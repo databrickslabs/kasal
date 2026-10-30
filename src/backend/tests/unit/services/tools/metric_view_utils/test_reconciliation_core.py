@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from src.services.tools.metric_view_utils import reconciliation as r
+from src.services.tools.metric_view_utils.reconciliation import runner as _runner
 
 # ── mapping loading + normalisation ──────────────────────────────────────────
 
@@ -591,8 +592,6 @@ def test_run_ucmv_query_empty_raises():
 
 
 # ── Bounded-concurrency query execution (runner._execute_many) ──────────────
-
-from src.services.tools.metric_view_utils.reconciliation import runner as _runner
 
 
 def test_execute_many_preserves_order_under_concurrency():

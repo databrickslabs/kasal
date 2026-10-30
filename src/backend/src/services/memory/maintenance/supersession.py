@@ -34,12 +34,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from datetime import datetime, timezone
 from typing import Any
 
 from src.services.memory.engine import KIND_EPISODIC
+from src.services.memory.engine.tuning import tuned
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +95,12 @@ def _durable(record: Any) -> bool:
 def supersede_outdated_facts(memory: Any, scope: str | None = None) -> dict[str, int]:
     """Retire facts contradicted by a newer one. ``{"scanned", "superseded"}``.
 
-    Disable with ``KASAL_MEMORY_SUPERSESSION=false``.
+    Off when the teamspace's Memory Tuning sets ``supersession_enabled`` false.
     """
     stats = {"scanned": 0, "superseded": 0}
     if memory in (None, True, False):
         return stats
-    if os.environ.get("KASAL_MEMORY_SUPERSESSION", "true").lower() == "false":
+    if not tuned(memory, "supersession_enabled", True):
         return stats
     call = getattr(getattr(memory, "llm", None), "call", None)
     if not callable(call):
@@ -131,13 +131,16 @@ def supersede_outdated_facts(memory: Any, scope: str | None = None) -> dict[str,
         for index, record in enumerate(records)
     ]
     try:
-        reply = call(_PROMPT.format(records="\n".join(lines)))
+        policy = getattr(memory, "decision_policy", None)
+        groups = policy.supersession(records) if policy is not None else None
+        if groups is None:
+            groups = _extract_json_array(call(_PROMPT.format(records="\n".join(lines))))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Supersession LLM call failed: %s", exc)
         return stats
 
     retired: set[int] = set()
-    for group in _extract_json_array(reply):
+    for group in groups:
         if not isinstance(group, dict):
             continue
         current = group.get("current")

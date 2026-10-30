@@ -560,31 +560,6 @@ class TestOtherMethods:
         result = await svc.list_knowledge_files("exec-1", "g1")
         assert result == []
 
-    def test_get_file_type_pdf(self):
-        svc = make_svc()
-        assert svc._get_file_type("doc.pdf") == "pdf"
-
-    def test_get_file_type_text(self):
-        svc = make_svc()
-        assert svc._get_file_type("readme.txt") == "text"
-
-    def test_get_file_type_markdown(self):
-        svc = make_svc()
-        assert svc._get_file_type("notes.md") == "markdown"
-
-    def test_get_file_type_unknown(self):
-        svc = make_svc()
-        assert svc._get_file_type("data.xyz") == "file"
-
-    def test_get_file_type_python(self):
-        svc = make_svc()
-        assert svc._get_file_type("script.py") == "python"
-
-    def test_get_file_type_yaml(self):
-        svc = make_svc()
-        assert svc._get_file_type("config.yaml") == "yaml"
-        assert svc._get_file_type("config.yml") == "yaml"
-
 
 # ---------------------------------------------------------------------------
 # delete_knowledge_file

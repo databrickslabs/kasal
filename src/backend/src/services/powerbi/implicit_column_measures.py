@@ -27,7 +27,6 @@ carried on every entry so it reaches the emitted YAML comment.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 # DAX SummarizeBy -> the SQL aggregate it maps to. "None" (not aggregatable —
 # most text/key columns) and anything unrecognized are deliberately absent:
@@ -107,7 +106,7 @@ def derive_implicit_column_measures(
         else:
             continue  # "None" or an unrecognized setting — not aggregatable
 
-        entry: dict[str, Any] = {
+        entry: dict[str, object] = {
             "name": _to_snake_case(field_name),
             "original_name": field_name,
             "raw_expr": sql,

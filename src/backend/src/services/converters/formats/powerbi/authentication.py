@@ -14,7 +14,6 @@ with project-specific and global fallback options.
 """
 
 import logging
-import os
 from typing import Dict, Optional
 
 # Optional azure.identity import
@@ -23,8 +22,8 @@ try:
 
     AZURE_IDENTITY_AVAILABLE = True
 except ImportError:
-    ClientSecretCredential = None  # type: ignore
-    UsernamePasswordCredential = None  # type: ignore
+    ClientSecretCredential = None  # type: ignore[assignment, misc]
+    UsernamePasswordCredential = None  # type: ignore[assignment, misc]
     AZURE_IDENTITY_AVAILABLE = False
     logging.warning(
         "azure-identity not available. Install with: pip install azure-identity"
@@ -68,16 +67,6 @@ class AadService:
         )
         token = service.get_access_token()
 
-        # Service Account with env var names
-        service = AadService(
-            client_id="abc123",
-            tenant_id="tenant789",
-            username_env="POWERBI_USERNAME",
-            password_env="POWERBI_PASSWORD",
-            auth_method="service_account"
-        )
-        token = service.get_access_token()
-
         # Database credentials (future)
         service = AadService(project_id="proj123", use_database=True)
         token = service.get_access_token()
@@ -92,7 +81,7 @@ class AadService:
     # Valid authentication methods
     AUTH_METHOD_SERVICE_PRINCIPAL = "service_principal"
     AUTH_METHOD_SERVICE_ACCOUNT = "service_account"
-    AUTH_METHOD_TOKEN = "token"
+    AUTH_METHOD_TOKEN = "token"  # auth-method label, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
     def __init__(
         self,
@@ -119,8 +108,8 @@ class AadService:
             access_token: Pre-obtained access token (bypasses authentication)
             username: Service account username/UPN (for service account auth)
             password: Service account password (for service account auth)
-            username_env: Environment variable name containing username (for service account)
-            password_env: Environment variable name containing password (for service account)
+            username_env: IGNORED (credentials are never read from the environment)
+            password_env: IGNORED (credentials are never read from the environment)
             auth_method: Authentication method: 'service_principal', 'service_account', or 'token'
                         If not specified, auto-detected based on provided credentials
             project_id: Project ID for database credential lookup (future)
@@ -193,8 +182,9 @@ class AadService:
         # Priority 4: Database credentials (future implementation)
         if self.use_database:
             self.logger.info("Fetching credentials from database")
-            credentials = self._get_credentials_from_database()
-            return self._acquire_token_with_client_credential(credentials)
+            db_credentials = self._get_credentials_from_database()
+            if db_credentials:
+                return self._acquire_token_with_client_credential(db_credentials)
 
         # No valid authentication method found
         raise ValueError(
@@ -230,20 +220,29 @@ class AadService:
         return None
 
     def _resolve_username(self) -> Optional[str]:
-        """Resolve username from direct value or environment variable."""
-        if self.username:
-            return self.username
-        if self.username_env:
-            return os.getenv(self.username_env)
-        return None
+        """The username passed in. Never read from the environment."""
+        self._warn_env_names_ignored()
+        return self.username
 
     def _resolve_password(self) -> Optional[str]:
-        """Resolve password from direct value or environment variable."""
-        if self.password:
-            return self.password
-        if self.password_env:
-            return os.getenv(self.password_env)
-        return None
+        """The password passed in. Never read from the environment."""
+        self._warn_env_names_ignored()
+        return self.password
+
+    def _warn_env_names_ignored(self) -> None:
+        # username_env / password_env used to name an environment variable to
+        # read the credential from. That let a tool config read ANY variable in
+        # the server's environment (the platform's own client secret included),
+        # and the environment is shared by every workspace. Credentials come
+        # from the workspace's API Keys, passed in as username / password.
+        if (self.username_env or self.password_env) and not getattr(
+            self, "_env_warned", False
+        ):
+            self._env_warned = True
+            self.logger.warning(
+                "username_env/password_env are ignored: Power BI credentials are "
+                "never read from the environment. Configure them as API keys."
+            )
 
     def _get_service_principal_credentials(self) -> Dict[str, str]:
         """Get service principal credentials from instance variables."""

@@ -859,10 +859,7 @@ class TestRejectGate:
     ):
         """Test successful rejection of a gate."""
         mock_hitl_service.reject.return_value = sample_action_response_rejected
-        request = HITLRejectRequest(
-            reason="Output quality is poor",
-            action=HITLRejectionActionEnum.REJECT,
-        )
+        request = HITLRejectRequest(reason="Output quality is poor")  # REJECT
 
         result = await reject_gate(
             approval_id=1,
@@ -880,6 +877,7 @@ class TestRejectGate:
             group_id=mock_group_context.primary_group_id,
             reason="Output quality is poor",
             action=HITLRejectionActionEnum.REJECT,
+            user_token=mock_group_context.access_token,
         )
 
     @pytest.mark.asyncio
@@ -917,6 +915,7 @@ class TestRejectGate:
             group_id=mock_group_context.primary_group_id,
             reason="Needs improvement",
             action=HITLRejectionActionEnum.RETRY,
+            user_token=mock_group_context.access_token,
         )
 
     @pytest.mark.asyncio

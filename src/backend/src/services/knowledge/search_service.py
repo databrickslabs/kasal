@@ -194,18 +194,17 @@ class KnowledgeSearchService:
                     # TTL: expired chunks are excluded immediately, even before
                     # the next upload-time purge sweeps them out of the table.
                     from src.services.knowledge.embedding_service import (
-                        KNOWLEDGE_TTL_DAYS,
+                        knowledge_ttl_days,
                     )
 
-                    if KNOWLEDGE_TTL_DAYS > 0:
+                    ttl_days = knowledge_ttl_days()
+                    if ttl_days > 0:
                         from datetime import datetime, timedelta, timezone
 
-                        cutoff = datetime.now(timezone.utc) - timedelta(
-                            days=KNOWLEDGE_TTL_DAYS
-                        )
+                        cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
 
-                        def _fresh(r) -> bool:
-                            created = getattr(r, "created_at", None)
+                        def _fresh(r: Any) -> bool:
+                            created: Optional[datetime] = getattr(r, "created_at", None)
                             if not created:
                                 return True
                             if created.tzinfo is None:

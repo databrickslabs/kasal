@@ -20,7 +20,10 @@ from src.utils.user_context import GroupContext
 def gc(role="user", valid=True):
     if valid:
         return GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role=role,
         )
     return GroupContext()
 
@@ -45,11 +48,15 @@ async def test_list_and_create_permissions_and_success():
 
     # list with valid context
     svc.find_by_group = AsyncMock(return_value=[make_agent("a1")])
-    out = await list_agents(service=svc, group_context=gc("operator"))
+    out = await list_agents(
+        service=svc, group_context=gc("operator"), secrets_visible=True
+    )
     assert isinstance(out, list) and out[0].id == "a1"
 
     # list with invalid context -> empty
-    out2 = await list_agents(service=svc, group_context=gc(valid=False))
+    out2 = await list_agents(
+        service=svc, group_context=gc(valid=False), secrets_visible=True
+    )
     assert out2 == []
 
     # create forbidden for user
@@ -77,11 +84,16 @@ async def test_get_and_updates_and_delete_paths():
     # get 404
     svc.get_with_group_check = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await get_agent("missing", service=svc, group_context=gc("operator"))
+        await get_agent(
+            "missing", service=svc, group_context=gc("operator"), secrets_visible=True
+        )
 
     # get success
     svc.get_with_group_check = AsyncMock(return_value=make_agent("a3"))
-    assert (await get_agent("a3", service=svc, group_context=gc("operator"))).id == "a3"
+    got = await get_agent(
+        "a3", service=svc, group_context=gc("operator"), secrets_visible=True
+    )
+    assert got.id == "a3"
 
     # update full forbidden for user
     with pytest.raises(Exception):

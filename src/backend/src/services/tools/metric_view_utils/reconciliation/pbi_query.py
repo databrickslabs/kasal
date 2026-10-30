@@ -11,9 +11,10 @@ string builder with no I/O (the executor-driven orchestration lives in
 from __future__ import annotations
 
 import math
-from typing import Optional
+from collections.abc import Sequence
 
-from .mapping import UCMVMapping
+from ..raw_fields import DimensionValue, RawMap, as_list, as_map, str_or
+from .mapping import Measure, UCMVMapping
 from .periods import normalize_snapshot_date
 
 # The separator every SUMMARIZECOLUMNS body is joined with.
@@ -42,7 +43,7 @@ def strip_table_prefix(col: str) -> str:
     return col.split("[")[-1].rstrip("]") if "[" in col else col
 
 
-def _dax_literal(value) -> str:
+def _dax_literal(value: object) -> str:
     if isinstance(value, bool):
         return "TRUE()" if value else "FALSE()"
     if isinstance(value, str):
@@ -54,20 +55,20 @@ def _dax_literal(value) -> str:
     raise ValueError(f"Unsupported DAX filter value: {value!r}")
 
 
-def _dax_set_literal(values: list) -> str:
+def _dax_set_literal(values: Sequence[object]) -> str:
     return ", ".join(_dax_literal(v) for v in values)
 
 
-def filter_expression(f: dict) -> str:
+def filter_expression(f: RawMap) -> str:
     """Render one ``{table, column, values, operator?}`` filter as a DAX filter
     argument. ``operator`` ∈ in (default, TREATAS) / not_in / prefix; an ``in``
     filter may set ``legacy_blank_through`` + ``date_column`` to retain verified
     historical blank-flagged rows without accepting newer blanks."""
-    table = f["table"].replace("'", "''")
-    column = f["column"].replace("]", "]]")
+    table = str(f["table"]).replace("'", "''")
+    column = str(f["column"]).replace("]", "]]")
     ref = f"'{table}'[{column}]"
-    values = f["values"]
-    operator = f.get("operator", "in")
+    values = as_list(f["values"])
+    operator = str_or(f.get("operator"), "in")
     if not values:
         raise ValueError("A mapping filter needs at least one value.")
     if f.get("legacy_blank_through"):
@@ -77,7 +78,7 @@ def filter_expression(f: dict) -> str:
             )
         cutoff = normalize_snapshot_date(f["legacy_blank_through"])
         parts = ", ".join(str(int(part)) for part in cutoff.split("-"))
-        date_column = f["date_column"].replace("]", "]]")
+        date_column = str(f["date_column"]).replace("]", "]]")
         date_ref = f"'{table}'[{date_column}]"
         return (
             f"KEEPFILTERS(FILTER(ALL({ref}, {date_ref}), {ref} IN {{{_dax_set_literal(values)}}} "
@@ -87,21 +88,17 @@ def filter_expression(f: dict) -> str:
         return f"TREATAS({{{_dax_set_literal(values)}}}, {ref})"
     if operator == "not_in":
         return f"FILTER(ALL({ref}), NOT({ref} IN {{{_dax_set_literal(values)}}}))"
-    if (
-        operator == "prefix"
-        and len(values) == 1
-        and isinstance(values[0], str)
-        and values[0]
-    ):
-        return f"FILTER(ALL({ref}), LEFT({ref}, {len(values[0])}) = {_dax_literal(values[0])})"
+    first = values[0]
+    if operator == "prefix" and len(values) == 1 and isinstance(first, str) and first:
+        return f"FILTER(ALL({ref}), LEFT({ref}, {len(first)}) = {_dax_literal(first)})"
     raise ValueError(f"Unsupported mapping filter operator or values: {operator!r}")
 
 
-def _extra_filter_key(m) -> tuple:
+def _extra_filter_key(m: Measure) -> tuple[str, ...]:
     return tuple(filter_expression(f) for f in m.pbi_extra_filter or [])
 
 
-def _extra_filter_lines(measures: list) -> list:
+def _extra_filter_lines(measures: Sequence[Measure]) -> list[str]:
     return [filter_expression(f) for f in measures[0].pbi_extra_filter or []]
 
 
@@ -111,23 +108,31 @@ def _raw_column_expr(pbi_column: str, pbi_aggregation: str = "Sum") -> str:
     return f"{dax_func}('{table}'[{column})"
 
 
-def _composite_operand_expr(operand: dict) -> str:
-    base = _raw_column_expr(operand["pbi_column"])
-    filters = operand.get("extra_filter") or []
+def _composite_operand_expr(operand: RawMap) -> str:
+    base = _raw_column_expr(str(operand["pbi_column"]))
+    filters = [as_map(f) for f in as_list(operand.get("extra_filter"))]
     if not filters:
         return base
     filter_args = ", ".join(filter_expression(f) for f in filters)
     return f"CALCULATE({base}, {filter_args})"
 
 
-def measure_dax_expr(m) -> str:
+def measure_dax_expr(m: Measure) -> str:
     """The DAX expression aggregated for one measure — a named-measure ref for
     direct/dimension_conditional, ``<AGG>('Table'[Column])`` for raw_column, or
     an arithmetic combination of two independently-filtered operands for
     composite."""
     if m.pbi_kind == "raw_column":
+        if m.pbi_column is None:
+            raise ValueError(f"{m.ucmv_measure}: raw_column requires pbi_column")
         return _raw_column_expr(m.pbi_column, m.pbi_aggregation)
     if m.pbi_kind == "composite":
+        if (
+            m.composite_a is None
+            or m.composite_b is None
+            or m.composite_operator is None
+        ):
+            raise ValueError(f"{m.ucmv_measure}: composite operands are incomplete")
         expr_a = _composite_operand_expr(m.composite_a)
         expr_b = _composite_operand_expr(m.composite_b)
         op = _COMPOSITE_OPERATORS[m.composite_operator]
@@ -144,8 +149,11 @@ def build_dimension_scope_query(mapping: UCMVMapping, dimension_name: str) -> st
 
 
 def build_direct_query(
-    mapping: UCMVMapping, dimension_name: str, dimension_values: list, measures: list
-) -> Optional[str]:
+    mapping: UCMVMapping,
+    dimension_name: str,
+    dimension_values: Sequence[DimensionValue],
+    measures: Sequence[Measure],
+) -> str | None:
     """One combined SUMMARIZECOLUMNS call for plain direct-shaped measures (no
     ``pbi_extra_group_by``). Returns None when there are none."""
     if not measures:
@@ -172,18 +180,21 @@ def build_direct_query(
 
 
 def build_direct_queries(
-    mapping: UCMVMapping, dimension_name: str, dimension_values: list, measures: list
-) -> list:
+    mapping: UCMVMapping,
+    dimension_name: str,
+    dimension_values: Sequence[DimensionValue],
+    measures: Sequence[Measure],
+) -> list[str]:
     """One SUMMARIZECOLUMNS per distinct ``extra_filter`` group. Measures with
     DIFFERENT extra_filters cannot share a query — a SUMMARIZECOLUMNS filter
     applies to every measure column in it, so combining e.g. an '0000'- and a
     'B000'-filtered raw column in one call would silently give both the same
     (wrong) value. Mirrors the live runner's grouping so a dry-run preview matches
     what actually executes. Returns the list of non-empty query strings."""
-    groups: dict = {}
+    groups: dict[tuple[str, ...], list[Measure]] = {}
     for m in measures:
         groups.setdefault(_extra_filter_key(m), []).append(m)
-    out: list = []
+    out: list[str] = []
     for group in groups.values():
         q = build_direct_query(mapping, dimension_name, dimension_values, group)
         if q:
@@ -208,10 +219,10 @@ def _context_value(ref: str, period: str) -> str:
 def build_direct_context_queries(
     mapping: UCMVMapping,
     dimension_name: str,
-    dimension_values: list,
-    periods: list,
-    measures: list,
-) -> list:
+    dimension_values: Sequence[DimensionValue],
+    periods: Sequence[str],
+    measures: Sequence[Measure],
+) -> list[tuple[str, str]]:
     """One SUMMARIZECOLUMNS call PER PERIOD for direct measures whose DAX needs a
     context column in single-value filter context (``pbi_extra_group_by``).
     Filtering that column via TREATAS to a single derived value, one period at a
@@ -223,9 +234,9 @@ def build_direct_context_queries(
     dim = binding.dimensions[dimension_name]
     dim_values_sql = _dax_set_literal(dimension_values) if dimension_values else None
     time_table = binding.time_dimension.pbi_table or binding.pbi_fact_table
-    extra_refs = sorted({ref for m in measures for ref in (m.pbi_extra_group_by or ())})
+    extra_refs = sorted({ref for m in measures for ref in (m.pbi_extra_group_by or [])})
 
-    queries = []
+    queries: list[tuple[str, str]] = []
     for period in periods:
         lines = [f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]"]
         if dim_values_sql:
@@ -252,8 +263,11 @@ def build_direct_context_queries(
 
 
 def build_switch_queries(
-    mapping: UCMVMapping, dimension_name: str, dimension_values: list, measures: list
-) -> list:
+    mapping: UCMVMapping,
+    dimension_name: str,
+    dimension_values: Sequence[DimensionValue],
+    measures: Sequence[Measure],
+) -> list[tuple[str, list[Measure], str, str | None]]:
     """One SUMMARIZECOLUMNS call per distinct (selector table/column[, selector2],
     pbi_measure, extra_filter) combination among switch measures — grouped BY the
     selector column(s) with TREATAS restricted to the needed values. Returns a
@@ -263,7 +277,7 @@ def build_switch_queries(
     dim_values_sql = _dax_set_literal(dimension_values) if dimension_values else None
     time_table = binding.time_dimension.pbi_table or binding.pbi_fact_table
 
-    groups: dict = {}
+    groups: dict[tuple[object, ...], list[Measure]] = {}
     for m in measures:
         key = (
             m.switch_selector_table,
@@ -275,7 +289,7 @@ def build_switch_queries(
         )
         groups.setdefault(key, []).append(m)
 
-    queries = []
+    queries: list[tuple[str, list[Measure], str, str | None]] = []
     for (
         sel_table,
         sel_col,
@@ -284,7 +298,7 @@ def build_switch_queries(
         pbi_measure,
         _,
     ), group_measures in groups.items():
-        selector_values = sorted({m.switch_selector_value for m in group_measures})
+        selector_values = sorted({str(m.switch_selector_value) for m in group_measures})
         lines = [
             f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]",
             f"'{time_table}'[{binding.time_dimension.pbi_column}]",
@@ -301,7 +315,7 @@ def build_switch_queries(
         )
         if sel2_table:
             selector2_values = sorted(
-                {m.switch_selector2_value for m in group_measures}
+                {str(m.switch_selector2_value) for m in group_measures}
             )
             lines.append(
                 f"TREATAS({{{_dax_set_literal(selector2_values)}}}, '{sel2_table}'[{sel2_col}])"
@@ -314,15 +328,17 @@ def build_switch_queries(
             (
                 f"EVALUATE\nSUMMARIZECOLUMNS(\n    {body}\n)",
                 group_measures,
-                sel_col,
-                sel2_col,
+                str(sel_col),
+                None if sel2_col is None else str(sel2_col),
             )
         )
 
     return queries
 
 
-def validate_dimension_conditional_usage(measures: list, dimension_name: str) -> None:
+def validate_dimension_conditional_usage(
+    measures: Sequence[Measure], dimension_name: str
+) -> None:
     """Guard the one mistake that silently yields a wrong-branch result for a
     dimension_conditional measure: querying a context_included=True measure
     without its context_dimension in the grouping, or a context_included=False
@@ -343,7 +359,9 @@ def validate_dimension_conditional_usage(measures: list, dimension_name: str) ->
             )
 
 
-def partition_measures_by_shape(measures: list) -> tuple:
+def partition_measures_by_shape(
+    measures: Sequence[Measure],
+) -> tuple[list[Measure], list[Measure], list[Measure]]:
     """Split into (direct, direct_context, switch) — the three query shapes."""
     direct = [
         m

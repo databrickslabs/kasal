@@ -13,7 +13,7 @@ with it, in ``inject_skills``) and a task's tools (built later, in
 the two, the same way the Genie MCP space id does.
 """
 
-from typing import Any, Dict, Iterable, List
+from typing import Dict, Iterable, List
 
 from src.core.logger import LoggerManager
 
@@ -30,14 +30,14 @@ AGENT_ATTR = "_kasal_skill_tool_context"
 SKILL_FED_PARAMS = ("domain_context",)
 
 
-def _metadata(skill: Any) -> Dict[str, Any]:
+def _metadata(skill: object) -> Dict[str, object]:
     meta = getattr(skill, "skill_metadata", None)
     if meta is None:
         meta = getattr(skill, "metadata", None)
     return meta if isinstance(meta, dict) else {}
 
 
-def collect_tool_context(skills: Iterable[Any]) -> Dict[str, str]:
+def collect_tool_context(skills: Iterable[object]) -> Dict[str, str]:
     """``{param: text}`` from every skill tagged for a tool parameter.
 
     Several skills tagged for the same parameter are joined in resolution
@@ -57,7 +57,7 @@ def collect_tool_context(skills: Iterable[Any]) -> Dict[str, str]:
 
 
 def apply_tool_context(
-    tools: Iterable[Any], context: Dict[str, str], *, label: str = ""
+    tools: Iterable[object], context: Dict[str, str], *, label: str = ""
 ) -> int:
     """Write the skill context into every tool that takes the parameter.
 
@@ -106,7 +106,7 @@ def apply_tool_context(
     return applied
 
 
-def apply_agent_tool_context(tools: Iterable[Any], agent: Any) -> int:
+def apply_agent_tool_context(tools: Iterable[object], agent: object) -> int:
     """The task seam: feed a task's tools the context its agent resolved."""
     context = getattr(agent, AGENT_ATTR, None) or {}
     label = getattr(agent, "_agent_key", None) or getattr(agent, "role", "")

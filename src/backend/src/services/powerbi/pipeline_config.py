@@ -11,7 +11,8 @@ import json
 import re
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, cast
+from urllib.parse import urlparse
 
 __all__ = [
     "get_token",
@@ -47,16 +48,10 @@ __all__ = [
 
 import requests
 
-# This module is also loaded standalone, by file path, via
-# generate_config.py's own CLI fallback (`importlib.util.
-# spec_from_file_location`, used when `python generate_config.py` is run
-# directly) — in that context it has NO real parent package, so `__package__`
-# is falsy and both an absolute `src.`-rooted import AND a relative `from
-# .switch_decomposition import` raise ImportError (confirmed empirically;
-# `spec_from_file_location` does not give the executed module a resolvable
-# package even though its `__name__` may contain dots). Mirror
-# generate_config.py's own `if __package__:` branch instead of picking one
-# import form and having it silently break in the other context.
+# Also loaded standalone, by file path, via generate_config.py's CLI fallback:
+# there `__package__` is falsy (no parent package), so neither an absolute nor a
+# relative sibling import works. Mirror generate_config.py's `if __package__:`
+# branch rather than picking one import form.
 if __package__:
     from .calculation_groups import derive_calculation_groups
     from .custom_function_resolution import derive_fx_otckpi_resolutions
@@ -70,11 +65,14 @@ if __package__:
 else:
     import importlib.util as _ilu
     from pathlib import Path as _Path
+    from types import ModuleType
 
-    def _load_sibling(_mod_name: str, _filename: str):
+    def _load_sibling(_mod_name: str, _filename: str) -> ModuleType:
         _spec = _ilu.spec_from_file_location(
             _mod_name, _Path(__file__).resolve().parent / _filename
         )
+        if _spec is None or _spec.loader is None:
+            raise ImportError(_filename)
         _mod = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_mod)
         return _mod
@@ -110,14 +108,13 @@ else:
 def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     """Acquire OAuth2 token via client_credentials grant (Service Principal).
 
-    Helper used by the generate_config CLI. The
-    Pipeline Config Generator *tool* does not call this — it resolves tokens
-    through the shared ``AadService`` (which additionally supports Service
-    Account and User-OAuth), then passes the resulting token into the
-    ``extract_*`` functions below.
+    Helper used by the generate_config CLI. The Pipeline Config Generator
+    *tool* does not call this — it resolves tokens through the shared
+    ``AadService`` (which also supports Service Account and User-OAuth), then
+    passes the resulting token into the ``extract_*`` functions below.
     """
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    resp = requests.post(
+    url = f"https://login.microsoftonline.com/{_pbi_id(tenant_id)}/oauth2/v2.0/token"
+    resp = requests.post(  # fixed Entra login host, tenant id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url
         url,
         data={
             "grant_type": "client_credentials",
@@ -128,7 +125,11 @@ def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
         timeout=30,
     )
     _check_response(resp, f"Auth (client_id={client_id[:8]}...)")
-    return resp.json()["access_token"]
+    return cast(str, resp.json()["access_token"])
+
+
+def _definition_parts(resp: Any) -> list[dict]:
+    return cast("list[dict]", resp.json().get("definition", {}).get("parts", []))
 
 
 def fetch_tmdl_parts(
@@ -136,40 +137,24 @@ def fetch_tmdl_parts(
 ) -> list[dict] | None:
     """Fetch the semantic model's TMDL definition parts via the Fabric REST API.
 
-    Returns the list of ``{path, payload}`` parts, or ``None`` if the workspace
-    is not Fabric-enabled / the model is unavailable. Handles the async 202
-    long-running-operation poll.
+    Returns the ``{path, payload}`` parts, or ``None`` when the workspace is not
+    Fabric-enabled or the model is unavailable; polls the async 202 operation.
     """
     url = (
-        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
-        f"/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+        f"https://api.fabric.microsoft.com/v1/workspaces/{_pbi_id(workspace_id)}"
+        f"/semanticModels/{_pbi_id(dataset_id)}/getDefinition?format=TMDL"
     )
     headers = {
         "Authorization": f"Bearer {fabric_token}",
         "Content-Type": "application/json",
     }
     try:
-        resp = requests.post(url, headers=headers, timeout=180)
+        resp = requests.post(url, headers=headers, timeout=180)  # fixed Fabric host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
         if resp.status_code == 200:
-            return resp.json().get("definition", {}).get("parts", [])
+            return _definition_parts(resp)
         if resp.status_code == 202:
-            location = resp.headers.get("Location")
-            if not location:
-                return None
-            for _ in range(60):
-                time.sleep(2)
-                poll = requests.get(location, headers=headers, timeout=60)
-                pdata = poll.json()
-                status = pdata.get("status")
-                if status == "Succeeded":
-                    result = requests.get(
-                        location + "/result", headers=headers, timeout=60
-                    )
-                    _check_response(result, "TMDL getDefinition result")
-                    return result.json().get("definition", {}).get("parts", [])
-                if status == "Failed":
-                    return None
-            return None
+            result = _fabric_operation_result(resp, headers, 60, "TMDL getDefinition")
+            return _definition_parts(result) if result is not None else None
         # 401/403/404 etc. — Fabric not available for these creds/workspace
         return None
     except Exception:
@@ -289,15 +274,14 @@ def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
     """Fabric TMDL equivalent of ``parse_admin_expressions`` — best-effort.
 
     TMDL groups a model's shared/named expressions into a single
-    ``definition/expressions.tmdl`` (multiple ``expression <Name> = ...``
-    blocks), unlike tables, which each get their own
-    ``definition/tables/<name>.tmdl``. Not live-verified against a real
-    Fabric-enabled workspace: every run observed while building this reached
-    the model via the Admin Scanner (``parse_admin_expressions``), with TMDL
-    only ever attempted as its fallback and returning no data. Kept
-    defensive/best-effort rather than blocking on that verification — same
-    posture as ``fetch_tmdl_parts``/``parse_tmdl_to_admin_tables`` already
-    take with tables.
+    ``definition/expressions.tmdl`` (multiple ``expression <Name> = ...`` blocks),
+    unlike tables, which each get their own ``definition/tables/<name>.tmdl``.
+    Not live-verified against a real Fabric-enabled workspace: every run observed
+    while building this reached the model via the Admin Scanner
+    (``parse_admin_expressions``), with TMDL only ever attempted as its fallback
+    and returning no data. Kept defensive/best-effort rather than blocking on
+    that verification — the same posture ``fetch_tmdl_parts`` and
+    ``parse_tmdl_to_admin_tables`` take with tables.
     """
     import base64
 
@@ -336,14 +320,31 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+_PBI_ID = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*")
+
+
+def _pbi_id(value: str) -> str:
+    """A GUID / tenant domain for a URL path segment: no "/", "?", "#" or ".."."""
+    if not _PBI_ID.fullmatch(str(value)):
+        raise ValueError(f"Not a valid Power BI / Entra id: {value!r}")
+    return value
+
+
+def _execute_queries(
+    token: str, workspace_id: str, dataset_id: str, query: str
+) -> requests.Response:
+    url = f"https://api.powerbi.com/v1.0/myorg/groups/{_pbi_id(workspace_id)}/datasets/{_pbi_id(dataset_id)}/executeQueries"
+    body = {"queries": [{"query": query}], "serializerSettings": {"includeNulls": True}}
+    return requests.post(url, headers=_headers(token), json=body, timeout=60)  # fixed Power BI host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+
+
 def _row_get(row: dict, col: str, default: str = "") -> str:
     """Read a Power BI executeQueries result column, tolerant of key format.
 
     The API returns column keys either bracketed (``[Measure Name]``) or
     unbracketed (``Measure Name``) depending on the query/permission path.
-    Reading only the bracketed form silently yields empty strings when the API
-    returns the unbracketed form — which is exactly how measure DAX went missing
-    (471 measures, 0 with DAX). Try both.
+    Reading only the bracketed form silently yields empty strings for the
+    unbracketed one — how measure DAX went missing (471 measures, 0 with DAX).
     """
     bare = col.strip("[]")
     val = row.get(f"[{bare}]")
@@ -352,7 +353,38 @@ def _row_get(row: dict, col: str, default: str = "") -> str:
     return val if val is not None else default
 
 
-def _check_response(resp, context: str = "") -> None:
+def _fabric_operation_result(
+    resp: requests.Response, headers: dict[str, str], poll_timeout: int, label: str
+) -> requests.Response | None:
+    """Follow a Fabric 202 operation to its ``/result``. The poll carries the
+    Fabric token, so ``Location`` must be https on a Fabric host with no userinfo
+    or port — anything else reads as missing. ``None`` on failure or timeout."""
+    location = resp.headers.get("Location") or ""
+    parsed = urlparse(location)
+    host = parsed.hostname or ""
+    if not (
+        parsed.scheme == "https"
+        and host.endswith(".fabric.microsoft.com")
+        and parsed.netloc.lower() == host
+    ):
+        print(f"  {label}: 202 without a trusted Location")
+        return None
+    for attempt in range(60):
+        time.sleep(2)
+        poll = requests.get(location, headers=headers, timeout=poll_timeout).json()  # Location pinned to https Fabric above — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+        if poll.get("status") == "Succeeded":
+            print(f"  {label}: succeeded after {attempt + 1} poll(s)")
+            result = requests.get(location + "/result", headers=headers, timeout=60)  # Location pinned to https Fabric above — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+            _check_response(result, f"{label} result")
+            return result
+        if poll.get("status") == "Failed":
+            print(f"  {label} failed: {poll.get('error', {})}")
+            return None
+    print(f"  {label}: timed out after 120s")
+    return None
+
+
+def _check_response(resp: Any, context: str = "") -> None:
     """Check HTTP response, raise with PBI error body on failure."""
     if resp.status_code >= 400:
         try:
@@ -360,8 +392,6 @@ def _check_response(resp, context: str = "") -> None:
         except Exception:
             body = resp.text
         raise RuntimeError(f"{context} HTTP {resp.status_code}: {body}")
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -400,15 +430,8 @@ def _humanize(name: str) -> str:
 
 def extract_relationships(token: str, workspace_id: str, dataset_id: str) -> list[dict]:
     """Call INFO.VIEW.RELATIONSHIPS() → list of relationship dicts."""
-    url = (
-        f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
-        f"/datasets/{dataset_id}/executeQueries"
-    )
-    body = {
-        "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
-        "serializerSettings": {"includeNulls": True},
-    }
-    resp = requests.post(url, headers=_headers(token), json=body, timeout=60)
+    query = "EVALUATE INFO.VIEW.RELATIONSHIPS()"
+    resp = _execute_queries(token, workspace_id, dataset_id, query)
     _check_response(resp, "API 1 (Relationships)")
     data = resp.json()
 
@@ -603,11 +626,6 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
     Tries DMV query ($SYSTEM.MDSCHEMA_MEASURES) first, falls back to
     EVALUATE INFO.VIEW.MEASURES() if the DMV returns 400.
     """
-    url = (
-        f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
-        f"/datasets/{dataset_id}/executeQueries"
-    )
-
     # Strategy 1: DMV query (richer — includes EXPRESSION)
     dmv_query = (
         "SELECT "
@@ -617,11 +635,7 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
         "[MEASUREGROUP_NAME] as [Table] "
         "FROM $SYSTEM.MDSCHEMA_MEASURES"
     )
-    body = {
-        "queries": [{"query": dmv_query}],
-        "serializerSettings": {"includeNulls": True},
-    }
-    resp = requests.post(url, headers=_headers(token), json=body, timeout=60)
+    resp = _execute_queries(token, workspace_id, dataset_id, dmv_query)
 
     if resp.status_code == 200:
         data = resp.json()
@@ -654,11 +668,7 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
         '"Description", [Description]'
         ")"
     )
-    body2 = {
-        "queries": [{"query": fallback_query}],
-        "serializerSettings": {"includeNulls": True},
-    }
-    resp2 = requests.post(url, headers=_headers(token), json=body2, timeout=60)
+    resp2 = _execute_queries(token, workspace_id, dataset_id, fallback_query)
     _check_response(resp2, "API 2 (Measures fallback via INFO.VIEW.MEASURES)")
     data2 = resp2.json()
 
@@ -871,8 +881,6 @@ def derive_column_overrides(
     return overrides
 
 
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # API 3: Admin Scanner — Workspace Scan
 # ═══════════════════════════════════════════════════════════════════════
@@ -907,12 +915,12 @@ def trigger_admin_scan(
     print(f"  Admin scan triggered: {scan_id}")
 
     # Step 2: Poll until complete
-    status_url = f"{base}/scanStatus/{scan_id}"
+    status_url = f"{base}/scanStatus/{_pbi_id(scan_id)}"
     elapsed = 0
     while elapsed < max_wait:
         time.sleep(poll_interval)
         elapsed += poll_interval
-        status_resp = requests.get(
+        status_resp = requests.get(  # fixed Power BI host, scan id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url
             status_url, headers=_headers(admin_token), timeout=30
         )
         _check_response(status_resp, "API 3 (Admin Scan poll)")
@@ -926,10 +934,10 @@ def trigger_admin_scan(
         raise RuntimeError(f"Admin scan timed out after {max_wait}s")
 
     # Step 3: Get results
-    result_url = f"{base}/scanResult/{scan_id}"
-    result_resp = requests.get(result_url, headers=_headers(admin_token), timeout=60)
+    result_url = f"{base}/scanResult/{_pbi_id(scan_id)}"
+    result_resp = requests.get(result_url, headers=_headers(admin_token), timeout=60)  # fixed Power BI host, scan id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
     _check_response(result_resp, "API 3 (Admin Scan result)")
-    return result_resp.json()
+    return cast("dict[str, Any]", result_resp.json())
 
 
 def parse_admin_tables(
@@ -1269,11 +1277,11 @@ def get_fabric_token(
     is what lets an SA-only caller read the model via TMDL when the Power BI
     Admin Scanner rejects the service-account token.
     """
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    url = f"https://login.microsoftonline.com/{_pbi_id(tenant_id)}/oauth2/v2.0/token"
     scope = "https://api.fabric.microsoft.com/.default"
 
     if username and password:
-        data = {
+        data: dict[str, str | None] = {
             "grant_type": "password",
             "client_id": client_id,
             "username": username,
@@ -1292,9 +1300,9 @@ def get_fabric_token(
         }
         context = "Auth (Fabric API)"
 
-    resp = requests.post(url, data=data, timeout=30)
+    resp = requests.post(url, data=data, timeout=30)  # fixed Entra login host, tenant id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
     _check_response(resp, context)
-    return resp.json()["access_token"]
+    return cast(str, resp.json()["access_token"])
 
 
 def extract_report_definition(
@@ -1324,43 +1332,19 @@ def extract_report_definition(
             print(f"  Fabric token failed ({e}), trying PBI token...")
 
     url = (
-        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
-        f"/reports/{report_id}/getDefinition"
+        f"https://api.fabric.microsoft.com/v1/workspaces/{_pbi_id(workspace_id)}"
+        f"/reports/{_pbi_id(report_id)}/getDefinition"
     )
     try:
-        resp = requests.post(url, headers=_headers(fabric_token), timeout=120)
+        resp = requests.post(url, headers=_headers(fabric_token), timeout=120)  # fixed Fabric host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
 
         # Handle 202 Accepted — long-running operation with polling
         if resp.status_code == 202:
-            location = resp.headers.get("Location")
-            if not location:
-                print("  Report definition: 202 but no Location header")
+            headers = _headers(fabric_token)
+            result = _fabric_operation_result(resp, headers, 30, "Report definition")
+            if result is None:
                 return None
-
-            print("  Report definition: polling (202 Accepted)...")
-            for attempt in range(60):
-                time.sleep(2)
-                poll_resp = requests.get(
-                    location, headers=_headers(fabric_token), timeout=30
-                )
-                poll_data = poll_resp.json()
-                status = poll_data.get("status", "")
-                if status == "Succeeded":
-                    print(f"  Report definition: succeeded after {attempt + 1} poll(s)")
-                    result_url = location + "/result"
-                    result_resp = requests.get(
-                        result_url, headers=_headers(fabric_token), timeout=60
-                    )
-                    _check_response(result_resp, "API 4 (Report Definition result)")
-                    data = result_resp.json()
-                    break
-                elif status == "Failed":
-                    error = poll_data.get("error", {})
-                    print(f"  Report definition failed: {error}")
-                    return None
-            else:
-                print("  Report definition: timed out after 120s")
-                return None
+            data = result.json()
         elif resp.status_code == 200:
             data = resp.json()
         else:
@@ -1373,7 +1357,7 @@ def extract_report_definition(
 
         if not parts:
             print(f"  Report definition: no parts found (keys: {list(data.keys())})")
-            return data
+            return cast("dict | None", data)
 
         # Decode base64 payloads into parsed JSON
         decoded_parts = []

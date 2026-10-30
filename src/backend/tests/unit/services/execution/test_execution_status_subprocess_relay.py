@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.core import process_role
+
 
 def _fake_db(monkeypatch, module):
     """Wire update_status onto an in-memory row so it reaches the announce step."""
@@ -67,7 +69,7 @@ async def test_subprocess_status_change_is_relayed_to_the_parent(monkeypatch):
     _fake_db(monkeypatch, module)
     writer = _CapturingWriter()
     monkeypatch.setattr(execution_event_pipe, "_active_writer", writer, raising=False)
-    monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
+    process_role.mark_run_subprocess("crew")
 
     # The gate opens, then the human's decision sends the run back to RUNNING.
     await module.ExecutionStatusService.update_status(
@@ -94,7 +96,7 @@ async def test_relayed_frame_omits_the_result_blob(monkeypatch):
     _fake_db(monkeypatch, module)
     writer = _CapturingWriter()
     monkeypatch.setattr(execution_event_pipe, "_active_writer", writer, raising=False)
-    monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
+    process_role.mark_run_subprocess("crew")
 
     await module.ExecutionStatusService.update_status(
         job_id="job-2",
@@ -116,7 +118,7 @@ async def test_missing_pipe_writer_does_not_fail_the_status_update(monkeypatch):
 
     _fake_db(monkeypatch, module)
     monkeypatch.setattr(execution_event_pipe, "_active_writer", None, raising=False)
-    monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
+    process_role.mark_run_subprocess("crew")
 
     ok = await module.ExecutionStatusService.update_status(
         job_id="job-3", status="RUNNING", message="m"
@@ -134,7 +136,7 @@ async def test_parent_process_still_broadcasts_directly(monkeypatch):
     _fake_db(monkeypatch, module)
     writer = _CapturingWriter()
     monkeypatch.setattr(execution_event_pipe, "_active_writer", writer, raising=False)
-    monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+    process_role.reset()
 
     sent = []
 

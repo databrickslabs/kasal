@@ -8,7 +8,7 @@ using LLM models and prompt templates.
 import json
 import logging
 import traceback
-from typing import Optional
+from typing import Any, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.schemas.template_generation import (
@@ -19,6 +19,7 @@ from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 from src.services.settings.models import ModelConfigService
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 class TemplateGenerationService:
     """Service for template generation operations."""
 
-    def __init__(self, session, group_id: str):
+    def __init__(self, session: Any, group_id: str):
         """
         Initialize the service with session.
 
@@ -112,10 +113,11 @@ class TemplateGenerationService:
 
             logger.info(f"Using model for template generation: {model_config['name']}")
 
-            # Get prompt template from database
+            # The workspace's own template when it has one, else the global one
             template_service = TemplateService(self.session)
             system_message = await template_service.get_template_content(
-                "generate_templates"
+                "generate_templates",
+                group_context=GroupContext(group_ids=[self.group_id]),
             )
 
             # Check if we have a prompt template

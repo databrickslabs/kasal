@@ -15,6 +15,9 @@ from typing import (  # noqa: E402 - import follows module initialization
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
 )
+from src.utils.sensitive_data_utils import (  # noqa: E402 - import follows module initialization
+    mask_sensitive_fields,
+)
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew
@@ -43,10 +46,10 @@ from src.services.execution.kernel.agent_security import (  # noqa: E402,F401
 async def create_agent(
     agent_key: str,
     agent_config: Dict,
-    tools: List[Any] = None,
-    config: Dict = None,
-    tool_service=None,
-    tool_factory=None,
+    tools: Optional[List[Any]] = None,
+    config: Optional[Dict] = None,
+    tool_service: Any = None,
+    tool_factory: Any = None,
     agent_id: Optional[str] = None,
 ) -> Any:
     """
@@ -67,7 +70,9 @@ async def create_agent(
     Raises:
         ValueError: If required fields are missing
     """
-    logger.info(f"Creating agent {agent_key} with config: {agent_config}")
+    logger.info(
+        f"Creating agent {agent_key} with config: {mask_sensitive_fields(agent_config)}"
+    )
 
     # Validate required fields
     required_fields = ["role", "goal", "backstory"]

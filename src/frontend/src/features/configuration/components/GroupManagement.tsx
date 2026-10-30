@@ -61,6 +61,8 @@ import {
   Workspaces as WorkspacesIcon,
 } from '@mui/icons-material';
 import { usePermissionStore } from '../../../store/permissions';
+import { usePersonalGroupId } from '../../../store/user';
+import { isAnyonesPersonalGroup } from '../lib/personalGroups';
 
 
 const GroupManagement: React.FC = () => {
@@ -152,7 +154,8 @@ const GroupManagement: React.FC = () => {
     setLoadingUsers(true);
     try {
       const userService = UserService.getInstance();
-      const usersData = await userService.getUsers();
+      // All of them: the Personal Space check needs every user's id.
+      const usersData = await userService.getAllUsers();
       setAvailableUsers(usersData);
     } catch (error) {
       console.error('Error loading users:', error);
@@ -162,12 +165,17 @@ const GroupManagement: React.FC = () => {
     }
   }, []);
 
-  // Load users when the assign user dialog opens
+  // Load users when the assign user dialog opens, and up front for a system
+  // admin: Personal Spaces are the users' stored ids (isAnyonesPersonalGroup).
   useEffect(() => {
-    if (assignUserDialogOpen) {
+    if (assignUserDialogOpen || isSystemAdmin) {
       loadAvailableUsers();
     }
-  }, [assignUserDialogOpen, loadAvailableUsers]);
+  }, [assignUserDialogOpen, isSystemAdmin, loadAvailableUsers]);
+  const ownPersonalGroupId = usePersonalGroupId();
+  const isPersonalGroup = (group: Group) => isAnyonesPersonalGroup(
+    group.id, [ownPersonalGroupId, ...availableUsers.map(user => user.personal_group_id)],
+  );
 
 
   const loadGroupUsers = async (groupId: string) => {
@@ -856,7 +864,7 @@ const GroupManagement: React.FC = () => {
         }}
       >
         <MenuList>
-          {isSystemAdmin && selectedMenuGroup && !(selectedMenuGroup.auto_created && selectedMenuGroup.id.startsWith('user_')) && (
+          {isSystemAdmin && selectedMenuGroup && !isPersonalGroup(selectedMenuGroup) && (
             <MenuItem onClick={() => {
               chooseDuplicateSource(selectedMenuGroup.id);
               setIncludeMembers(true);
@@ -1052,7 +1060,7 @@ const GroupManagement: React.FC = () => {
                   <Select labelId="teamspace-source-label" label="Start from" value={duplicateSourceId}
                     disabled={loading} onChange={(event) => chooseDuplicateSource(event.target.value)}>
                     <MenuItem value="">Empty teamspace</MenuItem>
-                    {groups.filter(group => !(group.auto_created && group.id.startsWith('user_'))).map(group => (
+                    {groups.filter(group => !isPersonalGroup(group)).map(group => (
                       <MenuItem key={group.id} value={group.id}>Duplicate {group.name}</MenuItem>
                     ))}
                   </Select>

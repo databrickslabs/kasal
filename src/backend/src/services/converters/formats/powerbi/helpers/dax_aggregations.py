@@ -102,7 +102,7 @@ class AggregationDetector:
 class DAXAggregationBuilder:
     """Builds DAX aggregation expressions"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.aggregation_templates = {
             AggregationType.SUM: self._build_sum,
             AggregationType.COUNT: self._build_count,
@@ -133,7 +133,7 @@ class DAXAggregationBuilder:
         agg_type: AggregationType,
         formula: str,
         source_table: str,
-        kbi_definition: Dict[str, Any] = None,
+        kbi_definition: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Build DAX aggregation expression
@@ -421,7 +421,7 @@ class DAXAggregationBuilder:
                 r"CASE\s+WHEN\s+(.+?)\s+THEN\s+(\w+|\d+)\s+ELSE\s+(\w+|\d+)\s+END"
             )
 
-            def convert_case(match):
+            def convert_case(match: re.Match[str]) -> str:
                 condition = match.group(1).strip()
                 then_value = match.group(2).strip()
                 else_value = match.group(3).strip()
@@ -442,7 +442,7 @@ class DAXAggregationBuilder:
 
         column_pattern = r"\b(bic_[a-zA-Z0-9_]+)\b"
 
-        def convert_standalone_column(match):
+        def convert_standalone_column(match: re.Match[str]) -> str:
             column_name = match.group(1)
             # Don't convert if it's already inside a SELECTEDVALUE call
             start_pos = match.start()
@@ -511,7 +511,7 @@ class DAXAggregationBuilder:
         # Pattern for column comparisons like "confirmed_phc <> 0"
         comparison_pattern = r"(\w+)\s*(<>|!=|=|>|<|>=|<=)\s*(\w+|\d+)"
 
-        def convert_comparison(match):
+        def convert_comparison(match: re.Match[str]) -> str:
             column = match.group(1)
             operator = match.group(2)
             value = match.group(3)

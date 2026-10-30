@@ -231,4 +231,7 @@ def test_agent_slide_contract_rejects_whole_deck_and_incomplete_slide():
     slide = '<section class="slide"><section>Content</section></section>'
     assert first_slide_section(slide, require_single=True) == slide
     assert first_slide_section(slide + slide, require_single=True) is None
-    assert first_slide_section('<section class="slide">Partial', require_single=True) is None
+    assert (
+        first_slide_section('<section class="slide">Partial', require_single=True)
+        is None
+    )

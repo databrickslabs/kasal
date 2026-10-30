@@ -2,19 +2,17 @@
 friendly table names and model column names to the real physical names from the
 Power Query M. Fixtures mirror the JTI ConsumerExperience cases."""
 
-from types import SimpleNamespace
-
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TableInfo,
     TranslationResult,
 )
 from src.services.tools.metric_view_utils.physical_name_resolver import (
-    physical_table,
-    is_generated,
-    column_map,
-    resolve_physical_names,
     _norm,
+    column_map,
+    is_generated,
+    physical_table,
+    resolve_physical_names,
 )
 
 # ── M expressions (trimmed to the shape the resolver reads) ──

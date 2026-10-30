@@ -66,6 +66,9 @@ def get_logging_config(env: str = "development") -> Dict[str, Any]:
             logger_manager.initialize()
 
     logs_dir = logger_manager._log_dir
+    # initialize() above always sets the directory; without it os.path.join
+    # below would fail anyway.
+    assert logs_dir is not None, "LoggerManager has no log directory"
 
     # Base configuration
     config = {
@@ -245,7 +248,7 @@ class CentralizedLoggingConfig:
             return None
 
     @classmethod
-    def configure_early(cls):
+    def configure_early(cls) -> None:
         """
         Configure logging as early as possible in application startup.
         This should be called BEFORE any module imports that create loggers.
@@ -392,7 +395,7 @@ class CentralizedLoggingConfig:
         return "\n".join(lines)
 
 
-def configure_early_logging():
+def configure_early_logging() -> None:
     """
     Configure logging as early as possible.
     This should be called BEFORE any module imports that create loggers.

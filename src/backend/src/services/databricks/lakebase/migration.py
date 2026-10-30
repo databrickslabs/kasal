@@ -10,11 +10,11 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from src.core.base_service import BaseService
 from src.db.base import Base
@@ -33,9 +33,15 @@ def _validate_identifier(name: str, kind: str = "identifier") -> str:
     Raises:
         ValueError: If the name does not match the safe pattern.
     """
-    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+    if not name or not _SAFE_IDENTIFIER_RE.fullmatch(name):
         raise ValueError(f"Invalid SQL {kind}: {name!r}")
     return name
+
+
+def _quoted_identifiers(names: List[str]) -> str:
+    """``"a", "b"`` for an INSERT column list, each name validated first: they
+    come from the source DB's result keys and double as bind names."""
+    return ", ".join(f'"{_validate_identifier(n, "column name")}"' for n in names)
 
 
 class LakebaseMigrationService(BaseService):
@@ -43,8 +49,8 @@ class LakebaseMigrationService(BaseService):
 
     def __init__(
         self,
-        source_engine: Optional[Engine] = None,
-        lakebase_engine: Optional[Engine] = None,
+        source_engine: Optional[Union[Engine, Connection]] = None,
+        lakebase_engine: Optional[Union[Engine, AsyncEngine]] = None,
         source_session: Optional[AsyncSession] = None,
     ):
         """
@@ -395,7 +401,7 @@ class LakebaseMigrationService(BaseService):
         bool_cols = self.boolean_columns_by_table.get(table_name, [])
         dt_cols = self.datetime_columns_by_table.get(table_name, [])
 
-        converted_dict = {}
+        converted_dict: Dict[str, Any] = {}
 
         for col in columns:
             value = row_dict.get(col)
@@ -500,7 +506,9 @@ class LakebaseMigrationService(BaseService):
                 async with source_session.begin():
                     safe_table = _validate_identifier(table_name, "table name")
                     result = await source_session.execute(
-                        text(f"SELECT * FROM {safe_table}")
+                        text(
+                            f"SELECT * FROM {safe_table}"  # table validated — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                        )
                     )
                     rows = result.fetchall()
                     columns = list(result.keys())
@@ -534,6 +542,9 @@ class LakebaseMigrationService(BaseService):
                     )
                 insert_columns = [c for c in columns if c in target_columns]
 
+            # Validated before the target table is cleared (see _quoted_identifiers).
+            col_names = _quoted_identifiers(insert_columns)
+
             # Clear existing data in Lakebase to avoid duplicates
             async with lakebase_session.begin():
                 safe_table = _validate_identifier(table_name, "table name")
@@ -545,11 +556,8 @@ class LakebaseMigrationService(BaseService):
             async with lakebase_session.begin():
                 # Build insert statement - escape column names for PostgreSQL.
                 # Only target-present columns (see insert_columns above).
-                col_names = ", ".join([f'"{col}"' for col in insert_columns])
                 placeholders = ", ".join([f":{col}" for col in insert_columns])
-                insert_sql = (
-                    f"INSERT INTO {safe_table} ({col_names}) VALUES ({placeholders})"
-                )
+                insert_sql = f"INSERT INTO {safe_table} ({col_names}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
 
                 # Batch insert with proper type conversion
                 for row in rows:
@@ -640,20 +648,20 @@ class LakebaseMigrationService(BaseService):
                 # SQLite doesn't enforce FKs, so orphans accumulate; PostgreSQL
                 # rejects them on INSERT.
                 fk_filter = self.fk_existence_filters.get(table_name)
-                where_clause = f" WHERE {fk_filter}" if fk_filter else ""
+                where_clause = f" WHERE {fk_filter}" if fk_filter else ""  # literal from fk_existence_filters — nosemgrep: tmp.databricks.sql-injection.fstring-where  # fmt: skip
                 if fk_filter:
                     logger.info(f"  ↳ Applying FK filter for {table_name}: {fk_filter}")
-                select_sql = f'SELECT * FROM "{safe_table}"{where_clause}'
+                select_sql = f'SELECT * FROM "{safe_table}"{where_clause}'  # table validated; literal FK filter — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 if is_sqlite:
                     with source_engine.connect() as conn:
                         result = conn.execute(text(select_sql))
                         rows = result.fetchall()
-                        columns = result.keys()
+                        columns = list(result.keys())
                 else:
                     with source_engine.begin() as conn:
                         result = conn.execute(text(select_sql))
                         rows = result.fetchall()
-                        columns = result.keys()
+                        columns = list(result.keys())
 
             if not rows:
                 elapsed = time.monotonic() - t0
@@ -733,7 +741,7 @@ class LakebaseMigrationService(BaseService):
                         f"  ↳ {table_name}: could not introspect target columns "
                         f"({col_err}); inserting all source columns"
                     )
-                column_list = ", ".join([f'"{col}"' for col in insert_columns])
+                column_list = _quoted_identifiers(insert_columns)
 
                 # Clear existing data to avoid duplicate key errors
                 # (e.g. seed data inserted by a previous schema-only migration).
@@ -768,7 +776,7 @@ class LakebaseMigrationService(BaseService):
                         value_clauses.append(f"({', '.join(row_placeholders)})")
 
                     multi_insert_sql = (
-                        f'INSERT INTO "{safe_table}" ({column_list}) VALUES '
+                        f'INSERT INTO "{safe_table}" ({column_list}) VALUES '  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                         + ", ".join(value_clauses)
                     )
                     lakebase_conn.execute(text(multi_insert_sql), params)
@@ -842,20 +850,22 @@ class LakebaseMigrationService(BaseService):
 
                         # Get max id; if table is empty setval to 1 with is_called=false
                         row = conn.execute(
-                            text(f'SELECT COALESCE(MAX(id), 0) FROM "{safe_table}"')
+                            text(
+                                f'SELECT COALESCE(MAX(id), 0) FROM "{safe_table}"'  # table validated — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                            )
                         ).scalar()
 
                         if row and row > 0:
                             conn.execute(
                                 text(
-                                    f'SELECT setval(\'"kasal"."{safe_seq}"\', {int(row)})'
+                                    f'SELECT setval(\'"kasal"."{safe_seq}"\', {int(row)})'  # sequence validated; int value — nosemgrep: tmp.databricks.sql-injection.fstring-select
                                 )
                             )
                             logger.info(f"  ✓ Reset sequence {seq_name} to {row}")
                         else:
                             conn.execute(
                                 text(
-                                    f'SELECT setval(\'"kasal"."{safe_seq}"\', 1, false)'
+                                    f'SELECT setval(\'"kasal"."{safe_seq}"\', 1, false)'  # sequence validated — nosemgrep: tmp.databricks.sql-injection.fstring-select
                                 )
                             )
                             logger.info(

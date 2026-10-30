@@ -28,13 +28,20 @@ checks able to fire at all.
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 from src.schemas.execution import CrewConfig
 from src.services.execution.checkpointing.record import ordered_units
 from src.services.execution.checkpointing.resume import build_crew_payload
 
 logger = logging.getLogger(__name__)
+
+#: ``execution_history.trigger_type`` of a chat run. The chat runs a saved crew
+#: with run-only changes (memory off, Agent Bricks endpoints, the request and
+#: conversation added to the first task) that the saved crew does not have, so
+#: rebuilding from it would resume a different run. It keeps ``crew_id`` for
+#: completion rules and trigger chains, and resumes from its snapshot.
+CHAT_TRIGGER = "chat"
 
 
 async def _rebuild_crew_definition(
@@ -55,7 +62,15 @@ async def _rebuild_crew_definition(
     crew than the one that was checkpointed and call that a resume.
     """
     crew_id = getattr(source, "crew_id", None)
-    if not crew_id:
+    from_chat = getattr(source, "trigger_type", None) == CHAT_TRIGGER
+    if not crew_id or from_chat:
+        if crew_id:
+            logger.info(
+                "[resume] %s is a chat run of crew %s; resuming from its stored "
+                "definition, which holds what the chat applied to it",
+                getattr(source, "job_id", None),
+                crew_id,
+            )
         return (
             stored_inputs.get("agents_yaml") or {},
             stored_inputs.get("tasks_yaml") or {},
@@ -131,8 +146,11 @@ async def build_crew_resume_config(
     identities come from, so it reports the true number in its own log line
     rather than this guessing.
     """
+    # Rebuilt in the source run's own workspace, never elsewhere in the scope.
+    from src.services.catalog.run_lookup import scope_to_run
+
     agents_yaml, tasks_yaml, rebuilt = await _rebuild_crew_definition(
-        session, source, stored_inputs, group_context
+        session, source, stored_inputs, scope_to_run(group_context, source)
     )
 
     if not agents_yaml or not tasks_yaml:
@@ -193,7 +211,7 @@ async def build_flow_resume_config(
 
     if from_unit not in (None, ""):
         try:
-            resume_at = int(from_unit)
+            resume_at = int(cast(str, from_unit))  # None/'' excluded above
         except (TypeError, ValueError):
             raise ValueError(f"Invalid resume point '{from_unit}'")
     elif units:
@@ -205,8 +223,10 @@ async def build_flow_resume_config(
 
     restored = sum(1 for u in units if resume_at is None or int(u["key"]) < resume_at)
 
+    from src.services.catalog.run_lookup import scope_to_run
+
     definition = await _rebuild_flow_definition(
-        session, source, stored_inputs, group_context
+        session, source, stored_inputs, scope_to_run(group_context, source)
     )
 
     return (

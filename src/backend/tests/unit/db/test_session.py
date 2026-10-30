@@ -2,13 +2,12 @@
 Unit tests for database session module.
 
 Tests session factory configuration, engine creation helpers,
-identifier validation, and get_db.
+and identifier validation.
 """
 
 import os
 import sqlite3
 import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -183,41 +182,6 @@ class TestSQLiteOperations:
         finally:
             if os.path.exists(db_path):
                 os.unlink(db_path)
-
-
-# ---------------------------------------------------------------------------
-# get_db tests
-# ---------------------------------------------------------------------------
-class TestGetDbFunction:
-    """Tests for the get_db async generator."""
-
-    @pytest.mark.asyncio
-    async def test_get_db_success_path(self):
-        """Test get_db yields a session and commits on success."""
-        mock_session = AsyncMock()
-
-        class MockCtx:
-            async def __aenter__(self):
-                return mock_session
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_factory = MagicMock(return_value=MockCtx())
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import get_db
-
-            gen = get_db()
-            session = await gen.__anext__()
-            assert session is mock_session
-
-            try:
-                await gen.__anext__()
-            except StopAsyncIteration:
-                pass
-
-            mock_session.commit.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

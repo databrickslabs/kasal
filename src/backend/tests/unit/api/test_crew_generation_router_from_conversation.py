@@ -12,7 +12,7 @@ from src.utils.user_context import GroupContext
 
 
 def _gc():
-    return GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com")
+    return GroupContext(group_ids=["g1"], group_email="u@x", email_domain="example.com")
 
 
 @pytest.mark.asyncio

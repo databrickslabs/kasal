@@ -197,13 +197,14 @@ class CrewConfigBuilder:
             "execution_effort"
         ) or self.config.get("execution_effort")
         if raw:
-            return resolve_effort(raw)["run_max_seconds"]
+            run_max: Optional[int] = resolve_effort(raw)["run_max_seconds"]
+            return run_max
         explicit = self.config.get("run_max_seconds")
         if explicit:
             return int(explicit)
 
         # A crew shares ONE deadline. More agents or retries do not multiply it.
-        saved = [
+        saved: List[int] = [
             resolve_effort(agent["execution_effort"])["run_max_seconds"]
             for agent in self.config.get("agents", [])
             if agent.get("execution_effort")
@@ -337,7 +338,7 @@ class CrewConfigBuilder:
                 )
 
                 if bt == "databricks":
-                    dbc = memory_backend_config.get("databricks_config")
+                    dbc: Any = memory_backend_config.get("databricks_config")
                     if hasattr(dbc, "model_dump") and callable(
                         getattr(dbc, "model_dump")
                     ):
@@ -354,7 +355,7 @@ class CrewConfigBuilder:
                     logger.info(f"Unified memory index: {dbc.get('memory_index')}")
                     logger.info("=" * 80)
                 elif bt == "lakebase":
-                    lbc = memory_backend_config.get("lakebase_config")
+                    lbc: Any = memory_backend_config.get("lakebase_config")
                     if hasattr(lbc, "model_dump") and callable(
                         getattr(lbc, "model_dump")
                     ):

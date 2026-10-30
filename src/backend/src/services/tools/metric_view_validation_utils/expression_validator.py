@@ -14,6 +14,11 @@ from .constants import (
 from .data_input_handler import DataInputHandler
 from .databricks_parser import UCMetricsViewParser
 from .dax_expression_parser import DAXExpressionParser
+from .measure_fingerprint import (
+    dax_fingerprint,
+    sql_fingerprint,
+    var_used_inside_calculate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +69,7 @@ class ExpressionValidator:
         self.db_parser = UCMetricsViewParser.create_headless()
         self.dax_parser = DAXExpressionParser(table_mappings, column_mappings)
 
-    def validate_ucmv(self):
+    def validate_ucmv(self) -> Dict[str, Any]:
         """
         Validate all measures in the Unity Catalog Metrics View.
 
@@ -187,11 +192,14 @@ class ExpressionValidator:
             }
 
         # Base measures (plain single-column aggregates like SUM(COALESCE(source.col,0)))
-        # are correct BY CONSTRUCTION and carry no DAX to diff against. Count them
-        # VALID rather than SKIPPED — otherwise the ~144 base measures show as
-        # "DAX not available" and the headline drastically understates quality.
+        # from the MQuery SUM columns are correct BY CONSTRUCTION and carry no DAX
+        # to diff against: count them VALID rather than SKIPPED. Only when there
+        # IS no DAX, though: a plain aggregate standing in for a filtered DAX
+        # measure is exactly the dropped-filter case and must be compared.
         _db_expr = yaml_measure.get("expr")
-        if _is_base_measure_expr(_db_expr):
+        dax_measure = self.data_handler.find_matching_dax_for_yaml_measure(yaml_measure)
+        _dax_text = (dax_measure or {}).get("dax_expression")
+        if _is_base_measure_expr(_db_expr) and _dax_text in (None, "", "Not available"):
             return {
                 "measure_name": measure_name,
                 "status": STATUS_VALID,
@@ -205,8 +213,6 @@ class ExpressionValidator:
                 "recommendations": [],
             }
 
-        # Find matching DAX measure
-        dax_measure = self.data_handler.find_matching_dax_for_yaml_measure(yaml_measure)
         if not dax_measure:
             return {
                 "measure_name": measure_name,
@@ -240,8 +246,10 @@ class ExpressionValidator:
         # Validate using the existing validate method
         databricks_expr = yaml_measure.get("expr")
         try:
-            result = self.validate(databricks_expr, dax_expr, strict=False)
+            result = self.validate(databricks_expr or "", dax_expr, strict=False)
             result["measure_name"] = measure_name
+            if result["is_valid"]:
+                self._demote_if_fingerprints_differ(result)
             if result["is_valid"]:
                 result["status"] = STATUS_VALID
             elif self._is_equivalent(result):
@@ -382,45 +390,48 @@ class ExpressionValidator:
         }
 
     def _is_equivalent(self, result: dict) -> bool:
-        """Check if differences are all expected DAX-to-SQL transformations.
+        """True only when the differences are PROVEN to be notation.
 
-        Returns True when differences are explainable by the DAX→SQL translation
-        process. This uses a permissive check — most structural differences between
-        DAX and Spark SQL are expected (table prefixes, filter syntax, aggregation
-        naming). The key semantic check is whether the same columns are being
-        aggregated.
+        The component checks differ on any DAX-to-SQL rewrite (``Table[col]``
+        vs ``source.col``, ``CALCULATE`` vs ``FILTER (WHERE)``), but partial
+        similarity is not proof: a measure with a filter conjunct, a filter
+        value or a denominator missing still shares its aggregation. So both
+        expressions are reduced to a canonical fingerprint (aggregation kind,
+        row expression, every filter conjunct, ratio shape) and EQUIVALENT
+        requires the two to be identical. Anything the fingerprint cannot
+        read is not EQUIVALENT; the caller reports it as REVIEW or INVALID.
         """
-        diffs = result.get("differences", [])
-        sims = result.get("similarities", [])
-        if not diffs:
+        if not result.get("differences"):
             return False
+        db_fp, dax_fp = self._fingerprints(result)
+        return db_fp is not None and db_fp == dax_fp
 
-        # Permissive mode: if we have ANY similarities, the translation is likely correct
-        # DAX→SQL always produces structural differences (Table[col] vs source.col,
-        # CALCULATE vs FILTER WHERE, SUMX vs SUM, etc.)
-        if sims:
-            return True
+    def _fingerprints(self, result: dict) -> tuple[object, object]:
+        """``(sql_fingerprint, dax_fingerprint)``; either may be ``None``."""
+        db_raw = (result.get("databricks_parsed") or {}).get("raw") or ""
+        dax_raw = (result.get("dax_parsed") or {}).get("raw") or ""
+        if not db_raw or not dax_raw:
+            return None, None
+        if var_used_inside_calculate(dax_raw):
+            return sql_fingerprint(db_raw), None  # substitution would add filters
+        return sql_fingerprint(db_raw), dax_fingerprint(
+            self.dax_parser.resolved_expression(dax_raw), self.column_mappings
+        )
 
-        # Even without similarities, check if all diffs are expected transformations
-        for diff in diffs:
-            diff_str = str(diff).lower()
-            if "aggregation mismatch" in diff_str:
-                if not self._is_expected_agg_mapping(diff):
-                    return False
-            elif "reference mismatch" in diff_str:
-                # Reference mismatches are almost always expected (Table[col] → source.col)
-                continue
-            elif "filter mismatch" in diff_str:
-                # Filter syntax always differs between DAX and SQL
-                continue
-            elif "structure mismatch" in diff_str:
-                # Structure always differs
-                continue
-            else:
-                return False  # Truly unknown difference type
-        return True
+    def _demote_if_fingerprints_differ(self, result: dict) -> None:
+        """A VALID verdict from the order-independent component checks is
+        withdrawn when both canonical forms can be read and differ (operands
+        swapped in a ratio or a subtraction, a filter on the wrong side)."""
+        db_fp, dax_fp = self._fingerprints(result)
+        if db_fp is not None and dax_fp is not None and db_fp != dax_fp:
+            result["is_valid"] = False
+            result["confidence"] = "medium"
+            result["differences"].append(
+                "Structure mismatch: canonical forms differ "
+                "(operand order, ratio shape or filter placement)"
+            )
 
-    def _is_expected_agg_mapping(self, diff) -> bool:
+    def _is_expected_agg_mapping(self, diff: Any) -> bool:
         """Check if aggregation difference is a known DAX-to-SQL mapping."""
         diff_str = str(diff)
         # Check if the mismatch mentions a DAX agg type that maps to a valid DB type
@@ -437,16 +448,6 @@ class ExpressionValidator:
                 if dax_type in diff_str.upper():
                     return True
         return False
-
-    def _is_expected_ref_mapping(self, diff, result: dict = None) -> bool:
-        """Check if reference difference is just a table prefix change.
-
-        The typical pattern is Table[col] in DAX becoming source.col in UCMV.
-        Table prefix differences are ALWAYS expected in DAX→SQL translation.
-        """
-        # Reference mismatches are almost always expected — DAX uses Table[col],
-        # SQL uses source.col or alias.col. This is always a valid translation.
-        return True
 
     def _is_review_candidate(self, result: dict) -> bool:
         """Check if there is enough similarity to warrant human review instead of INVALID."""
@@ -500,7 +501,7 @@ class ExpressionValidator:
             return attributes
 
         # Create a signature for each aggregation (type + attributes)
-        def create_agg_signature(agg: Dict, type_map: Dict = None) -> tuple:
+        def create_agg_signature(agg: Dict, type_map: Optional[Dict] = None) -> tuple:
             """Create a signature for an aggregation based on type and attributes."""
             agg_type = agg["type"]
             if type_map:

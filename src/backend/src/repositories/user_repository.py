@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import ColumnElement, func, or_, select, update
 
 from src.core.base_repository import BaseRepository
 from src.models.user import User
@@ -40,7 +40,7 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def has_legacy_personal_collision(self, user_id: str, legacy: str) -> bool:
-        normalized = self.model.email
+        normalized: ColumnElement[str] = self.model.email.expression
         for separator in ("@", ".", "-", "+"):
             normalized = func.replace(normalized, separator, "_")
         result = await self.session.execute(
@@ -120,6 +120,65 @@ class UserRepository(BaseRepository[User]):
             )
         )
         return result.scalar() or 0
+
+    async def revoke_system_admin_unless_last(self, user_id: str) -> bool:
+        """Clear ``is_system_admin`` on ``user_id`` only while another admin remains.
+
+        Returns False, changing nothing, when ``user_id`` is the last one. The
+        check and the write are one conditional UPDATE, so two admins demoting
+        each other cannot both pass a count read earlier. On PostgreSQL the
+        admin rows are locked first: under READ COMMITTED the subquery would
+        otherwise see the other, uncommitted, demotion as still an admin.
+        SQLite ignores FOR UPDATE, but it runs one writer at a time.
+        """
+        await self.session.execute(
+            select(self.model.id)
+            .where(self.model.is_system_admin.is_(True))
+            .with_for_update()
+        )
+        other_admins = (
+            select(func.count(self.model.id))
+            .where(self.model.is_system_admin.is_(True), self.model.id != user_id)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(self.model)
+            .where(self.model.id == user_id, other_admins >= 1)
+            .values(is_system_admin=False)
+            .execution_options(synchronize_session="fetch")
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def grant_first_system_admin(self, user_id: str) -> bool:
+        """Make ``user_id`` system admin if no admin exists and it is the first user.
+
+        The first user is the earliest row by ``(created_at, id)``, so two users
+        created at once do not both miss out because each saw the other's row.
+        One conditional UPDATE; returns whether it promoted ``user_id``.
+        """
+        any_admin = (
+            select(self.model.id).where(self.model.is_system_admin.is_(True)).exists()
+        )
+        first_user = (
+            select(self.model.id)
+            .order_by(self.model.created_at.asc().nulls_last(), self.model.id.asc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(self.model)
+            .where(self.model.id == user_id, ~any_admin, self.model.id == first_user)
+            .values(is_system_admin=True, is_personal_workspace_manager=True)
+            .execution_options(synchronize_session="fetch")
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def find_system_admin_emails(self) -> List[str]:
+        """Emails of every user holding system-admin privileges."""
+        result = await self.session.execute(
+            select(self.model.email).where(self.model.is_system_admin.is_(True))
+        )
+        return [row[0] for row in result.all() if row[0]]
 
     async def count(self) -> int:
         """Get total count of users"""

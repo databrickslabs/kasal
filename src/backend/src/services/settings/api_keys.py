@@ -6,7 +6,6 @@ and managing API keys stored in the local database.
 """
 
 import logging
-import os
 from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,9 +39,8 @@ class ApiKeysService(BaseService):
         # KEEP the session. This used to be hardcoded to None ("for compatibility
         # with older code"), which silently disabled the whole sync path:
         # find_by_name_sync guards on `isinstance(self.session, Session)`, so with
-        # None it ALWAYS raised TypeError, and setup_provider_api_key_sync — which
-        # loads OPENAI/ANTHROPIC/DEEPSEEK/GEMINI keys into the environment — could
-        # never read a key from the database. It swallowed the TypeError and
+        # None it ALWAYS raised TypeError, so the sync path could never read a
+        # key from the database. It swallowed the TypeError and
         # returned False, so a configured key simply looked absent. The unit tests
         # missed it because they mock the repository rather than pass a real
         # Session.
@@ -153,7 +151,7 @@ class ApiKeysService(BaseService):
 
         # For the response, we need to set the decrypted value
         # This won't be saved to the database, it's just for the API response
-        created_key.value = api_key_data.value
+        setattr(created_key, "value", api_key_data.value)  # response-only, not a column
 
         return created_key
 
@@ -187,10 +185,12 @@ class ApiKeysService(BaseService):
         updated_key = await self.repository.update(api_key.id, update_dict)
 
         self._invalidate_pat_cache()
+        if updated_key is None:  # deleted between the read and the update
+            return None
 
         # For the response, we need to set the decrypted value
         # This won't be saved to the database, it's just for the API response
-        updated_key.value = api_key_data.value
+        setattr(updated_key, "value", api_key_data.value)  # response-only, not a column
 
         return updated_key
 
@@ -215,27 +215,6 @@ class ApiKeysService(BaseService):
             self._invalidate_pat_cache()
         return deleted
 
-    async def get_all_api_keys(self) -> List[ApiKey]:
-        """
-        Get all API keys with decrypted values for the current group.
-
-        Returns:
-            List of all API keys with decrypted values
-        """
-        api_keys = await self.repository.find_all(group_id=self.group_id)
-
-        # Decrypt values for the response
-        for key in api_keys:
-            try:
-                # Set a plain attribute for the value
-                key.value = EncryptionUtils.decrypt_value(key.encrypted_value)
-            except Exception as e:
-                logger.error(f"Error decrypting API key '{key.name}': {str(e)}")
-                # If decryption fails, set empty value
-                key.value = ""
-
-        return api_keys
-
     async def get_api_keys_metadata(self) -> List[ApiKey]:
         """
         Get all API keys metadata without values for frontend display.
@@ -252,16 +231,18 @@ class ApiKeysService(BaseService):
         for key in api_keys:
             # Check if key has an encrypted value
             has_value = bool(key.encrypted_value and key.encrypted_value.strip())
-            key.value = (
-                "Set" if has_value else "Not set"
-            )  # Status indicator instead of actual value
+            # Status indicator instead of actual value (response-only attribute)
+            setattr(key, "value", "Set" if has_value else "Not set")
 
         return api_keys
 
     @classmethod
     async def get_api_key_value(
-        cls, db: AsyncSession = None, key_name: str = None, group_id: str = None
-    ):
+        cls,
+        db: Optional[AsyncSession] = None,
+        key_name: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Get the value of an API key by name (decrypted).
 
@@ -297,6 +278,8 @@ class ApiKeysService(BaseService):
             service = cls(session, group_id=group_id)
 
             # Find the API key
+            if key_name is None:
+                return None
             api_key = await service.find_by_name(key_name)
             if not api_key:
                 return None
@@ -309,256 +292,9 @@ class ApiKeysService(BaseService):
                 return None
 
     @classmethod
-    async def setup_provider_api_key(cls, db: AsyncSession, key_name: str) -> bool:
-        """
-        Set up an API key for any provider from the database.
-
-        This is a generic function that can be used to set up any API key.
-        It retrieves the key from the database and sets it as an environment variable.
-
-        Args:
-            db: Database session
-            key_name: Name of the API key
-
-        Returns:
-            True if successful, False otherwise
-        """
-        value = await cls.get_api_key_value(db, key_name)
-        if value:
-            os.environ[key_name] = value
-            logger.info(f"API key '{key_name}' set up successfully")
-            return True
-        else:
-            logger.warning(f"API key '{key_name}' not found in database")
-            return False
-
-    @staticmethod
-    def setup_provider_api_key_sync(db: Session, key_name: str) -> bool:
-        """
-        Set up an API key for any provider from the database (sync version).
-
-        Args:
-            db: Database session (synchronous)
-            key_name: Name of the API key
-
-        Returns:
-            True if successful, False otherwise
-        """
-        # Create a service instance with a synchronous session
-        service = ApiKeysService(db)
-
-        # Get the API key from the database
-        try:
-            # Find the API key by name
-            api_key = service.find_by_name_sync(key_name)
-
-            if api_key and api_key.encrypted_value:
-                # Decrypt the value
-                value = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-
-                # Set as environment variable
-                os.environ[key_name] = value
-                logger.info(f"API key '{key_name}' set up successfully (sync)")
-                return True
-            else:
-                logger.warning(f"API key '{key_name}' not found in database (sync)")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up API key '{key_name}': {str(e)}")
-            return False
-
-    @classmethod
-    async def setup_openai_api_key(
-        cls, db: AsyncSession = None, group_id: str = None
-    ) -> bool:
-        """
-        Set up the OpenAI API key from the database.
-
-        SECURITY: Requires group_id for multi-tenant isolation.
-
-        Args:
-            db: Optional database session (for backwards compatibility)
-            group_id: Group ID for multi-tenant filtering (REQUIRED)
-
-        Returns:
-            True if key was found and set up successfully, False otherwise
-
-        Raises:
-            ValueError: If group_id is not provided
-        """
-        if group_id is None:
-            raise ValueError(
-                "SECURITY: group_id is REQUIRED for setup_openai_api_key(). "
-                "All API key operations must be scoped to a group."
-            )
-        try:
-            # Use the class method that handles session internally
-            value = await cls.get_provider_api_key("openai", group_id=group_id)
-            if value:
-                os.environ["OPENAI_API_KEY"] = value
-                logger.info("OpenAI API key set up successfully")
-                return True
-            else:
-                logger.warning("OpenAI API key not found in database")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up OpenAI API key: {str(e)}")
-            return False
-
-    @classmethod
-    async def setup_anthropic_api_key(
-        cls, db: AsyncSession = None, group_id: str = None
-    ) -> bool:
-        """
-        Set up the Anthropic API key from the database.
-
-        SECURITY: Requires group_id for multi-tenant isolation.
-
-        Args:
-            db: Optional database session (for backwards compatibility)
-            group_id: Group ID for multi-tenant filtering (REQUIRED)
-
-        Returns:
-            True if key was found and set up successfully, False otherwise
-
-        Raises:
-            ValueError: If group_id is not provided
-        """
-        if group_id is None:
-            raise ValueError(
-                "SECURITY: group_id is REQUIRED for setup_anthropic_api_key(). "
-                "All API key operations must be scoped to a group."
-            )
-        try:
-            # Use the class method that handles session internally
-            value = await cls.get_provider_api_key("anthropic", group_id=group_id)
-            if value:
-                os.environ["ANTHROPIC_API_KEY"] = value
-                logger.info("Anthropic API key set up successfully")
-                return True
-            else:
-                logger.warning("Anthropic API key not found in database")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up Anthropic API key: {str(e)}")
-            return False
-
-    @classmethod
-    async def setup_deepseek_api_key(
-        cls, db: AsyncSession = None, group_id: str = None
-    ) -> bool:
-        """
-        Set up the DeepSeek API key from the database.
-
-        SECURITY: Requires group_id for multi-tenant isolation.
-
-        Args:
-            db: Optional database session (for backwards compatibility)
-            group_id: Group ID for multi-tenant filtering (REQUIRED)
-
-        Returns:
-            True if key was found and set up successfully, False otherwise
-
-        Raises:
-            ValueError: If group_id is not provided
-        """
-        if group_id is None:
-            raise ValueError(
-                "SECURITY: group_id is REQUIRED for setup_deepseek_api_key(). "
-                "All API key operations must be scoped to a group."
-            )
-        try:
-            # Use the class method that handles session internally
-            value = await cls.get_provider_api_key("deepseek", group_id=group_id)
-            if value:
-                os.environ["DEEPSEEK_API_KEY"] = value
-                logger.info("DeepSeek API key set up successfully")
-                return True
-            else:
-                logger.warning("DeepSeek API key not found in database")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up DeepSeek API key: {str(e)}")
-            return False
-
-    @classmethod
-    async def setup_gemini_api_key(
-        cls, db: AsyncSession = None, group_id: str = None
-    ) -> bool:
-        """
-        Set up the Gemini API key from the database.
-
-        SECURITY: Requires group_id for multi-tenant isolation.
-
-        Args:
-            db: Optional database session (for backwards compatibility)
-            group_id: Group ID for multi-tenant filtering (REQUIRED)
-
-        Returns:
-            True if key was found and set up successfully, False otherwise
-
-        Raises:
-            ValueError: If group_id is not provided
-        """
-        if group_id is None:
-            raise ValueError(
-                "SECURITY: group_id is REQUIRED for setup_gemini_api_key(). "
-                "All API key operations must be scoped to a group."
-            )
-        try:
-            # Use the class method that handles session internally
-            value = await cls.get_provider_api_key("gemini", group_id=group_id)
-            if value:
-                os.environ["GEMINI_API_KEY"] = value
-                logger.info("Gemini API key set up successfully")
-                return True
-            else:
-                logger.warning("Gemini API key not found in database")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up Gemini API key: {str(e)}")
-            return False
-
-    @classmethod
-    async def setup_all_api_keys(cls, db=None, group_id: str = None) -> None:
-        """
-        Set up all supported API keys from the database.
-
-        SECURITY: Requires group_id for multi-tenant isolation.
-
-        Args:
-            db: Optional database session (for backwards compatibility)
-            group_id: Group ID for multi-tenant filtering (REQUIRED)
-
-        Raises:
-            ValueError: If group_id is not provided
-        """
-        if group_id is None:
-            raise ValueError(
-                "SECURITY: group_id is REQUIRED for setup_all_api_keys(). "
-                "All API key operations must be scoped to a group."
-            )
-
-        # Check if we have a synchronous session
-        if db is not None and isinstance(db, Session):
-            # NOTE: Sync methods are deprecated and don't support group_id properly
-            # This path should not be used in production
-            logger.warning(
-                "Using deprecated sync API key setup - security may be compromised"
-            )
-            ApiKeysService.setup_provider_api_key_sync(db, "OPENAI_API_KEY")
-            ApiKeysService.setup_provider_api_key_sync(db, "ANTHROPIC_API_KEY")
-            ApiKeysService.setup_provider_api_key_sync(db, "DEEPSEEK_API_KEY")
-            ApiKeysService.setup_provider_api_key_sync(db, "GEMINI_API_KEY")
-        else:
-            # Use the async methods, which take a routed session
-            await cls.setup_openai_api_key(group_id=group_id)
-            await cls.setup_anthropic_api_key(group_id=group_id)
-            await cls.setup_deepseek_api_key(group_id=group_id)
-            await cls.setup_gemini_api_key(group_id=group_id)
-
-    @classmethod
-    async def get_provider_api_key(cls, provider: str, group_id: str) -> Optional[str]:
+    async def get_provider_api_key(
+        cls, provider: str, group_id: Optional[str]
+    ) -> Optional[str]:
         """
         Get API key for a specific provider using the repository pattern.
         This method handles encryption/decryption and doesn't require a db session.

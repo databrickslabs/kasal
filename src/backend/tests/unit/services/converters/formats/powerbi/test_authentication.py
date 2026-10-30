@@ -296,10 +296,11 @@ class TestAadService:
         assert service._resolve_username() == "direct_user@domain.com"
 
     @patch.dict(os.environ, {"TEST_USERNAME_ENV": "env_user@domain.com"})
-    def test_resolve_username_from_env(self, mock_logger):
-        """Test resolving username from environment variable"""
+    def test_username_is_never_read_from_env(self, mock_logger):
+        """username_env names a variable that is NOT read (shared process env)."""
         service = AadService(username_env="TEST_USERNAME_ENV", logger=mock_logger)
-        assert service._resolve_username() == "env_user@domain.com"
+        assert service._resolve_username() is None
+        mock_logger.warning.assert_called_once()
 
     def test_resolve_username_none(self, service_empty):
         """Test resolving username when not set"""
@@ -311,10 +312,10 @@ class TestAadService:
         assert service._resolve_password() == "direct_password"
 
     @patch.dict(os.environ, {"TEST_PASSWORD_ENV": "env_password"})
-    def test_resolve_password_from_env(self, mock_logger):
-        """Test resolving password from environment variable"""
+    def test_password_is_never_read_from_env(self, mock_logger):
+        """password_env names a variable that is NOT read (shared process env)."""
         service = AadService(password_env="TEST_PASSWORD_ENV", logger=mock_logger)
-        assert service._resolve_password() == "env_password"
+        assert service._resolve_password() is None
 
     def test_resolve_password_none(self, service_empty):
         """Test resolving password when not set"""
@@ -577,25 +578,13 @@ class TestAadService:
         assert "https://" in AadService.AUTHORITY_BASE
         assert "powerbi" in AadService.POWERBI_SCOPE.lower()
 
-    @patch.dict(
-        os.environ,
-        {"CUSTOM_USERNAME": "env_user@domain.com", "CUSTOM_PASSWORD": "env_password"},
-    )
-    @patch(
-        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
-        True,
-    )
     @patch(
         "src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential"
     )
-    def test_service_account_with_env_vars(self, mock_credential_class, mock_logger):
-        """Test service account authentication using environment variables"""
-        mock_credential = Mock()
-        mock_token = Mock()
-        mock_token.token = "env_token"
-        mock_credential.get_token.return_value = mock_token
-        mock_credential_class.return_value = mock_credential
-
+    def test_service_account_with_env_var_names_is_refused(
+        self, mock_credential_class, mock_logger
+    ):
+        """Env-named credentials are ignored, so service-account auth has none."""
         service = AadService(
             client_id="test_client",
             tenant_id="test_tenant",
@@ -605,13 +594,6 @@ class TestAadService:
             logger=mock_logger,
         )
 
-        token = service.get_access_token()
-
-        assert token == "env_token"
-        # Source code only adds client_secret to kwargs when it is not None (public client)
-        mock_credential_class.assert_called_once_with(
-            client_id="test_client",
-            username="env_user@domain.com",
-            password="env_password",
-            tenant_id="test_tenant",
-        )
+        with pytest.raises(Exception):
+            service.get_access_token()
+        mock_credential_class.assert_not_called()

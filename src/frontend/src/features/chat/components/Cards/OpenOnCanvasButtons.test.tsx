@@ -25,7 +25,7 @@ beforeEach(() => {
   // Simulate the chat "+" picker having selected an MCP server + Agent Bricks endpoint.
   useExecutionStore.setState({
     memoryEnabled: false,
-    selectedMcpServers: ['nemotemo'],
+    selectedMcpServers: ['example-mcp'],
     selectedAgentBricksEndpoints: [],
   });
 });
@@ -68,7 +68,7 @@ describe('OpenOnCanvasButtons — Open in Agent Builder', () => {
 
     expect(spy).toHaveBeenCalled();
     const { nodes } = events[0].detail;
-    const expected = { MCP_SERVERS: { servers: ['nemotemo'] } };
+    const expected = { MCP_SERVERS: { servers: ['example-mcp'] } };
     expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toEqual(expected);
     expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toEqual(expected);
   });

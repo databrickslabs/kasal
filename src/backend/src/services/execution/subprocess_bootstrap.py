@@ -6,9 +6,11 @@ calls before it runs anything, plus the stdout/stderr muzzle that keeps engine
 chatter off the terminal. Its only callers are the crew and flow runners.
 """
 
+import io
 import logging
 import os
 import sys
+from typing import TextIO, Tuple, Union
 
 from src.services.execution.logs.context import (
     ExecutionContextFormatter,
@@ -16,7 +18,60 @@ from src.services.execution.logs.context import (
 )
 
 
-def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
+def prepare_child_environment(execution_id: str, process_type: str = "crew") -> None:
+    """The first thing a spawned crew/flow interpreter does with its environment.
+
+    1. Applies the child allow-list (``core/databricks_app``): this interpreter
+       runs ONE workspace's execution, the server that spawned it serves many,
+       so nothing but platform facts (the app service principal included), Kasal
+       settings, process control and DB/logging configuration survives. Never a
+       workspace credential — the run reads its keys through the services.
+       ``multiprocessing`` spawn cannot be handed an environment, hence here.
+       Skipped when this is not a spawned child (unit tests call the child entry
+       points in-process, and must not have the test runner's env scrubbed).
+    2. Marks the subprocess mode and the execution id (orphan detection).
+    3. Pins ``DATABASE_TYPE`` for the BASE engine to what the parent's settings
+       resolved. It names the boot database, not where the run's data lives:
+       with Lakebase active the child re-activates it from the same config
+       (``activate_lakebase_in_subprocess``), exactly like the parent.
+    """
+    import multiprocessing
+
+    if multiprocessing.parent_process() is not None:
+        from src.core.databricks_app import restrict_environment_to_child_allow_list
+
+        restrict_environment_to_child_allow_list()
+
+    from src.core.process_role import mark_run_subprocess
+
+    mark_run_subprocess(process_type)
+    if process_type == "flow":
+        os.environ["CREWAI_DEBUG_TRACING"] = "true"
+    os.environ["KASAL_EXECUTION_ID"] = execution_id
+    if "DATABASE_TYPE" not in os.environ:
+        from src.config.settings import settings
+
+        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE
+
+
+async def open_child_database() -> bool:
+    """Point this child at the server's database, then load what it configured.
+
+    Re-activates Lakebase (it is not inherited from the parent's hot-swap) and
+    THEN loads the Configuration → Engines settings snapshot, so they are read
+    from the database the server uses. Returns whether Lakebase is active.
+    """
+    from src.db.database_router import activate_lakebase_in_subprocess
+    from src.services.settings import engine_settings_loader
+
+    lakebase_active = await activate_lakebase_in_subprocess()
+    await engine_settings_loader.load()
+    return lakebase_active
+
+
+def configure_subprocess_logging(
+    execution_id: str, process_type: str = "crew"
+) -> logging.Logger:
     """
     Configure logging for a subprocess running a crew or flow execution.
 
@@ -29,8 +84,6 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         execution_id: The execution ID to include in logs
         process_type: Type of process ("crew" or "flow") - defaults to "crew" for backward compatibility
     """
-
-    # Set execution context
     set_execution_context(execution_id)
 
     # Suppress CrewAI verbose output
@@ -70,7 +123,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     from src.core.logger import LoggerManager
 
     # Get the log directory from environment or determine dynamically
-    log_dir = os.environ.get("LOG_DIR")
+    log_dir: Union[str, os.PathLike, None] = os.environ.get("LOG_DIR")
     if not log_dir:
         # Determine log directory relative to backend root
         import pathlib
@@ -153,10 +206,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     # Determine which environment variable to check based on process_type
     env_var_name = f"KASAL_LOG_{process_type.upper()}"
 
-    # Support both old KASAL_DEBUG_TRACES and new KASAL_LOG_CREW/KASAL_LOG_FLOW
     debug_enabled = (
-        os.environ.get("KASAL_DEBUG_TRACES", "").lower() in ["true", "1", "yes"]
-        or os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]
+        os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]
         or os.environ.get(env_var_name, "").upper() == "DEBUG"
     )
 
@@ -249,7 +300,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     return exec_logger
 
 
-def suppress_stdout_stderr():
+def suppress_stdout_stderr() -> Tuple[TextIO, TextIO, io.StringIO]:
     """
     Completely suppress stdout and stderr output.
 
@@ -269,7 +320,7 @@ def suppress_stdout_stderr():
     return original_stdout, original_stderr, captured_output
 
 
-def restore_stdout_stderr(original_stdout, original_stderr):
+def restore_stdout_stderr(original_stdout: TextIO, original_stderr: TextIO) -> None:
     """
     Restore original stdout and stderr.
 

@@ -290,23 +290,6 @@ class TestFlowExecutionService:
 
     # ========== update_execution_config Tests ==========
 
-    @pytest.mark.asyncio
-    async def test_update_execution_config(
-        self, flow_execution_service, mock_session, mock_execution
-    ):
-        """Test updating execution config for state persistence."""
-        execution_id = 1
-        new_config = {"state": "updated", "counter": 5}
-
-        mock_session.execute.return_value = MockScalarResult(mock_execution)
-
-        result = await flow_execution_service.update_execution_config(
-            execution_id=execution_id, config=new_config
-        )
-
-        assert result.inputs == new_config
-        mock_session.commit.assert_called_once()
-
     # ========== get_node_executions Tests ==========
 
     @pytest.mark.asyncio

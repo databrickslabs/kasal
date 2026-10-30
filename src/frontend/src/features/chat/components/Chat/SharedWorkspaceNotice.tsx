@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useGroupStore } from '../../../../store/groups';
+import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../../store/user';
 
 /**
  * Shared-workspace data-exposure notice for ChatMode.
@@ -11,8 +12,8 @@ import { useGroupStore } from '../../../../store/groups';
  * to isolate per-user (provenance is lost once data is materialised into memory
  * and logs); instead we make the trade-off explicit via informed consent.
  *
- * Personal workspaces (group id starting with "user_") are single-member, so the
- * notice never shows there. Shown ONCE per shared workspace: dismissal is
+ * The user's personal workspace (their `personal_group_id`) is single-member, so
+ * the notice never shows there; a team named "User …" still gets it. Shown ONCE per shared workspace: dismissal is
  * remembered in localStorage keyed by group id, so it informs without nagging.
  */
 const DISMISS_PREFIX = 'kasal_shared_ws_notice_dismissed:';
@@ -21,8 +22,9 @@ const ACCENT = 'var(--accent)';
 const SharedWorkspaceNotice: React.FC = () => {
   const currentGroupId = useGroupStore((s) => s.currentGroupId);
   const groups = useGroupStore((s) => s.groups);
+  const personalGroupId = usePersonalGroupId();
 
-  const isShared = !!currentGroupId && !currentGroupId.startsWith('user_');
+  const isShared = !!currentGroupId && !isPersonalWorkspaceId(currentGroupId, personalGroupId);
   const [dismissed, setDismissed] = useState(true);
 
   // Re-evaluate dismissal whenever the active workspace changes.

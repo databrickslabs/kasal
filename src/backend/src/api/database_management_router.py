@@ -6,12 +6,13 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.config.settings import settings
+from src.core.databricks_app import resolve_lakebase_instance_name
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.dependencies.admin_auth import require_system_admin
@@ -26,6 +27,10 @@ from src.schemas.database_management import (
     ListBackupsResponse,
 )
 from src.schemas.lakebase_preflight import LakebasePreflightReport
+from src.services.databricks.lakebase.installation_guard import (
+    MIGRATION_REFUSED,
+    refuse_when_installation_managed,
+)
 from src.services.databricks.lakebase.management import DatabaseManagementService
 from src.services.databricks.lakebase.service import LakebaseService
 
@@ -312,7 +317,7 @@ async def debug_permissions(
         except Exception:
             pass
 
-        if not all([app_name, databricks_host]):
+        if not app_name or not databricks_host:
             return {
                 "error": "Missing configuration",
                 "app_name": app_name,
@@ -379,9 +384,8 @@ async def debug_permissions(
                         "auth_method": auth_method,
                         "has_service_principal": bool(client_id and client_secret),
                         "has_user_token": bool(user_token),
-                        "token_preview": (
-                            auth_token[:20] + "..." if auth_token else None
-                        ),
+                        # Whether a token was sent, never any part of it (N4).
+                        "has_auth_token": bool(auth_token),
                         "current_user": user_email,
                         "note": "Check if service principal credentials are working",
                     }
@@ -632,10 +636,14 @@ async def create_lakebase_instance(
     )
 
 
-@router.get("/lakebase/instance/{instance_name}", dependencies=_SYSTEM_ADMIN_ONLY)
+@router.get(
+    "/lakebase/instance/{instance_name}",
+    response_model=Dict[str, Any],
+    dependencies=_SYSTEM_ADMIN_ONLY,
+)
 async def get_lakebase_instance(
     instance_name: str, service: LakebaseServiceDep
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """
     Get Lakebase instance details.
     Only works when Lakebase is configured and enabled.
@@ -649,8 +657,8 @@ async def get_lakebase_instance(
     return await service.get_instance(instance_name)
 
 
-@router.get("/lakebase/tables", dependencies=_SYSTEM_ADMIN_ONLY)
-async def check_lakebase_tables(service: LakebaseServiceDep):
+@router.get("/lakebase/tables", response_model=None, dependencies=_SYSTEM_ADMIN_ONLY)
+async def check_lakebase_tables(service: LakebaseServiceDep) -> Dict[str, Any]:
     """
     Check what tables exist in the configured Lakebase instance.
     Returns detailed information about tables and their status.
@@ -672,7 +680,9 @@ async def migrate_to_lakebase(
     Returns:
         Migration result
     """
-    instance_name = request.get("instance_name", "kasal-lakebase")
+    refuse_when_installation_managed(MIGRATION_REFUSED)
+    # The requested instance, else the Apps binding — never an invented name.
+    instance_name = resolve_lakebase_instance_name(request.get("instance_name"))
     endpoint = request.get("endpoint")
     recreate_schema = request.get("recreate_schema", False)
 
@@ -687,7 +697,7 @@ async def migrate_to_lakebase(
 @router.post("/lakebase/migrate/stream", dependencies=_SYSTEM_ADMIN_ONLY)
 async def migrate_to_lakebase_stream(
     request: Dict[str, Any], raw_request: Request, group_context: GroupContextDep
-):
+) -> StreamingResponse:
     """
     Stream migration progress to Lakebase using Server-Sent Events.
 
@@ -696,9 +706,14 @@ async def migrate_to_lakebase_stream(
 
     Returns:
         StreamingResponse with SSE events
-    """
 
-    async def event_generator():
+    Raises:
+        BadRequestError: 400 when the Databricks App installation binds the
+            database; checked before the stream starts, so nothing is dropped.
+    """
+    refuse_when_installation_managed(MIGRATION_REFUSED)
+
+    async def event_generator() -> AsyncIterator[str]:
         migration_succeeded = False
         try:
             # Extract user token for authentication
@@ -708,7 +723,7 @@ async def migrate_to_lakebase_stream(
             user_email = group_context.group_email if group_context else None
 
             # Get migration parameters
-            instance_name = request.get("instance_name", "kasal-lakebase")
+            instance_name = resolve_lakebase_instance_name(request.get("instance_name"))
             endpoint = request.get("endpoint")
             recreate_schema = request.get("recreate_schema", False)
             migrate_data = request.get(

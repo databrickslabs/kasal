@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def _rewrite_columns(text: str, prefix_maps: dict[str, dict[str, str]]) -> str:
     prefixes = "|".join(re.escape(p) for p in prefix_maps)
     pat = re.compile(rf"\b({prefixes})\.([A-Za-z_][A-Za-z0-9_]*)")
 
-    def _sub(mm: re.Match) -> str:
+    def _sub(mm: re.Match[str]) -> str:
         pre, col = mm.group(1), mm.group(2)
         raw = prefix_maps.get(pre, {}).get(_norm(col))
         if raw and raw != col:
@@ -119,7 +120,11 @@ def _replace_leaf(source: str, physical: str) -> str:
     return f"{parts[0]}.{physical}" if len(parts) == 2 else physical
 
 
-def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
+def resolve_physical_names(
+    specs: dict[str, Any],
+    mquery_tables: dict[str, Any],
+    mquery_expressions: dict[str, str],
+) -> dict:
     """Rewrite every spec's table/column identifiers to physical names from the M.
 
     Args:
@@ -132,11 +137,14 @@ def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
     """
     logger.info(
         "[physical_name_resolver] invoked: %d spec(s), %d M expression(s)",
-        len(specs or {}), len(mquery_expressions or {}))
+        len(specs or {}),
+        len(mquery_expressions or {}),
+    )
     if not mquery_expressions:
         logger.info(
             "[physical_name_resolver] skipped: no Power Query M available "
-            "(pass scan_data_json / mquery_expressions) — identifiers left as model names")
+            "(pass scan_data_json / mquery_expressions) — identifiers left as model names"
+        )
         return {"generated_tables": [], "tables_resolved": 0, "columns_rewritten": 0}
 
     # Per friendly table: physical name, column map, generated flag — indexed by
@@ -170,7 +178,7 @@ def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
         if phys:
             by_norm.setdefault(_norm_table(phys), entry)
 
-    def lookup(*names) -> dict | None:
+    def lookup(*names: str | None) -> dict | None:
         for n in names:
             if not n:
                 continue
@@ -179,7 +187,7 @@ def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
                     return by_norm[k]
         return None
 
-    report = {
+    report: dict[str, Any] = {
         "generated_tables": sorted(generated),
         "tables_resolved": 0,
         "columns_rewritten": 0,
@@ -236,5 +244,7 @@ def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
         logger.info(
             "[physical_name_resolver] no-op: %d M expression(s) but nothing matched "
             "%d spec(s) (check that fact/dim keys align with the M table names)",
-            len(mquery_expressions), len(specs or {}))
+            len(mquery_expressions),
+            len(specs or {}),
+        )
     return report

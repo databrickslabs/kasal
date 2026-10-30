@@ -14,7 +14,7 @@ and a test pins the two outputs together so this cannot drift.
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -104,23 +104,3 @@ def _escape(value: str) -> str:
     silently hide their colleagues' skills.
     """
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").strip()
-
-
-async def build_for_agent(
-    skill_names: Optional[List[str]], group_ids: List[str], session: Any
-) -> str:
-    """Resolve an agent's skills and render its prompt section.
-
-    Never raises: a database that cannot be reached costs the agent its skills,
-    not its run.
-    """
-    if not session:
-        return ""
-    try:
-        from src.services.skills.loader import resolve_for_agent
-
-        skills = await resolve_for_agent(skill_names, group_ids, session)
-        return build_prompt_section(skills)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[skills] could not build the skill block: %s", exc)
-        return ""

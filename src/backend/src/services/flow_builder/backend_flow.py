@@ -1,56 +1,49 @@
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
-
 """
 Base BackendFlow class for handling flow execution.
 
 Handles the creation and execution of CrewAI flows.
 """
-import json  # noqa: E402 - import follows module initialization
-import os  # noqa: E402 - import follows module initialization
-import uuid  # noqa: E402 - import follows module initialization
-from typing import (  # noqa: E402 - import follows module initialization
+
+import json
+import os
+import uuid
+from typing import (
     Any,
     Dict,
     List,
     Optional,
     Union,
+    cast,
 )
 
-from src.core.llm.transport import (  # noqa: E402 - import follows module initialization
-    LLM,
-)
-from src.core.logger import (  # noqa: E402 - import follows module initialization
+from src.core.logger import (
     LoggerManager,
 )
-from src.repositories.flow_repository import (  # noqa: E402 - import follows module initialization
+from src.repositories.flow_repository import (
     FlowRepository,
 )
-from src.services.flow_builder.conversation.interrupt import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.conversation.interrupt import (
     APPROVAL_CONFIG_KEY,
     interrupt_inputs,
 )
-from src.services.flow_builder.conversation.thread import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.conversation.thread import (
     thread_state_uuid,
 )
-from src.services.flow_builder.conversation.turn import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.conversation.turn import (
     close_turn_async,
     is_conversational,
     turn_inputs,
 )
-from src.services.flow_builder.exceptions import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.exceptions import (
     FlowPausedForApprovalException,
 )
 
 # Import the refactored modules
-from src.services.flow_builder.modules.flow_builder import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.modules.flow_builder import (
     FlowBuilder,
 )
-from src.services.flow_builder.runtime import (  # noqa: E402 - import follows module initialization
-    Flow as CrewAIFlow,
-)
-from src.services.llm.manager import (  # noqa: E402 - import follows module initialization
-    LLMManager,
-)
+from src.services.flow_builder.runtime import Flow as CrewAIFlow
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -68,7 +61,7 @@ logger = LoggerManager.get_instance().flow
 RUN_METADATA_INPUTS = frozenset({"flow_id", "run_name", "execution_id", "job_id"})
 
 
-def _extract_flow_uuid(engine_flow) -> Optional[str]:
+def _extract_flow_uuid(engine_flow: Any) -> Optional[str]:
     """Extract CrewAI's flow state id — used as the checkpoint/resume ``flow_uuid``.
 
     CrewAI wraps flow state in a ``StateProxy`` whose ``id`` is NOT exposed as an
@@ -139,31 +132,31 @@ class BackendFlow:
                 logger.error(f"Invalid flow_id format: {flow_id}")
                 raise ValueError(f"Invalid flow_id format: {flow_id}")
 
-        self._flow_data = None
+        self._flow_data: Optional[Dict[str, Any]] = None
         # Set when a turn was answered from state and no crew ran.
         self._state_answer: Optional[str] = None
         #: The outcome this turn selected, if narrowing chose one.
         self._turn_outcome: Optional[str] = None
         # Don't store API keys directly, just other configuration
-        self._config = {}
+        self._config: Dict[str, Any] = {}
         # Repository container
-        self._repositories = {}
+        self._repositories: Dict[str, Any] = {}
         logger.info(f"Initializing BackendFlow{' for job ' + job_id if job_id else ''}")
 
     @property
-    def config(self):
+    def config(self) -> Dict[str, Any]:
         return self._config
 
     @config.setter
-    def config(self, value):
+    def config(self, value: Dict[str, Any]) -> None:
         self._config = value
 
     @property
-    def repositories(self):
+    def repositories(self) -> Dict[str, Any]:
         return self._repositories
 
     @repositories.setter
-    def repositories(self, value):
+    def repositories(self, value: Dict[str, Any]) -> None:
         self._repositories = value
 
     async def load_flow(self, repository: Optional[FlowRepository] = None) -> Dict:
@@ -207,28 +200,12 @@ class BackendFlow:
                 "flow_config": flow.flow_config,
             }
             logger.info(f"Successfully loaded flow: {flow.name}")
-            logger.info(f"Flow configuration: {flow.flow_config}")
+            logger.info(
+                f"Flow configuration: {mask_sensitive_fields(flow.flow_config)}"
+            )
             return self._flow_data
         except Exception as e:
             logger.error(f"Error loading flow data: {e}", exc_info=True)
-            raise
-
-    async def _get_llm(self) -> LLM:
-        """
-        Get a properly configured LLM for CrewAI using LLMManager.
-        This ensures API keys are properly set from the database.
-        """
-        try:
-            # Get the default model name from environment or use a default
-            model_name = os.getenv("DEFAULT_LLM_MODEL", DEFAULT_ENGINE_MODEL)
-            logger.info(f"Getting LLM model: {model_name} for flow execution")
-
-            # Use LLMManager to get a properly configured LLM
-            llm = await LLMManager.get_llm(model_name)
-            logger.info(f"Successfully configured LLM: {model_name}")
-            return llm
-        except Exception as e:
-            logger.error(f"Error configuring LLM: {e}", exc_info=True)
             raise
 
     async def flow(self) -> CrewAIFlow:
@@ -301,7 +278,7 @@ class BackendFlow:
                     )
 
             # Build the flow using the FlowBuilder module
-            dynamic_flow = await FlowBuilder.build_flow(
+            dynamic_flow: CrewAIFlow = await FlowBuilder.build_flow(
                 flow_data=self._flow_data,
                 repositories=self._repositories,
                 callbacks=self._config.get("callbacks", {}),
@@ -320,7 +297,7 @@ class BackendFlow:
             logger.error(f"Error creating flow: {e}", exc_info=True)
             raise ValueError(f"Failed to create flow: {str(e)}")
 
-    def _init_callbacks(self):
+    def _init_callbacks(self) -> None:
         """
         Initialize callbacks for flow execution.
 
@@ -394,7 +371,7 @@ class BackendFlow:
         instead of starting over. No session means no thread, which is how every
         flow runs today.
         """
-        explicit = self._config.get("resume_from_flow_uuid")
+        explicit: Optional[str] = self._config.get("resume_from_flow_uuid")
         if explicit:
             return explicit
         return thread_state_uuid(
@@ -664,16 +641,16 @@ class BackendFlow:
                         }
 
             # Merge config data into flow_data (frontend config takes precedence)
-            # This ensures frontend-provided flow_config, nodes, and edges are used
+            flow_data = cast(Dict[str, Any], self._flow_data)  # set above, or raised
             if "flow_config" in self._config:
                 logger.info(
                     "[kickoff_async] Using flow_config from self._config (has latest updates)"
                 )
-                self._flow_data["flow_config"] = self._config["flow_config"]
+                flow_data["flow_config"] = self._config["flow_config"]
             if "nodes" in self._config:
-                self._flow_data["nodes"] = self._config["nodes"]
+                flow_data["nodes"] = self._config["nodes"]
             if "edges" in self._config:
-                self._flow_data["edges"] = self._config["edges"]
+                flow_data["edges"] = self._config["edges"]
                 logger.info(
                     f"[kickoff_async] Merged {len(self._config['edges'])} edges from config"
                 )
@@ -965,18 +942,18 @@ class BackendFlow:
                         }
 
             # CRITICAL: If config has an updated flow_config (with startingPoints), use it
-            # This ensures frontend-provided flow_config takes precedence over database version
             if "flow_config" in self._config:
                 logger.info(
                     "[kickoff] Using flow_config from self._config (has latest updates)"
                 )
-                self._flow_data["flow_config"] = self._config["flow_config"]
+                # Set above: load_flow either fills _flow_data or raises.
+                flow_data = cast(Dict[str, Any], self._flow_data)
+                flow_data["flow_config"] = self._config["flow_config"]
 
-                # Also update nodes/edges if they're in config
                 if "nodes" in self._config:
-                    self._flow_data["nodes"] = self._config["nodes"]
+                    flow_data["nodes"] = self._config["nodes"]
                 if "edges" in self._config:
-                    self._flow_data["edges"] = self._config["edges"]
+                    flow_data["edges"] = self._config["edges"]
 
                 logger.info("[kickoff] Updated flow_data with flow_config from config")
                 if "startingPoints" in self._config.get("flow_config", {}):

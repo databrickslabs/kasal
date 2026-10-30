@@ -18,6 +18,13 @@ interface UseExecutionStreamOptions {
   onStatusChange: (status: string, data: Record<string, unknown>) => void;
   onComplete: (result: Record<string, unknown>) => void;
   onError: (error: string) => void;
+  /**
+   * The stream gave up reconnecting before the run reported an ending. That is
+   * a fact about the connection, not the run: the run may still be going, or
+   * may have finished. The caller asks the server; it must never treat this as
+   * a failure (doing so posted "Connection lost" and dropped the real answer).
+   */
+  onTransportLost?: () => void;
   /** Coalesced LLM token chunk (`llm_chunk` SSE event) for live typing. */
   onChunk?: (chunk: string, data: Record<string, unknown>) => void;
   /**
@@ -143,7 +150,7 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
         () => {
           console.log('[useExecutionStream] Connection lost callback, completedRef:', completedRef.current);
           if (!completedRef.current) {
-            optionsRef.current.onError('Connection lost');
+            optionsRef.current.onTransportLost?.();
           }
         }
       );
@@ -196,5 +203,5 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
     };
   }, []);
 
-  return { startStream, stopStream };
+  return { startStream, stopStream, awaitLateSurface };
 }

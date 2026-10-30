@@ -24,12 +24,13 @@ async def sweep_expired_knowledge() -> int:
     loop, and a failed sweep must not take the loop down with it — the next one
     is an hour or a day away and the data is already excluded from search.
     """
-    from src.services.knowledge.embedding_service import KNOWLEDGE_TTL_DAYS
+    from src.services.knowledge.embedding_service import knowledge_ttl_days
 
-    if KNOWLEDGE_TTL_DAYS <= 0:
+    ttl_days = knowledge_ttl_days()
+    if ttl_days <= 0:
         return 0
 
-    cutoff = datetime.utcnow() - timedelta(days=KNOWLEDGE_TTL_DAYS)
+    cutoff = datetime.utcnow() - timedelta(days=ttl_days)
 
     try:
         from src.db.session import get_isolated_db_session
@@ -52,6 +53,6 @@ async def sweep_expired_knowledge() -> int:
         logger.info(
             "[knowledge] TTL sweep removed %d chunk(s) older than %d day(s)",
             removed,
-            KNOWLEDGE_TTL_DAYS,
+            ttl_days,
         )
     return removed

@@ -130,6 +130,9 @@ async def test_list_executions_minimal_db():
 
                     return _S()
 
+                def all(self):  # summary-column projection rows
+                    return []
+
             return _R(self.calls)
 
     out = await list_executions(group_context=Ctx(), db=FakeSession())

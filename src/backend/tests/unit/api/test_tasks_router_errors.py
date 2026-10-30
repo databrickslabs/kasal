@@ -23,7 +23,10 @@ from src.utils.user_context import GroupContext
 
 def gc(role="admin"):
     return GroupContext(
-        group_ids=["g1"], group_email="u@x.com", email_domain="x.com", user_role=role
+        group_ids=["g1"],
+        group_email="u@example.com",
+        email_domain="example.com",
+        user_role=role,
     )
 
 
@@ -49,7 +52,7 @@ class TestListTasksErrorPath:
         svc = AsyncMock()
         svc.find_by_group = AsyncMock(side_effect=Exception("query failed"))
         with pytest.raises(HTTPException) as exc_info:
-            await list_tasks(service=svc, group_context=gc())
+            await list_tasks(service=svc, group_context=gc(), secrets_visible=True)
         assert exc_info.value.status_code == 500
 
 
@@ -60,7 +63,9 @@ class TestGetTaskErrorPath:
         svc = AsyncMock()
         svc.get_with_group_check = AsyncMock(side_effect=Exception("Unexpected error"))
         with pytest.raises(HTTPException) as exc_info:
-            await get_task("task-1", service=svc, group_context=gc())
+            await get_task(
+                "task-1", service=svc, group_context=gc(), secrets_visible=True
+            )
         assert exc_info.value.status_code == 500
 
 

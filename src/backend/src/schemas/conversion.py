@@ -5,9 +5,9 @@ Pydantic schemas for converter models and API validation
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ===== ENUMS =====
 
@@ -125,7 +125,7 @@ class ConversionHistoryResponse(ConversionHistoryBase):
     input_data: Optional[Dict[str, Any]] = Field(None, description="Input data")
     output_data: Optional[Dict[str, Any]] = Field(None, description="Output data")
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversionHistoryListResponse(BaseModel):
@@ -211,7 +211,7 @@ class ConversionJobResponse(ConversionJobBase):
     started_at: Optional[datetime] = Field(None, description="Start timestamp")
     completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversionJobListResponse(BaseModel):
@@ -248,7 +248,11 @@ class SavedConfigurationBase(BaseModel):
     configuration: Dict[str, Any] = Field(..., description="Converter configuration")
     is_public: bool = Field(default=False, description="Whether shared with group")
     is_template: bool = Field(
-        default=False, description="Whether it's a system template"
+        default=False,
+        description=(
+            "Whether it's a system template, visible to every workspace. Only a "
+            "system administrator may create or edit one."
+        ),
     )
     tags: Optional[List[str]] = Field(None, description="Tags for categorization")
 
@@ -290,7 +294,7 @@ class SavedConfigurationResponse(SavedConfigurationBase):
         None, description="Additional metadata"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SavedConfigurationListResponse(BaseModel):
@@ -314,13 +318,6 @@ class ConversionHistoryFilter(BaseModel):
     execution_id: Optional[str] = Field(None, description="Filter by execution ID")
     limit: int = Field(default=100, ge=1, le=1000, description="Number of results")
     offset: int = Field(default=0, ge=0, description="Offset for pagination")
-
-
-class ConversionJobFilter(BaseModel):
-    """Schema for filtering conversion jobs"""
-
-    status: Optional[str] = Field(None, description="Filter by status")
-    limit: int = Field(default=50, ge=1, le=500, description="Number of results")
 
 
 class SavedConfigurationFilter(BaseModel):

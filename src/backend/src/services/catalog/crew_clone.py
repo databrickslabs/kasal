@@ -15,20 +15,25 @@ kept here as a pure function so it is unit-testable without a session;
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Dict, List, Optional, Tuple
 
+from src.models.agent import Agent
+from src.models.task import Task
 from src.schemas.agent import AgentCreate
 from src.schemas.task import TaskCreate
 
+CrewGraphItem = Dict[str, object]
 
-def _non_null_fields(obj, field_names) -> Dict[str, Any]:
+
+def _non_null_fields(obj: object, field_names: Iterable[str]) -> Dict[str, object]:
     """Stored values for ``field_names`` present on ``obj``, dropping ``None``.
 
     Dropping None lets the Create schema's own defaults apply, which matters for
     non-optional-with-default fields (e.g. a task's ``config``): a stored NULL
     passed explicitly would fail validation, whereas omitting it uses the default.
     """
-    out = {}
+    out: Dict[str, object] = {}
     for f in field_names:
         if hasattr(obj, f):
             val = getattr(obj, f)
@@ -37,7 +42,7 @@ def _non_null_fields(obj, field_names) -> Dict[str, Any]:
     return out
 
 
-def agent_create_from_model(agent) -> AgentCreate:
+def agent_create_from_model(agent: Agent) -> AgentCreate:
     """An ``AgentCreate`` carrying the stored agent's fields.
 
     ``tool_configs`` is expected already decrypted (``AgentService.get``);
@@ -47,7 +52,7 @@ def agent_create_from_model(agent) -> AgentCreate:
     return AgentCreate(**_non_null_fields(agent, AgentCreate.model_fields.keys()))
 
 
-def task_create_from_model(task, agent_id_map: Dict[str, str]) -> TaskCreate:
+def task_create_from_model(task: Task, agent_id_map: Dict[str, str]) -> TaskCreate:
     """A ``TaskCreate`` for the clone.
 
     ``agent_id`` is repointed at the CLONED agent; ``context`` is cleared here
@@ -62,14 +67,19 @@ def task_create_from_model(task, agent_id_map: Dict[str, str]) -> TaskCreate:
     return TaskCreate(**data)
 
 
-def remap_context(context, task_id_map: Dict[str, str]) -> List[str]:
+def remap_context(
+    context: Optional[Iterable[object]], task_id_map: Dict[str, str]
+) -> List[str]:
     """Remap a task-context list of OLD task IDs to the clone's new IDs."""
     return [task_id_map.get(str(c), str(c)) for c in (context or [])]
 
 
 def remap_crew_graph(
-    nodes, edges, agent_id_map: Dict[str, str], task_id_map: Dict[str, str]
-) -> Tuple[List[dict], List[dict]]:
+    nodes: Optional[Sequence[CrewGraphItem]],
+    edges: Optional[Sequence[CrewGraphItem]],
+    agent_id_map: Dict[str, str],
+    task_id_map: Dict[str, str],
+) -> Tuple[List[CrewGraphItem], List[CrewGraphItem]]:
     """Rebuild ``(nodes, edges)`` with every old agent/task ID replaced by its clone's.
 
     Node and edge IDs embed the entity UUID as a substring (e.g. ``"task-<uuid>"``,
@@ -86,11 +96,12 @@ def remap_crew_graph(
                 s = s.replace(old, new)
         return s
 
-    new_nodes: List[dict] = []
+    new_nodes: List[CrewGraphItem] = []
     for node in nodes or []:
         node = copy.deepcopy(node)
-        if isinstance(node.get("id"), str):
-            node["id"] = _sub(node["id"])
+        node_id = node.get("id")
+        if isinstance(node_id, str):
+            node["id"] = _sub(node_id)
         data = node.get("data")
         if isinstance(data, dict):
             if str(data.get("agentId")) in agent_id_map:
@@ -101,12 +112,13 @@ def remap_crew_graph(
                 data["context"] = remap_context(data["context"], task_id_map)
         new_nodes.append(node)
 
-    new_edges: List[dict] = []
+    new_edges: List[CrewGraphItem] = []
     for edge in edges or []:
         edge = copy.deepcopy(edge)
         for key in ("id", "source", "target"):
-            if isinstance(edge.get(key), str):
-                edge[key] = _sub(edge[key])
+            value = edge.get(key)
+            if isinstance(value, str):
+                edge[key] = _sub(value)
         new_edges.append(edge)
 
     return new_nodes, new_edges

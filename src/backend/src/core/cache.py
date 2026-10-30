@@ -154,32 +154,6 @@ class TTLCache(Generic[T]):
                 return True
             return False
 
-    async def invalidate_group(self, group_id: str) -> int:
-        """
-        Invalidate all cache entries for a group.
-
-        Args:
-            group_id: Group ID to invalidate
-
-        Returns:
-            Number of entries removed
-        """
-        suffix = f":{group_id}"
-        removed = 0
-
-        async with self._lock:
-            keys_to_remove = [k for k in self._cache.keys() if k.endswith(suffix)]
-            for key in keys_to_remove:
-                del self._cache[key]
-                removed += 1
-
-            if removed > 0:
-                logger.info(
-                    f"[{self._name}] Invalidated {removed} entries for group {group_id}"
-                )
-
-        return removed
-
     async def clear(self) -> int:
         """
         Clear all cache entries.

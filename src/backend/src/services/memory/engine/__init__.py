@@ -11,6 +11,10 @@
   (categories, importance, kind, entities), tolerant of malformed JSON.
 * ``recall_planner`` — query distillation and exploration rounds.
 * ``consolidation`` — the save-time merge into a near-duplicate.
+* ``graph_memory`` — ``GraphMemory``: the same ``remember`` / ``recall`` over
+  an entity/fact graph, when a teamspace turns graph memory on.
+  ``graph_types`` is its data model and vocabulary, ``extract`` the one model
+  call a write makes.
 """
 
 from .analyze import ExtractedMetadata, MemoryAnalysis

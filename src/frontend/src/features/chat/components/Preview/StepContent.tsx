@@ -15,6 +15,7 @@
 import React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { MarkdownImage } from '../../../../shared/a2ui/lib/safeImage';
 import { containsMarkdown } from '../../utils/markdown';
 import PlanChecklist from './PlanChecklist';
 import CodeSnippet from './CodeSnippet';
@@ -93,6 +94,8 @@ const MARKDOWN_COMPONENTS: Components = {
   },
   // The snippet brings its own frame; a wrapping <pre> would add a second one.
   pre: ({ children }) => <>{children}</>,
+  // A scraped page's remote images wait for a click (shared image policy).
+  img: MarkdownImage,
 };
 
 const StepContent: React.FC<{ step: RunStep }> = ({ step }) => {

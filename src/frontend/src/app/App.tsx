@@ -1,7 +1,8 @@
+import { useShallow } from 'zustand/react/shallow';
 import './notifications/apiNotifications';
 import { useEffect, lazy, Suspense } from 'react';
 import { Box, CircularProgress } from '@mui/material';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import ThemeProvider from '../theme/ThemeProvider';
 import ShortcutsCircle from './navigation/ShortcutsCircle';
@@ -13,11 +14,11 @@ import { usePermissionLoader } from '../hooks/usePermissions';
 import { useUserStore } from '../store/user';
 import { useGroupStore } from '../store/groups';
 import '../config/i18n/config';
+import { ErrorBoundary } from '../shared/errors/ErrorBoundary';
 
 // Lazy load heavy components to reduce initial bundle size
 const RunHistory = lazy(() => import('../features/executions/components/ExecutionHistory'));
 const WorkflowDesigner = lazy(() => import('./workspace/index'));
-const ToolForm = lazy(() => import('../features/tools/components/ToolForm'));
 const Documentation = lazy(() => import('../features/help/documentation/index').then(module => ({ default: module.Documentation })));
 const ConverterPage = lazy(() => import('../features/conversion/components/ConverterPage'));
 const ConfigEditorPage = lazy(() => import('../features/configuration/editor/ConfigEditorPage'));
@@ -32,16 +33,18 @@ let databaseManagementPermissionCache: {
   checked: false
 };
 
-// Export getter for the cache
-export const getDatabaseManagementPermission = () => databaseManagementPermissionCache;
-
 function App() {
   // Load and maintain user permissions throughout the app
   usePermissionLoader();
 
   // Get stores for group initialization (same logic as GroupSelector)
-  const { currentUser, fetchCurrentUser } = useUserStore();
-  const { fetchMyGroups } = useGroupStore();
+  const { currentUser, fetchCurrentUser } = useUserStore(useShallow(state => ({
+    currentUser: state.currentUser,
+    fetchCurrentUser: state.fetchCurrentUser,
+  })));
+  const fetchMyGroups = useGroupStore(state => state.fetchMyGroups);
+  // Navigating to another route clears a failed page, no reload needed.
+  const { pathname } = useLocation();
 
   // Initialize user on mount
   useEffect(() => {
@@ -106,30 +109,33 @@ function App() {
           overflow: 'hidden'
         }}
       >
-        <Suspense
-          fallback={
-            <Box
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              minHeight="100vh"
-            >
-              <CircularProgress />
-            </Box>
-          }
-        >
-          <Routes>
-            <Route path="/" element={<Navigate to="/workflow" replace />} />
-            <Route path="/workflow" element={<WorkflowDesigner />} />
-            <Route path="/nemo" element={<Navigate to="/workflow" replace />} />
-            <Route path="/runs" element={<RunHistory />} />
-            <Route path="/tools" element={<ToolForm />} />
-            <Route path="/converter" element={<ConverterPage />} />
-            <Route path="/config-editor" element={<ConfigEditorPage />} />
-            <Route path="/triggers" element={<TriggersPanel />} />
-            <Route path="/docs/*" element={<Documentation />} />
-          </Routes>
-        </Suspense>
+        {/* Every route is a lazy chunk: a failed load shows a reload prompt
+            instead of unmounting the whole app. */}
+        <ErrorBoundary variant="page" resetKeys={[pathname]}>
+          <Suspense
+            fallback={
+              <Box
+                display="flex"
+                justifyContent="center"
+                alignItems="center"
+                minHeight="100vh"
+              >
+                <CircularProgress />
+              </Box>
+            }
+          >
+            <Routes>
+              <Route path="/" element={<Navigate to="/workflow" replace />} />
+              <Route path="/workflow" element={<WorkflowDesigner />} />
+              <Route path="/nemo" element={<Navigate to="/workflow" replace />} />
+              <Route path="/runs" element={<RunHistory />} />
+              <Route path="/converter" element={<ConverterPage />} />
+              <Route path="/config-editor" element={<ConfigEditorPage />} />
+              <Route path="/triggers" element={<TriggersPanel />} />
+              <Route path="/docs/*" element={<Documentation />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </Box>
     </ThemeProvider>
   );

@@ -16,7 +16,9 @@ fetching originals and running the (async) LLM call.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.conversion import ConversionHistoryFilter
 from src.services.llm.manager import LLMManager
@@ -36,7 +38,9 @@ _DISTILL_MODEL = "databricks-claude-sonnet-4-5"
 class UCMVCorrectionLearningService:
     """Distil a reusable domain-context README from customer-corrected UCMVs."""
 
-    def __init__(self, session, group_context: Optional[GroupContext] = None):
+    def __init__(
+        self, session: AsyncSession, group_context: Optional[GroupContext] = None
+    ):
         # Accept the request session; reach conversion history through its owning
         # service (never open a session or build its repository here).
         self.session = session
@@ -70,7 +74,7 @@ class UCMVCorrectionLearningService:
         corrected: Dict[str, str],
         execution_id: Optional[str] = None,
         model_hint: str = "",
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         """Diff uploaded corrected UCMVs against our originals and distil a README.
 
         ``corrected`` is ``{view_name -> corrected_yaml}``. Returns the README (or
@@ -129,7 +133,7 @@ class UCMVCorrectionLearningService:
                 messages=messages, model=_DISTILL_MODEL, max_tokens=4000
             )
         except Exception as e:  # noqa: BLE001 — surface, don't crash the request
-            logger.warning(f"[UCMVLearning] distillation LLM call failed: {e}")
+            logger.warning("[UCMVLearning] distillation LLM call failed: %s", e)
             return {"readme": None, "error": f"Distillation failed: {e}", **base}
 
         readme = content[0] if isinstance(content, tuple) else content

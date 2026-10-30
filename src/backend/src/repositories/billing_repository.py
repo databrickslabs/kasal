@@ -1,6 +1,8 @@
 from datetime import datetime
+from typing import Any, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -45,4 +47,4 @@ class BillingRepository(BaseRepository[LLMUsageBilling]):
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount

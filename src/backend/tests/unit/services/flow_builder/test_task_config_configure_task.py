@@ -730,7 +730,9 @@ class TestResolveAgentForTask:
         assert result is mock_agent
 
     @pytest.mark.asyncio
-    async def test_agent_not_found_in_repo_fallback_db(self):
+    async def test_a_miss_in_the_runs_bundle_is_not_retried_on_the_table(self):
+        # The bundle's read is scoped to the run's workspace; a direct table
+        # read after a miss would return another workspace's agent.
         agent_id = uuid.uuid4()
         task_data = _make_task_data(agent_id=agent_id)
         mock_agent = MagicMock()
@@ -742,7 +744,6 @@ class TestResolveAgentForTask:
         fallback_repo.get = AsyncMock(return_value=MagicMock())
 
         with (
-            patch("src.db.session.routed_scoped_session") as MockSession,
             patch(
                 "src.repositories.agent_repository.AgentRepository",
                 return_value=fallback_repo,
@@ -752,18 +753,13 @@ class TestResolveAgentForTask:
                 new=AsyncMock(return_value=mock_agent),
             ),
         ):
-            mock_session_ctx = MagicMock()
-            mock_session = AsyncMock()
-            mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-            MockSession.return_value = mock_session_ctx
-
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}
             )
 
-        assert result is mock_agent
-        fallback_repo.get.assert_awaited_once_with(agent_id)
+        assert result is None
+        agent_repo.get.assert_awaited_once_with(agent_id)
+        fallback_repo.get.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_agent_configure_fails_returns_none(self):
@@ -792,48 +788,12 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=None)
 
-        fallback_repo = MagicMock()
-        fallback_repo.get = AsyncMock(return_value=None)
-
-        with (
-            patch("src.db.session.routed_scoped_session") as MockSession,
-            patch(
-                "src.repositories.agent_repository.AgentRepository",
-                return_value=fallback_repo,
-            ),
-        ):
-            mock_session_ctx = MagicMock()
-            mock_session = AsyncMock()
-            mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-            MockSession.return_value = mock_session_ctx
-
-            result = await TaskConfig._resolve_agent_for_task(
-                task_data, None, {"agent": agent_repo}
-            )
+        result = await TaskConfig._resolve_agent_for_task(
+            task_data, None, {"agent": agent_repo}
+        )
 
         assert result is None
-        fallback_repo.get.assert_awaited_once_with(agent_id)
-
-    @pytest.mark.asyncio
-    async def test_agent_db_error_continues_to_none(self):
-        agent_id = uuid.uuid4()
-        task_data = _make_task_data(agent_id=agent_id)
-
-        agent_repo = MagicMock()
-        agent_repo.get = AsyncMock(return_value=None)
-
-        with patch("src.db.session.routed_scoped_session") as MockSession:
-            mock_session_ctx = MagicMock()
-            mock_session_ctx.__aenter__ = AsyncMock(side_effect=Exception("db error"))
-            mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-            MockSession.return_value = mock_session_ctx
-
-            result = await TaskConfig._resolve_agent_for_task(
-                task_data, None, {"agent": agent_repo}
-            )
-
-        assert result is None
+        agent_repo.get.assert_awaited_once_with(agent_id)
 
 
 # ---------------------------------------------------------------------------

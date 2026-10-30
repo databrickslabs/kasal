@@ -6,15 +6,15 @@ and determining optimal connections and dependencies.
 """
 
 import logging
-import os
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.schemas.connection import ConnectionRequest, ConnectionResponse
 from src.services.catalog.templates import TemplateService
 from src.services.llm.manager import LLMManager
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class ConnectionService:
     """Service for generating connections between agents and tasks."""
 
-    def __init__(self, session=None):
+    def __init__(self, session: Any = None) -> None:
         """Initialize the service.
 
         Args:
@@ -38,7 +38,7 @@ class ConnectionService:
         response: str,
         model: str,
         status: str = "success",
-        error_message: str = None,
+        error_message: Optional[str] = None,
     ) -> None:
         """
         Log LLM interaction using standard Python logging.
@@ -164,13 +164,14 @@ class ConnectionService:
             raise ValueError(error_detail)
 
     async def generate_connections(
-        self, request: ConnectionRequest
+        self, request: ConnectionRequest, group_context: Optional[GroupContext] = None
     ) -> ConnectionResponse:
         """
         Generate connections between agents and tasks.
 
         Args:
             request: Connection request containing agents and tasks
+            group_context: The workspace; its own ``generate_connections`` wins
 
         Returns:
             ConnectionResponse with assignments and dependencies
@@ -183,9 +184,8 @@ class ConnectionService:
         # "gpt-4o-mini" normally, "databricks-llama-4-maverick" under service
         # principal auth — which meant a Databricks-only deployment silently
         # needed an OPENAI_API_KEY for connection generation. The single engine
-        # default is already a Databricks endpoint, so the branch is gone;
-        # override per deployment with DEFAULT_LLM_MODEL or CONNECTION_MODEL.
-        model = request.model or os.getenv("CONNECTION_MODEL", DEFAULT_ENGINE_MODEL)
+        # default is already a Databricks endpoint, so the branch is gone.
+        model = request.model or DEFAULT_ENGINE_MODEL
 
         logger.info(f"Generating connections with model: {model}")
         logger.info(
@@ -202,11 +202,15 @@ class ConnectionService:
                 # "" and made this path fail as "template not found".
                 system_message = await TemplateService(
                     self.session
-                ).get_template_content("generate_connections")
+                ).get_template_content(
+                    "generate_connections", group_context=group_context
+                )
             else:
-                # Fallback for backward compatibility when no session is provided
-                system_message = await TemplateService.get_template_content(
-                    "generate_connections"
+                # No session: the static helper opens its own. This called the
+                # INSTANCE method on the class, so "generate_connections" landed
+                # in ``self`` and ``name`` was missing — a TypeError every time.
+                system_message = await TemplateService.get_effective_template_content(
+                    "generate_connections", group_context
                 )
 
             if not system_message:
@@ -349,45 +353,52 @@ class ConnectionService:
         except Exception as e:
             return False, f"API key validation error: {str(e)}"
 
-    async def test_api_keys(self) -> Dict[str, Any]:
+    async def test_api_keys(self, group_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Test API keys and configurations.
+        Test the calling workspace's API keys.
+
+        Keys are read from ``group_id``'s ApiKeysService, never the process
+        environment (shared by every workspace this server serves).
 
         Returns:
             Dictionary with test results for each provider
         """
-        results = {}
+        # Configured / not configured only. No part of a key is returned: this
+        # is readable by any authenticated user, and the provider's rejection
+        # text can itself echo a masked key, so the message is fixed.
+        results: Dict[str, Any] = {}
 
-        # Test OpenAI API key
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        async def _key(provider: str) -> Optional[str]:
+            if not group_id:
+                return None
+            from src.services.settings.api_keys import ApiKeysService
+
+            return await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
+
+        openai_key = await _key("openai")
         if openai_key:
-            valid, message = await self.validate_api_key(openai_key)
+            valid, _detail = await self.validate_api_key(openai_key)
             results["openai"] = {
                 "has_key": True,
                 "valid": valid,
-                "message": message,
-                "key_prefix": openai_key[:4] + "..." if openai_key else "None",
+                "message": (
+                    "API key is configured and valid"
+                    if valid
+                    else "API key is configured but was not accepted"
+                ),
             }
         else:
             results["openai"] = {
                 "has_key": False,
                 "valid": False,
-                "message": "No API key found in environment variables",
+                "message": "No API key configured for this workspace",
             }
 
-        # Test Anthropic API key (simple presence check)
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-        results["anthropic"] = {
-            "has_key": bool(anthropic_key),
-            "key_prefix": anthropic_key[:4] + "..." if anthropic_key else "None",
-        }
-
-        # Test DeepSeek API key (simple presence check)
-        deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
-        results["deepseek"] = {
-            "has_key": bool(deepseek_key),
-            "key_prefix": deepseek_key[:4] + "..." if deepseek_key else "None",
-        }
+        # Anthropic and DeepSeek: presence only.
+        for provider in ("anthropic", "deepseek"):
+            results[provider] = {"has_key": bool(await _key(provider))}
 
         # Include Python version info
         import sys

@@ -76,7 +76,7 @@ class TestArmAssignment:
                 "find_similar_for_prompt",
                 return_value=[(_Recipe(7), 0.9)],
             ),
-            patch("src.services.recipes.recipes.HOLDOUT_FRACTION", 0.0),
+            patch("src.services.recipes.recipes.holdout_fraction", return_value=0.0),
         ):
             decision = await service.prepare_exemplars("load companies", ["g1"])
 
@@ -95,7 +95,7 @@ class TestArmAssignment:
                 "find_similar_for_prompt",
                 return_value=[(_Recipe(7), 0.9)],
             ),
-            patch("src.services.recipes.recipes.HOLDOUT_FRACTION", 1.0),
+            patch("src.services.recipes.recipes.holdout_fraction", return_value=1.0),
         ):
             decision = await service.prepare_exemplars("load companies", ["g1"])
 
@@ -116,7 +116,7 @@ class TestArmAssignment:
                 "find_similar_for_prompt",
                 return_value=[(_Recipe(7, curation=None), 0.9)],
             ),
-            patch("src.services.recipes.recipes.HOLDOUT_FRACTION", 1.0),
+            patch("src.services.recipes.recipes.holdout_fraction", return_value=1.0),
         ):
             decision = await service.prepare_exemplars("load companies", ["g1"])
 

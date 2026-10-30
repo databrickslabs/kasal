@@ -103,18 +103,18 @@ existing UCMV/Validator viewers. Read-only proposal.
 
 ## Critical files
 
-- `src/backend/src/engines/crewai/tools/custom/metric_view_utils/capability_version.py` (new)
-- `src/backend/src/engines/crewai/tools/custom/metric_view_utils/reevaluate.py` (new)
-- `src/backend/src/engines/crewai/tools/custom/ucmv_reevaluation_tool.py` (new)
-- `src/frontend/src/components/Jobs/ReevaluationResultViewer.tsx` (new)
-- `src/frontend/src/components/Jobs/ShowResult.tsx` (wire the viewer)
+- `src/backend/src/services/tools/metric_view_utils/capability_version.py` (new)
+- `src/backend/src/services/tools/metric_view_utils/reevaluate.py` (new)
+- `src/backend/src/services/tools/ucmv_reevaluation_tool.py` (new)
+- `src/frontend/src/features/executions/components/ReevaluationResultViewer.tsx` (new)
+- `src/frontend/src/features/executions/components/ShowResult.tsx` (wire the viewer)
 - Reused: `metric_view_utils/dax_translator.py`, `yaml_emitter._categorize_untranslatable`,
   `repositories/powerbi_extraction_repository.py`
 
 ## Verification
 
-- Backend: `.venv/bin/python -m pytest tests/unit/engines/crewai/tools/custom/ -k "reevaluat or capability" -q`
-- Frontend: `npm run test:run -- src/components/Jobs/ReevaluationResultViewer.test.tsx`, then `npm run tsc` && `npm run lint`
+- Backend: `.venv/bin/python -m pytest tests/unit/services/tools/ -k "reevaluat or capability" -q`
+- Frontend: `npm run test:run -- src/features/executions/components/ReevaluationResultViewer.test.tsx`, then `npm run tsc` && `npm run lint`
 - End-to-end: run the re-evaluation tool against a group that has prior extractions →
   report lists datasets with recovered measures + their new SQL; a dataset whose
   fingerprint is unchanged reports `fingerprint_changed: false` with nothing proposed.

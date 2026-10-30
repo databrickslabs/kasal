@@ -7,7 +7,11 @@ expired HITL approvals and processes them according to their timeout action.
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Optional
+
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,7 @@ class HITLTimeoutService:
 
         self._running = True
         logger.info("Starting HITL timeout service...")
+        await self._reap_abandoned_gates()
 
         while self._running:
             try:
@@ -70,6 +75,25 @@ class HITLTimeoutService:
                 pass
         logger.info("HITL timeout service stop requested")
 
+    async def _reap_abandoned_gates(self) -> None:
+        """Once, at startup: close the in-run gates a previous process left open.
+
+        Gates raised before this process started belong to a worker that did
+        not survive the restart (services/hitl/expiry.py). Their runs would
+        otherwise wait for approval until the gate expired, and every sweep
+        until then would leave them alone.
+        """
+        from src.db.database_router import get_smart_db_session
+        from src.services.hitl.service import HITLService
+
+        started = datetime.fromtimestamp(psutil.Process().create_time(), timezone.utc)
+        try:
+            async for session in get_smart_db_session():
+                await HITLService(session).reap_abandoned_gates(started)
+                await session.commit()
+        except Exception:
+            logger.exception("Error closing approvals abandoned by a restart")
+
     async def _check_expired_approvals(self) -> None:
         """
         Check for and process expired HITL approvals.
@@ -91,8 +115,9 @@ class HITLTimeoutService:
             # activate_lakebase() ran in this process (boot or subprocess, never a
             # runtime /lakebase/enable). On the wrong database this sweep finds no
             # expired approvals, so a timed-out approval is never actioned and its
-            # run waits forever — a silent hang, not an error.
-            async for session in get_smart_db_session():
+            # run waits forever — a silent hang, not an error. A context manager,
+            # not `async for`: a break OR a return there abandons the generator.
+            async with asynccontextmanager(get_smart_db_session)() as session:
                 approval_repo = HITLApprovalRepository(session)
                 hitl_service = HITLService(session, approval_repository=approval_repo)
                 webhook_service = HITLWebhookService(session)
@@ -101,8 +126,7 @@ class HITLTimeoutService:
                 expired_approvals = await approval_repo.get_expired_pending()
 
                 if not expired_approvals:
-                    # break, not return — see the note on the loop above.
-                    break
+                    return
 
                 logger.info(f"Found {len(expired_approvals)} expired HITL approvals")
 
@@ -138,6 +162,12 @@ async def start_hitl_timeout_service() -> None:
     """Start the HITL timeout service as a background task."""
     import asyncio
 
+    from src.services.hitl.boot import export_boot_id
+
+    # Run subprocesses spawned from here on inherit it and stamp their gates
+    # with this server as the owner. One spawned earlier names itself, which
+    # is still a process whose death strands the gate.
+    export_boot_id()
     service = HITLTimeoutService.get_instance()
     service._task = asyncio.create_task(service.start())
     logger.info("HITL timeout service started in background")

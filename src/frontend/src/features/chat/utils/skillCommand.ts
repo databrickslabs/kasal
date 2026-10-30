@@ -22,9 +22,19 @@ export interface SkillCommand {
 }
 
 const SLASH = /^\/skill(?:\s+([\s\S]*))?$/i;
-// Plain-language asks. Deliberately narrow: a verb of creation + "skill" in
-// the same sentence; "which skills exist?" or "skill issue" must not match.
-const NATURAL = /\b(create|make|write|draft|build|save|turn\b.*\binto)\b[^.?!]{0,80}\b(a |this |it |that |the )?(new )?skill\b/i;
+// Plain-language asks. Deliberately narrow: the SKILL must be what is being
+// created, not merely mentioned. "create a presentation using the databricks
+// skill" is a request to USE a skill and goes to the agent; it used to match
+// because the old pattern allowed anything between the verb and "skill".
+//
+// CREATE_SKILL: a creation verb whose object is the skill — optional
+// "me"/article/"new", then at most ONE describing word ("a SQL-review
+// skill"), which may not be a preposition ("a deck with the … skill").
+const CREATE_SKILL =
+  /\b(create|make|write|draft|build)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the|this|that|my|our)\s+)?(?:new\s+)?(?:(?!(?:using|with|from|via|by|through|in|on|for|to|of|and|or)\b)[\w-]+\s+)?skills?\b/i;
+// SAVE_AS_SKILL: "save this as a skill", "turn this conversation into a skill".
+const SAVE_AS_SKILL =
+  /\b(save|turn|capture|convert|package)\b[^.?!]{0,80}\b(?:as|into)\s+(?:(?:a|an)\s+)?(?:new\s+)?skills?\b/i;
 const CAPTURE_HINT = /\b(this|our|the)\s+(chat|conversation|exchange|thread|session)\b|\bwhat we (learned|did|discussed)\b|\bsave (this|it|that)\b/i;
 
 /** Parse a chat message into a skill command, or null when it is not one. */
@@ -38,7 +48,7 @@ export function parseSkillCommand(message: string): SkillCommand | null {
     if (!rest || /^capture$/i.test(rest)) return { mode: 'capture', request: '' };
     return { mode: CAPTURE_HINT.test(rest) ? 'capture' : 'blank', request: rest };
   }
-  if (NATURAL.test(text)) {
+  if (CREATE_SKILL.test(text) || SAVE_AS_SKILL.test(text)) {
     return { mode: CAPTURE_HINT.test(text) ? 'capture' : 'blank', request: text };
   }
   return null;

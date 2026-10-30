@@ -139,7 +139,7 @@ class KasalFlowPersistence(FlowPersistence):
             async with get_isolated_db_session() as session:
                 conn = await session.connection()
                 await conn.run_sync(
-                    lambda sync_conn: FlowState.__table__.create(
+                    lambda sync_conn: FlowState.__table__.create(  # type: ignore[attr-defined]  # a Table at runtime
                         sync_conn, checkfirst=True
                     )
                 )
@@ -164,7 +164,7 @@ class KasalFlowPersistence(FlowPersistence):
         for _ in range(attempts):
             try:
                 return _run_async(coro_factory)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 message = str(exc).lower()
                 last_error = exc
                 if "no such table" in message and not _table_ensured:
@@ -231,7 +231,8 @@ class KasalFlowPersistence(FlowPersistence):
         if not state_json:
             return None
         try:
-            return json.loads(state_json)
+            state: dict[str, Any] = json.loads(state_json)
+            return state
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(
                 f"[KasalFlowPersistence] Could not parse persisted state for {flow_uuid}: {e}"

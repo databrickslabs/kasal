@@ -308,9 +308,9 @@ class TestSetupStorageDirectory:
                 # Capture INSIDE the patch.dict block — it reverts os.environ
                 # (including CREWAI_STORAGE_DIR) when the context exits.
                 value = os.environ.get("CREWAI_STORAGE_DIR")
-                assert value is not None, (
-                    "setup_storage_directory did not set CREWAI_STORAGE_DIR"
-                )
+                assert (
+                    value is not None
+                ), "setup_storage_directory did not set CREWAI_STORAGE_DIR"
                 return value
 
     def test_sets_default_storage_dir(self):
@@ -885,38 +885,6 @@ class TestSetCrewReferenceOnMemory:
 # ─────────────────────────────────────────────────────────────────────────────
 # restore_storage_directory
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestRestoreStorageDirectory:
-    """Tests for restore_storage_directory."""
-
-    def test_restores_original_value(self):
-        service = CrewMemoryService({})
-        service._original_storage_dir = "my_original_dir"
-        os.environ["CREWAI_STORAGE_DIR"] = "changed_dir"
-
-        service.restore_storage_directory()
-
-        assert os.environ.get("CREWAI_STORAGE_DIR") == "my_original_dir"
-
-    def test_removes_env_var_when_original_was_none(self):
-        service = CrewMemoryService({})
-        service._original_storage_dir = None
-        os.environ["CREWAI_STORAGE_DIR"] = "some_dir"
-
-        service.restore_storage_directory()
-
-        assert "CREWAI_STORAGE_DIR" not in os.environ
-
-    def test_does_nothing_when_original_is_none_and_no_env_var(self):
-        service = CrewMemoryService({})
-        service._original_storage_dir = None
-        os.environ.pop("CREWAI_STORAGE_DIR", None)
-
-        # Should not raise
-        service.restore_storage_directory()
-
-        assert "CREWAI_STORAGE_DIR" not in os.environ
 
 
 class TestMemoryLlmOverride:

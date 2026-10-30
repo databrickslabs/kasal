@@ -35,17 +35,16 @@ JUDGE INTEGRITY (the two properties this module must not lose):
 
 import asyncio
 import logging
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.repositories.prompt_optimization_run_repository import (
     PromptOptimizationRunRepository,
 )
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.services.catalog.templates import TemplateService
-from src.services.prompt_optimization import (  # noqa: E402,F401
+from src.services.prompt_optimization import (
     CrewRunnerMixin,
     JudgeAlignmentMixin,
     JudgeOperationsMixin,
@@ -53,13 +52,12 @@ from src.services.prompt_optimization import (  # noqa: E402,F401
     TemplateRunnerMixin,
     run_state,
 )
-from src.services.prompt_optimization.config import (  # noqa: E402,F401
+from src.services.prompt_optimization.config import (
     DEFAULT_TARGET_MODEL,
     MIN_EXAMPLES,
     TEMPLATE_TASKS,
-    _pin_local_experiment,
 )
-from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
+from src.services.prompt_optimization.gepa.crew_doc import (
     _CREW_DOC_FIELD_LABELS,
     _distill_requirements,
     _extract_user_from_log,
@@ -67,7 +65,7 @@ from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _parse_requirement_lines,
     _serialize_crew_doc,
 )
-from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (
     _CATEGORICAL_GRADES,
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
@@ -81,10 +79,11 @@ from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _parse_grade_from_text,
     _to_float,
 )
-from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
+from src.services.prompt_optimization.gepa.judge_model import (
     _crew_target_model,
     _resolve_judge_model,
     _stored_judge_model_to_key,
+    resolve_run_judge,
 )
 
 # Extracted modules, re-exported so this module stays the single import point
@@ -92,7 +91,7 @@ from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
 # ``prompt_optimization_service.X`` regardless of which file X now lives in.
 # These are IMPORTS, not copies: ``_RUNS`` and ``_GEPA_REFLECTION_STATE`` are
 # shared mutable state and must remain one object across every importer.
-from src.services.prompt_optimization.gepa.reflection import (  # noqa: E402,F401
+from src.services.prompt_optimization.gepa.reflection import (  # noqa: F401
     _GEPA_REFLECTION_STATE,
     _JUDGE_SYSTEM,
     DEFAULT_JUDGE_SAMPLES,
@@ -103,7 +102,8 @@ from src.services.prompt_optimization.gepa.reflection import (  # noqa: E402,F40
     _sync_llm_completion,
     _sync_run_crew,
 )
-from src.services.prompt_optimization.run_state import (  # noqa: E402,F401
+from src.services.prompt_optimization.labels.operations import LabelOperationsMixin
+from src.services.prompt_optimization.run_state import (  # noqa: F401
     _LIVE_COUNTERS,
     _MAX_KEPT_RUNS,
     _PUBLIC_FIELDS,
@@ -183,6 +183,7 @@ class PromptOptimizationService(
     CrewRunnerMixin,
     JudgeOperationsMixin,
     JudgeAlignmentMixin,
+    LabelOperationsMixin,
     RunRegistryMixin,
 ):
     """Service for optimizing seeded prompt templates against logged usage."""
@@ -237,12 +238,12 @@ class PromptOptimizationService(
             )
 
         target_model = request.model or DEFAULT_TARGET_MODEL
-        # NOT `or target_model`: judging with the model under optimization is
-        # self-preference (see _resolve_judge_model).
-        judge_model = _resolve_judge_model(
+        judge_model, _ = await resolve_run_judge(
+            self.session,
             request.judge_model,
             target_model,
             f"Prompt optimization '{request.template_name}'",
+            group_context,
         )
         # Reflection is a Kasal model key like every other model here —
         # invocation goes through LLMManager (keys, endpoints, provider quirks
@@ -305,14 +306,15 @@ class PromptOptimizationService(
         group_context: Optional[GroupContext],
         lookback_days: int,
         max_examples: int,
-        extract=None,
+        extract: Optional[Callable[[str], Optional[str]]] = None,
     ) -> List[str]:
         """Pull distinct, successful inputs for `endpoint` from the LLM log."""
         group_ids = group_context.group_ids if group_context else []
         if not group_ids:
             return []
         cutoff = datetime.utcnow() - timedelta(days=lookback_days)
-        seen, examples = set(), []
+        seen: set[str] = set()
+        examples: List[str] = []
         page = 0
         # Over-fetch pages (dedup shrinks them) but bound total scanned rows.
         while len(examples) < max_examples and page < 20:
@@ -350,6 +352,44 @@ class PromptOptimizationService(
             page += 1
         return examples
 
+    async def _rubric_with_feedback(
+        self, rubric: str, crew: Any, group_context: Optional[GroupContext]
+    ) -> str:
+        """The judge's rubric plus this crew's real user feedback."""
+        # HUMAN JUDGMENT: fold this crew's real user feedback (chat 👍/👎 with
+        # comments) into the judge's rubric so the automated grade reflects what
+        # actual users praised or flagged, not just the task contracts.
+        try:
+            # Feedback is CrewFeedbackService's domain, and its list_for_crew takes
+            # the GroupContext so the scoping stays with the owner.
+            from src.services.catalog.crew_feedback import CrewFeedbackService
+
+            feedback = await CrewFeedbackService(self.session).list_for_crew(
+                str(crew.id), group_context
+            )
+            complaints = [
+                f.comment.strip()
+                for f in feedback
+                if f.rating == "down" and f.comment and f.comment.strip()
+            ][:8]
+            praise = [
+                f.comment.strip()
+                for f in feedback
+                if f.rating == "up" and f.comment and f.comment.strip()
+            ][:4]
+            if complaints:
+                rubric += (
+                    "\nUsers flagged these problems in past runs (penalize any recurrence):\n"
+                    + "\n".join(f"- {c}" for c in complaints)
+                )
+            if praise:
+                rubric += "\nUsers praised (preserve these qualities):\n" + "\n".join(
+                    f"- {p}" for p in praise
+                )
+        except Exception as feedback_err:
+            logger.warning(f"Could not load crew feedback for rubric: {feedback_err}")
+        return rubric
+
     async def _resolve_crew_traces_experiment(
         self, group_context: Optional[GroupContext]
     ) -> str:
@@ -376,13 +416,12 @@ class PromptOptimizationService(
 
     async def _resolve_registry(
         self, template_name: str, group_context: Optional[GroupContext]
-    ) -> tuple:
+    ) -> Tuple[str, str]:
         """Resolve the MLflow prompt-registry destination and prompt name.
 
         Policy: managed MLflow (Databricks Unity Catalog prompt registry) is
-        the default. A LOCAL MLflow server is used only when explicitly
-        enabled for development: MCP_SERVER_ENABLED=true plus
-        MLFLOW_TRACKING_URI (e.g. http://127.0.0.1:5555).
+        the default. A LOCAL MLflow server is used when the workspace set one in
+        Configuration → MLflow (e.g. http://127.0.0.1:5555), for development.
         """
         group_id = group_context.primary_group_id if group_context else None
         safe_group = "".join(
@@ -390,15 +429,14 @@ class PromptOptimizationService(
         )
         base_name = f"kasal_{template_name}_{safe_group}"
 
-        local_enabled = os.getenv("MCP_SERVER_ENABLED", "").lower() == "true"
-        # main.py force-overwrites MLFLOW_TRACKING_URI to "databricks" at
-        # startup; the value the process was LAUNCHED with is preserved in
-        # KASAL_LAUNCH_MLFLOW_TRACKING_URI. Guard against databricks-schemed
-        # values either way — local mode means a local/OSS server.
-        local_uri = os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI") or os.getenv(
-            "MLFLOW_TRACKING_URI"
+        from src.services.mlflow.service import MLflowService
+
+        local_uri = (
+            await MLflowService(self.session, group_id=group_id).configured_local_uri()
+            if group_id
+            else None
         )
-        if local_enabled and local_uri and not local_uri.startswith("databricks"):
+        if local_uri:
             return local_uri, base_name
 
         # Managed MLflow: UC prompt registry needs a three-level name from the
@@ -416,9 +454,8 @@ class PromptOptimizationService(
             raise ValueError(
                 "Prompt optimization uses the managed MLflow (Unity Catalog) prompt "
                 "registry, which requires a catalog and schema in the Databricks "
-                "configuration. For local development set MCP_SERVER_ENABLED=true and "
-                "MLFLOW_TRACKING_URI (e.g. http://127.0.0.1:5555) to use a local "
-                "MLflow server instead."
+                "configuration. For local development, set a local MLflow server "
+                "(e.g. http://127.0.0.1:5555) in Configuration → MLflow instead."
             )
         return "databricks-uc", f"{catalog}.{schema}.{base_name}"
 
@@ -479,7 +516,12 @@ class PromptOptimizationService(
 
     # ------------------------------------------------------------ background
 
-    async def _run_optimization(self, run_id: str, sync_fn=None, **kwargs) -> None:
+    async def _run_optimization(
+        self,
+        run_id: str,
+        sync_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> None:
         run = _RUNS.get(run_id)
         if run is None:
             return
@@ -487,8 +529,11 @@ class PromptOptimizationService(
         await run_state._persist_run_changes(run_id, {"status": "running"})
         heartbeat = asyncio.create_task(self._heartbeat(run_id))
         try:
+            worker: Callable[..., Dict[str, Any]] = (
+                sync_fn or self._execute_optimization_sync
+            )
             result = await asyncio.to_thread(
-                sync_fn or self._execute_optimization_sync,
+                worker,
                 loop=asyncio.get_running_loop(),
                 **kwargs,
             )
@@ -593,8 +638,11 @@ class PromptOptimizationService(
 
         # Execution payload bases (candidate fields are overlaid per eval).
         agent_name_by_id = {str(a.id): a.name for a in agents}
+        # "id" (rows already group-checked above): the run fills tool_configs and
+        # LLM overrides from the row by id; a name alone resolves nothing.
         agents_yaml = {
             str(a.name): {
+                "id": str(a.id),
                 "name": a.name,
                 "role": a.role,
                 "goal": a.goal,
@@ -607,6 +655,7 @@ class PromptOptimizationService(
         }
         tasks_yaml = {
             str(t.name): {
+                "id": str(t.id),
                 "name": t.name,
                 "description": t.description,
                 "expected_output": t.expected_output,
@@ -628,38 +677,10 @@ class PromptOptimizationService(
         if request.guidance:
             rubric += f"\nAdditional guidance: {request.guidance}"
 
-        # HUMAN JUDGMENT: fold this crew's real user feedback (chat 👍/👎 with
-        # comments) into the judge's rubric so the automated grade reflects what
-        # actual users praised or flagged, not just the task contracts.
-        try:
-            # Feedback is CrewFeedbackService's domain, and its list_for_crew takes
-            # the GroupContext so the scoping stays with the owner.
-            from src.services.catalog.crew_feedback import CrewFeedbackService
-
-            feedback = await CrewFeedbackService(self.session).list_for_crew(
-                str(crew.id), group_context
-            )
-            complaints = [
-                f.comment.strip()
-                for f in feedback
-                if f.rating == "down" and f.comment and f.comment.strip()
-            ][:8]
-            praise = [
-                f.comment.strip()
-                for f in feedback
-                if f.rating == "up" and f.comment and f.comment.strip()
-            ][:4]
-            if complaints:
-                rubric += (
-                    "\nUsers flagged these problems in past runs (penalize any recurrence):\n"
-                    + "\n".join(f"- {c}" for c in complaints)
-                )
-            if praise:
-                rubric += "\nUsers praised (preserve these qualities):\n" + "\n".join(
-                    f"- {p}" for p in praise
-                )
-        except Exception as feedback_err:
-            logger.warning(f"Could not load crew feedback for rubric: {feedback_err}")
+        rubric = await self._rubric_with_feedback(rubric, crew, group_context)
+        # Labels, review notes and the built-ins that count (400 on one the run
+        # could not use; a label judge without labels is skipped with a reason).
+        prepared = await self._prepare_run_labels(str(crew.id), request, group_context)
 
         # Fall back to the model the crew ACTUALLY runs on, not a global default.
         # Each agent keeps its own ``llm`` during optimization (agents_yaml below
@@ -671,11 +692,14 @@ class PromptOptimizationService(
         target_model = (
             request.model or _crew_target_model(agents) or DEFAULT_TARGET_MODEL
         )
-        # NOT `or target_model`: the crew judge grades deliverables the target
-        # model produced, so target == judge is self-preference — and the crew
-        # judge is the one whose grade drives accept/reject.
-        judge_model = _resolve_judge_model(
-            request.judge_model, target_model, f"Crew optimization '{crew.name}'"
+        # target == judge is self-preference, and the crew judge's grade drives
+        # accept/reject (see resolve_run_judge).
+        judge_model, judge_samples = await resolve_run_judge(
+            self.session,
+            request.judge_model,
+            target_model,
+            f"Crew optimization '{crew.name}'",
+            group_context,
         )
         # A Kasal model key; invoked through LLMManager (no URI/env plumbing).
         reflection_model = request.reflection_model or target_model
@@ -718,7 +742,7 @@ class PromptOptimizationService(
             "baseline_template": baseline_doc,
             "baseline_fields": baseline_fields,
             "applied": False,
-            "human_feedback_count": 0,
+            "human_feedback_count": prepared.feedback_count,
             "candidates_tried": 0,
             "created_at": datetime.now(timezone.utc),
         }
@@ -747,25 +771,22 @@ class PromptOptimizationService(
                 cancel_run_id=run_id,
                 group_context=group_context,
                 crew_traces_experiment=crew_traces_experiment,
+                judge_samples=judge_samples,
+                builtin_judges=prepared.judge_ids,
+                label_expectations=prepared.expectations,
+                human_requirements=prepared.human_requirements,
             )
             # Spawned mid-request but outlives it: routed_scoped_session routes a
             # fresh session for this child task (different current_task()).
         )
-        return {"run_id": run_id, "status": "pending", "dataset_size": 1}
+        return {
+            "run_id": run_id,
+            "status": "pending",
+            "dataset_size": 1,
+            "skipped_judges": prepared.skipped,
+        }
 
     # -------------------------------------------------- crew eval feedback
-
-    @staticmethod
-    def _local_mlflow_uri() -> Optional[str]:
-        """The local MLflow server URI when local mode is enabled, else None."""
-        if os.getenv("MCP_SERVER_ENABLED", "").lower() != "true":
-            return None
-        uri = os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI") or os.getenv(
-            "MLFLOW_TRACKING_URI"
-        )
-        if uri and not uri.startswith("databricks"):
-            return uri
-        return None
 
     # ----------------------------------------------------------- LLM judges
 

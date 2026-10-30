@@ -8,12 +8,12 @@ request-scoped session is closed by then — every database touch here opens a
 session of its own, on a PRIVATE connection."""
 
 import logging
-import os
 import re
 import traceback
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, ContextManager, Dict, List, Optional, cast
 
+from src.core.databricks_app import lakebase_instance_from_config
 from src.core.exceptions import BadRequestError, KasalError
 from src.core.llm.robust_json import robust_json_parser
 from src.core.sse_manager import SSEEvent, sse_manager
@@ -28,6 +28,7 @@ from src.schemas.task_generation import TaskGenerationRequest
 from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.generation.agents import AgentGenerationService
+from src.services.generation.crew.host import CrewGenerationBase
 from src.services.generation.mcp_assignment import (
     assign_mcps_to_tasks,
     describe_selected_mcps,
@@ -42,7 +43,7 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
-class ProgressiveGenerationMixin:
+class ProgressiveGenerationMixin(CrewGenerationBase):
     """Streaming crew generation (``POST /crew/create-crew-streaming``).
 
     Plan first, then agents, then tasks, broadcasting SSE as each entity lands.
@@ -91,7 +92,7 @@ class ProgressiveGenerationMixin:
             try:
                 from src.services.mlflow.tracing import start_root_trace
 
-                trace_ctx = start_root_trace(
+                trace_ctx: ContextManager[Any] = start_root_trace(
                     "crew_generation",
                     inputs={
                         "prompt": request.prompt,
@@ -121,7 +122,7 @@ class ProgressiveGenerationMixin:
                     )
                     return
 
-                model = request.model or os.getenv("CREW_MODEL", DEFAULT_ENGINE_MODEL)
+                model = request.model or DEFAULT_ENGINE_MODEL
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
                 # Caps are UPPER BOUNDS, not predictions: the PLAN LLM decides the
@@ -403,10 +404,9 @@ class ProgressiveGenerationMixin:
                 # are already per-connection, so the helper falls through to them.)
                 if await is_lakebase_enabled():
                     lb_config = await get_lakebase_config_from_db()
-                    lb_instance = (lb_config or {}).get(
-                        "instance_name"
-                    ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
-                    _session_ctx = get_lakebase_session(lb_instance)
+                    _session_ctx = get_lakebase_session(
+                        lakebase_instance_from_config(lb_config)
+                    )
                 else:
                     _session_ctx = get_isolated_db_session()
 
@@ -928,7 +928,7 @@ class ProgressiveGenerationMixin:
                 clean_tasks = [
                     {k: v for k, v in t.items() if k != "_plan"} for t in task_results
                 ]
-                gen_complete_data = {
+                gen_complete_data: Dict[str, Any] = {
                     "type": "generation_complete",
                     "status": "completed",
                     "agents": agent_results,
@@ -1243,7 +1243,7 @@ class ProgressiveGenerationMixin:
         except Exception as e:
             logger.error(f"Failed to log crew plan LLM interaction: {e}")
 
-        plan = robust_json_parser(content)
+        plan: Dict[str, Any] = robust_json_parser(content)
 
         # Malformed output (missing/typed-wrong lists) is still an error, but a
         # VALID plan with zero agents is an answer — "there is nothing to
@@ -1476,10 +1476,9 @@ class ProgressiveGenerationMixin:
 
         for agent in agent_results:
             if agent.get("name", "").lower() == assigned.lower():
-                return agent["id"]
+                return cast(Optional[str], agent["id"])
 
-        # Fallback: first agent
-        return agent_results[0]["id"] if agent_results else None
+        return agent_results[0]["id"] if agent_results else None  # first agent
 
     async def _resolve_progressive_dependencies(
         self,

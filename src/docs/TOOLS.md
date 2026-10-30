@@ -26,16 +26,41 @@ Tools are assigned to agents, not to tasks. In an agent's configuration you list
 }
 ```
 
-At execution time the tool factory (`src/services/execution/tools/tool_factory.py`) looks up each name in the seeded tool registry, builds the tool with its configuration, and hands it to the agent. Each tool is configured automatically with the values it needs for tenant isolation and authentication, such as `group_id`, `execution_id`, and a user token for On-Behalf-Of (OBO) auth where supported.
+At execution time the tool factory (`src/backend/src/services/tools/tool_factory.py`) looks up each name in the seeded tool registry, builds the tool with its configuration, and hands it to the agent. Each tool is configured automatically with the values it needs for tenant isolation and authentication, such as `group_id`, `execution_id`, and a user token for On-Behalf-Of (OBO) auth where supported.
 
 ### The registry
 
 The set of available tools is seeded into the `tools` table from `src/backend/src/seeds/tools.py`. Each entry has an id, a title (the name agents reference), a description, an icon category, and a default configuration block. Tools are global by default (available to all groups) and enabled on seed. Configuration values, such as API parameters and Databricks or Power BI credentials, are set per tool either in the UI or in the seeded defaults.
 
+### Per-agent and per-task configuration
+
+An agent's or task's `tool_configs` entry (for example the Power BI ids and credentials a task form saves) is laid over the teamspace tool configuration from Configuration → Tools, and its values win. These keys are the exception, and Kasal ignores them in an entry:
+
+- Identity: `group_id`, `group_ids`, `user_email`, `user_token` and `execution_id` always come from the run.
+- Endpoint: `base_url` (Serper, Image Generation) comes only from the teamspace configuration, because the teamspace's provider key is sent there.
+- Policies: `requires_approval` / `approval` and `replayable` / `replay` come from the teamspace configuration. An entry can add an approval gate to a tool that the teamspace leaves ungated, but it cannot remove or change the teamspace's gate.
+- Naming: `name` and `description` come from the tool registry.
+
+If an entry points an endpoint at another origin (scheme, host or port), the teamspace credential for that endpoint is not sent there. Give the entry its own credential for that origin, in the same form. The pairs are:
+
+- `llm_workspace_url`: `llm_token`
+- `databricks_sql_endpoint`: `databricks_pat`
+- `website_url` (`ScrapeWebsiteTool`): `cookies` and `headers`
+
+The run log names each ignored or withheld key, without its value.
+
+Three related rules apply when a tool runs:
+
+- If a tool's `llm_workspace_url` names a workspace other than the run's, the run's Databricks credential is not sent there. To use another workspace, give the entry its own `llm_token` for it.
+- `ScrapeWebsiteTool` sends its configured `cookies` and `headers` only to the origin of its configured `website_url`. Another page on that origin gets them. Any other URL the agent asks it to read gets the tool's default browser headers. So does every URL when no `website_url` is set. The run log names each configured header the tool did not send to a URL. A redirect to another origin keeps only content-negotiation headers such as `User-Agent` and `Accept`, for every tool that fetches through this path. That includes a redirect between `example.com` and `www.example.com`, so set `website_url` to the address the site ends up on.
+- Serper, Image Generation and the scrape tool connect only to globally routable addresses. They refuse private, loopback, link-local, shared (`100.64.0.0/10`), reserved and multicast addresses, so a Serper or Image Generation `base_url` must be a public endpoint. When `HTTP_PROXY` or `HTTPS_PROXY` is set in the environment, they connect through that proxy, except for hosts listed in `NO_PROXY`. Through a proxy the target's address is still checked, so the host must resolve from the app as well, but the proxy makes the connection.
+
 ### Native vs custom tools
 
-- Native tools wrap capabilities provided by the CrewAI framework or third-party SDKs (for example `SerperDevTool`, `ScrapeWebsiteTool`, `Dall-E Tool`).
-- Custom tools are implemented in this codebase under `src/backend/src/services/tools/` (for example the Genie, Knowledge Search, Agent Bricks, Gmail, Databricks Jobs, and Power BI tools). They follow CrewAI's `BaseTool` interface and call into Kasal's own service layer.
+- Built-in tools cover general capabilities such as web search (`SerperDevTool`, `serper_search.py`), scraping (`ScrapeWebsiteTool`, `scrape_website.py`) and image generation (`Dall-E Tool`, `image_generation.py`). Kasal does not depend on `crewai-tools`; these are first-party implementations.
+- Domain tools cover Databricks and Power BI work (for example the Genie, Knowledge Search, Agent Bricks, Gmail, Databricks Jobs, and Power BI tools).
+
+Both kinds live under `src/backend/src/services/tools/`, subclass Kasal's `BaseTool` (`services/tools/base.py`), and call into Kasal's own service layer. The active harness adapts them onto its runtime, so the same tool runs on the Kasal and CrewAI harnesses.
 
 ## Tool categories
 
@@ -69,11 +94,11 @@ Input fields:
 - `limit` (optional): maximum number of results (default 5).
 - `file_paths` (optional): restrict results to specific uploaded files.
 
-The tool is configured automatically with `group_id`, `execution_id`, and a user token for OBO authentication, and it returns formatted results with a similarity score and source per match. See the [Knowledge Search tool guide](./archive/guides/knowledge-search-tool.md) and the [UI knowledge tool usage guide](./archive/guides/ui-knowledge-tool-usage.md).
+The tool is configured automatically with `group_id`, `execution_id`, and a user token for OBO authentication, and it returns formatted results with a similarity score and source per match.
 
 ## Agent Bricks
 
-`AgentBricksTool` calls a Databricks Agent Bricks (Mosaic AI Agent Bricks) serving endpoint. Agent Bricks is Databricks' no-code agent builder, so this tool lets a CrewAI agent delegate a subtask to a pre-built, domain-specific Databricks agent and use its answer. It supports OBO, PAT, and Service Principal authentication, returns the endpoint response as the agent's answer (`result_as_answer` is true by default), and has a configurable `timeout`. Use it to compose Kasal's orchestration with specialized agents already running in your Databricks workspace.
+`AgentBricksTool` calls a Databricks Agent Bricks (Mosaic AI Agent Bricks) serving endpoint. Agent Bricks is Databricks' no-code agent builder, so this tool lets a Kasal agent delegate a subtask to a pre-built, domain-specific Databricks agent and use its answer. It supports OBO, PAT, and Service Principal authentication, returns the endpoint response as the agent's answer (`result_as_answer` is true by default), and has a configurable `timeout`. Use it to compose Kasal's orchestration with specialized agents already running in your Databricks workspace.
 
 ## Web search
 

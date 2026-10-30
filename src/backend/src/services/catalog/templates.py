@@ -1,6 +1,8 @@
 import logging
 from typing import Any, List, Optional
 
+from src.core.exceptions import ForbiddenError
+from src.core.permissions import is_system_admin
 from src.models.template import PromptTemplate
 from src.repositories.template_repository import TemplateRepository
 from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
@@ -30,15 +32,6 @@ class TemplateService:
         self.repository = TemplateRepository(session)
 
     # Removed factory method - using dependency injection instead
-
-    async def find_all_templates(self) -> List[PromptTemplate]:
-        """
-        Find all prompt templates.
-
-        Returns:
-            List of prompt templates
-        """
-        return await self.find_all()
 
     async def find_all_templates_for_group(
         self, group_context: GroupContext
@@ -124,18 +117,6 @@ class TemplateService:
             if template.group_id in group_context.group_ids
         ]
 
-    async def get_template_by_id(self, id: int) -> Optional[PromptTemplate]:
-        """
-        Get a prompt template by ID.
-
-        Args:
-            id: ID of the template to get
-
-        Returns:
-            PromptTemplate if found, else None
-        """
-        return await self.get(id)
-
     async def get_template_with_group_check(
         self, id: int, group_context: GroupContext
     ) -> Optional[PromptTemplate]:
@@ -186,18 +167,6 @@ class TemplateService:
             return template
         return None
 
-    async def find_template_by_name(self, name: str) -> Optional[PromptTemplate]:
-        """
-        Find a prompt template by name.
-
-        Args:
-            name: Name to search for
-
-        Returns:
-            PromptTemplate if found, else None
-        """
-        return await self.find_by_name(name)
-
     async def find_template_by_name_with_group(
         self, name: str, group_context: GroupContext
     ) -> Optional[PromptTemplate]:
@@ -213,20 +182,25 @@ class TemplateService:
         """
         return await self.find_by_name_with_group_check(name, group_context)
 
-    async def find_by_name(self, name: str) -> Optional[PromptTemplate]:
+    async def find_by_name(
+        self, name: str, group_context: Optional[GroupContext] = None
+    ) -> Optional[PromptTemplate]:
         """
-        Find a prompt template by name.
+        Find a prompt template by name: the current group's own row when it has
+        one, else the global row. Nothing else is returned.
 
         Args:
             name: Name to search for
+            group_context: The caller's group; without one, the global row only
 
         Returns:
             PromptTemplate if found, else None
         """
-        return await self.repository.find_by_name(name)
+        gid = group_context.primary_group_id if group_context else None
+        return await self.repository.find_by_name(name, gid)
 
     async def find_by_name_with_group_check(
-        self, name: str, group_context: GroupContext
+        self, name: str, group_context: Optional[GroupContext]
     ) -> Optional[PromptTemplate]:
         """
         Find a template by name with group semantics:
@@ -261,22 +235,6 @@ class TemplateService:
         except Exception:
             pass
         return None
-
-    async def create_new_template(
-        self, template_data: PromptTemplateCreate
-    ) -> PromptTemplate:
-        """
-        Create a new prompt template.
-
-        Args:
-            template_data: Data for the new template
-
-        Returns:
-            Created PromptTemplate
-        """
-        template = await self.create_template(template_data)
-        # Repository handles flush, session handles commit
-        return template
 
     async def create_template_with_group(
         self, template_data: PromptTemplateCreate, group_context: GroupContext
@@ -359,7 +317,10 @@ class TemplateService:
         return result
 
     async def update_with_group_check(
-        self, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext
+        self,
+        id: int,
+        template_data: PromptTemplateUpdate,
+        group_context: Optional[GroupContext],
     ) -> Optional[PromptTemplate]:
         """
         Update semantics aligned with flat list and same-name overrides:
@@ -442,11 +403,17 @@ class TemplateService:
 
         Returns:
             True if deleted, False if not found or not authorized
+
+        Raises:
+            ForbiddenError: for a global template (no group) unless the caller
+                is a system admin — it is every workspace's template
         """
         # First check if template exists and belongs to group
         template = await self.get_with_group_check(id, group_context)
         if not template:
             return False
+        if template.group_id is None and not is_system_admin(group_context):
+            raise ForbiddenError("Only system admins can delete global templates")
 
         result = await self.repository.delete(id)
         await TemplateService.invalidate_template_cache()
@@ -556,7 +523,10 @@ class TemplateService:
         return count
 
     async def _get_template_content_instance(
-        self, name: str, default_template: str = None
+        self,
+        name: str,
+        default_template: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> str:
         """
         Get the content of a template by name (instance method).
@@ -564,12 +534,13 @@ class TemplateService:
         Args:
             name: Name of the template
             default_template: Default template to use if not found
+            group_context: The caller's group (see :meth:`find_by_name`)
 
         Returns:
             Template content
         """
         try:
-            template = await self.find_by_name(name)
+            template = await self.find_by_name(name, group_context)
             if template:
                 return template.template
             elif default_template:
@@ -584,7 +555,10 @@ class TemplateService:
             return ""
 
     async def get_template_content(
-        self, name: str, default_template: str = None
+        self,
+        name: str,
+        default_template: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> str:
         """
         Get the content of a template by name.
@@ -592,14 +566,18 @@ class TemplateService:
         Args:
             name: Name of the template
             default_template: Default template to use if not found
+            group_context: The caller's group. Its own row wins; without one,
+                only the global row is read
 
         Returns:
             Template content
         """
-        return await self._get_template_content_instance(name, default_template)
+        return await self._get_template_content_instance(
+            name, default_template, group_context
+        )
 
     async def _get_effective_template_content_instance(
-        self, name: str, group_context: GroupContext
+        self, name: str, group_context: Optional[GroupContext]
     ) -> str:
         """
         Get effective template content for current group: prefer the group's
@@ -613,7 +591,7 @@ class TemplateService:
 
         gid = group_context.primary_group_id if group_context else None
         cache_group = gid or "__base__"
-        cached = await template_cache.get(cache_group, f"tpl:{name}")
+        cached: Optional[str] = await template_cache.get(cache_group, f"tpl:{name}")
         if cached is not None:
             return cached
         try:
@@ -633,7 +611,7 @@ class TemplateService:
 
     @staticmethod
     async def get_effective_template_content(
-        name: str, group_context: GroupContext
+        name: str, group_context: Optional[GroupContext]
     ) -> str:
         """
         Static helper to retrieve composed template content for the current group/user.
@@ -645,17 +623,24 @@ class TemplateService:
         from src.core.cache import template_cache
 
         gid = group_context.primary_group_id if group_context else None
-        cached = await template_cache.get(gid or "__base__", f"tpl:{name}")
+        cached: Optional[str] = await template_cache.get(
+            gid or "__base__", f"tpl:{name}"
+        )
         if cached is not None:
             return cached
 
+        from contextlib import asynccontextmanager
+
         from src.db.database_router import get_smart_db_session
 
-        async for session in get_smart_db_session():
+        # A context manager, not `async for`: a return inside the loop abandoned
+        # the router generator, and left this task's request session pointing at it.
+        async with asynccontextmanager(get_smart_db_session)() as session:
             service = TemplateService(session)
             return await service._get_effective_template_content_instance(
                 name, group_context
             )
+        return ""  # unreachable; mypy cannot tell the context manager re-raises
 
     @staticmethod
     async def invalidate_template_cache() -> None:

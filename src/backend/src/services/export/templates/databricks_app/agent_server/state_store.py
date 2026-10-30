@@ -110,7 +110,7 @@ class _SQLiteBackend(_Backend):
 
     def get(self, cid: str, key: str) -> Optional[Tuple[str, float]]:
         row = self._conn.execute(
-            f"SELECT value, updated_at FROM {_TABLE} "
+            f"SELECT value, updated_at FROM {_TABLE} "  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select
             "WHERE conversation_id = ? AND key = ?",
             (cid, key),
         ).fetchone()
@@ -118,7 +118,7 @@ class _SQLiteBackend(_Backend):
 
     def set(self, cid: str, key: str, value: str, now: float) -> None:
         self._conn.execute(
-            f"INSERT OR REPLACE INTO {_TABLE} "
+            f"INSERT OR REPLACE INTO {_TABLE} "  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             "(conversation_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
             (cid, key, value, now),
         )
@@ -126,7 +126,7 @@ class _SQLiteBackend(_Backend):
 
     def set_if_absent(self, cid: str, key: str, value: str, now: float) -> bool:
         cur = self._conn.execute(
-            f"INSERT OR IGNORE INTO {_TABLE} "
+            f"INSERT OR IGNORE INTO {_TABLE} "  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             "(conversation_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
             (cid, key, value, now),
         )
@@ -134,13 +134,13 @@ class _SQLiteBackend(_Backend):
         return cur.rowcount == 1
 
     def delete(self, cid: str, key: str) -> None:
-        self._conn.execute(
-            f"DELETE FROM {_TABLE} WHERE conversation_id = ? AND key = ?", (cid, key)
-        )
+        sql = f"DELETE FROM {_TABLE} WHERE conversation_id = ? AND key = ?"  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        self._conn.execute(sql, (cid, key))
         self._conn.commit()
 
     def prune(self, cutoff: float) -> None:
-        self._conn.execute(f"DELETE FROM {_TABLE} WHERE updated_at < ?", (cutoff,))
+        sql = f"DELETE FROM {_TABLE} WHERE updated_at < ?"  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        self._conn.execute(sql, (cutoff,))
         self._conn.commit()
 
 
@@ -258,7 +258,7 @@ class _PostgresBackend(_Backend):
 
     def get(self, cid: str, key: str) -> Optional[Tuple[str, float]]:
         row = self._execute(
-            f"SELECT value, updated_at FROM {self._table} "
+            f"SELECT value, updated_at FROM {self._table} "  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select
             "WHERE conversation_id = %s AND key = %s",
             (cid, key),
             fetch=True,
@@ -267,7 +267,7 @@ class _PostgresBackend(_Backend):
 
     def set(self, cid: str, key: str, value: str, now: float) -> None:
         self._execute(
-            f"INSERT INTO {self._table} (conversation_id, key, value, updated_at) "
+            f"INSERT INTO {self._table} (conversation_id, key, value, updated_at) "  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             "VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (conversation_id, key) "
             "DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
@@ -276,7 +276,7 @@ class _PostgresBackend(_Backend):
 
     def set_if_absent(self, cid: str, key: str, value: str, now: float) -> bool:
         row = self._execute(
-            f"INSERT INTO {self._table} (conversation_id, key, value, updated_at) "
+            f"INSERT INTO {self._table} (conversation_id, key, value, updated_at) "  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             "VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (conversation_id, key) DO NOTHING "
             "RETURNING conversation_id",
@@ -286,13 +286,12 @@ class _PostgresBackend(_Backend):
         return row is not None
 
     def delete(self, cid: str, key: str) -> None:
-        self._execute(
-            f"DELETE FROM {self._table} WHERE conversation_id = %s AND key = %s",
-            (cid, key),
-        )
+        sql = f"DELETE FROM {self._table} WHERE conversation_id = %s AND key = %s"  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        self._execute(sql, (cid, key))
 
     def prune(self, cutoff: float) -> None:
-        self._execute(f"DELETE FROM {self._table} WHERE updated_at < %s", (cutoff,))
+        sql = f"DELETE FROM {self._table} WHERE updated_at < %s"  # table name is the module constant _TABLE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        self._execute(sql, (cutoff,))
 
 
 def _sqlite_path() -> str:
@@ -358,7 +357,7 @@ def get_text(
         if max_age is not None and (time.time() - ts) > max_age:
             return None
         return value
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"[state_store] get({key}) failed: {exc}")
         if strict:
             raise StorageUnavailable(str(exc)) from exc
@@ -375,7 +374,7 @@ def claim_text(cid: Optional[str], key: str, value: str) -> bool:
     try:
         with _lock:
             return _get_backend().set_if_absent(str(cid), key, value, time.time())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"[state_store] claim({key}) failed: {exc}")
         raise StorageUnavailable(str(exc)) from exc
 

@@ -63,7 +63,9 @@ def purge_agent_server_modules():
 
 
 async def _render_bundle(tmp_path, monkeypatch, options=None):
-    result = await DatabricksAppExporter().export(dict(SAMPLE_CREW), {"runtime": "kasal", **(options or {})})
+    result = await DatabricksAppExporter().export(
+        dict(SAMPLE_CREW), {"runtime": "kasal", **(options or {})}
+    )
     for f in result["files"]:
         dest = tmp_path / f["path"]
         dest.parent.mkdir(parents=True, exist_ok=True)

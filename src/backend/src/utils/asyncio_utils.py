@@ -99,8 +99,6 @@ async def execute_db_operation_smart(
     from src.db.database_router import is_lakebase_enabled
 
     if await is_lakebase_enabled():
-        import os
-
         from src.db.database_router import get_lakebase_config_from_db
         from src.db.lakebase_session import get_lakebase_session
         from src.db.lakebase_state import (
@@ -110,9 +108,9 @@ async def execute_db_operation_smart(
         from src.utils.databricks_auth import get_auth_context
 
         config = await get_lakebase_config_from_db()
-        instance_name = (
-            config.get("instance_name") if config else None
-        ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+        from src.core.databricks_app import lakebase_instance_from_config
+
+        instance_name = lakebase_instance_from_config(config)
 
         user_token = None
         user_email = None
@@ -152,26 +150,19 @@ async def execute_db_operation_smart(
                 if _is_disposed_connection_error(e):
                     try:
                         from src.db.lakebase_session import (
-                            _is_crew_thread,
-                            dispose_lakebase_factory,
-                            dispose_thread_local_lakebase_factory,
+                            dispose_current_lakebase_factory,
                         )
 
-                        # Scope the dispose to THIS thread's factory in crew/flow
-                        # subprocess threads; only touch the shared global factory
-                        # off those threads (where there is no concurrent traffic
-                        # to disrupt mid-flight).
-                        if _is_crew_thread():
-                            await dispose_thread_local_lakebase_factory()
-                        else:
-                            await dispose_lakebase_factory()
+                        await dispose_current_lakebase_factory()
                         logger.warning(
                             "Lakebase connection was closed; disposed the factory so "
                             "the next retry reconnects fresh."
                         )
                     except Exception as disp_err:  # noqa: BLE001 — best-effort
                         logger.debug(
-                            f"Lakebase factory dispose after closed connection skipped: {disp_err}"
+                            "Lakebase factory dispose after closed connection "
+                            "skipped: %s",
+                            disp_err,
                         )
                 if attempt < max_retries - 1:
                     delay = backoff_delays[attempt]
@@ -250,7 +241,7 @@ def create_and_run_loop(coroutine: Any) -> Any:
             logger.error(f"Error cleaning up event loop: {str(e)}")
 
 
-def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:
+def run_in_thread_with_loop(func: Callable, *args: Any, **kwargs: Any) -> Any:
     """Run a function in a thread with a properly managed event loop."""
     # Track whether we created a new event loop
     created_loop = False

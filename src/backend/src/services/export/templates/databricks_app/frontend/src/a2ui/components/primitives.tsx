@@ -11,6 +11,7 @@ import { Separator } from '../ui/separator'
 import { DeckThemeContext, deckProseVars } from '../lib/deckThemes'
 import { SurfaceContext } from '../lib/surfaceContext'
 import { mdComponents, linkifyCitations } from '../lib/markdown'
+import { SafeImage } from '../lib/safeImage'
 import { cn } from '../lib/utils'
 import { iconByName } from './icons'
 import { asArr, asStr } from './values'
@@ -69,7 +70,7 @@ export function Image({ node, resolve }: NodeProps) {
   const caption = asStr(resolve(node.caption))
   return (
     <figure className="m-0">
-      <img src={src} alt={asStr(node.alt) || caption} className="max-w-full rounded-lg" />
+      <SafeImage src={src} alt={asStr(node.alt) || caption} className="max-w-full rounded-lg" />
       {caption && <figcaption className="mt-1 text-sm text-muted-foreground">{caption}</figcaption>}
     </figure>
   )

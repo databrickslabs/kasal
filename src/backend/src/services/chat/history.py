@@ -1,15 +1,18 @@
 import asyncio
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import uuid4
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.base_service import BaseService
 from src.models.chat_history import ChatHistory
+from src.models.chat_session import ChatSession
 from src.repositories.chat_history_repository import ChatHistoryRepository
 from src.schemas.chat_history import ChatHistoryCreate, ChatHistoryResponse
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -18,12 +21,15 @@ logger = logging.getLogger(__name__)
 #: Content the UI posts for an ACTIVITY card rather than an answer.
 _ACTIVITY_CONTENT = {"[ui-card]"}
 
+
 #: A streamed answer reaches the store one chunk at a time: the row is created
 #: with the first chunk and rewritten with every one after it. Remembering on
 #: the create stored "Assistant: # Lebanon Daily News Report — September" and
 #: nothing more. An exchange is remembered once its row has stopped changing
 #: for this long; a newer write restarts the clock, and the last content wins.
-EXCHANGE_SETTLE_SECONDS = float(os.getenv("CHAT_MEMORY_SETTLE_SECONDS", "20"))
+def exchange_settle_seconds() -> float:
+    """Configuration → Engines → Advanced → Chat (was CHAT_MEMORY_SETTLE_SECONDS)."""
+    return float(engine_setting("chat_memory_settle_seconds"))
 
 
 @dataclass
@@ -49,7 +55,7 @@ def _remember_when_settled(
 
     async def _settle() -> None:
         try:
-            await asyncio.sleep(EXCHANGE_SETTLE_SECONDS)
+            await asyncio.sleep(exchange_settle_seconds())
         except asyncio.CancelledError:
             return  # superseded by a newer write of the same row
         _settling.pop(message_id, None)
@@ -98,7 +104,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
     Follows Kasal's service patterns for multi-group deployments.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession):
         """
         Initialize the service with session.
 
@@ -216,7 +222,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
 
         "Completed" is judged by the row settling, not by the create: a streamed
         answer is created with its first chunk and rewritten per chunk (see
-        ``EXCHANGE_SETTLE_SECONDS``). Every write of an assistant row — create or
+        ``exchange_settle_seconds()``). Every write of an assistant row — create or
         update — comes through here and restarts the clock; the content of the
         last write is what gets remembered.
         """
@@ -261,7 +267,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                     metadata["execution_id"] = run_id
                 remember_async(
                     memory,
-                    format_turn_for_memory(question, content),
+                    format_turn_for_memory(question, content, memory),
                     source="chat",
                     metadata=metadata,
                 )
@@ -469,7 +475,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         title: str = "New Chat",
         session_id: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> ChatSession:
         """Create a named chat session owned by user_id in the current group."""
         data = {
             "id": session_id or str(uuid4()),
@@ -493,7 +499,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         page: int = 0,
         per_page: int = 50,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> List[ChatSession]:
         """List the user's named sessions in the current workspace, most recent first."""
         if not group_context or not group_context.group_ids:
             return []
@@ -509,7 +515,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         session_id: str,
         title: str,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> Optional[ChatSession]:
         """Rename a named session (group-checked). Returns None when not found."""
         if not group_context or not group_context.group_ids:
             return None

@@ -7,7 +7,7 @@ with different LLM providers that have varying JSON schema support.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ def simplify_schema(schema: Dict) -> Dict:
     return simplified
 
 
-def _supports_native_structured_output(llm) -> bool:
+def _supports_native_structured_output(llm: Any) -> bool:
     """True when the LLM enforces output_pydantic itself.
 
     Handlers built on CrewAI's OpenAICompletion Responses API path (e.g. the
@@ -108,7 +108,9 @@ def _supports_native_structured_output(llm) -> bool:
     return cap is True
 
 
-def get_compatible_converter_for_model(agent, pydantic_class):
+def get_compatible_converter_for_model(
+    agent: Any, pydantic_class: Any
+) -> Tuple[Any, Any, bool, bool]:
     """
     Get a compatible converter for a given agent model.
 
@@ -150,7 +152,9 @@ def get_compatible_converter_for_model(agent, pydantic_class):
     return default_response
 
 
-def configure_output_json_approach(task_args, pydantic_class):
+def configure_output_json_approach(
+    task_args: Dict[str, Any], pydantic_class: Any
+) -> Dict[str, Any]:
     """
     Configure the task to use output_json approach instead of output_pydantic.
 

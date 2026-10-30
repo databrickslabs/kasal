@@ -16,13 +16,16 @@ you are editing wins on specifics:
   - `src/backend/src/repositories/CLAUDE.md` — data access
   - `src/backend/src/services/execution/CLAUDE.md` — the three execution paths
     (Chat / Agent Builder / Flow Builder) and the machinery they share
-  - `src/backend/src/services/` — capabilities usable without a crew run:
-    `tools/`, `memory/`, `guardrails/`, `security/`, `knowledge/`, `export/`,
-    `trace/`
   - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system
     (renderer + composer + catalog + UIConfigurator + exported-app vendoring).
     **Read before adding/editing an A2UI component** — the touchpoints span
     frontend, backend and the export template.
+
+  The capability packages under `src/backend/src/services/` (`tools/`, `memory/`,
+  `guardrails/`, `security/`, `knowledge/`, `export/`, `trace/`) have NO CLAUDE.md
+  of their own; `services/CLAUDE.md` ("Two shapes live here") covers them, and
+  `src/backend/CLAUDE.md` has the memory package map. To check this list:
+  `git ls-files | grep 'CLAUDE.md$'`.
 
 ## Important Project Rules
 
@@ -36,7 +39,7 @@ you are editing wins on specifics:
 ### Documentation Location
 - **ALWAYS create documentation in `src/docs/` directory**
 - Do not create docs in the root `docs/` folder
-- Frontend copies from `src/docs/` to `public/docs/` for display
+- The frontend build copies `src/docs/` to `src/frontend/.generated/public/docs/` for display, leaving out internal pages (`archive/`, `reviews/`, the files listed in `src/scripts/build-tasks.cjs`, and any page whose opening carries a `**Status: internal` banner)
 - Follow existing documentation patterns and naming conventions
 
 ### Test Files Location
@@ -64,7 +67,7 @@ you are editing wins on specifics:
 **Target ≤ 800 lines per file. 1500 is the hard ceiling.** Same pair for source
 and tests.
 
-Set from the tree as it is: 89% of files are already under 800, and only 2.8% are
+Set from the tree as it is: about 94% of files are under 800, and under 2% are
 over 1500 — exceptional, which is what a ceiling should mean. The previous pair
 (400 / 800) put the target at the 75th percentile and left 131 files above the
 "hard" ceiling, so it taught people to skip the rule rather than split the file.
@@ -84,6 +87,13 @@ future change to it. Applies to `.py`, `.ts`, and `.tsx` under `src/backend/` an
 - **Touch it, shrink it.** Any non-trivial edit to a file over the ceiling should
   leave it smaller than you found it — pull out one coherent seam, not a token
   gesture.
+- **Functions: 200 lines at most.** A Python function or method in
+  `src/backend/src` may not pass 200 lines; one already over may only shrink.
+  Split it into named steps.
+- **CI enforces this** for `src/backend/src` and `src/frontend/src` (not yet for
+  `src/backend/tests`) with `src/backend/tests/unit/architecture/test_size_ratchet.py`
+  (see "Enforcement ratchets" below). When you shrink a baselined file or
+  function, that test fails until you lower the baseline with its `--update`.
 - **Do not mass-refactor files you were not asked to touch.** Splitting modules
   the crew/flow **subprocess** imports is high-risk (see
   `src/backend/src/services/execution/CLAUDE.md`); a drive-by split that passes
@@ -102,7 +112,8 @@ one another engineer can name:
 - **Keep the public import path stable.** Re-export from the package
   `__init__.py` / `index.ts` so call sites do not churn.
 
-**Known offenders.** 30 source files are over the 1500 ceiling, so there is no
+**Known offenders.** Roughly 30 source files are over the 1500 ceiling (28 on
+2026-09-26; the number drifts every week), so there is no
 hand-maintained table here — a list that long goes stale the week it is written
 (the previous one named 8 files, three of them under paths that no longer existed).
 Ask the tree instead:
@@ -118,15 +129,37 @@ The `$2 != "total"` matters: `wc -l` emits a `total` row per batch, and without
 it the count reads one too high — which is exactly how the number above was
 previously wrong.
 
-The heaviest are `services/agent_builder/process_executor.py` (3051), the PowerBI
-semantic-model tools (3004 / 2912), `services/execution/service.py` (2735) and
-`services/tools/tool_factory.py` (2709). Do not add to any file already over the
-ceiling; shrink it when you are in it.
+The heaviest are the PowerBI semantic-model tools,
+`services/agent_builder/process_executor.py`, `services/tools/tool_factory.py`
+and `services/execution/service.py` (roughly 2,100-3,000 lines). Do not add
+to any file already over the ceiling; shrink it when you are in it.
 
-Counts drift with every commit — treat the four above as "which files", not as
-current line numbers, and run the command when the number matters.
+Counts drift with every commit: treat the files above as "which files", not as
+current sizes, and run the command when the number matters.
 
 Check before you commit: `wc -l <files you touched>`.
+
+### Enforcement ratchets
+
+Several checks freeze existing debt so it can only shrink. They fail when a count
+grows, and most also fail when a count drops until you record the gain. Lower a
+baseline from `src/backend` with the owning test's `--update`, and commit the JSON
+with the change that earned it:
+
+```bash
+uv run python tests/unit/architecture/test_size_ratchet.py --update                 # file + function size
+uv run python tests/unit/architecture/test_ruff_ratchet.py --update                 # BLE001/S110/TRY400/G004/B904
+uv run python tests/unit/architecture/test_env_reads_stay_in_config.py --update     # env reads
+uv run python tests/unit/architecture/test_no_exception_text_in_http_errors.py --update
+```
+
+`--update` only ever lowers a baseline; it cannot absorb a regression, so when a
+count grows, fix the code. Never hand-edit a baseline upwards. The same rule
+applies to the import-linter `ignore_imports` lists in `src/backend/pyproject.toml`
+(delete a line when you fix the import; never add one), the mypy baseline
+(`check_types.py`) and the ESLint `--max-warnings` cap in
+`.github/workflows/quality.yml`. Details: `src/docs/continuous-integration.md`
+("Ratchets"). Run them all with `uv run pytest -q tests/unit/architecture`.
 
 ### Build and Deploy
 - **Build frontend static assets**: `python src/build.py`
@@ -204,4 +237,4 @@ Rules:
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
-- After modifying code files in this session, run `graphify --update .` to keep the graph current (AST-only, no API cost)
+- After modifying code files in this session, run `graphify --update .` to keep the graph current (AST-only, no API cost; it reuses cached extractions for unchanged files). `graphify-out/` is gitignored and local to each checkout, so a fresh worktree has no graph until you build one with `graphify .`

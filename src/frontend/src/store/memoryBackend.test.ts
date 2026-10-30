@@ -175,61 +175,6 @@ describe('memoryBackendStore', () => {
     });
   });
 
-  describe('saveConfig', () => {
-    it('should save config successfully after validation', async () => {
-      (MemoryBackendService.validateConfig as Mock).mockResolvedValue({ valid: true });
-      (MemoryBackendService.saveConfig as Mock).mockResolvedValue({ 
-        success: true, 
-        message: 'Config saved' 
-      });
-      
-      const { result } = renderHook(() => useMemoryBackendStore());
-      
-      let success = false;
-      await act(async () => {
-        success = await result.current.saveConfig();
-      });
-      
-      expect(success).toBe(true);
-      expect(MemoryBackendService.validateConfig).toHaveBeenCalled();
-      expect(MemoryBackendService.saveConfig).toHaveBeenCalled();
-    });
-
-    it('should not save if validation fails', async () => {
-      (MemoryBackendService.validateConfig as Mock).mockResolvedValue({ 
-        valid: false, 
-        errors: ['Invalid config'] 
-      });
-      
-      const { result } = renderHook(() => useMemoryBackendStore());
-      
-      let success = true;
-      await act(async () => {
-        success = await result.current.saveConfig();
-      });
-      
-      expect(success).toBe(false);
-      expect(MemoryBackendService.saveConfig).not.toHaveBeenCalled();
-    });
-
-    it('should handle save errors', async () => {
-      (MemoryBackendService.validateConfig as Mock).mockResolvedValue({ valid: true });
-      (MemoryBackendService.saveConfig as Mock).mockRejectedValue(
-        new Error('Save failed')
-      );
-      
-      const { result } = renderHook(() => useMemoryBackendStore());
-      
-      let success = true;
-      await act(async () => {
-        success = await result.current.saveConfig();
-      });
-      
-      expect(success).toBe(false);
-      expect(result.current.error).toBe('Save failed');
-    });
-  });
-
   describe('loadConfig', () => {
     it('should load config successfully', async () => {
       const mockConfig = {

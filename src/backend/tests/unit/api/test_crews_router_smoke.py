@@ -29,7 +29,7 @@ from tests.unit.api.conftest import register_exception_handlers
 
 def gc(role="user"):
     return GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+        group_ids=["g1"], group_email="u@x", email_domain="example.com", user_role=role
     )
 
 
@@ -100,16 +100,22 @@ async def test_list_get_create_paths():
 
     # list
     svc.find_by_group = AsyncMock(return_value=[make_crew()])
-    out = await list_crews(service=svc, group_context=gc("operator"))
+    out = await list_crews(
+        service=svc, group_context=gc("operator"), secrets_visible=True
+    )
     assert isinstance(out, list) and out[0].name == "C"
 
     # get 404 and success
     svc.get_by_group = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await get_crew(uuid4(), service=svc, group_context=gc("operator"))
+        await get_crew(
+            uuid4(), service=svc, group_context=gc("operator"), secrets_visible=True
+        )
     c = make_crew()
     svc.get_by_group = AsyncMock(return_value=c)
-    got = await get_crew(c.id, service=svc, group_context=gc("operator"))
+    got = await get_crew(
+        c.id, service=svc, group_context=gc("operator"), secrets_visible=True
+    )
     assert got.name == "C"
 
     # create forbidden and success

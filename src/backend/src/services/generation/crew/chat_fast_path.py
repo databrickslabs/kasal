@@ -9,6 +9,7 @@ import traceback
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.core.sse_manager import SSEEvent, sse_manager
+from src.services.generation.crew.host import CrewGenerationBase
 from src.utils.user_context import GroupContext
 
 if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
@@ -17,7 +18,7 @@ if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
 logger = logging.getLogger(__name__)
 
 
-class ChatFastPathMixin:
+class ChatFastPathMixin(CrewGenerationBase):
     """ChatMode's 'chat' answer mode.
 
     A single Agent.kickoff_async. The bespoke plan + agent + task generations of

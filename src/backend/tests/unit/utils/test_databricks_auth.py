@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import subprocess
@@ -14,13 +13,11 @@ from src.utils.databricks_auth import (
     extract_user_token_from_request,
     get_auth_context,
     get_current_databricks_user,
-    get_databricks_auth_headers_sync,
     get_mcp_access_token,
     get_mcp_auth_headers,
     get_workspace_client,
     get_workspace_client_with_fallback,
     is_scope_error,
-    setup_environment_variables,
     validate_databricks_connection,
 )
 
@@ -64,9 +61,9 @@ class TestAuthContext:
             token="t",
             workspace_url="https://h.com",
             auth_method="obo",
-            user_identity="u@x.com",
+            user_identity="u@example.com",
         )
-        assert ctx.user_identity == "u@x.com"
+        assert ctx.user_identity == "u@example.com"
 
     def test_url_normalization_no_https(self):
         ctx = AuthContext(token="t", workspace_url="host.com/", auth_method="pat")
@@ -117,10 +114,10 @@ class TestAuthContext:
             token="t",
             workspace_url="https://h.com",
             auth_method="obo",
-            user_identity="u@x.com",
+            user_identity="u@example.com",
         )
         r = repr(ctx)
-        assert "obo" in r and "u@x.com" in r
+        assert "obo" in r and "u@example.com" in r
 
     def test_repr_service(self):
         ctx = AuthContext(
@@ -437,8 +434,8 @@ class TestGetAuthHeaders:
         assert headers is None and "boom" in err
 
     @pytest.mark.asyncio
-    async def test_user_token_sets_access_token(self):
-        """Line 484: user_token param triggers set_user_access_token."""
+    async def test_user_token_is_used_for_the_call(self):
+        """The user_token param is sent as OBO for this call (never stored)."""
         auth = _make_auth(
             config_loaded=True,
             user_access_token=None,
@@ -450,7 +447,7 @@ class TestGetAuthHeaders:
             auth, "_load_config", new_callable=AsyncMock, return_value=True
         ):
             headers, err = await auth.get_auth_headers(user_token="ut")
-        # After set_user_access_token, OBO path returns bearer headers
+        # The OBO path returns bearer headers carrying the caller's token
         assert headers is not None
         assert headers["Authorization"] == "Bearer ut"
 
@@ -769,12 +766,6 @@ class TestSimpleAccessors:
             == "https://h.com"
         )
 
-    def test_get_api_token(self):
-        assert _make_auth(api_token="tok").get_api_token() == "tok"
-
-    def test_get_api_token_none(self):
-        assert _make_auth(api_token=None).get_api_token() is None
-
 
 # ── validate_databricks_connection ─────────────────────
 
@@ -839,161 +830,6 @@ class TestValidateDatabricksConnection:
 
 
 # ── get_databricks_auth_headers_sync ───────────────────
-
-
-class TestGetDatabricksAuthHeadersSync:
-    def test_basic_call(self):
-        result = get_databricks_auth_headers_sync()
-        assert isinstance(result, tuple) and len(result) == 2
-
-    def test_from_async_context(self):
-        async def _inner():
-            return get_databricks_auth_headers_sync()
-
-        loop = asyncio.new_event_loop()
-        try:
-            headers, err = loop.run_until_complete(_inner())
-            assert headers is None
-            assert "Cannot call sync version from async context" in err
-        finally:
-            loop.close()
-
-    def test_exception_path(self):
-        """Lines 760-762: outer exception."""
-        with (
-            patch("asyncio.get_running_loop", side_effect=RuntimeError),
-            patch("asyncio.run", side_effect=Exception("async boom")),
-        ):
-            headers, err = get_databricks_auth_headers_sync()
-        assert headers is None
-        assert "async boom" in err
-
-
-# ── setup_environment_variables ────────────────────────
-
-
-class TestSetupEnvironmentVariables:
-    def test_config_load_fails(self):
-        import warnings
-
-        with patch.object(
-            _databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False
-        ):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                assert setup_environment_variables(user_token="tok") is False
-
-    def test_set_access_token_fails(self):
-        import warnings
-
-        orig_host = _databricks_auth._workspace_host
-        orig_token = _databricks_auth._api_token
-        try:
-            _databricks_auth._workspace_host = "https://h.com"
-            with (
-                patch.object(
-                    _databricks_auth,
-                    "_load_config",
-                    new_callable=AsyncMock,
-                    return_value=True,
-                ),
-                patch.object(
-                    _databricks_auth,
-                    "set_user_access_token",
-                    side_effect=Exception("oops"),
-                ),
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", DeprecationWarning)
-                    result = setup_environment_variables(user_token="tok")
-            assert result is True
-            assert os.environ.get("DATABRICKS_TOKEN") == "tok"
-        finally:
-            _databricks_auth._workspace_host = orig_host
-            _databricks_auth._api_token = orig_token
-            for v in [
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_API_KEY",
-                "DATABRICKS_HOST",
-                "DATABRICKS_API_BASE",
-            ]:
-                os.environ.pop(v, None)
-
-    def test_without_token_uses_api_token(self):
-        import warnings
-
-        orig_token = _databricks_auth._api_token
-        orig_host = _databricks_auth._workspace_host
-        try:
-            _databricks_auth._api_token = "pat_value"
-            _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(
-                _databricks_auth,
-                "_load_config",
-                new_callable=AsyncMock,
-                return_value=True,
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", DeprecationWarning)
-                    assert setup_environment_variables(None) is True
-            assert os.environ.get("DATABRICKS_TOKEN") == "pat_value"
-        finally:
-            _databricks_auth._api_token = orig_token
-            _databricks_auth._workspace_host = orig_host
-            for v in [
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_API_KEY",
-                "DATABRICKS_HOST",
-                "DATABRICKS_API_BASE",
-            ]:
-                os.environ.pop(v, None)
-
-    def test_from_async_context(self):
-        import warnings
-
-        orig_host = _databricks_auth._workspace_host
-
-        async def _inner():
-            _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(
-                _databricks_auth,
-                "_load_config",
-                new_callable=AsyncMock,
-                return_value=True,
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", DeprecationWarning)
-                    return setup_environment_variables(user_token="tok2")
-
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(_inner())
-            assert isinstance(result, bool)
-        finally:
-            loop.close()
-            _databricks_auth._workspace_host = orig_host
-            for v in [
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_API_KEY",
-                "DATABRICKS_HOST",
-                "DATABRICKS_API_BASE",
-            ]:
-                os.environ.pop(v, None)
-
-    def test_outer_exception(self):
-        """Lines 868-870."""
-        import warnings
-
-        with (
-            patch("asyncio.get_running_loop", side_effect=RuntimeError),
-            patch("asyncio.run", side_effect=Exception("run fail")),
-        ):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                assert setup_environment_variables(user_token="tok") is False
-
-
-# ── extract_user_token_from_request ────────────────────
 
 
 class TestExtractUserToken:
@@ -1091,7 +927,7 @@ class TestGetAuthContext:
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         mock_user = MagicMock()
-        mock_user.user_name = "u@x.com"
+        mock_user.user_name = "u@example.com"
         mock_user.application_id = None
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_user
@@ -1108,8 +944,8 @@ class TestGetAuthContext:
                     return_value=mock_client,
                 ),
             ):
-                result = await get_auth_context(user_token="user_tok")
-            assert result.auth_method == "obo" and result.user_identity == "u@x.com"
+                ctx = await get_auth_context(user_token="user_tok")
+            assert ctx.auth_method == "obo" and ctx.user_identity == "u@example.com"
         finally:
             self._restore(s)
 
@@ -1308,9 +1144,9 @@ class TestGetAuthContext:
                 result = (
                     await get_auth_context()
                 )  # no group_id param → searches all groups
-            assert result is not None, (
-                "PAT under a non-primary group should still resolve"
-            )
+            assert (
+                result is not None
+            ), "PAT under a non-primary group should still resolve"
             assert result.auth_method == "pat" and result.token == "pat_from_g3"
         finally:
             invalidate_pat_cache()
@@ -1920,7 +1756,7 @@ class TestGetCurrentDatabricksUser:
     @pytest.mark.asyncio
     async def test_user_name(self):
         mu = MagicMock()
-        mu.user_name = "u@x.com"
+        mu.user_name = "u@example.com"
         mc = MagicMock()
         mc.current_user.me.return_value = mu
         with patch(
@@ -1929,7 +1765,7 @@ class TestGetCurrentDatabricksUser:
             return_value=mc,
         ):
             u, e = await get_current_databricks_user(user_token="t")
-        assert u == "u@x.com" and e is None
+        assert u == "u@example.com" and e is None
 
     @pytest.mark.asyncio
     async def test_application_id(self):
@@ -2218,7 +2054,7 @@ class TestDatabricksAuthHttpxMethods:
         auth = self._mk(api_token="t", workspace_host="https://h.com")
         mr = MagicMock()
         mr.status_code = 200
-        mr.json.return_value = {"userName": "u@x.com"}
+        mr.json.return_value = {"userName": "u@example.com"}
         mc = AsyncMock()
         mc.get.return_value = mr
         with patch("src.utils.databricks_auth.httpx.AsyncClient") as M:
@@ -2298,7 +2134,7 @@ class TestOboValidationCache:
         for k, v in s.items():
             setattr(_databricks_auth, f"_{k}", v)
 
-    def _mock_client(self, user_name="u@x.com"):
+    def _mock_client(self, user_name="u@example.com"):
         mock_user = MagicMock()
         mock_user.user_name = user_name
         mock_user.application_id = None
@@ -2325,8 +2161,8 @@ class TestOboValidationCache:
             ):
                 r1 = await get_auth_context(user_token="cache-tok-1")
                 r2 = await get_auth_context(user_token="cache-tok-1")
-            assert r1.user_identity == "u@x.com"
-            assert r2.user_identity == "u@x.com"
+            assert r1.user_identity == "u@example.com"
+            assert r2.user_identity == "u@example.com"
             assert r2.auth_method == "obo"
             assert mock_wc.call_count == 1  # cached on second call
         finally:
@@ -2421,7 +2257,7 @@ class TestOboValidationCache:
         # Fill with expired entries up to the cap: put() prunes them
         for i in range(m._OBO_VALIDATION_CACHE_MAX):
             m._OBO_VALIDATION_CACHE[f"h{i}"] = (None, 0.0)
-        m._obo_cache_put("fresh", "id@x.com")
+        m._obo_cache_put("fresh", "id@example.com")
         assert list(m._OBO_VALIDATION_CACHE) == ["fresh"]
         # Fill with live entries up to the cap: put() clears rather than grow unbounded
         import time as _time
@@ -2429,7 +2265,7 @@ class TestOboValidationCache:
         live = _time.time() + 1000
         for i in range(m._OBO_VALIDATION_CACHE_MAX):
             m._OBO_VALIDATION_CACHE[f"l{i}"] = (None, live)
-        m._obo_cache_put("fresh2", "id2@x.com")
+        m._obo_cache_put("fresh2", "id2@example.com")
         assert list(m._OBO_VALIDATION_CACHE) == ["fresh2"]
 
 
@@ -2583,3 +2419,60 @@ class TestPatLookupCache:
         m._PAT_TOKEN_CACHE["g2"] = ("t2", _time.time() + 60)
         m.invalidate_pat_cache()
         assert m._PAT_TOKEN_CACHE == {}
+
+
+class TestLocalDevPat:
+    """A PAT in the environment is a local-dev convenience, never used in Apps.
+
+    Inside Databricks Apps the process environment is shared by every workspace
+    the server serves, so a token found there belongs to nobody in particular.
+    """
+
+    def test_env_pat_is_used_outside_apps(self, monkeypatch):
+        from src.utils.databricks_auth import local_dev_pat
+
+        monkeypatch.setenv("DATABRICKS_TOKEN", "dev-pat")
+        with patch("src.core.databricks_app.is_databricks_app", return_value=False):
+            assert local_dev_pat() == "dev-pat"
+
+    def test_env_pat_is_ignored_inside_apps(self, monkeypatch):
+        from src.utils.databricks_auth import local_dev_pat
+
+        monkeypatch.setenv("DATABRICKS_TOKEN", "leaked-pat")
+        monkeypatch.setenv("DATABRICKS_API_KEY", "leaked-key")
+        with patch("src.core.databricks_app.is_databricks_app", return_value=True):
+            assert local_dev_pat() is None
+
+    @pytest.mark.asyncio
+    async def test_get_auth_context_never_returns_an_env_pat_inside_apps(
+        self, monkeypatch
+    ):
+        saved = (
+            _databricks_auth._workspace_host,
+            _databricks_auth._client_id,
+            _databricks_auth._client_secret,
+        )
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        monkeypatch.setenv("DATABRICKS_TOKEN", "leaked-pat")
+        try:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.core.databricks_app.is_databricks_app", return_value=True),
+                patch("src.utils.user_context.UserContext") as mock_uc,
+            ):
+                mock_uc.get_group_context.return_value = None
+                result = await get_auth_context()
+            assert result is None or result.token != "leaked-pat"
+        finally:
+            (
+                _databricks_auth._workspace_host,
+                _databricks_auth._client_id,
+                _databricks_auth._client_secret,
+            ) = saved

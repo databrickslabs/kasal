@@ -81,7 +81,7 @@ async def test_postgres_adds_native_json_only_when_missing(present):
     await _ensure_memory_backend_columns(conn)
 
     statements = [call.args[0] for call in conn.exec_driver_sql.await_args_list]
-    assert "information_schema.columns" in statements[0]
+    assert "pg_attribute" in statements[0]
     assert "memory_backends" in statements[0]
     assert statements[1:] == (
         []

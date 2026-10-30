@@ -28,6 +28,8 @@ was before, so nothing regresses.
 import logging
 
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 logger = logging.getLogger("src.services.databricks.lakebase.superuser")
 
@@ -46,7 +48,9 @@ SUPERUSER_ROLE = "databricks_superuser"
 # exact mechanism that turned one "must be owner" into a total no-op before.
 
 
-async def _run_isolated_async(conn, sql: str, ok_log: str, fail_log: str) -> bool:
+async def _run_isolated_async(
+    conn: AsyncConnection, sql: str, ok_log: str, fail_log: str
+) -> bool:
     try:
         nested = conn.begin_nested()
     except Exception:  # noqa: BLE001 — no savepoint support (test mock); run bare
@@ -67,7 +71,7 @@ async def _run_isolated_async(conn, sql: str, ok_log: str, fail_log: str) -> boo
         return False
 
 
-def _run_isolated_sync(conn, sql: str, ok_log: str, fail_log: str) -> bool:
+def _run_isolated_sync(conn: Connection, sql: str, ok_log: str, fail_log: str) -> bool:
     try:
         nested = conn.begin_nested()
     except Exception:  # noqa: BLE001
@@ -88,7 +92,7 @@ def _run_isolated_sync(conn, sql: str, ok_log: str, fail_log: str) -> bool:
         return False
 
 
-async def enter_superuser_async(conn) -> bool:
+async def enter_superuser_async(conn: AsyncConnection) -> bool:
     """``SET ROLE databricks_superuser`` on an async connection. Best-effort.
 
     Returns True when the session is now acting as the shared owner role, False
@@ -103,7 +107,7 @@ async def enter_superuser_async(conn) -> bool:
     )
 
 
-def enter_superuser_sync(conn) -> bool:
+def enter_superuser_sync(conn: Connection) -> bool:
     """``SET ROLE databricks_superuser`` on a sync connection. Best-effort."""
     return _run_isolated_sync(
         conn,
@@ -113,7 +117,7 @@ def enter_superuser_sync(conn) -> bool:
     )
 
 
-async def enable_pgvector_async(conn) -> bool:
+async def enable_pgvector_async(conn: AsyncConnection) -> bool:
     """``CREATE EXTENSION IF NOT EXISTS vector``. Best-effort; requires superuser.
 
     Call AFTER :func:`enter_superuser_async`. Returns True when pgvector is
@@ -128,7 +132,7 @@ async def enable_pgvector_async(conn) -> bool:
     )
 
 
-def enable_pgvector_sync(conn) -> bool:
+def enable_pgvector_sync(conn: Connection) -> bool:
     """``CREATE EXTENSION IF NOT EXISTS vector`` on a sync connection. Best-effort."""
     return _run_isolated_sync(
         conn,

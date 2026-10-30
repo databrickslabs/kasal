@@ -23,16 +23,20 @@ permissions:
 jobs:
   lockfile-hygiene:
     name: Lockfile hygiene (no internal proxy URLs)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Reject internal proxy hosts in committed lockfiles
         run: |
           set -euo pipefail
-          # Internal dev proxies are local-dev-only and must never be committed.
+          # Internal proxies are local-dev-only and must never be committed.
           # Committed lockfiles must reference public registries so the repo is
-          # portable and the Databricks Apps build (no VPN) can install.
-          patterns='npm-proxy\.dev\.databricks\.com|pypi-proxy\.dev\.databricks\.com'
+          # portable and the Databricks Apps build (no VPN) can install. Both the
+          # legacy *.dev hosts and the current *.cloud hosts (pypi-proxy.cloud,
+          # npm-proxy.cloud, pypi-pytorch-proxy, pypi-nvidia-proxy) are matched.
+          patterns='(npm|pypi|pypi-pytorch|pypi-nvidia)-proxy\.(dev|cloud)\.databricks\.com'
           files="src/backend/uv.lock src/frontend/package-lock.json"
           found=0
           for f in $files; do
@@ -48,14 +52,18 @@ jobs:
 
   python-cve:
     name: Python deps — lock drift + CVE audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: src/backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
       - name: Lockfile is in sync with pyproject (no drift)
         run: uv lock --check
       - name: CVE audit (pip-audit over the locked deps)
@@ -78,15 +86,19 @@ jobs:
 
   npm-cve:
     name: Frontend deps — lock consistency + npm audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: src/frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
       - name: Lockfile consistency (npm ci installs strictly from the lock)
         run: npm ci
       - name: CVE audit (fail on high/critical)

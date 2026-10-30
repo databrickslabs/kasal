@@ -11,7 +11,7 @@ This module is the other backend. Which one a run uses is DERIVED, never
 configured by hand:
 
     Databricks configured  -> tracking_uri "databricks", /Shared/<experiment>
-    else local server      -> tracking_uri <this>,       <experiment>
+    else local server set  -> tracking_uri <that URL>,   <experiment>
     else                   -> tracing off
 
 Three rules this deliberately keeps:
@@ -21,17 +21,17 @@ Three rules this deliberately keeps:
   scatters ``mlruns/`` directories through the tree. A server URI creates none;
   a ``file://`` store does. Accepting only http(s) keeps that intent instead of
   quietly undoing it.
-* **The launch value is the source of truth.** Because of that same override,
-  the live ``MLFLOW_TRACKING_URI`` always reads "databricks" and cannot answer
-  "is this a local run?" — only ``KASAL_LAUNCH_MLFLOW_TRACKING_URI``, which
-  ``main.py`` stashes before overwriting, can.
+* **Configured, not launched.** The server is the workspace's
+  ``mlflowconfig.local_tracking_uri`` (Configuration → MLflow). It used to be
+  the MLFLOW_TRACKING_URI the backend was launched with (plus
+  MCP_SERVER_ENABLED), which nothing in the UI could set — and which
+  ``main.py``'s "databricks" override hid unless it had been stashed first.
 * **Fail soft.** A tracing backend that is unreachable must disable tracing, not
   fail the run — the same rule the A2UI and guardrail paths already follow.
   ``is_reachable`` exists so a dev machine with no server running degrades to
   "no tracing" instead of paying a connect timeout on every crew execution.
 """
 
-import os
 import re
 from typing import Optional
 from urllib.parse import urlparse
@@ -40,10 +40,8 @@ from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().system
 
-#: Where a dev machine's MLflow server is expected. Used when nothing else says
-#: otherwise AND no Databricks workspace is configured, so a deployed app cannot
-#: be redirected here by accident.
-DEFAULT_LOCAL_URI = "http://127.0.0.1:5555"
+#: What the Configuration → MLflow form suggests for a local server.
+SUGGESTED_LOCAL_URI = "http://127.0.0.1:5555"
 
 #: Seconds to wait when checking the server is actually there. Short on purpose:
 #: this runs before every traced execution, and a dev server either answers
@@ -51,31 +49,88 @@ DEFAULT_LOCAL_URI = "http://127.0.0.1:5555"
 REACHABILITY_TIMEOUT = 2.0
 
 
-def local_tracking_uri() -> Optional[str]:
-    """The OSS MLflow server to trace to, or None if this is not a local setup.
+#: Hostnames that name this machine without resolving anything.
+_LOOPBACK_NAMES = frozenset({"localhost"})
 
-    Reads the value the process was LAUNCHED with (see the module docstring for
-    why the live env var cannot be trusted), falling back to the dev default.
-    Returns None for a Databricks-schemed value or anything that is not an
-    http(s) URL.
+
+def _is_loopback(host: str) -> bool:
+    import ipaddress
+
+    if host.lower() in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_local_tracking_uri(raw: str) -> str:
+    """``raw`` as a safe local MLflow server URL, or ValueError saying why not.
+
+    Traces carry prompts, outputs and tool results, so the destination is a
+    security decision, not a formatting one:
+
+    * **https anywhere; plain http only to this machine** (localhost,
+      127.0.0.0/8, ::1). Plain http to another host would ship every trace in
+      the clear, and an arbitrary http URL is exactly how a workspace member
+      redirected traces to a host of their choosing.
+    * **No credentials in the URL.** ``user:pass@`` would be stored in the
+      database and shown back in the Configuration form.
+    * **Another host is never an internal address.** The backend itself GETs
+      the server (``experiment_id``), so a private, link-local or
+      cloud-metadata destination would be a server-side request into the
+      deployment's own network.
     """
-    raw = (
-        os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI")
-        or os.getenv("MLFLOW_TRACKING_URI")
-        or ""
-    ).strip()
+    value = raw.strip().rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            "The local MLflow server must be an http(s) URL, "
+            "e.g. http://127.0.0.1:5555"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("The local MLflow server URL must not contain credentials")
+    try:
+        host = parsed.hostname
+        _ = parsed.port  # raises ValueError on a malformed port
+    except ValueError as exc:
+        raise ValueError(f"Invalid local MLflow server URL: {exc}") from exc
+    if not host:
+        raise ValueError("The local MLflow server URL must name a host")
+    if parsed.scheme == "http" and not _is_loopback(host):
+        raise ValueError(
+            "Plain http is only allowed for a server on this machine "
+            "(localhost, 127.0.0.1 or ::1); use https for any other host"
+        )
+    if not _is_loopback(host):
+        from src.utils.url_security import UnsafeUrlError, check_url_structure
 
-    if raw.startswith("databricks"):
-        # An explicit Databricks tracking URI is not a local setup.
+        try:
+            check_url_structure(value)
+        except UnsafeUrlError as exc:
+            raise ValueError(
+                f"The local MLflow server must not be an internal address: {exc}"
+            ) from exc
+    return value
+
+
+def local_tracking_uri(configured: Optional[str]) -> Optional[str]:
+    """The OSS MLflow server to trace to, from Configuration → MLflow, or None.
+
+    Only a URL :func:`validate_local_tracking_uri` accepts counts (see the
+    module docstring); anything else — unset, a file store, a Databricks URI, a
+    plain-http remote host saved before that rule existed — means "no local
+    server". The same rule is applied on read as on write so a value stored
+    before it (or written straight to the database) cannot redirect traces.
+    """
+    raw = (configured or "").strip()
+    if not raw:
         return None
-    if raw.startswith(("http://", "https://")):
-        return raw.rstrip("/")
-    if raw:
-        # A file store or some other scheme: not something with a UI to link to,
-        # and not something we want creating directories.
-        logger.debug("[mlflow-local] ignoring non-http tracking URI %r", raw)
+    try:
+        return validate_local_tracking_uri(raw)
+    except ValueError as exc:
+        logger.warning("[mlflow-local] ignoring local tracking URI: %s", exc)
         return None
-    return DEFAULT_LOCAL_URI
 
 
 def experiment_slug(teamspace: Optional[str]) -> str:
@@ -106,7 +161,9 @@ def local_experiment_name(
     become an experiment literally named "/Shared/…", which works but reads as a
     mistake, so the workspace prefix is stripped.
     """
-    name = (configured or os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT") or "").strip()
+    # From the MLflow configuration only (Configuration → MLflow); the old
+    # MLFLOW_CREW_TRACES_EXPERIMENT env override is gone.
+    name = (configured or "").strip()
     if not name:
         return experiment_slug(teamspace)
     if name.startswith("/Shared/"):
@@ -157,7 +214,7 @@ def experiment_id(uri: str, name: str, timeout: float = REACHABILITY_TIMEOUT) ->
     query = urllib.parse.urlencode({"experiment_name": name})
     url = f"{uri.rstrip('/')}/api/2.0/mlflow/experiments/get-by-name?{query}"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+        with urllib.request.urlopen(url, timeout=timeout) as response:  # fmt: skip  # uri passed validate_local_tracking_uri on write and read — nosemgrep: tmp.databricks.ssrf.requests-user-url
             payload = json.loads(response.read().decode("utf-8"))
         return str(payload.get("experiment", {}).get("experiment_id", "") or "")
     except urllib.error.HTTPError as exc:
@@ -201,3 +258,34 @@ def prompt_url(base_uri: str, prompt_name: str) -> str:
     from urllib.parse import quote
 
     return f"{base_uri.rstrip('/')}/#/prompts/{quote(prompt_name, safe='')}"
+
+
+def ensure_experiment(uri: str, name: str) -> str:
+    """Make ``name`` usable on the server at ``uri``; return its experiment id.
+
+    Creates it when missing, and RESTORES it when it was deleted: MLflow refuses
+    to set a deleted experiment active or to create a new one with its name, so
+    an experiment deleted in the MLflow UI otherwise switched tracing off for
+    good ("Cannot set a deleted experiment ... as the active experiment"). It is
+    Kasal's own trace destination, the same one enabling tracing creates.
+
+    Uses a client bound to ``uri`` rather than the global tracking URI, so it is
+    safe to call from the server process. Blocking: run it in a thread.
+    """
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=uri)
+    experiment = client.get_experiment_by_name(name)
+    if experiment is None:
+        experiment_id = str(client.create_experiment(name))
+        logger.info("[mlflow-local] created experiment %s (id=%s)", name, experiment_id)
+        return experiment_id
+    if getattr(experiment, "lifecycle_stage", "") == "deleted":
+        client.restore_experiment(experiment.experiment_id)
+        logger.warning(
+            "[mlflow-local] experiment %s (id=%s) had been deleted; restored it so "
+            "tracing can resume",
+            name,
+            experiment.experiment_id,
+        )
+    return str(experiment.experiment_id)

@@ -212,41 +212,6 @@ class TestRunFileBased:
 # ---------------------------------------------------------------------------
 
 
-class TestRunAsJson:
-    def test_returns_string(self):
-        p = MetricExpressionValidatorPipeline()
-        result = p.run_as_json(
-            databricks_expr="SUM(source.amount)",
-            dax_expr="SUM(T[amount])",
-        )
-        assert isinstance(result, str)
-
-    def test_valid_json(self):
-        p = MetricExpressionValidatorPipeline()
-        result = p.run_as_json(
-            databricks_expr="SUM(source.amount)",
-            dax_expr="SUM(T[amount])",
-        )
-        parsed = json.loads(result)
-        assert isinstance(parsed, dict)
-
-    def test_error_case_serialised(self):
-        p = MetricExpressionValidatorPipeline()
-        result = p.run_as_json()  # no params → error
-        parsed = json.loads(result)
-        assert "error" in parsed
-
-    def test_file_based_serialised(self, tmp_path):
-        yaml_path, json_path = _write_files(tmp_path)
-        p = MetricExpressionValidatorPipeline()
-        result = p.run_as_json(
-            metrics_view_yaml_path=yaml_path,
-            table_mapping_json_path=json_path,
-        )
-        parsed = json.loads(result)
-        assert "skipped" in parsed or "evaluated" in parsed
-
-
 # ---------------------------------------------------------------------------
 # Mapping merge behaviour
 # ---------------------------------------------------------------------------

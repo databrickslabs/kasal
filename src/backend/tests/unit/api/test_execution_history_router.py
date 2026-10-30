@@ -189,8 +189,13 @@ def mock_execution_history_service():
 @pytest.fixture
 def mock_group_context():
     """Create a mock group context."""
+    # Admin of one selected workspace: the delete routes check the role
+    # (see test_execution_history_router_roles.py).
     context = GroupContext(
-        group_ids=["group-123"], group_email="test@example.com", user_id="user-123"
+        group_ids=["group-123"],
+        group_email="test@example.com",
+        user_id="user-123",
+        user_role="admin",
     )
     return context
 
@@ -279,7 +284,22 @@ class TestGetExecutionHistory:
         assert data["total"] == 2
         assert len(data["executions"]) == 2
         mock_execution_history_service.get_execution_history.assert_called_once_with(
-            50, 0, group_ids=mock_group_context.group_ids
+            50, 0, group_ids=mock_group_context.group_ids, include_payload=False
+        )
+
+    def test_get_execution_history_payload_is_opt_in(
+        self, client, mock_execution_history_service, mock_group_context
+    ):
+        """List rows are summaries unless the caller asks for payloads."""
+        mock_execution_history_service.get_execution_history.return_value = (
+            MockExecutionHistoryList(executions=[], total=0, limit=50, offset=0)
+        )
+
+        response = client.get("/executions/history?include_payload=true")
+
+        assert response.status_code == 200
+        mock_execution_history_service.get_execution_history.assert_called_once_with(
+            50, 0, group_ids=mock_group_context.group_ids, include_payload=True
         )
 
     def test_get_execution_history_with_pagination(
@@ -299,7 +319,7 @@ class TestGetExecutionHistory:
         assert data["limit"] == 10
         assert data["offset"] == 20
         mock_execution_history_service.get_execution_history.assert_called_once_with(
-            10, 20, group_ids=mock_group_context.group_ids
+            10, 20, group_ids=mock_group_context.group_ids, include_payload=False
         )
 
     def test_get_execution_history_invalid_params(
@@ -399,7 +419,7 @@ class TestGetExecutionById:
         assert data["id"] == 1
         assert data["job_id"] == "exec-123"
         mock_execution_history_service.get_execution_by_id.assert_called_once_with(
-            1, group_ids=mock_group_context.group_ids
+            1, tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_by_id_not_found(
@@ -464,7 +484,7 @@ class TestGetExecutionOutputs:
         assert len(data["outputs"]) == 2
         assert data["execution_id"] == "exec-123"
         mock_execution_history_service.get_execution_outputs.assert_called_once_with(
-            "exec-123", 1000, 0, group_ids=mock_group_context.group_ids
+            "exec-123", 1000, 0, tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_outputs_with_pagination(
@@ -485,7 +505,7 @@ class TestGetExecutionOutputs:
         assert data["offset"] == 50
         assert data["execution_id"] == "exec-123"
         mock_execution_history_service.get_execution_outputs.assert_called_once_with(
-            "exec-123", 100, 50, group_ids=mock_group_context.group_ids
+            "exec-123", 100, 50, tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_outputs_invalid_params(
@@ -541,7 +561,7 @@ class TestGetExecutionDebugOutputs:
         assert data["total_outputs"] == 2
         assert len(data["outputs"]) == 2
         mock_execution_history_service.get_debug_outputs.assert_called_once_with(
-            "exec-123", group_ids=mock_group_context.group_ids
+            "exec-123", tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_debug_outputs_not_found(

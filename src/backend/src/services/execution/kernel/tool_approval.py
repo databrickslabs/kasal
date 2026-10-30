@@ -22,7 +22,7 @@ machinery is skipped for tool gates (the blocked thread resumes itself).
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from src.services.execution.runtime import (
     ToolExecutionBlockedError,
@@ -105,8 +105,8 @@ async def _create_approval(
 async def _restore_running(execution_id: str) -> None:
     """Flip WAITING_FOR_APPROVAL back to RUNNING once a gate is decided.
 
-    Safe unconditionally: the run cannot reach a terminal state while its
-    worker thread is blocked on the gate.
+    Not over a run already settled from outside (a restart's reap, the sweep,
+    a stop): see services/hitl/run_state.py.
 
     A FAILED restore is not cosmetic and must not be swallowed: the run keeps
     executing while its status stays WAITING_FOR_APPROVAL, so the UI shows the
@@ -114,14 +114,10 @@ async def _restore_running(execution_id: str) -> None:
     approval" — the decision was made, but nothing reflects it. The usual cause
     is a missing parent row, so say which it is.
     """
-    from src.models.execution_status import ExecutionStatus
     from src.services.execution.status import ExecutionStatusService
+    from src.services.hitl.run_state import restore_running
 
-    updated = await ExecutionStatusService.update_status(
-        job_id=execution_id,
-        status=ExecutionStatus.RUNNING.value,
-        message="Approval decided — run continuing",
-    )
+    updated = await restore_running(execution_id, "Approval decided — run continuing")
     if not updated:
         exists = await ExecutionStatusService.get_status(execution_id) is not None
         logger.error(
@@ -143,7 +139,9 @@ async def _approval_status(approval_id: str) -> Optional[str]:
         return status.value if hasattr(status, "value") else str(status)
 
 
-def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupContext]):
+def make_tool_approval_hook(
+    execution_id: str, group_context: Optional[GroupContext]
+) -> Callable[[Any, Dict[str, Any], Any, Any], None]:
     """Build the pre-execution hook for one execution's tool calls."""
     from src.services.hitl.notify import notify_input_needed
     from src.services.tools.async_bridge import run_async_with_context
@@ -200,7 +198,7 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             approval_id = run_async_with_context(
                 _create_approval(execution_id, group_id, gate_config), timeout=30
             )
-        except Exception as create_err:  # noqa: BLE001
+        except Exception as create_err:
             # Fail CLOSED: an approval-required tool must not run when the
             # approval record can't be created.
             logger.error(f"[tool_approval] could not create approval: {create_err}")
@@ -208,6 +206,10 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
                 f"'{tool_name}' requires approval but the approval request "
                 f"could not be created ({create_err})."
             ) from create_err
+        if approval_id is None:  # fail closed: no row, so nobody could approve it
+            raise ToolExecutionBlockedError(
+                f"'{tool_name}' requires approval but no approval request was created."
+            )
 
         logger.info(
             f"[tool_approval] execution {execution_id}: '{tool_name}' waiting "
@@ -268,10 +270,15 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
 
 def install_tool_approval_hook(
     execution_id: str, group_context: Optional[GroupContext]
-):
-    """Register the hook; returns a callable that unregisters it."""
+) -> Callable[[], None]:
+    """Register the hook; returns a callable that unregisters it.
+
+    Registered FOR this execution: in the server process, where several chat
+    turns hold a hook at once, it gates only the calls made under this
+    execution (``core.execution_scope``).
+    """
     hook = make_tool_approval_hook(execution_id, group_context)
-    register_tool_hooks(pre=hook)
+    register_tool_hooks(pre=hook, execution_id=execution_id)
 
     def uninstall() -> None:
         unregister_tool_hooks(pre=hook)

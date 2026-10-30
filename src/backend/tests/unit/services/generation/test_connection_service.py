@@ -409,7 +409,7 @@ class TestGenerateConnections:
         request = _make_request()
 
         # Template static method -- no session means TemplateService.get_template_content is called as static
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -471,7 +471,9 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value=None)
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value=None
+        )
 
         with pytest.raises(ValueError, match="template.*not found"):
             await svc.generate_connections(request)
@@ -488,7 +490,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="")
+        MockTemplateService.get_effective_template_content = AsyncMock(return_value="")
 
         with pytest.raises(ValueError, match="template.*not found"):
             await svc.generate_connections(request)
@@ -505,7 +507,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request(instructions="Focus on performance")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -539,7 +541,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
         MockLLMManager.completion = AsyncMock(side_effect=RuntimeError("API down"))
@@ -559,7 +561,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
         MockLLMManager.completion = AsyncMock(return_value="not json at all")
@@ -581,7 +583,7 @@ class TestGenerateConnections:
         tasks = [_make_task(name="T1"), _make_task(name="T2")]
         request = _make_request(tasks=tasks)
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -613,7 +615,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -641,7 +643,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -668,7 +670,7 @@ class TestGenerateConnections:
         # Use empty string model to trigger default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -695,15 +697,16 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_model_from_env_var(
+    async def test_empty_model_uses_the_engine_default(
         self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
     ):
-        """When request.model is empty, CONNECTION_MODEL env var is used."""
+        """When request.model is empty, the engine default is used — the old
+        CONNECTION_MODEL env override is ignored."""
         svc = ConnectionService(session=None)
         # Empty string model triggers fallback to env var
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -720,7 +723,9 @@ class TestGenerateConnections:
         with patch.dict(os.environ, {"CONNECTION_MODEL": "custom-model"}):
             await svc.generate_connections(request)
 
-        assert "custom-model" in captured_model
+        from src.services.generation.connections import DEFAULT_ENGINE_MODEL
+
+        assert captured_model == [DEFAULT_ENGINE_MODEL]
 
     @pytest.mark.asyncio
     @patch(_LLM_MANAGER_PATCH)
@@ -739,7 +744,7 @@ class TestGenerateConnections:
         # Empty string model triggers default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -773,7 +778,7 @@ class TestGenerateConnections:
         # Empty string model triggers default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -807,7 +812,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request(model="claude-3-opus")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -837,7 +842,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -958,25 +963,27 @@ class TestTestApiKeys:
         svc.validate_api_key = AsyncMock(return_value=(True, "valid"))
 
         env = {
-            "OPENAI_API_KEY": "sk-1234567890",
-            "ANTHROPIC_API_KEY": "ant-abc",
-            "DEEPSEEK_API_KEY": "ds-xyz",
+            "openai": "sk-1234567890",
+            "anthropic": "ant-abc",
+            "deepseek": "ds-xyz",
         }
-        with patch.dict(os.environ, env, clear=False):
-            results = await svc.test_api_keys()
+        with patch(
+            "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=lambda provider, group_id: env.get(provider),
+        ) as lookup:
+            results = await svc.test_api_keys(group_id="grp-1")
+        # The CALLING workspace's keys, from ApiKeysService.
+        assert {c.kwargs["group_id"] for c in lookup.await_args_list} == {"grp-1"}
 
-        # OpenAI
+        # Configured / not configured only: no part of any key is returned.
         assert results["openai"]["has_key"] is True
         assert results["openai"]["valid"] is True
-        assert results["openai"]["key_prefix"] == "sk-1..."
-
-        # Anthropic
-        assert results["anthropic"]["has_key"] is True
-        assert results["anthropic"]["key_prefix"] == "ant-..."
-
-        # DeepSeek
-        assert results["deepseek"]["has_key"] is True
-        assert results["deepseek"]["key_prefix"] == "ds-x..."
+        assert results["anthropic"] == {"has_key": True}
+        assert results["deepseek"] == {"has_key": True}
+        flat = repr({k: v for k, v in results.items() if k != "python_info"})
+        for secret in env.values():
+            assert secret[:4] not in flat
 
         # Python info
         assert "version" in results["python_info"]
@@ -1006,19 +1013,38 @@ class TestTestApiKeys:
         svc = ConnectionService()
         svc.validate_api_key = AsyncMock(return_value=(False, "invalid key"))
 
-        env = {"OPENAI_API_KEY": "sk-bad"}
-        env_clean = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")
-        }
-        env_clean.update(env)
-        with patch.dict(os.environ, env_clean, clear=True):
-            results = await svc.test_api_keys()
+        with patch(
+            "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=lambda provider, group_id: (
+                "sk-bad" if provider == "openai" else None
+            ),
+        ):
+            results = await svc.test_api_keys(group_id="grp-1")
 
         assert results["openai"]["has_key"] is True
         assert results["openai"]["valid"] is False
-        assert results["openai"]["message"] == "invalid key"
+        # The provider's rejection text (which can echo a masked key) is dropped.
+        assert results["openai"]["message"] == (
+            "API key is configured but was not accepted"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_key_in_the_environment_is_not_reported(self):
+        """The env is shared by every workspace: it never counts as configured."""
+        svc = ConnectionService()
+        env = {"OPENAI_API_KEY": "sk-env", "ANTHROPIC_API_KEY": "ant-env"}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            results = await svc.test_api_keys(group_id="grp-1")
+        assert results["openai"]["has_key"] is False
+        assert results["anthropic"]["has_key"] is False
 
     @pytest.mark.asyncio
     async def test_python_info_populated(self):
@@ -1078,7 +1104,7 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request(instructions=None)
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -1109,7 +1135,9 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request(model="my-model")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys")
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value="sys"
+        )
 
         response_data = _valid_response_data()
         MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
@@ -1131,7 +1159,9 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys")
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value="sys"
+        )
 
         response_data = _valid_response_data()
         captured = {}
@@ -1177,7 +1207,7 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="sys prompt text"
         )
 
@@ -1213,7 +1243,9 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys")
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value="sys"
+        )
 
         response_data = _valid_response_data()
         captured = {}

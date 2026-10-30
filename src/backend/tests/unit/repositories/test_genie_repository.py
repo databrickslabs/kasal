@@ -103,43 +103,6 @@ class TestGenieRepository:
         repository = GenieRepository()
         assert repository.auth_config is None
 
-    def test_build_headers_with_auth(self, repository):
-        """Test header building with authentication"""
-        headers = repository._build_headers()
-
-        expected_headers = {
-            "Authorization": "Bearer test-token",
-            "X-Databricks-Genie-User-Token": "test-user-token",
-            "Content-Type": "application/json",
-        }
-
-        assert headers == expected_headers
-
-    def test_build_headers_without_auth(self, repository_no_auth):
-        """Test header building without authentication"""
-        headers = repository_no_auth._build_headers()
-
-        expected_headers = {"Content-Type": "application/json"}
-
-        assert headers == expected_headers
-
-    def test_build_headers_partial_auth(self):
-        """Test header building with partial auth (only token)"""
-        auth_config = GenieAuthConfig(
-            host="https://test-workspace.cloud.databricks.com",
-            pat_token="test-token",
-            # user_token is None
-        )
-        repository = GenieRepository(auth_config)
-        headers = repository._build_headers()
-
-        expected_headers = {
-            "Authorization": "Bearer test-token",
-            "Content-Type": "application/json",
-        }
-
-        assert headers == expected_headers
-
     @pytest.mark.asyncio
     async def test_make_url_host_with_trailing_slash(self):
         """Test _make_url strips trailing slash from host."""
@@ -523,15 +486,6 @@ class TestGenieRepository:
         assert result.spaces[0].name == "Space space1"
         assert result.spaces[0].description == ""
         assert result.next_page_token is None
-
-    def test_headers_consistency(self, repository):
-        """Test that headers are consistent across calls"""
-        headers1 = repository._build_headers()
-        headers2 = repository._build_headers()
-
-        assert headers1 == headers2
-        assert headers1["Authorization"] == "Bearer test-token"
-        assert headers1["Content-Type"] == "application/json"
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio

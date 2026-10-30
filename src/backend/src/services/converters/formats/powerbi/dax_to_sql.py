@@ -8,7 +8,7 @@ querying, and cross-platform compatibility.
 """
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     # Only import for type checking to avoid circular import
@@ -52,7 +52,7 @@ class DaxToSqlTranspiler:
         "REMOVEFILTERS",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize transpilation mappings."""
         self.dax_to_sql_mappings = {
             # Basic aggregations
@@ -145,6 +145,23 @@ class DaxToSqlTranspiler:
                     return False, f"contains unsupported {token.type} {token.value}"
         return True, None
 
+    def translate(
+        self, signature: str, tokens: List["DaxToken"]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Translate a measure, or report why it is a gap.
+
+        Returns ``(sql, None)`` on success and ``(None, reason)`` otherwise.
+        A measure no template matches is a gap like one with an unsupported
+        function: it never comes back as "transpilable" with no SQL.
+        """
+        can_transpile, reason = self.can_transpile(tokens)
+        if not can_transpile:
+            return None, reason
+        sql = self.transpile(signature, tokens)
+        if sql is None:
+            return None, "no SQL translation pattern matches this DAX expression"
+        return sql, None
+
     def transpile(self, signature: str, tokens: List["DaxToken"]) -> Optional[str]:
         """
         Transpile DAX expression to SQL using signature matching.
@@ -164,7 +181,7 @@ class DaxToSqlTranspiler:
         sql_template = self.dax_to_sql_mappings[signature.lower()]
 
         # Build replacement map from tokens
-        type_counts = {}
+        type_counts: Dict[str, Dict[str, int]] = {}
         replacements = {}
 
         for token in tokens:

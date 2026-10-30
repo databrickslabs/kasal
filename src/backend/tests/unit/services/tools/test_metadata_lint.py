@@ -531,7 +531,7 @@ class TestLintConfigOverride:
         assert "margin_budget" not in flagged
 
     def test_default_scenario_suffixes_unchanged(self):
-        """Without config, the CCH defaults still accept `_actual`."""
+        """Without config, the reference-model defaults still accept `_actual`."""
         spec = {
             "dimensions": [],
             "measures": [_measure("margin_actual", expr="SUM(a)/SUM(b)")],

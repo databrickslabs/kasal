@@ -137,7 +137,19 @@ bundle README; it is never a refusal.
   lives in Kasal's transport tool loop. Under CrewAI that loop is bypassed —
   `delegate_tool_calls` hands it to CrewAI's executor — so CrewAI's own
   `max_iter` governs instead. The same crew can therefore get a different
-  budget depending on the harness.
+  budget depending on the harness. Nothing caps tool calls below that on
+  either harness (the Databricks handler used to stop at 8 tool results).
+* **A spent clock.** On both harnesses a task whose `max_execution_time` or run
+  ceiling runs out ends with its partial answer under a `⚠️ Truncated` banner,
+  and the run carries on. On CrewAI the cap is kept off `crewai.Agent`, whose own
+  timeout would fail the task or re-run it through `max_retry_limit`; the
+  transport's deadline bounds the turn instead (`harnesses/crewai/deadline.py`).
+  One difference remains: CrewAI has no `on_budget_exceeded`, so a task that
+  sets it to `raise` still degrades there. The kernel's default is `degrade`,
+  so only an explicit `raise` behaves differently between the harnesses.
+* **Degraded outputs.** A task output that was truncated, or whose every tool
+  call failed (`⚠️ Unverified`), is marked `degraded` on both harnesses, and
+  memory does not store it.
 * **Structured output.** `output_pydantic` / `output_json` pass through to
   CrewAI's own converter rather than Kasal's schema gate. Both produce a typed
   `.pydantic` on the crew output — so router conditions on nested schemas work
@@ -150,6 +162,26 @@ bundle README; it is never a refusal.
 ---
 
 ## For developers
+
+### Where the runtime lives
+
+Paths are relative to `src/backend/src/`:
+
+| Piece | Location |
+| --- | --- |
+| Kasal runtime: `Agent`, `Task`, `Crew`, the executor and the agent plan | `services/execution/runtime/` |
+| Harness interface, capability list and selection | `services/execution/harnesses/binding.py`, `harnesses/selection.py` |
+| Kasal and CrewAI bindings | `services/execution/harnesses/kasal/`, `harnesses/crewai/` |
+| Path-agnostic build logic both subprocess paths share | `services/execution/kernel/` |
+| LLM transport and the tool-round loop | `core/llm/transport/` |
+| Run event bus | `core/events/` |
+
+The Agent Builder and Flow Builder paths run each build in a spawned subprocess. Two modules keep those subprocesses from harming the server:
+
+- `services/execution/process_tree.py` stops a run by terminating only the process tree this server spawned for it: the `multiprocessing.Process` the executor holds and its descendants. If that handle is gone, it falls back to descendants of this server whose `KASAL_EXECUTION_ID` matches the execution ID exactly. It never scans the whole host.
+- `services/execution/blocking_pools.py` runs the long blocking waits (joining the run, reading its event queue) on two dedicated, bounded thread pools, so concurrent builds cannot starve Chat turns on the event loop's default executor, and waits cannot block the event relay a child needs in order to exit.
+
+### The binding interface
 
 The binding is one interface: `HarnessBinding` in
 `services/execution/harnesses/binding.py` — `build_agent`, `build_task`,
@@ -174,7 +206,7 @@ Rules worth knowing before changing anything here:
   something, remove it from that binding's set — do not special-case the call
   site. The API and the UI read the same declaration.
 
-Open items are tracked in [the dual-harness backlog](./dual-harness-backlog.md).
+Open items are tracked in an internal engineering backlog.
 
 ---
 

@@ -186,31 +186,6 @@ class TestKbiFormulaParser:
 
     # ========== Extract Dependencies Tests ==========
 
-    def test_extract_dependencies_complete(self, parser):
-        """Test extracting all dependency types"""
-        formula = "[total_sales] + [total_cost] WHERE year = $year_filter"
-
-        deps = parser.extract_dependencies(formula)
-
-        assert "kbis" in deps
-        assert "variables" in deps
-        assert "columns" in deps
-
-        assert len(deps["kbis"]) == 2
-        assert "total_sales" in deps["kbis"]
-        assert "total_cost" in deps["kbis"]
-
-        assert len(deps["variables"]) == 1
-        assert "year_filter" in deps["variables"]
-
-    def test_extract_dependencies_empty_formula(self, parser):
-        """Test extracting dependencies from empty formula"""
-        deps = parser.extract_dependencies("")
-
-        assert deps["kbis"] == []
-        assert deps["variables"] == []
-        assert deps["columns"] == []
-
     # ========== Parse Formula Tests ==========
 
     def test_parse_formula_with_kbi_references(self, parser):

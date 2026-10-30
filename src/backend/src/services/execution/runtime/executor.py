@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeVar, overload
 
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,7 @@ from src.core.events.types import (
     ToolUsageFinishedEvent,
     ToolUsageStartedEvent,
 )
+from src.core.execution_scope import bound_execution_id
 from src.core.llm.json_extraction import extract_json_dict
 from src.core.llm.transport.exceptions import (
     ExecutionBudgetExceededError,
@@ -82,9 +83,12 @@ _tool_ledger: contextvars.ContextVar[dict[str, ToolOutcome] | None] = (
 )
 
 
-def reset_tool_ledger() -> None:
-    """Start a fresh tally. Called at the top of each task."""
-    _tool_ledger.set({})
+def reset_tool_ledger() -> dict[str, ToolOutcome]:
+    """Start a fresh tally. Called at the top of each task; returns it, so a
+    caller that judges the task later (CrewAI's crew) can keep this one."""
+    ledger: dict[str, ToolOutcome] = {}
+    _tool_ledger.set(ledger)
+    return ledger
 
 
 def tool_ledger() -> dict[str, ToolOutcome]:
@@ -131,11 +135,19 @@ def tool_failure_summary() -> str:
     return "\n".join(lines)
 
 
-def wholly_failed_tools() -> list[str]:
-    """Tools that were called and never once succeeded."""
-    return sorted(n for n, o in tool_ledger().items() if o.wholly_failed)
+def wholly_failed_tools(ledger: dict[str, ToolOutcome] | None = None) -> list[str]:
+    """Tools that were called and never once succeeded — in ``ledger``, or in
+    the current task's tally."""
+    entries = tool_ledger() if ledger is None else ledger
+    return sorted(n for n, o in entries.items() if o.wholly_failed)
 
 
+@overload
+def interpolate_text(text: str, inputs: dict[str, Any]) -> str: ...
+@overload
+def interpolate_text(text: None, inputs: dict[str, Any]) -> None: ...
+@overload
+def interpolate_text(text: str | None, inputs: dict[str, Any]) -> str | None: ...
 def interpolate_text(text: str | None, inputs: dict[str, Any]) -> str | None:
     """Replace {key} placeholders present in inputs; leave others untouched."""
     if text is None or not inputs:
@@ -164,12 +176,28 @@ def tool_schema(tool: BaseTool) -> dict[str, Any]:
 # audit, rewrite arguments, cache, or BLOCK any call (raise
 # ToolExecutionBlockedError, or block synchronously while awaiting a human
 # decision — tool calls already run on LLM worker threads in all paths).
-# Global by design (one execution per subprocess; in-process hooks scope
-# themselves by the agent/tool identity they captured, exactly like bus
-# handlers do). Hook failures are isolated: a broken *observer* never breaks
-# the call, but ToolExecutionBlockedError always propagates.
+# The lists are process-wide. A hook registered FOR an execution runs only on
+# calls made while that execution is bound (core.execution_scope) — the server
+# process runs several chat turns at once — or while none is bound, which is
+# every run subprocess (one execution per process) and any context that lost
+# the binding (fail closed: the gate still applies). Hook failures are
+# isolated: a broken *observer* never breaks the call, but
+# ToolExecutionBlockedError always propagates.
 _TOOL_PRE_HOOKS: list[Callable[..., Any]] = []
 _TOOL_POST_HOOKS: list[Callable[..., Any]] = []
+#: id(hook) -> the execution it was registered for. Absent means every
+#: execution. Keyed by id so a hook need not be hashable; an entry lives exactly
+#: as long as its hook is registered (the list keeps the hook alive).
+_HOOK_OWNERS: dict[int, str] = {}
+_Hook = TypeVar("_Hook", bound=Callable[..., object])
+
+
+def _hooks_for_this_call(hooks: list[_Hook]) -> list[_Hook]:
+    """The hooks that apply to a call made in the current context."""
+    current = bound_execution_id()
+    if current is None:
+        return list(hooks)
+    return [h for h in list(hooks) if _HOOK_OWNERS.get(id(h), current) == current]
 
 
 @dataclass(frozen=True)
@@ -193,6 +221,8 @@ class ToolCallAnswered:
 def register_tool_hooks(
     pre: Callable[..., Any] | None = None,
     post: Callable[..., Any] | None = None,
+    *,
+    execution_id: str | None = None,
 ) -> None:
     """Register tool hooks.
 
@@ -201,21 +231,28 @@ def register_tool_hooks(
     without running the tool, or raise ToolExecutionBlockedError to block it.
     post(tool, kwargs, result, agent, task) -> Any | None — return non-None
     to replace the tool result.
+
+    ``execution_id`` makes the hooks that execution's: they then skip calls
+    made while a DIFFERENT execution is bound. None means every execution.
     """
-    if pre is not None and pre not in _TOOL_PRE_HOOKS:
-        _TOOL_PRE_HOOKS.append(pre)
-    if post is not None and post not in _TOOL_POST_HOOKS:
-        _TOOL_POST_HOOKS.append(post)
+    for hook, hooks in ((pre, _TOOL_PRE_HOOKS), (post, _TOOL_POST_HOOKS)):
+        if hook is None:
+            continue
+        if execution_id is not None:
+            _HOOK_OWNERS[id(hook)] = execution_id
+        if hook not in hooks:
+            hooks.append(hook)
 
 
 def unregister_tool_hooks(
     pre: Callable[..., Any] | None = None,
     post: Callable[..., Any] | None = None,
 ) -> None:
-    if pre is not None and pre in _TOOL_PRE_HOOKS:
-        _TOOL_PRE_HOOKS.remove(pre)
-    if post is not None and post in _TOOL_POST_HOOKS:
-        _TOOL_POST_HOOKS.remove(post)
+    for hook, hooks in ((pre, _TOOL_PRE_HOOKS), (post, _TOOL_POST_HOOKS)):
+        if hook is not None and hook in hooks:
+            hooks.remove(hook)
+            if hook not in _TOOL_PRE_HOOKS and hook not in _TOOL_POST_HOOKS:
+                _HOOK_OWNERS.pop(id(hook), None)
 
 
 def wrap_tool(
@@ -237,7 +274,7 @@ def wrap_tool(
         event_bus.emit(tool, ToolUsageStartedEvent(**common))
         answered: ToolCallAnswered | None = None
         try:
-            for pre_hook in list(_TOOL_PRE_HOOKS):
+            for pre_hook in _hooks_for_this_call(_TOOL_PRE_HOOKS):
                 try:
                     replacement = pre_hook(tool, kwargs, agent, task)
                 except ToolExecutionBlockedError:
@@ -261,7 +298,7 @@ def wrap_tool(
                 output = answered.output
             else:
                 output = tool.run(**kwargs)
-            for post_hook in list(_TOOL_POST_HOOKS):
+            for post_hook in _hooks_for_this_call(_TOOL_POST_HOOKS):
                 try:
                     replaced = post_hook(tool, kwargs, output, agent, task)
                 except Exception:
@@ -304,7 +341,7 @@ def wrap_tool(
     # field on BaseTool and seeded per tool since the engine was vendored, and
     # was plumbed all the way to the instance without anything reading it; the
     # tool-call loop reads it here (see transport/tool_rounds).
-    run.result_as_answer = bool(getattr(tool, "result_as_answer", False))
+    run.result_as_answer = bool(getattr(tool, "result_as_answer", False))  # type: ignore[attr-defined]  # mypy: no attrs on functions
     return run
 
 
@@ -477,7 +514,7 @@ def run_agent(
 
             # The transport reads these off the callable itself.
             watched.__name__ = getattr(fn, "__name__", name)
-            watched.result_as_answer = getattr(fn, "result_as_answer", False)
+            watched.result_as_answer = getattr(fn, "result_as_answer", False)  # type: ignore[attr-defined]  # mypy: no attrs on functions
             return watched
 
         functions = {name: _watch(name, fn) for name, fn in functions.items()}

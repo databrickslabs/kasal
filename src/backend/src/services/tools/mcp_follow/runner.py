@@ -113,7 +113,9 @@ def _not_available(spec: FollowSpec, reason: str) -> str:
     )
 
 
-async def _open_poll_session(stack, adapter: Any, spec: FollowSpec) -> Optional[Any]:
+async def _open_poll_session(
+    stack: contextlib.AsyncExitStack, adapter: Any, spec: FollowSpec
+) -> Optional[Any]:
     """One MCP session for the WHOLE poll loop, when the adapter offers one.
 
     Per-poll reconnects (auth resolution + TLS/SSE handshake + MCP initialize,
@@ -134,7 +136,11 @@ async def _open_poll_session(stack, adapter: Any, spec: FollowSpec) -> Optional[
         return None
 
 
-async def follow_tool_call(wrapper, params, spec_of) -> Any:
+async def follow_tool_call(
+    wrapper: Any,
+    params: Dict[str, Any],
+    spec_of: Callable[[Any, Any], Optional[FollowSpec]],
+) -> Any:
     """Execute the wrapped MCP tool; follow it to completion when recognised.
 
     ``spec_of(wrapper, result)`` returns a :class:`FollowSpec` when this call's
@@ -163,7 +169,13 @@ async def follow_tool_call(wrapper, params, spec_of) -> Any:
         return await _follow_loop(stack, adapter, spec, poll_params, envelope)
 
 
-async def _follow_loop(stack, adapter, spec: FollowSpec, poll_params, envelope) -> Any:
+async def _follow_loop(
+    stack: contextlib.AsyncExitStack,
+    adapter: Any,
+    spec: FollowSpec,
+    poll_params: Dict[str, Any],
+    envelope: dict,
+) -> Any:
     budget = (
         spec.timeout_seconds
         if spec.timeout_seconds is not None

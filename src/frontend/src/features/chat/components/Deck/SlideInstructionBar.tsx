@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, Sparkles, X } from 'lucide-react';
+import { ArrowUp, Loader2, X } from 'lucide-react';
 import { FILL_CHIPS, REFINE_CHIPS } from './chips';
 
 /**
  * The studio's instruction bar: what should change on the selected slide (or
- * what a just-inserted blank slide should cover), a few one-click chips, Apply. Enter applies,
- * Shift+Enter breaks a line.
+ * what a just-inserted blank slide should cover), a few one-click chips, Apply.
+ * Enter applies, Shift+Enter breaks a line. Drawn like the chat composer — one
+ * rounded input box, chips and tools along its bottom, an arrow to send.
  */
 
 interface SlideInstructionBarProps {
@@ -35,8 +36,18 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
   // A new target (slide or mode) starts a fresh instruction.
   useEffect(() => {
     setValue('');
-    ref.current?.focus();
   }, [slideNumber, mode]);
+
+  useEffect(() => {
+    // Someone typing into the slide itself (the stage frame) keeps the caret.
+    if (document.activeElement?.tagName === 'IFRAME') return;
+    // A disabled textarea cannot keep focus. Without a modal fallback, arrow
+    // keys go to the page and scroll it instead of navigating running slides.
+    const target = working
+      ? ref.current?.closest<HTMLElement>('[role="dialog"]')
+      : ref.current;
+    target?.focus({ preventScroll: true });
+  }, [slideNumber, mode, working]);
 
   const submit = (text: string) => {
     const t = text.trim();
@@ -46,10 +57,15 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
   };
   const chips = mode === 'fill' ? FILL_CHIPS : REFINE_CHIPS;
 
+  const ready = !working && !!value.trim();
+  // Chips and the send arrow share the composer's look: hairline border, quiet text.
+  const chipStyle = { border: '1px solid var(--border-color)', color: 'var(--text-secondary)' };
+
   return (
-    <div className="flex flex-col gap-2 px-6 py-3" style={{ background: '#161616', color: '#e5e5e5' }}>
-      <div className="flex items-center gap-2 text-xs" style={{ color: '#9a9a9a' }}>
-        <span className="font-medium" style={{ color: '#e5e5e5' }}>
+    // Right padding keeps the box clear of the app's floating help button.
+    <div className="flex flex-col gap-2 py-3 pl-6 pr-14" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+      <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
           {mode === 'fill' ? `New slide ${slideNumber} — what should it cover?` : `Slide ${slideNumber}`}
         </span>
         {mode === 'fill' && (
@@ -58,12 +74,15 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
           </button>
         )}
         {error && (
-          <span role="alert" className="ml-auto" style={{ color: '#ff8a80' }}>
+          <span role="alert" className="ml-auto" style={{ color: 'hsl(var(--a2-destructive))' }}>
             {error}
           </span>
         )}
       </div>
-      <div className="flex items-end gap-2">
+      <div
+        className="rounded-3xl"
+        style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-input)' }}
+      >
         <textarea
           ref={ref}
           value={value}
@@ -78,34 +97,37 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
           disabled={working}
           placeholder={mode === 'fill' ? 'Describe the new slide' : 'What should change on this slide?'}
           aria-label={mode === 'fill' ? 'New slide instruction' : 'Slide instruction'}
-          className="flex-1 resize-none rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/60"
-          style={{ background: '#242424', color: '#f2f2f2', border: '1px solid #333' }}
+          className="block w-full resize-none border-0 bg-transparent !px-5 !pt-3.5 !pb-1 text-sm leading-relaxed outline-none disabled:opacity-50"
+          style={{ color: 'var(--text-primary)' }}
         />
-        <button
-          type="button"
-          onClick={() => submit(value)}
-          disabled={working || !value.trim()}
-          className="inline-flex items-center gap-1.5 rounded-lg !px-3 !py-2 text-sm font-medium disabled:opacity-40"
-          style={{ background: '#2f6feb', color: '#fff' }}
-        >
-          {working ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-          {working ? 'Working…' : 'Apply'}
-        </button>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {controls}
-        {chips.map((chip) => (
-          <button
-            key={chip}
-            type="button"
-            disabled={working}
-            onClick={() => submit(chip)}
-            className="rounded-full border !px-2.5 !py-1 text-xs hover:opacity-90 disabled:opacity-40"
-            style={{ borderColor: '#3a3a3a', color: '#cfcfcf', background: 'transparent' }}
-          >
-            {chip}
-          </button>
-        ))}
+        <div className="flex flex-wrap items-center gap-1.5 !px-3 !pb-2.5 !pt-1">
+          {chips.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              disabled={working}
+              onClick={() => submit(chip)}
+              className="rounded-full !px-2.5 !py-1 text-xs transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-40"
+              style={chipStyle}
+            >
+              {chip}
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-1.5">
+            {controls}
+            <button
+              type="button"
+              onClick={() => submit(value)}
+              disabled={!ready}
+              aria-label="Apply"
+              title={working ? 'Working…' : `Apply to slide ${slideNumber} (Enter)`}
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl !p-0 transition-opacity hover:opacity-80 disabled:cursor-not-allowed"
+              style={{ ...chipStyle, background: 'var(--bg-secondary)', color: ready ? 'var(--text-secondary)' : 'var(--text-muted)' }}
+            >
+              {working ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} />}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

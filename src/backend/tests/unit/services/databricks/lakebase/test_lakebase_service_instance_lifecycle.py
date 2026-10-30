@@ -17,6 +17,7 @@ Targets the uncovered paths in LakebaseService:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from databricks.sdk.service.database import DatabaseAPI
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -580,8 +581,10 @@ class TestStartInstance:
     @pytest.mark.asyncio
     async def test_start_instance_success(self):
         svc = _make_service()
+        # spec'd: the SDK has no start_database_instance (the old call raised
+        # AttributeError); starting is update_database_instance(stopped=False).
         mock_w = MagicMock()
-        mock_w.database.start_database_instance.return_value = None
+        mock_w.database = MagicMock(spec=DatabaseAPI)
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
         ready_inst = {"name": "inst", "state": "READY"}
         svc.get_instance = AsyncMock(return_value=ready_inst)
@@ -593,12 +596,15 @@ class TestStartInstance:
         ):
             result = await svc.start_instance("inst")
         assert result["state"] == "READY"
+        kwargs = mock_w.database.update_database_instance.call_args.kwargs
+        assert kwargs["name"] == "inst"
+        assert kwargs["update_mask"] == "stopped"
+        assert kwargs["database_instance"].stopped is False
 
     @pytest.mark.asyncio
     async def test_start_instance_timeout_returns_starting(self):
         svc = _make_service()
         mock_w = MagicMock()
-        mock_w.database.start_database_instance.return_value = None
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
         # Never becomes READY
         svc.get_instance = AsyncMock(return_value={"name": "inst", "state": "STARTING"})

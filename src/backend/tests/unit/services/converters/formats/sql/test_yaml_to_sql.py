@@ -107,21 +107,6 @@ class TestSQLGenerator:
 
     # ========== Identifier Quoting Tests ==========
 
-    def test_quote_identifier_standard(self, standard_generator):
-        """Test quoting identifier with STANDARD dialect"""
-        result = standard_generator.quote_identifier("column_name")
-        assert result == '"column_name"'
-
-    def test_quote_identifier_databricks(self, databricks_generator):
-        """Test quoting identifier with DATABRICKS dialect"""
-        result = databricks_generator.quote_identifier("column_name")
-        assert result == "`column_name`"
-
-    def test_quote_identifier_special_chars(self, standard_generator):
-        """Test quoting identifier with special characters"""
-        result = standard_generator.quote_identifier("column with spaces")
-        assert result == '"column with spaces"'
-
     # ========== Simple Column Reference Tests ==========
 
     # ========== Aggregation Type Mapping Tests ==========

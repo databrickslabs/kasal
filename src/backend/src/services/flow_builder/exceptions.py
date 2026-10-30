@@ -8,12 +8,6 @@ particularly for Human in the Loop (HITL) gate handling.
 from typing import Any, Dict, Optional
 
 
-class FlowExecutionError(Exception):
-    """Base exception for flow execution errors."""
-
-    pass
-
-
 class FlowPausedForApprovalException(BaseException):
     """
     Raised when a flow pauses at an HITL gate awaiting human approval.
@@ -65,30 +59,3 @@ class FlowPausedForApprovalException(BaseException):
             "flow_uuid": self.flow_uuid,
             "status": "waiting_for_approval",
         }
-
-
-class FlowResumeError(FlowExecutionError):
-    """Raised when there's an error resuming a flow from checkpoint."""
-
-    def __init__(self, execution_id: str, reason: str):
-        self.execution_id = execution_id
-        self.reason = reason
-        super().__init__(f"Failed to resume flow {execution_id}: {reason}")
-
-
-class FlowCheckpointError(FlowExecutionError):
-    """Raised when there's an error with flow checkpointing."""
-
-    def __init__(self, execution_id: str, reason: str):
-        self.execution_id = execution_id
-        self.reason = reason
-        super().__init__(f"Checkpoint error for flow {execution_id}: {reason}")
-
-
-class HITLGateConfigError(FlowExecutionError):
-    """Raised when HITL gate configuration is invalid."""
-
-    def __init__(self, gate_node_id: str, reason: str):
-        self.gate_node_id = gate_node_id
-        self.reason = reason
-        super().__init__(f"Invalid HITL gate config for '{gate_node_id}': {reason}")

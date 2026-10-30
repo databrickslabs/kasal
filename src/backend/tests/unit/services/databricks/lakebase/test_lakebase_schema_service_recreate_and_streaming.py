@@ -575,39 +575,6 @@ class TestCreateTablesBatchSyncMultiple:
 # ---------------------------------------------------------------------------
 
 
-class TestCreateDocEmbeddingsSyncDetailed:
-
-    @pytest.fixture
-    def service(self):
-        return LakebaseSchemaService()
-
-    def test_executes_set_search_path_and_create_table(self, service):
-        """SET search_path + CREATE TABLE + idempotent column/index ensure run."""
-        conn = MagicMock()
-        engine = _sync_engine(conn)
-        service._create_doc_embeddings_sync(engine)
-        executed = " ".join(str(c.args[0]) for c in conn.execute.call_args_list)
-        assert "SET search_path" in executed
-        assert "CREATE TABLE IF NOT EXISTS documentation_embeddings" in executed
-
-    def test_create_sql_contains_documentation_embeddings(self, service):
-        """The DDL contains the expected table name and scoping columns."""
-        conn = MagicMock()
-        executed_sqls = []
-
-        def _capture(sql):
-            executed_sqls.append(str(sql))
-            # The column ensure issues a pgvector check whose .fetchone() is read.
-            return MagicMock()
-
-        conn.execute = MagicMock(side_effect=_capture)
-        engine = _sync_engine(conn)
-        service._create_doc_embeddings_sync(engine)
-        assert any("documentation_embeddings" in s for s in executed_sqls)
-        assert any("ADD COLUMN IF NOT EXISTS group_id" in s for s in executed_sqls)
-        assert any("ADD COLUMN IF NOT EXISTS file_path" in s for s in executed_sqls)
-
-
 # ---------------------------------------------------------------------------
 # create_tables_sync_stream — parallel path (lines 490-558)
 # ---------------------------------------------------------------------------
@@ -820,31 +787,3 @@ class TestSetSearchPathAsyncDetailed:
 # ---------------------------------------------------------------------------
 # set_search_path_sync (lines 592-598)
 # ---------------------------------------------------------------------------
-
-
-class TestSetSearchPathSyncDetailed:
-
-    @pytest.fixture
-    def service(self):
-        return LakebaseSchemaService()
-
-    def test_custom_schema_name(self, service):
-        conn = MagicMock()
-        service.set_search_path_sync(conn, schema="myschema")
-        conn.execute.assert_called_once()
-
-    def test_default_schema_kasal(self, service):
-        conn = MagicMock()
-        service.set_search_path_sync(conn)
-        conn.execute.assert_called_once()
-
-    def test_invalid_schema_raises_value_error(self, service):
-        conn = MagicMock()
-        with pytest.raises(ValueError):
-            service.set_search_path_sync(conn, schema="bad-schema-name")
-
-    def test_execute_error_propagates(self, service):
-        conn = MagicMock()
-        conn.execute = MagicMock(side_effect=RuntimeError("conn dropped"))
-        with pytest.raises(RuntimeError, match="conn dropped"):
-            service.set_search_path_sync(conn)

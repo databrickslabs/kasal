@@ -9,6 +9,8 @@ which the engine uses for a readable guardrail label in events/trace rows
 import datetime
 import os
 import traceback
+from pathlib import Path
+from typing import Any, cast
 
 from src.core.logger import LoggerManager
 from src.services.guardrails.base_guardrail import BaseGuardrail
@@ -43,10 +45,11 @@ class GuardrailWrapper:
 
         # Get log directory from the logger manager
         logger_manager = LoggerManager.get_instance()
-        self.log_dir = logger_manager._log_dir
+        # LoggerManager sets _log_dir at startup, before any task can run.
+        self.log_dir = cast(Path, logger_manager._log_dir)
         os.makedirs(self.log_dir, exist_ok=True)
 
-    def __call__(self, output) -> tuple[bool, str]:
+    def __call__(self, output: Any) -> tuple[bool, str]:
         """
         Validate task output with the wrapped guardrail.
 

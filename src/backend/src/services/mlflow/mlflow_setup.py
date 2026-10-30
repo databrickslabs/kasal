@@ -19,7 +19,7 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple, cast
 
 from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 from src.services.mlflow.trace_storage import log_trace_storage, select_experiment
@@ -53,7 +53,7 @@ def _build_uc_trace_location(
     catalog: Optional[str],
     schema: Optional[str],
     warehouse_id: Optional[str],
-    log,
+    log: Any,
     *,
     experiment_name: Optional[str] = None,
 ) -> Any:
@@ -178,12 +178,41 @@ def _databricks_configured() -> bool:
     )
 
 
+async def _configured_local_target(
+    group_id: Optional[str],
+) -> Optional[Tuple[str, str]]:
+    """``(server, experiment)`` from Configuration → MLflow, or None.
+
+    None when no local server is set, when a Databricks workspace is configured
+    (it wins) or inside Databricks Apps (never a local server there). The
+    experiment is the CONFIGURED one — runs used to ignore it and always trace
+    to the per-teamspace default."""
+    if not group_id or _databricks_configured() or is_databricks_app():
+        return None
+    from src.db.session import routed_scoped_session
+    from src.repositories.mlflow_repository import MLflowRepository
+    from src.services.mlflow import local as _local
+
+    async with routed_scoped_session() as session:
+        repo = MLflowRepository(session)
+        uri = _local.local_tracking_uri(
+            await repo.get_local_tracking_uri(group_id=group_id)
+        )
+        if not uri:
+            return None
+        experiment = _local.local_experiment_name(
+            await repo.get_experiment_name(group_id=group_id),
+            await _teamspace_name(session, group_id),
+        )
+    return uri, experiment
+
+
 def _setup_local_mlflow(
     *,
     uri: str,
+    experiment: str,
     execution_id: str,
     group_id: Optional[str],
-    teamspace: Optional[str],
     alog: Any,
 ) -> "MlflowSetupResult":
     """Point tracing at a local OSS MLflow server.
@@ -212,9 +241,9 @@ def _setup_local_mlflow(
         import mlflow
 
         mlflow.set_tracking_uri(uri)
-        name = _local.local_experiment_name(teamspace=teamspace)
-        experiment = mlflow.set_experiment(name)
-        experiment_id = str(getattr(experiment, "experiment_id", "") or "")
+        name = experiment
+        experiment_id = _local.ensure_experiment(uri, name)
+        mlflow.set_experiment(experiment_id=experiment_id)
         alog.info(
             "[SUBPROCESS] MLflow tracing to local server %s, experiment %s (ID: %s)",
             uri,
@@ -343,19 +372,17 @@ async def configure_mlflow_in_subprocess(
     # timeout on every execution.
     # -------------------------------------------------------
     try:
-        from src.services.mlflow import local as _local
-
-        local_uri = None if _databricks_configured() else _local.local_tracking_uri()
+        local_target = await _configured_local_target(group_id)
     except Exception as exc:  # noqa: BLE001 — never break a run over tracing
         alog.warning("[SUBPROCESS] Local MLflow resolution failed: %s", exc)
-        local_uri = None
+        local_target = None
 
-    if local_uri:
+    if local_target:
         return _setup_local_mlflow(
-            uri=local_uri,
+            uri=local_target[0],
+            experiment=local_target[1],
             execution_id=execution_id,
             group_id=group_id,
-            teamspace=teamspace_name,
             alog=alog,
         )
 
@@ -427,12 +454,6 @@ async def configure_mlflow_in_subprocess(
             except Exception as ctx_err:
                 alog.warning(f"[SUBPROCESS] Could not set UserContext: {ctx_err}")
 
-        # The platform also injects DATABRICKS_TOKEN (a PAT) which
-        # conflicts with SPN in the SDK ("more than one authorization
-        # method").  We strip PAT vars before the SDK call and restore
-        # them after; a bearer token is extracted up-front so the MLflow
-        # exporter uses simple HOST + TOKEN auth.
-
         auth_method: Optional[str] = None
 
         # Extract credential via SDK
@@ -475,9 +496,9 @@ async def configure_mlflow_in_subprocess(
                 workspace_url = host.rstrip("/")
                 if not workspace_url.startswith("http"):
                     workspace_url = f"https://{workspace_url}"
+                # CLIENT_ID / CLIENT_SECRET are already in the env (the platform
+                # injected them; that is where they were read from above).
                 os.environ["DATABRICKS_HOST"] = workspace_url
-                os.environ["DATABRICKS_CLIENT_ID"] = client_id
-                os.environ["DATABRICKS_CLIENT_SECRET"] = client_secret
                 os.environ["DATABRICKS_AUTH_TYPE"] = "oauth-m2m"
                 # Remove static token vars so oauth-m2m is the SINGLE auth method
                 # (the SDK errors with "more than one authorization method
@@ -526,8 +547,8 @@ async def configure_mlflow_in_subprocess(
         # NOTE this supersedes rather than renames: runs already traced to
         # /Shared/kasal-crew-execution-traces stay there, and new ones land in
         # the per-teamspace experiment. Nothing is lost, but history splits.
-        # Set MLFLOW_CREW_TRACES_EXPERIMENT (or the workspace's configured
-        # experiment name) to keep everything in one place.
+        # Configure the experiment name (Configuration -> MLflow) to keep
+        # everything in one place.
         experiment_name = f"/Shared/{_local_slug(teamspace_name)}"
         uc_catalog = None
         uc_schema = None
@@ -572,7 +593,9 @@ async def configure_mlflow_in_subprocess(
                     and DatabricksAppInstallation.from_env().output_volume
                 ):
                     experiment_name = (
-                        DatabricksAppInstallation.from_env().experiment_name(group_id)
+                        DatabricksAppInstallation.from_env().experiment_name(
+                            group_id or ""
+                        )
                     )
                 fresh_config = await databricks_service.get_databricks_config()
                 if fresh_config:
@@ -647,7 +670,7 @@ async def configure_mlflow_in_subprocess(
                 f"[SUBPROCESS] UC trace storage uses dedicated experiment: {experiment_name}"
             )
 
-        def _set_experiment(name: str):
+        def _set_experiment(name: str) -> Any:
             """Keep an existing UC destination; defaults only provision new ones."""
             if trace_location is not None:
                 exp = select_experiment(mlflow, name, trace_location)
@@ -655,7 +678,7 @@ async def configure_mlflow_in_subprocess(
                 return exp
             return mlflow.set_experiment(name)
 
-        experiment = None
+        experiment: Any = None
         experiment_id = None
         # Candidate experiment names. For UC trace storage we self-heal: if the
         # dedicated UC experiment somehow got poisoned by a managed trace, fall
@@ -719,7 +742,7 @@ async def configure_mlflow_in_subprocess(
                 )
             else:
                 mlflow.tracing.set_destination(
-                    _MlflowDbxDest(experiment_id=str(experiment.experiment_id))
+                    _MlflowDbxDest(experiment_id=str(experiment.experiment_id))  # type: ignore[arg-type]  # stub gap
                 )
                 alog.info(
                     f"[SUBPROCESS] MLflow tracing destination set to experiment {experiment.experiment_id}"
@@ -994,10 +1017,10 @@ async def configure_mlflow_in_subprocess(
 # ---------------------------------------------------------------------------
 
 
-def _try_import_mlflow():
+def _try_import_mlflow() -> Any:
     """Import mlflow if available; return None otherwise."""
     try:
-        import mlflow  # type: ignore
+        import mlflow
 
         return mlflow
     except ImportError:
@@ -1096,7 +1119,9 @@ async def capture_trace_and_update_execution(
         last_trace_id = _get_last_id()
         if last_trace_id:
             alog.info(f"[SUBPROCESS] - Last active trace id: {last_trace_id}")
-            exp = experiment_name or "/Shared/kasal-crew-execution-traces"
+            from src.core.databricks_app import fallback_trace_experiment
+
+            exp = experiment_name or fallback_trace_experiment(group_id) or ""
             await _update_trace(
                 execution_id=execution_id,
                 trace_id=last_trace_id,
@@ -1232,8 +1257,8 @@ def _derive_trace_run_name(
     ``inputs`` rather than at the top level, which is why the previous
     ``config.get("run_name")`` alone produced ``crew_kickoff:Unnamed``.
     """
-    config_inputs = (
-        config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
+    config_inputs = cast(
+        dict, config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
     )
     arg_inputs = inputs if isinstance(inputs, dict) else {}
     for candidate in (

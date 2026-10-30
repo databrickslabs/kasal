@@ -183,7 +183,7 @@ class TestMCPServerRepositoryFindEnabled:
         mock_result = MockResult(enabled_servers)
         mock_async_session.execute.return_value = mock_result
 
-        result = await mcp_server_repository.find_enabled()
+        result = await mcp_server_repository.find_enabled(["group-1"])
 
         assert len(result) == len(enabled_servers)
         assert all(server.enabled for server in result)
@@ -197,7 +197,7 @@ class TestMCPServerRepositoryFindEnabled:
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
 
-        result = await mcp_server_repository.find_enabled()
+        result = await mcp_server_repository.find_enabled(["group-1"])
 
         assert result == []
         mock_async_session.execute.assert_called_once()
@@ -210,7 +210,7 @@ class TestMCPServerRepositoryFindEnabled:
         mock_async_session.execute.side_effect = Exception("Query failed")
 
         with pytest.raises(Exception, match="Query failed"):
-            await mcp_server_repository.find_enabled()
+            await mcp_server_repository.find_enabled(["group-1"])
 
 
 class TestMCPServerRepositoryToggleEnabled:
@@ -354,85 +354,6 @@ class TestMCPSettingsRepositoryGetSettings:
             await mcp_settings_repository.get_settings()
 
 
-class TestMCPSettingsRepositoryUpdateGlobalEnabled:
-    """Test cases for update_global_enabled method."""
-
-    @pytest.mark.asyncio
-    async def test_update_global_enabled_to_true(
-        self, mcp_settings_repository, mock_async_session, sample_mcp_settings
-    ):
-        """Test updating global enabled to True."""
-        sample_mcp_settings.global_enabled = False  # Start with False
-
-        with patch.object(
-            mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
-        ):
-            result = await mcp_settings_repository.update_global_enabled(True)
-
-            assert result == sample_mcp_settings
-            assert sample_mcp_settings.global_enabled is True
-            mock_async_session.flush.assert_called_once()
-            mock_async_session.refresh.assert_called_once_with(sample_mcp_settings)
-
-    @pytest.mark.asyncio
-    async def test_update_global_enabled_to_false(
-        self, mcp_settings_repository, mock_async_session, sample_mcp_settings
-    ):
-        """Test updating global enabled to False."""
-        sample_mcp_settings.global_enabled = True  # Start with True
-
-        with patch.object(
-            mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
-        ):
-            result = await mcp_settings_repository.update_global_enabled(False)
-
-            assert result == sample_mcp_settings
-            assert sample_mcp_settings.global_enabled is False
-            mock_async_session.flush.assert_called_once()
-            mock_async_session.refresh.assert_called_once_with(sample_mcp_settings)
-
-    @pytest.mark.asyncio
-    async def test_update_global_enabled_no_change(
-        self, mcp_settings_repository, mock_async_session, sample_mcp_settings
-    ):
-        """Test updating global enabled to same value."""
-        sample_mcp_settings.global_enabled = True  # Start with True
-
-        with patch.object(
-            mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
-        ):
-            result = await mcp_settings_repository.update_global_enabled(True)
-
-            assert result == sample_mcp_settings
-            assert sample_mcp_settings.global_enabled is True
-            mock_async_session.flush.assert_called_once()
-            mock_async_session.refresh.assert_called_once_with(sample_mcp_settings)
-
-    @pytest.mark.asyncio
-    async def test_update_global_enabled_get_settings_error(
-        self, mcp_settings_repository, mock_async_session
-    ):
-        """Test update global enabled when get_settings fails."""
-        with patch.object(
-            mcp_settings_repository, "get_settings", side_effect=Exception("Get failed")
-        ):
-            with pytest.raises(Exception, match="Get failed"):
-                await mcp_settings_repository.update_global_enabled(True)
-
-    @pytest.mark.asyncio
-    async def test_update_global_enabled_flush_error(
-        self, mcp_settings_repository, mock_async_session, sample_mcp_settings
-    ):
-        """Test update global enabled with flush error."""
-        with patch.object(
-            mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
-        ):
-            mock_async_session.flush.side_effect = Exception("Flush failed")
-
-            with pytest.raises(Exception, match="Flush failed"):
-                await mcp_settings_repository.update_global_enabled(True)
-
-
 class TestMCPRepositoryIntegration:
     """Integration test cases testing method interactions."""
 
@@ -478,7 +399,7 @@ class TestMCPRepositoryIntegration:
         mock_result = MockResult(enabled_servers)
         mock_async_session.execute.return_value = mock_result
 
-        found_servers = await mcp_server_repository.find_enabled()
+        found_servers = await mcp_server_repository.find_enabled(["group-1"])
 
         assert len(found_servers) == len(enabled_servers)
 
@@ -493,29 +414,6 @@ class TestMCPRepositoryIntegration:
 
             assert toggle_result == server_to_toggle
             assert server_to_toggle.enabled != original_status
-            mock_async_session.flush.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_get_settings_then_update_workflow(
-        self, mcp_settings_repository, mock_async_session, sample_mcp_settings
-    ):
-        """Test workflow of getting settings then updating global enabled."""
-        # Mock get_settings
-        with patch.object(
-            mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
-        ):
-            settings = await mcp_settings_repository.get_settings()
-            assert settings == sample_mcp_settings
-
-            original_enabled = settings.global_enabled
-
-            # Update global enabled
-            updated_settings = await mcp_settings_repository.update_global_enabled(
-                not original_enabled
-            )
-
-            assert updated_settings == sample_mcp_settings
-            assert settings.global_enabled != original_enabled
             mock_async_session.flush.assert_called_once()
 
 
@@ -540,7 +438,7 @@ class TestMCPRepositoryErrorHandling:
         mock_async_session.execute.side_effect = Exception("Query timeout")
 
         with pytest.raises(Exception, match="Query timeout"):
-            await mcp_server_repository.find_enabled()
+            await mcp_server_repository.find_enabled(["group-1"])
 
     @pytest.mark.asyncio
     async def test_get_settings_create_default_error(
@@ -584,22 +482,6 @@ class TestMCPRepositoryEdgeCases:
             assert result1 == server
             assert result2 == server
             assert mock_async_session.flush.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_update_global_enabled_boolean_coercion(
-        self, mcp_settings_repository, mock_async_session, sample_mcp_settings
-    ):
-        """Test update global enabled with non-boolean values."""
-        with patch.object(
-            mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
-        ):
-            # Test with truthy value
-            await mcp_settings_repository.update_global_enabled("true")
-            assert sample_mcp_settings.global_enabled == "true"  # Should be set as-is
-
-            # Test with falsy value
-            await mcp_settings_repository.update_global_enabled(0)
-            assert sample_mcp_settings.global_enabled == 0  # Should be set as-is
 
     @pytest.mark.asyncio
     async def test_get_settings_empty_database(

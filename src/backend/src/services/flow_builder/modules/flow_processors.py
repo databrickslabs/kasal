@@ -4,6 +4,7 @@ Flow processors module for CrewAI flow execution.
 This module handles processing of starting points, listeners, and routers in flow configuration.
 """
 
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from src.core.logger import LoggerManager
@@ -12,17 +13,24 @@ from src.services.flow_builder.mcp_assignments import (
     apply_flow_mcp_assignments,
     flow_task_tool_ids,
 )
+from src.services.flow_builder.modules.canvas_fallback import canvas_task_data
 
 # Re-exported for stable import paths (callers and tests import these from here).
 from src.services.flow_builder.modules.stale_task_config import (  # noqa: F401
     load_current_crew_tasks as _load_current_crew_tasks,
+)
+from src.services.flow_builder.modules.stale_task_config import (  # noqa: F401
+    merge_task_tool_configs,
     recover_mcp_from_current_tasks,
+    resync_stale_task_configs,
     resync_tool_configs_from_current_task,
 )
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
+_Cfg = Dict[str, Any]
 
-def _to_uuid(value) -> UUID:
+
+def _to_uuid(value: Any) -> UUID:
     """Convert a string or UUID to UUID object."""
     if isinstance(value, UUID):
         return value
@@ -42,8 +50,12 @@ class FlowProcessorManager:
 
     @staticmethod
     async def process_starting_points(
-        flow_config, all_tasks, repositories, group_context=None, callbacks=None
-    ):
+        flow_config: _Cfg,
+        all_tasks: _Cfg,
+        repositories: Optional[_Cfg],
+        group_context: Any = None,
+        callbacks: Any = None,
+    ) -> List[Tuple[Any, ...]]:
         """
         Process starting points from flow configuration.
 
@@ -61,7 +73,7 @@ class FlowProcessorManager:
             List of starting point method names
         """
         logger.info("Processing starting points")
-        starting_point_methods = []
+        starting_point_methods: List[Tuple[Any, ...]] = []
 
         task_repo = repositories.get("task") if repositories else None
         crew_repo = repositories.get("crew") if repositories else None
@@ -71,7 +83,7 @@ class FlowProcessorManager:
             return starting_point_methods
 
         # Group starting points by crew_id
-        crews_map = {}  # crew_id -> list of task_ids
+        crews_map: Dict[Any, Any] = {}  # crew_id -> list of task_ids
 
         for idx, start_point in enumerate(flow_config.get("startingPoints", [])):
             task_id = start_point.get("taskId")
@@ -110,7 +122,7 @@ class FlowProcessorManager:
                     continue
 
                 # Build Task objects for all tasks in this crew
-                crew_task_objects = []
+                crew_task_objects: List[Any] = []
 
                 for task_idx, task_id in enumerate(task_ids):
                     task_data = await task_repo.get(task_id) if task_repo else None
@@ -181,39 +193,9 @@ class FlowProcessorManager:
                             logger.info(
                                 f"Task {task_id} not in database, using embedded node data from crew"
                             )
-                            # Create a mock task data object from node data
-                            from types import SimpleNamespace
-
-                            task_data = SimpleNamespace(
-                                id=task_id,
-                                name=task_node_data.get("label", f"Task {task_id}"),
-                                description=task_node_data.get("description", ""),
-                                expected_output=task_node_data.get(
-                                    "expected_output", ""
-                                ),
-                                agent_id=agent_id,
-                                tools=task_node_data.get("tools", []),
-                                tool_configs=task_node_data.get("tool_configs", {}),
-                                async_execution=task_node_data.get(
-                                    "async_execution", False
-                                ),
-                                context=task_node_data.get("context", []),
-                                config=task_node_data.get("config", {}),
-                                memory=task_node_data.get("memory", False),
-                                markdown=task_node_data.get("markdown", False),
-                                output_file=task_node_data.get("config", {}).get(
-                                    "output_file"
-                                ),
-                                output_json=task_node_data.get("config", {}).get(
-                                    "output_json"
-                                ),
-                                output_pydantic=task_node_data.get("config", {}).get(
-                                    "output_pydantic"
-                                ),
-                                human_input=task_node_data.get("config", {}).get(
-                                    "human_input", False
-                                ),
-                                converter_cls=None,
+                            # Policy (guardrails, human input) comes from the node too.
+                            task_data = canvas_task_data(
+                                task_id, task_node_data, agent_id
                             )
                         else:
                             logger.warning(
@@ -277,7 +259,7 @@ class FlowProcessorManager:
                         from types import SimpleNamespace
 
                         # Helper to handle None values with defaults
-                        def _get_val(d, key, default):
+                        def _get_val(d: Any, key: str, default: Any) -> Any:
                             val = d.get(key)
                             return default if val is None else val
 
@@ -329,71 +311,23 @@ class FlowProcessorManager:
                         )
 
                     if agent_data:
-                        # Merge tool_configs: task-level takes priority over crew-level
-                        # MCP servers are typically configured at the task level
-                        effective_tool_configs = {}
-                        if (
-                            crew_data
-                            and hasattr(crew_data, "tool_configs")
-                            and crew_data.tool_configs
-                        ):
-                            if isinstance(crew_data.tool_configs, dict):
-                                effective_tool_configs.update(crew_data.tool_configs)
-                        # The crew canvas node carries tool_configs saved from chat /
-                        # Agent Builder (e.g. MCP_SERVERS) that are NOT persisted onto
-                        # the task DB record. A flow run loads the DB task, so without
-                        # this it would lose the MCP servers the crew was saved with.
-                        # Merge the node config BEFORE the DB task so it fills the gap
-                        # without overriding real values the DB task does carry.
-                        if task_node_data and isinstance(
-                            task_node_data.get("tool_configs"), dict
-                        ):
-                            effective_tool_configs.update(
-                                task_node_data.get("tool_configs") or {}
-                            )
-                        if (
-                            hasattr(task_data, "tool_configs")
-                            and task_data.tool_configs
-                        ):
-                            if isinstance(task_data.tool_configs, dict):
-                                effective_tool_configs.update(task_data.tool_configs)
+                        # Crew-level, then canvas node, then DB task (see stale_task_config).
+                        effective_tool_configs = merge_task_tool_configs(
+                            crew_data, task_node_data, task_data
+                        )
 
-                        # A flow's task IDs are frozen at save time, but crew edits
-                        # mint NEW task rows — so the flow can run a STALE task whose
-                        # tool_configs still holds old values (warehouse_id, dataset_id,
-                        # enable_reconciliation, MCP_SERVERS, …) while the crew is
-                        # correct. Re-sync the LIVE config from the crew's current task
-                        # (full config, not just MCP), then back-fill MCP as before.
+                        # Crew edits mint new task rows, so the flow may point at a
+                        # stale task: re-sync its live config (see stale_task_config).
                         if task_repo:
-                            try:
-                                current_tasks = await _load_current_crew_tasks(
-                                    crew_data, task_repo
-                                )
-                                flow_task_name = getattr(task_data, "name", None)
-                                before_cfg = dict(effective_tool_configs)
-                                effective_tool_configs = (
-                                    resync_tool_configs_from_current_task(
-                                        effective_tool_configs,
-                                        task_id,
-                                        flow_task_name,
-                                        current_tasks,
-                                    )
-                                )
-                                effective_tool_configs = recover_mcp_from_current_tasks(
-                                    effective_tool_configs,
-                                    task_id,
-                                    flow_task_name,
-                                    current_tasks,
-                                )
-                                if effective_tool_configs != before_cfg:
-                                    logger.info(
-                                        f"Re-synced tool_configs for stale flow task "
-                                        f"{task_id} from crew {crew_id}'s current task(s)"
-                                    )
-                            except Exception as _resync_err:
-                                logger.warning(
-                                    f"tool_config re-sync from current crew task failed: {_resync_err}"
-                                )
+                            effective_tool_configs = await resync_stale_task_configs(
+                                effective_tool_configs,
+                                crew_data=crew_data,
+                                task_repo=task_repo,
+                                task_id=task_id,
+                                flow_task_name=getattr(task_data, "name", None),
+                                crew_id=crew_id,
+                                kind="flow",
+                            )
 
                         logger.info(
                             f"Task {task_id} "
@@ -493,7 +427,6 @@ class FlowProcessorManager:
                         # Generate a unique ID for the auto-created task
                         auto_task_id = f"auto_completion_{crew_id[:8]}"
                         task_ids.append(auto_task_id)
-
                         logger.info(
                             f"Auto-created completion task for crew {crew_id} to enable parallel execution"
                         )
@@ -503,7 +436,6 @@ class FlowProcessorManager:
                         logger.info(
                             f"  Parallel tasks: {[t.description[:50] + '...' if len(t.description) > 50 else t.description for t in async_tasks]}"
                         )
-
                 # If we successfully built tasks for this crew, add it as a starting point
                 if crew_task_objects:
                     # Store metadata about this starting point crew
@@ -524,18 +456,20 @@ class FlowProcessorManager:
                     logger.info(
                         f"Added starting point {method_name} for crew {crew_id} with {len(crew_task_objects)} tasks (including {len(async_tasks)} parallel)"
                     )
-
             except Exception as e:
                 logger.error(f"Error processing crew {crew_id}: {e}", exc_info=True)
                 continue
-
         logger.info(f"Processed {len(starting_point_methods)} starting points")
         return starting_point_methods
 
     @staticmethod
     async def process_listeners(
-        flow_config, all_tasks, repositories, group_context=None, callbacks=None
-    ):
+        flow_config: _Cfg,
+        all_tasks: _Cfg,
+        repositories: Optional[_Cfg],
+        group_context: Any = None,
+        callbacks: Any = None,
+    ) -> List[Tuple[Any, ...]]:
         """
         Process listeners from flow configuration.
 
@@ -555,7 +489,7 @@ class FlowProcessorManager:
             This rich structure allows flow_builder to create proper crew-level listeners.
         """
         logger.info("Processing listeners with crew grouping")
-        listener_methods = []
+        listener_methods: List[Tuple[Any, ...]] = []
 
         task_repo = repositories.get("task") if repositories else None
         crew_repo = repositories.get("crew") if repositories else None
@@ -655,7 +589,7 @@ class FlowProcessorManager:
                 )
 
                 # Build Task objects for all tasks in this crew
-                crew_task_objects = []
+                crew_task_objects: List[Any] = []
 
                 for task_idx, task_id in enumerate(task_ids):
                     task_data = await task_repo.get(task_id)
@@ -735,39 +669,9 @@ class FlowProcessorManager:
                             logger.info(
                                 f"Listener task {task_id} not in database, using embedded node data from crew"
                             )
-                            # Create a mock task data object from node data
-                            from types import SimpleNamespace
-
-                            task_data = SimpleNamespace(
-                                id=task_id,
-                                name=task_node_data.get("label", f"Task {task_id}"),
-                                description=task_node_data.get("description", ""),
-                                expected_output=task_node_data.get(
-                                    "expected_output", ""
-                                ),
-                                agent_id=agent_id,
-                                tools=task_node_data.get("tools", []),
-                                tool_configs=task_node_data.get("tool_configs", {}),
-                                async_execution=task_node_data.get(
-                                    "async_execution", False
-                                ),
-                                context=task_node_data.get("context", []),
-                                config=task_node_data.get("config", {}),
-                                memory=task_node_data.get("memory", False),
-                                markdown=task_node_data.get("markdown", False),
-                                output_file=task_node_data.get("config", {}).get(
-                                    "output_file"
-                                ),
-                                output_json=task_node_data.get("config", {}).get(
-                                    "output_json"
-                                ),
-                                output_pydantic=task_node_data.get("config", {}).get(
-                                    "output_pydantic"
-                                ),
-                                human_input=task_node_data.get("config", {}).get(
-                                    "human_input", False
-                                ),
-                                converter_cls=None,
+                            # Policy (guardrails, human input) comes from the node too.
+                            task_data = canvas_task_data(
+                                task_id, task_node_data, agent_id
                             )
                         else:
                             logger.warning(
@@ -808,7 +712,7 @@ class FlowProcessorManager:
                         from types import SimpleNamespace
 
                         # Helper to handle None values with defaults
-                        def _get_val(d, key, default):
+                        def _get_val(d: Any, key: str, default: Any) -> Any:
                             val = d.get(key)
                             return default if val is None else val
 
@@ -860,66 +764,23 @@ class FlowProcessorManager:
                         )
 
                     if agent_data:
-                        # Merge tool_configs: task-level takes priority over crew-level
-                        # MCP servers are typically configured at the task level
-                        effective_tool_configs = {}
-                        if (
-                            crew_data
-                            and hasattr(crew_data, "tool_configs")
-                            and crew_data.tool_configs
-                        ):
-                            if isinstance(crew_data.tool_configs, dict):
-                                effective_tool_configs.update(crew_data.tool_configs)
-                        # See starting-point path: the crew canvas node carries MCP_SERVERS
-                        # saved from chat that never lands on the DB task record; merge it
-                        # in before the DB task so a flow run keeps the crew's MCP servers.
-                        if task_node_data and isinstance(
-                            task_node_data.get("tool_configs"), dict
-                        ):
-                            effective_tool_configs.update(
-                                task_node_data.get("tool_configs") or {}
-                            )
-                        if (
-                            hasattr(task_data, "tool_configs")
-                            and task_data.tool_configs
-                        ):
-                            if isinstance(task_data.tool_configs, dict):
-                                effective_tool_configs.update(task_data.tool_configs)
+                        # Crew-level, then canvas node, then DB task (see stale_task_config).
+                        effective_tool_configs = merge_task_tool_configs(
+                            crew_data, task_node_data, task_data
+                        )
 
-                        # Same stale-task drift as the starting-point path: crew edits
-                        # mint new task rows, so re-sync the live config (warehouse_id,
-                        # dataset_id, enable_reconciliation, MCP_SERVERS, …) from the
-                        # crew's current task before building the agent.
+                        # Crew edits mint new task rows, so the flow may point at a
+                        # stale task: re-sync its live config (see stale_task_config).
                         if task_repo:
-                            try:
-                                current_tasks = await _load_current_crew_tasks(
-                                    crew_data, task_repo
-                                )
-                                flow_task_name = getattr(task_data, "name", None)
-                                before_cfg = dict(effective_tool_configs)
-                                effective_tool_configs = (
-                                    resync_tool_configs_from_current_task(
-                                        effective_tool_configs,
-                                        task_id,
-                                        flow_task_name,
-                                        current_tasks,
-                                    )
-                                )
-                                effective_tool_configs = recover_mcp_from_current_tasks(
-                                    effective_tool_configs,
-                                    task_id,
-                                    flow_task_name,
-                                    current_tasks,
-                                )
-                                if effective_tool_configs != before_cfg:
-                                    logger.info(
-                                        f"Re-synced tool_configs for stale listener task "
-                                        f"{task_id} from crew {crew_id}'s current task(s)"
-                                    )
-                            except Exception as _resync_err:
-                                logger.warning(
-                                    f"tool_config re-sync from current crew task failed: {_resync_err}"
-                                )
+                            effective_tool_configs = await resync_stale_task_configs(
+                                effective_tool_configs,
+                                crew_data=crew_data,
+                                task_repo=task_repo,
+                                task_id=task_id,
+                                flow_task_name=getattr(task_data, "name", None),
+                                crew_id=crew_id,
+                                kind="listener",
+                            )
 
                         logger.info(
                             f"Listener task {task_id} "
@@ -973,7 +834,6 @@ class FlowProcessorManager:
                             logger.info(
                                 f"  Task {task_id} will wait for previous task (sequential via task.context)"
                             )
-
                         # Store the task object
                         all_tasks[str(task_id)] = task_obj
                         crew_task_objects.append(task_obj)
@@ -984,7 +844,6 @@ class FlowProcessorManager:
                         logger.warning(
                             f"Agent {agent_id} not found in database or crew nodes for listener task {task_id}"
                         )
-
                 # If we successfully built tasks for this listener crew, add it
                 if crew_task_objects:
                     # Return rich structure for flow_builder to create proper crew-level listeners
@@ -1005,20 +864,22 @@ class FlowProcessorManager:
                     )
                 else:
                     logger.warning(f"No valid tasks found for listener crew {crew_id}")
-
             except Exception as e:
                 logger.error(
                     f"Error processing listener crew {crew_id}: {e}", exc_info=True
                 )
                 continue
-
         logger.info(f"Processed {len(listener_methods)} listener crews")
         return listener_methods
 
     @staticmethod
     async def process_routers(
-        flow_config, all_tasks, repositories, group_context=None, callbacks=None
-    ):
+        flow_config: _Cfg,
+        all_tasks: _Cfg,
+        repositories: Optional[_Cfg],
+        group_context: Any = None,
+        callbacks: Any = None,
+    ) -> List[Tuple[Any, ...]]:
         """
         Process routers from flow configuration.
 
@@ -1033,7 +894,7 @@ class FlowProcessorManager:
             List of tuples (router_method_name, routes_config)
         """
         logger.info("Processing routers")
-        router_configs = []
+        router_configs: List[Tuple[Any, ...]] = []
 
         task_repo = repositories.get("task") if repositories else None
         crew_repo = repositories.get("crew") if repositories else None
@@ -1183,39 +1044,9 @@ class FlowProcessorManager:
                                 logger.info(
                                     f"Router task {task_id} not in database, using embedded node data from crew"
                                 )
-                                # Create a mock task data object from node data
-                                from types import SimpleNamespace
-
-                                task_data = SimpleNamespace(
-                                    id=task_id,
-                                    name=task_node_data.get("label", f"Task {task_id}"),
-                                    description=task_node_data.get("description", ""),
-                                    expected_output=task_node_data.get(
-                                        "expected_output", ""
-                                    ),
-                                    agent_id=agent_id,
-                                    tools=task_node_data.get("tools", []),
-                                    tool_configs=task_node_data.get("tool_configs", {}),
-                                    async_execution=task_node_data.get(
-                                        "async_execution", False
-                                    ),
-                                    context=task_node_data.get("context", []),
-                                    config=task_node_data.get("config", {}),
-                                    memory=task_node_data.get("memory", False),
-                                    markdown=task_node_data.get("markdown", False),
-                                    output_file=task_node_data.get("config", {}).get(
-                                        "output_file"
-                                    ),
-                                    output_json=task_node_data.get("config", {}).get(
-                                        "output_json"
-                                    ),
-                                    output_pydantic=task_node_data.get(
-                                        "config", {}
-                                    ).get("output_pydantic"),
-                                    human_input=task_node_data.get("config", {}).get(
-                                        "human_input", False
-                                    ),
-                                    converter_cls=None,
+                                # Policy (guardrails, human input) comes from the node too.
+                                task_data = canvas_task_data(
+                                    task_id, task_node_data, agent_id
                                 )
                             else:
                                 logger.warning(
@@ -1258,7 +1089,7 @@ class FlowProcessorManager:
                             from types import SimpleNamespace
 
                             # Helper to handle None values with defaults
-                            def _get_val(d, key, default):
+                            def _get_val(d: Any, key: str, default: Any) -> Any:
                                 val = d.get(key)
                                 return default if val is None else val
 
@@ -1316,35 +1147,10 @@ class FlowProcessorManager:
                             )
 
                         if agent_data:
-                            # Merge tool_configs: task-level takes priority over crew-level
-                            # MCP servers are typically configured at the task level
-                            effective_tool_configs = {}
-                            if (
-                                crew_data
-                                and hasattr(crew_data, "tool_configs")
-                                and crew_data.tool_configs
-                            ):
-                                if isinstance(crew_data.tool_configs, dict):
-                                    effective_tool_configs.update(
-                                        crew_data.tool_configs
-                                    )
-                            # See starting-point path: the crew canvas node carries MCP_SERVERS
-                            # saved from chat that never lands on the DB task record; merge it
-                            # in before the DB task so a flow run keeps the crew's MCP servers.
-                            if task_node_data and isinstance(
-                                task_node_data.get("tool_configs"), dict
-                            ):
-                                effective_tool_configs.update(
-                                    task_node_data.get("tool_configs") or {}
-                                )
-                            if (
-                                hasattr(task_data, "tool_configs")
-                                and task_data.tool_configs
-                            ):
-                                if isinstance(task_data.tool_configs, dict):
-                                    effective_tool_configs.update(
-                                        task_data.tool_configs
-                                    )
+                            # Crew-level, then canvas node, then DB task (see stale_task_config).
+                            effective_tool_configs = merge_task_tool_configs(
+                                crew_data, task_node_data, task_data
+                            )
 
                             logger.info(
                                 f"Router task {task_id} "
@@ -1393,7 +1199,6 @@ class FlowProcessorManager:
                             logger.warning(
                                 f"Agent {agent_id} not found in database or crew nodes for router task {task_id}"
                             )
-
                     if route_tasks:
                         processed_routes.append(
                             {
@@ -1408,7 +1213,6 @@ class FlowProcessorManager:
                         )
                     else:
                         logger.warning(f"No valid tasks found for route {route_name}")
-
                 if processed_routes:
                     router_configs.append((router_method_name, processed_routes))
                     logger.info(
@@ -1416,10 +1220,8 @@ class FlowProcessorManager:
                     )
                 else:
                     logger.warning(f"No valid routes found for router {idx}")
-
             except Exception as e:
                 logger.error(f"Error processing router {idx}: {e}", exc_info=True)
                 continue
-
         logger.info(f"Processed {len(router_configs)} routers")
         return router_configs

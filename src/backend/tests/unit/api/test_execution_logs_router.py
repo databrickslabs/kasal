@@ -28,8 +28,8 @@ def gc(valid=True):
     if valid:
         return GroupContext(
             group_ids=["g1"],
-            group_email="u@x.com",
-            email_domain="x.com",
+            group_email="u@example.com",
+            email_domain="example.com",
             user_role="admin",
         )
     return GroupContext()

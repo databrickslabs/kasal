@@ -59,13 +59,15 @@ async def test_list_and_enabled_and_global(monkeypatch):
     svc.get_all_tools_for_group = AsyncMock(
         return_value=SimpleNamespace(tools=tools_list, count=2)
     )
-    out = await get_tools(service=svc, group_context=Ctx())
+    out = await get_tools(service=svc, group_context=Ctx(), secrets_visible=True)
     assert isinstance(out, list) and len(out) == 2
 
     svc.get_enabled_tools_for_group = AsyncMock(
         return_value=SimpleNamespace(tools=tools_list[:1], count=1)
     )
-    out2 = await get_enabled_tools(service=svc, group_context=Ctx())
+    out2 = await get_enabled_tools(
+        service=svc, group_context=Ctx(), secrets_visible=True
+    )
     assert out2.count == 1
 
     # global tools (base with group_id None)
@@ -73,7 +75,10 @@ async def test_list_and_enabled_and_global(monkeypatch):
     from src.utils.user_context import GroupContext
 
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     all_tools = SimpleNamespace(tools=tools_list, count=2)
     svc.get_all_tools = AsyncMock(return_value=all_tools)
@@ -88,7 +93,9 @@ async def test_crud_permissions_and_toggle(monkeypatch):
     # get by id returns tool
     t = make_tool(3)
     svc.get_tool_with_group_check = AsyncMock(return_value=t)
-    out = await get_tool_by_id(3, service=svc, group_context=Ctx())
+    out = await get_tool_by_id(
+        3, service=svc, group_context=Ctx(), secrets_visible=True
+    )
     assert out.id == 3
 
     # create forbidden for user
@@ -141,11 +148,15 @@ async def test_config_endpoints(monkeypatch):
     svc = AsyncMock()
     cfgs = {"toolA": {"x": 1}}
     svc.get_all_tool_configurations_for_group = AsyncMock(return_value=cfgs)
-    out = await get_all_tool_configurations(service=svc, group_context=Ctx())
+    out = await get_all_tool_configurations(
+        service=svc, group_context=Ctx(), secrets_visible=True
+    )
     assert out["toolA"]["x"] == 1
 
     svc.get_tool_configuration_with_group_check = AsyncMock(return_value={"y": 2})
-    out2 = await get_tool_configuration("toolA", service=svc, group_context=Ctx())
+    out2 = await get_tool_configuration(
+        "toolA", service=svc, group_context=Ctx(), secrets_visible=True
+    )
     assert out2["y"] == 2
 
     # update tool configuration requires admin

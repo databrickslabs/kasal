@@ -5,14 +5,15 @@ This module provides API endpoints for retrieving, managing, and deleting
 execution history records and related data.
 """
 
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.config.settings import settings
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.core.permissions import can_clear_workspace_history, check_role_in_context
+from src.dependencies.providers import GroupContextDep, RequestEmailDep, SessionDep
 from src.schemas.execution_history import (
     DeleteResponse,
     ExecutionHistoryItem,
@@ -39,8 +40,7 @@ router = APIRouter(prefix="/executions", tags=["Execution History"])
 @router.get("/history/debug-groups")
 async def debug_execution_groups(
     session: SessionDep,
-    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
-    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
+    user_email: RequestEmailDep,
 ) -> Dict[str, Any]:
     """
     Debug endpoint to see all unique group_ids in execution_history table
@@ -48,22 +48,18 @@ async def debug_execution_groups(
     """
     if not settings.DEBUG_MODE:
         raise HTTPException(status_code=404)
-    # Get user email from headers
-    user_email = x_auth_request_email or x_forwarded_email
 
     # Get all unique group_ids from execution_history table via service
     history_service = ExecutionHistoryService(session)
     all_group_ids = await history_service.get_execution_groups_with_counts()
 
-    # Get user's groups if email provided
     user_groups = []
-    if user_email:
-        user_service = UserService(session)
-        user = await user_service.get_or_create_user_by_email(user_email)
-        if user:
-            group_service = GroupService(session)
-            groups = await group_service.get_user_groups(user.id)
-            user_groups = [{"id": g.id, "name": g.name} for g in groups]
+    user_service = UserService(session)
+    user = await user_service.get_or_create_user_by_email(user_email)
+    if user:
+        group_service = GroupService(session)
+        groups = await group_service.get_user_groups(user.id)
+        user_groups = [{"id": g.id, "name": g.name} for g in groups]
 
     return {
         "user_email": user_email,
@@ -78,12 +74,14 @@ async def debug_execution_groups(
 @router.get("/history/all-groups", response_model=ExecutionHistoryList)
 async def get_all_groups_execution_history(
     session: SessionDep,
+    user_email: RequestEmailDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
-    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
+    # Rows are summaries unless the caller opts in; the full payload is on
+    # GET /executions/history/{execution_id}.
+    include_payload: Annotated[bool, Query()] = False,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionHistoryList:
     """
     Get execution history from all groups the user belongs to.
 
@@ -94,20 +92,12 @@ async def get_all_groups_execution_history(
         session: Database session
         limit: Maximum number of executions to return (1-100)
         offset: Pagination offset
-        x_forwarded_email: User email from Databricks Apps
-        x_auth_request_email: User email from OAuth2-Proxy
+        user_email: Caller identity from the shared resolver (401 if absent)
         service: ExecutionHistoryService instance
 
     Returns:
         ExecutionHistoryList with paginated execution history from all user's groups
     """
-    # Get user email from headers (prefer OAuth2-Proxy over direct)
-    user_email = x_auth_request_email or x_forwarded_email
-
-    if not user_email:
-        logger.warning("No user email found in headers, returning empty list")
-        return ExecutionHistoryList(executions=[], total=0, offset=offset, limit=limit)
-
     # Get all groups the user belongs to
     user_service = UserService(session)
     user = await user_service.get_or_create_user_by_email(user_email)
@@ -122,31 +112,22 @@ async def get_all_groups_execution_history(
     # Extract group IDs
     group_ids = [group.id for group in user_groups]
 
-    logger.info(f"User {user_email} belongs to {len(user_groups)} groups")
-    for group in user_groups:
-        logger.info(f"  - Group: {group.id} ({group.name})")
+    logger.debug(f"User {user_email} belongs to {len(user_groups)} groups")
 
     personal_group_id = GroupContext.personal_workspace_id_of(user, user_email)
     if personal_group_id not in group_ids:
         group_ids.append(personal_group_id)
 
-    logger.info(
-        f"Fetching executions for user {user_email} from {len(group_ids)} total groups: {group_ids}"
+    logger.debug(
+        f"Fetching executions for user {user_email} from {len(group_ids)} groups"
     )
 
     # Fetch executions from all groups
-    result = await service.get_execution_history(limit, offset, group_ids=group_ids)
+    result = await service.get_execution_history(
+        limit, offset, group_ids=group_ids, include_payload=include_payload
+    )
 
-    logger.info(f"Found {result.total} total executions across all groups")
-    if result.executions:
-        logger.info(
-            f"Returning {len(result.executions)} executions (offset={offset}, limit={limit})"
-        )
-        # Log first few execution group_ids to debug
-        for i, exec in enumerate(result.executions[:5]):
-            logger.info(
-                f"  - Execution {i+1}: job_id={exec.job_id}, status={exec.status}"
-            )
+    logger.debug(f"Found {result.total} total executions across all groups")
 
     return result
 
@@ -156,8 +137,11 @@ async def get_execution_history(
     group_context: GroupContextDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    # Rows are summaries unless the caller opts in; the full payload is on
+    # GET /executions/history/{execution_id}.
+    include_payload: Annotated[bool, Query()] = False,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionHistoryList:
     """
     Get a paginated list of execution history with group filtering.
 
@@ -171,7 +155,10 @@ async def get_execution_history(
         ExecutionHistoryList with paginated execution history
     """
     return await service.get_execution_history(
-        limit, offset, group_ids=group_context.group_ids
+        limit,
+        offset,
+        group_ids=group_context.group_ids,
+        include_payload=include_payload,
     )
 
 
@@ -180,8 +167,7 @@ async def check_execution_exists(
     execution_id: int,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-    response: Response = None,
-):
+) -> Response:
     """
     Check if an execution exists by ID. This is a lightweight HEAD request
     that returns only status code without a response body.
@@ -189,7 +175,6 @@ async def check_execution_exists(
     Args:
         execution_id: Database ID of the execution
         service: ExecutionHistoryService instance
-        response: FastAPI Response object
 
     Returns:
         HTTP 200 OK if the execution exists, HTTP 404 Not Found otherwise
@@ -208,7 +193,7 @@ async def get_execution_by_id(
     execution_id: int,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionHistoryItem:
     """
     Get execution details by ID with group filtering.
 
@@ -221,7 +206,7 @@ async def get_execution_by_id(
         ExecutionHistoryItem with execution details
     """
     execution = await service.get_execution_by_id(
-        execution_id, group_ids=group_context.group_ids
+        execution_id, tenant_ids=group_context.group_ids
     )
     if not execution:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
@@ -235,7 +220,7 @@ async def get_execution_outputs(
     limit: int = Query(1000, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionOutputList:
     """
     Get outputs for an execution.
 
@@ -249,7 +234,7 @@ async def get_execution_outputs(
         ExecutionOutputList with paginated execution outputs
     """
     return await service.get_execution_outputs(
-        execution_id, limit, offset, group_ids=group_context.group_ids
+        execution_id, limit, offset, tenant_ids=group_context.group_ids
     )
 
 
@@ -258,7 +243,7 @@ async def get_execution_debug_outputs(
     execution_id: str,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionOutputDebugList:
     """
     Get debug information about outputs for an execution.
 
@@ -270,7 +255,7 @@ async def get_execution_debug_outputs(
         ExecutionOutputDebugList with debug information
     """
     debug_info = await service.get_debug_outputs(
-        execution_id, group_ids=group_context.group_ids
+        execution_id, tenant_ids=group_context.group_ids
     )
     if not debug_info:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
@@ -283,7 +268,7 @@ async def update_execution_result(
     request: UpdateExecutionResultRequest,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> Dict[str, Any]:
     """
     Update the result data for an execution by job_id.
 
@@ -313,17 +298,30 @@ async def update_execution_result(
 @router.delete("/history", response_model=DeleteResponse)
 async def delete_all_executions(
     group_context: GroupContextDep,
+    job_id: Annotated[Optional[str], Query()] = None,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> DeleteResponse:
     """
-    Delete all executions and their associated data for the user's groups.
+    Delete all executions and their associated data in the selected workspace.
 
-    This endpoint ensures tenant isolation by only deleting executions
-    that belong to the groups the user has access to.
+    Allowed roles: admin, or anyone in their own personal workspace. This also
+    deletes the workspace's traces, logs and workflow-recipe library, the same
+    bar as deleting every crew.
+
+    It needs one selected workspace: with none, the scope is every workspace
+    the caller belongs to, and one request must not wipe them all. A
+    ``job_id`` query asks for one run, which this route would not honour, so it
+    is refused rather than read as "delete everything".
 
     Returns:
         DeleteResponse with information about the deleted data
     """
+    if not can_clear_workspace_history(group_context):
+        raise ForbiddenError("Only admins can delete the whole run history")
+    if job_id is not None:
+        raise BadRequestError("Use DELETE /executions/{job_id} to delete one run")
+    if len(group_context.group_ids or []) != 1:
+        raise BadRequestError("Select a workspace before deleting its run history")
     return await service.delete_all_executions(group_ids=group_context.group_ids)
 
 
@@ -332,9 +330,11 @@ async def delete_execution(
     execution_id: int,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> DeleteResponse:
     """
     Delete a specific execution and its associated data.
+
+    Allowed roles: admin / editor.
 
     Args:
         execution_id: Database ID of the execution
@@ -343,6 +343,8 @@ async def delete_execution(
     Returns:
         DeleteResponse with information about the deleted data
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only admins and editors can delete runs")
     result = await service.delete_execution(
         execution_id, group_ids=group_context.group_ids
     )
@@ -356,9 +358,11 @@ async def delete_execution_by_job_id(
     job_id: str,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> DeleteResponse:
     """
     Delete an execution by its job_id.
+
+    Allowed roles: admin / editor.
 
     Args:
         job_id: String ID (UUID) of the execution
@@ -367,6 +371,8 @@ async def delete_execution_by_job_id(
     Returns:
         DeleteResponse with information about the deleted data
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only admins and editors can delete runs")
     result = await service.delete_execution_by_job_id(
         job_id, group_ids=group_context.group_ids
     )

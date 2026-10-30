@@ -17,6 +17,8 @@ Two calling conventions, because there are two callers:
 import logging
 from typing import Any, Dict, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.services.execution.checkpointing.record import (
     CHECKPOINT_KEY,
     LEGACY_CREW_KEY,
@@ -53,7 +55,7 @@ async def record_unit(
     from src.services.execution.checkpointing.lifecycle import CheckpointStatus
     from src.utils.asyncio_utils import execute_db_operation_smart
 
-    async def _op(session):
+    async def _op(session: AsyncSession) -> bool:
         repo = ExecutionHistoryRepository(session)
         existing = await repo.get_checkpoint_data(job_id)
 
@@ -85,57 +87,13 @@ async def record_unit(
         return False
 
 
-async def clear(job_id: str) -> bool:
-    """Drop the checkpoint after a successful run.
-
-    Clears the lifecycle status with it: a run that finished has nothing to
-    resume, and an 'active' status would keep listing it as resumable. Sibling
-    keys in the column (HITL ``edited_config``, ``ucmv_yaml_edits``) survive.
-    """
-    from src.repositories.execution_history_repository import (
-        ExecutionHistoryRepository,
-    )
-    from src.utils.asyncio_utils import execute_db_operation_smart
-
-    async def _op(session):
-        repo = ExecutionHistoryRepository(session)
-        existing = await repo.get_checkpoint_data(job_id)
-
-        checkpoint_data = dict(existing or {})
-        # Both pops must run: `a or b` would skip the legacy key whenever the
-        # current one was present, leaving a stale v0 payload behind to be
-        # migrated back into existence on the next read.
-        dropped_current = checkpoint_data.pop(CHECKPOINT_KEY, None)
-        dropped_legacy = checkpoint_data.pop(LEGACY_CREW_KEY, None)
-        had_record = dropped_current is not None or dropped_legacy is not None
-
-        ok = await repo.set_checkpoint_data(
-            job_id,
-            checkpoint_data or None,
-            checkpoint_status=None,
-        )
-        if ok:
-            await session.commit()
-            if had_record:
-                logger.info(f"[CHECKPOINT] Cleared checkpoint for {job_id}")
-        return ok
-
-    try:
-        return bool(await execute_db_operation_smart(_op))
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            f"[CHECKPOINT] Failed to clear checkpoint for {job_id} (non-fatal): {e}"
-        )
-        return False
-
-
 # --------------------------------------------------------------------------
 # Request side: caller owns the session
 # --------------------------------------------------------------------------
 
 
 async def read_record(
-    session,
+    session: AsyncSession,
     job_id: str,
     group_ids: Optional[list] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -154,7 +112,7 @@ async def read_record(
 
 
 async def write_record(
-    session,
+    session: AsyncSession,
     job_id: str,
     record: Optional[Dict[str, Any]],
     checkpoint_status: Any = None,

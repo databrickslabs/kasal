@@ -119,27 +119,6 @@ async def test_get_flow_not_found_raises_404(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_flows_by_crew_invalid_uuid_returns_empty():
-    svc = Svc(FakeSession())
-    svc.repository = FakeRepo(None)
-    out = await svc.get_flows_by_crew("invalid-uuid")
-    assert out == []
-
-
-@pytest.mark.asyncio
-async def test_get_flows_by_crew_valid_uuid_delegates(monkeypatch):
-    svc = Svc(FakeSession())
-    fake_repo = FakeRepo(None)
-    monkeypatch.setattr(
-        "src.services.flow_builder.flow_service.FlowRepository",
-        lambda session: fake_repo,
-    )
-    crew_id = uuid.uuid4()
-    out = await svc.get_flows_by_crew(str(crew_id))
-    assert out == []
-
-
-@pytest.mark.asyncio
 async def test_update_flow_not_found_raises_404(monkeypatch):
     svc = Svc(FakeSession())
     fake_repo = FakeRepo(None)

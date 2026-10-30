@@ -85,7 +85,7 @@ async def upload_knowledge_file(
     logger.info(f"[API] File: {file.filename} ({file.content_type})")
     logger.info(f"[API] Volume config: {volume_config}")
     logger.info(f"[API] Agent IDs raw: '{agent_ids}' (type: {type(agent_ids)})")
-    logger.info(f"[API] Group context: {group_context}")
+    logger.info(f"[API] Group: {getattr(group_context, 'primary_group_id', None)}")
 
     try:
         # Extract user token for OBO authentication
@@ -137,7 +137,7 @@ async def browse_volume_files(
         DatabricksKnowledgeService, Depends(get_databricks_knowledge_service)
     ],
     group_context: GroupContextDep,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Browse files in a Databricks Volume directory.
 

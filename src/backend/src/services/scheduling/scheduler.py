@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,7 @@ from src.config.settings import settings
 from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
+from src.models.schedule import Schedule
 from src.repositories.schedule_repository import ScheduleRepository
 from src.schemas.execution import CrewConfig, ExecutionNameGenerationRequest
 from src.schemas.schedule import (
@@ -27,9 +29,17 @@ from src.schemas.scheduler import (
 )
 from src.services.execution.kasal_service import JobStatus, KasalExecutionService
 from src.services.execution.service import ExecutionService
+from src.services.execution.stored_inputs import mask_run_inputs
+from src.services.scheduling.retire import retire_schedule
+from src.services.scheduling.saved_targets import (
+    SavedTargetGone,
+    schedule_crew_id,
+    schedule_target_from_run,
+    schedule_timezone,
+    use_saved_target,
+)
 from src.utils.cron_utils import calculate_next_run_from_last, ensure_utc
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -37,6 +47,29 @@ logger_manager = LoggerManager.get_instance()
 
 # Define DB_PATH from settings
 DB_PATH = str(settings.DATABASE_URI).replace("sqlite:///", "")
+
+
+def _job_response(
+    schedule: Schedule, description: Optional[str]
+) -> SchedulerJobResponse:
+    """A schedule row in the shape of the /schedules/jobs API."""
+    return SchedulerJobResponse(
+        id=schedule.id,
+        name=schedule.name,
+        description=description,
+        schedule=schedule.cron_expression,
+        enabled=schedule.is_active,
+        job_data={
+            "agents": schedule.agents_yaml,
+            "tasks": schedule.tasks_yaml,
+            "inputs": schedule.inputs,
+            "model": schedule.model,
+        },
+        created_at=schedule.created_at,
+        updated_at=schedule.updated_at,
+        last_run_at=schedule.last_run_at,
+        next_run_at=schedule.next_run_at,
+    )
 
 
 class SchedulerService:
@@ -61,7 +94,9 @@ class SchedulerService:
         self._running_tasks: Set[asyncio.Task] = set()
 
     async def create_schedule(
-        self, schedule_data: ScheduleCreate, group_context: GroupContext = None
+        self,
+        schedule_data: ScheduleCreate,
+        group_context: Optional[GroupContext] = None,
     ) -> ScheduleResponse:
         """
         Create a new schedule.
@@ -76,8 +111,10 @@ class SchedulerService:
             HTTPException: If schedule creation fails
         """
         try:
-            # Calculate next run time
-            next_run = calculate_next_run_from_last(schedule_data.cron_expression)
+            # Calculate next run time, on the schedule's own clock
+            next_run = calculate_next_run_from_last(
+                schedule_data.cron_expression, None, schedule_data.timezone
+            )
 
             # Create schedule with tenant context
             schedule_dict = schedule_data.model_dump()
@@ -101,7 +138,7 @@ class SchedulerService:
     async def create_schedule_from_execution(
         self,
         schedule_data: ScheduleCreateFromExecution,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> ScheduleResponse:
         """
         Create a new schedule based on an existing execution.
@@ -135,7 +172,6 @@ class SchedulerService:
 
             # Parse the inputs from execution
             inputs = execution.inputs if execution.inputs else {}
-            execution_inputs = inputs.get("inputs", {})
 
             # Determine execution type from the execution record
             execution_type = getattr(execution, "execution_type", None) or inputs.get(
@@ -156,59 +192,37 @@ class SchedulerService:
                 "name": schedule_data.name,
                 "cron_expression": schedule_data.cron_expression,
                 "execution_type": execution_type,
-                "inputs": execution_inputs,
+                "inputs": inputs.get("inputs", {}),
                 "is_active": schedule_data.is_active,
+                "timezone": schedule_data.timezone,
                 "next_run_at": calculate_next_run_from_last(
-                    schedule_data.cron_expression
+                    schedule_data.cron_expression, None, schedule_data.timezone
                 ),
             }
+            # The saved crew or flow the run came from, not the run's masked
+            # copy of it (see saved_targets).
+            target = await schedule_target_from_run(
+                self.session, execution, execution_type, group_context
+            )
+            schedule_dict.update(target)
+            agents_yaml = target.get("agents_yaml") or {}
 
-            if execution_type == "flow":
-                # Flow execution - extract flow-specific fields
-                nodes = inputs.get("nodes", [])
-                edges = inputs.get("edges", [])
-                flow_config = inputs.get("flow_config", {})
-                flow_id = inputs.get("flow_id") or getattr(execution, "flow_id", None)
+            # Extract model from first agent's llm configuration if not in inputs
+            if not model and execution_type != "flow":
+                for agent_config in agents_yaml.values():
+                    if isinstance(agent_config, dict) and agent_config.get("llm"):
+                        model = agent_config["llm"]
+                        break
 
-                if not flow_id and not (nodes and edges):
-                    raise BadRequestError(
-                        detail=f"Execution {schedule_data.execution_id} is a flow execution but does not contain flow_id or nodes/edges configuration"
-                    )
-
-                schedule_dict["flow_id"] = flow_id
-                schedule_dict["nodes"] = nodes
-                schedule_dict["edges"] = edges
-                schedule_dict["flow_config"] = flow_config
-                # For flows, agents_yaml and tasks_yaml can be empty
-                schedule_dict["agents_yaml"] = inputs.get("agents_yaml", {})
-                schedule_dict["tasks_yaml"] = inputs.get("tasks_yaml", {})
-
-                logger_manager.scheduler.info(
-                    f"Creating flow schedule from execution {schedule_data.execution_id} with flow_id={flow_id}, {len(nodes)} nodes, {len(edges)} edges"
-                )
-            else:
-                # Crew execution - extract crew-specific fields
-                agents_yaml = inputs.get("agents_yaml", {})
-                tasks_yaml = inputs.get("tasks_yaml", {})
-
-                if not agents_yaml or not tasks_yaml:
-                    raise BadRequestError(
-                        detail=f"Execution {schedule_data.execution_id} does not contain valid agents_yaml or tasks_yaml configuration"
-                    )
-
-                # Extract model from first agent's llm configuration if not in inputs
-                if not model and agents_yaml:
-                    for agent_key, agent_config in agents_yaml.items():
-                        if isinstance(agent_config, dict) and agent_config.get("llm"):
-                            model = agent_config["llm"]
-                            break
-
-                schedule_dict["agents_yaml"] = agents_yaml
-                schedule_dict["tasks_yaml"] = tasks_yaml
-
-                logger_manager.scheduler.info(
-                    f"Creating crew schedule from execution {schedule_data.execution_id} with {len(agents_yaml)} agents, {len(tasks_yaml)} tasks"
-                )
+            logger_manager.scheduler.info(
+                "Creating %s schedule from execution %s: crew_id=%s, flow_id=%s, "
+                "%d agents",
+                execution_type,
+                schedule_data.execution_id,
+                target.get("crew_id"),
+                target.get("flow_id"),
+                len(agents_yaml),
+            )
 
             # Fallback to default model if no model found
             if not model:
@@ -235,7 +249,7 @@ class SchedulerService:
             )
 
     async def get_all_schedules(
-        self, group_context: GroupContext = None
+        self, group_context: Optional[GroupContext] = None
     ) -> ScheduleListResponse:
         """
         Get all schedules.
@@ -243,7 +257,10 @@ class SchedulerService:
         Returns:
             ScheduleListResponse with list of schedules
         """
-        logger.debug(f"get_all_schedules called with group_context: {group_context}")
+        logger.debug(
+            "get_all_schedules called for group %s",
+            getattr(group_context, "primary_group_id", None),
+        )
         if group_context and group_context.primary_group_id:
             logger.debug(f"Filtering by group_id: {group_context.primary_group_id}")
             schedules = await self.repository.find_by_group(
@@ -271,26 +288,8 @@ class SchedulerService:
             count=len(schedules),
         )
 
-    async def get_schedule_by_id(self, schedule_id: int) -> ScheduleResponse:
-        """
-        Get a schedule by ID.
-
-        Args:
-            schedule_id: ID of the schedule to retrieve
-
-        Returns:
-            ScheduleResponse if schedule found
-
-        Raises:
-            HTTPException: If schedule not found
-        """
-        schedule = await self.repository.find_by_id(schedule_id)
-        if not schedule:
-            raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
-        return ScheduleResponse.model_validate(schedule)
-
     async def get_schedule_by_id_with_group_check(
-        self, schedule_id: int, group_context: GroupContext = None
+        self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> ScheduleResponse:
         """
         Get a schedule by ID with group isolation.
@@ -333,9 +332,10 @@ class SchedulerService:
             HTTPException: If schedule not found or update fails
         """
         try:
-            # Update schedule
+            # Only the fields the caller sent: an omitted timezone or flow_id
+            # keeps its stored value instead of being reset to the default.
             schedule = await self.repository.update(
-                schedule_id, schedule_data.model_dump()
+                schedule_id, schedule_data.model_dump(exclude_unset=True)
             )
             if not schedule:
                 raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
@@ -354,7 +354,7 @@ class SchedulerService:
         self,
         schedule_id: int,
         schedule_data: ScheduleUpdate,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> ScheduleResponse:
         """
         Update a schedule with group isolation.
@@ -383,9 +383,9 @@ class SchedulerService:
                         detail=f"Schedule with ID {schedule_id} not found"
                     )
 
-            # Update schedule
+            # Only the fields the caller sent (see update_schedule).
             schedule = await self.repository.update(
-                schedule_id, schedule_data.model_dump()
+                schedule_id, schedule_data.model_dump(exclude_unset=True)
             )
             return ScheduleResponse.model_validate(schedule)
         except KasalError:
@@ -424,7 +424,7 @@ class SchedulerService:
             raise KasalError(detail=f"Failed to delete schedule: {str(e)}")
 
     async def delete_schedule_with_group_check(
-        self, schedule_id: int, group_context: GroupContext = None
+        self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> Dict[str, str]:
         """
         Delete a schedule with group isolation.
@@ -488,7 +488,7 @@ class SchedulerService:
             raise KasalError(detail=f"Failed to toggle schedule: {str(e)}")
 
     async def toggle_schedule_with_group_check(
-        self, schedule_id: int, group_context: GroupContext = None
+        self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> ToggleResponse:
         """
         Toggle a schedule's active state with group isolation.
@@ -547,16 +547,34 @@ class SchedulerService:
             # that only points there if activate_lakebase() ran in this process
             # (boot or subprocess — never a runtime /lakebase/enable). Reading the
             # wrong database here means the schedule is "not found" and the run is
-            # skipped silently.
-            async for session in get_smart_db_session():
+            # skipped silently. A context manager, not `async for`: a break OR a
+            # return in the loop abandons the generator before it commits/closes.
+            async with asynccontextmanager(get_smart_db_session)() as session:
                 # Get the schedule to retrieve group information
                 repo = ScheduleRepository(session)
                 schedule = await repo.find_by_id(schedule_id)
                 if not schedule:
                     logger_manager.scheduler.error(f"Schedule {schedule_id} not found")
-                    # break, not return: a return would abandon the session
-                    # generator before it commits and closes.
-                    break
+                    return
+
+                from src.services.execution.config import run_freeze
+
+                group_context = GroupContext(
+                    group_ids=[schedule.group_id] if schedule.group_id else [],
+                    group_email=schedule.created_by_email,
+                )
+                # A schedule of a saved crew or flow runs it as it is now; one
+                # whose crew or flow is gone is turned off, with a failed run
+                # that says why.
+                try:
+                    await use_saved_target(session, config, group_context)
+                except SavedTargetGone as gone:
+                    await retire_schedule(session, schedule, str(gone), execution_time)
+                    return
+                # A schedule may ask for "auto": it is resolved per run, here,
+                # before the run is named, recorded or started.
+                auto = await run_freeze.resolve(config, session, group_context)
+                model = config.model or DEFAULT_ENGINE_MODEL
 
                 # Generate run name based on execution type
                 execution_service = ExecutionService()
@@ -579,22 +597,12 @@ class SchedulerService:
                         f"Running scheduled crew job {job_id} for schedule {schedule_id}"
                     )
 
-                # Prepare job configuration based on execution type
-                # SECURITY: Mask sensitive fields (client_secret, password, token, etc.) before storage
-                config_dict = {
-                    "agents_yaml": (
-                        mask_sensitive_fields(config.agents_yaml)
-                        if config.agents_yaml
-                        else {}
-                    ),
-                    "tasks_yaml": (
-                        mask_sensitive_fields(config.tasks_yaml)
-                        if config.tasks_yaml
-                        else {}
-                    ),
-                    "inputs": (
-                        mask_sensitive_fields(config.inputs) if config.inputs else {}
-                    ),
+                # The run's record. It is masked below by the rule every launch
+                # path shares; the run itself is handed ``config``.
+                config_dict: Dict[str, object] = {
+                    "agents_yaml": config.agents_yaml or {},
+                    "tasks_yaml": config.tasks_yaml or {},
+                    "inputs": config.inputs or {},
                     "model": config.model,
                     "execution_type": execution_type,
                 }
@@ -610,14 +618,14 @@ class SchedulerService:
                     if config.flow_config:
                         config_dict["flow_config"] = config.flow_config
 
-                # Convert to local time for database consistency with regular jobs
+                # Naive UTC, like every other executionhistory timestamp
                 if (
                     hasattr(execution_time, "tzinfo")
                     and execution_time.tzinfo is not None
                 ):
-                    execution_time_naive = execution_time.astimezone().replace(
-                        tzinfo=None
-                    )
+                    execution_time_naive = execution_time.astimezone(
+                        timezone.utc
+                    ).replace(tzinfo=None)
                 else:
                     execution_time_naive = execution_time
 
@@ -631,55 +639,24 @@ class SchedulerService:
                     session,
                     job_id=job_id,
                     run_name=run_name,
-                    inputs=config_dict,
+                    inputs=mask_run_inputs(config_dict),
                     execution_type=execution_type,
                     group_id=schedule.group_id,
                     group_email=schedule.created_by_email,
                     flow_id=config.flow_id if execution_type == "flow" else None,
-                    # Without this a SCHEDULED crew run records no crew_id, so
-                    # emit-on-completion can never match it to an emit rule —
-                    # "runs on a schedule, then triggers downstream" silently
-                    # did nothing for crews.
+                    # The schedule's saved crew (schedule.crew_id, set when it
+                    # was made from a run of a saved crew). Without it the run
+                    # records no crew_id and emit-on-completion can never match
+                    # it to an emit rule.
                     crew_id=getattr(config, "crew_id", None),
                     trigger_type="scheduled",
                     created_at=execution_time_naive,
                 )
+                run_freeze.record(auto, job_id, group_context)
 
-                # Ensure Databricks auth is available via unified auth for scheduled jobs
-                import os
-
-                try:
-                    from src.utils.databricks_auth import get_auth_context
-
-                    auth = await get_auth_context()
-                    if auth:
-                        if auth.workspace_url:
-                            os.environ["DATABRICKS_HOST"] = auth.workspace_url
-                            logger_manager.scheduler.info(
-                                f"Loaded DATABRICKS_HOST from unified {auth.auth_method} auth for scheduled job"
-                            )
-                        if auth.token:
-                            os.environ["DATABRICKS_TOKEN"] = auth.token
-                            os.environ["DATABRICKS_API_KEY"] = auth.token
-                            logger_manager.scheduler.info(
-                                f"Loaded DATABRICKS_TOKEN from unified {auth.auth_method} auth for scheduled job"
-                            )
-                    else:
-                        logger_manager.scheduler.warning(
-                            "No unified auth available for scheduled job"
-                        )
-                except Exception as e:
-                    logger_manager.scheduler.warning(
-                        f"Could not load Databricks auth from unified auth: {e}"
-                    )
-
-                # Create group context from schedule information
-                from src.utils.user_context import GroupContext
-
-                group_context = GroupContext(
-                    group_ids=[schedule.group_id] if schedule.group_id else [],
-                    group_email=schedule.created_by_email,
-                )
+                # No Databricks credentials are exported into os.environ here:
+                # the process env is shared by every workspace, and the run
+                # resolves its own auth (get_auth_context) for its group.
 
                 # Add execution to memory
                 KasalExecutionService.add_execution_to_memory(
@@ -722,6 +699,22 @@ class SchedulerService:
                     f"Error updating schedule {schedule_id} after job failure: {update_error}"
                 )
 
+    async def _retire_quietly(
+        self, schedule: Schedule, reason: str, when: datetime
+    ) -> None:
+        """``retire_schedule`` on its own session, logging rather than raising.
+
+        The loop's session and the rest of this tick's due schedules are left
+        alone if it fails; the schedule stays due and is tried next tick.
+        """
+        try:
+            async with asynccontextmanager(get_smart_db_session)() as session:
+                await retire_schedule(session, schedule, reason, when)
+        except Exception:  # noqa: BLE001 — one schedule must not stop the rest
+            logger_manager.scheduler.exception(
+                "Could not turn off schedule %s; trying again next tick", schedule.id
+            )
+
     async def check_and_run_schedules(self) -> None:
         """
         Check for due schedules and run them.
@@ -761,6 +754,8 @@ class SchedulerService:
                     logger_manager.scheduler.debug("Current schedules status:")
                     for schedule in all_schedules:
                         # Handle timezone-naive datetimes from database
+                        next_run: Optional[datetime]
+                        last_run: Optional[datetime]
                         if schedule.next_run_at and schedule.next_run_at.tzinfo is None:
                             next_run = schedule.next_run_at.replace(tzinfo=timezone.utc)
                         else:
@@ -808,9 +803,32 @@ class SchedulerService:
                         logger_manager.scheduler.info(
                             f"Starting task for schedule {schedule.id} - {schedule.name} (type: {execution_type})"
                         )
+                        # Keys only: the specs can carry decrypted tool_configs.
                         logger_manager.scheduler.info(
-                            f"Schedule configuration: execution_type={execution_type}, agents_yaml={schedule.agents_yaml}, tasks_yaml={schedule.tasks_yaml}, inputs={schedule.inputs}, model={schedule.model}"
+                            f"Schedule configuration: execution_type={execution_type}, "
+                            f"agents={sorted(schedule.agents_yaml or {})}, "
+                            f"tasks={sorted(schedule.tasks_yaml or {})}, "
+                            f"input keys={sorted(schedule.inputs or {})}, "
+                            f"model={schedule.model}"
                         )
+
+                        # The next run first: an unreadable cron line or
+                        # timezone turns the schedule off rather than leaving
+                        # it due, which re-fired it every minute.
+                        try:
+                            next_run = calculate_next_run_from_last(
+                                schedule.cron_expression,
+                                now_utc,
+                                schedule_timezone(schedule),
+                            )
+                        except ValueError as unreadable:
+                            await self._retire_quietly(
+                                schedule,
+                                f"Its cron line or timezone cannot be read "
+                                f"({unreadable}), so the schedule was turned off.",
+                                now_utc,
+                            )
+                            continue
 
                         # Build CrewConfig with proper defaults for None values (important for flow schedules)
                         config = CrewConfig(
@@ -830,6 +848,7 @@ class SchedulerService:
                             nodes=getattr(schedule, "nodes", None),
                             edges=getattr(schedule, "edges", None),
                             flow_config=getattr(schedule, "flow_config", None),
+                            crew_id=schedule_crew_id(schedule),
                         )
 
                         # Create task for the job
@@ -839,11 +858,7 @@ class SchedulerService:
                         )
                         self._running_tasks.add(task)
 
-                        # Update next run time immediately
-                        # Convert timezone-aware now_utc to timezone-naive for consistency
-                        schedule.next_run_at = calculate_next_run_from_last(
-                            schedule.cron_expression, now_utc.replace(tzinfo=None)
-                        )
+                        schedule.next_run_at = next_run
                         await session.commit()
 
                 # Check for task errors
@@ -874,7 +889,7 @@ class SchedulerService:
         """
         logger.info("Starting scheduler background task...")
 
-        async def scheduler_loop():
+        async def scheduler_loop() -> None:
             while True:
                 try:
                     await self.check_and_run_schedules()
@@ -887,7 +902,7 @@ class SchedulerService:
         self._running_tasks.add(task)
 
         # Add done callback to remove task from set when done
-        def task_done_callback(task):
+        def task_done_callback(task: asyncio.Task[None]) -> None:
             self._running_tasks.discard(task)
             if task.done() and not task.cancelled():
                 exc = task.exception()
@@ -911,29 +926,13 @@ class SchedulerService:
         # Convert schedules to job responses
         jobs = []
         for schedule in schedules:
-            job = SchedulerJobResponse(
-                id=schedule.id,
-                name=schedule.name,
-                description=f"Scheduled job from {schedule.name}",
-                schedule=schedule.cron_expression,
-                enabled=schedule.is_active,
-                job_data={
-                    "agents": schedule.agents_yaml,
-                    "tasks": schedule.tasks_yaml,
-                    "inputs": schedule.inputs,
-                    "model": schedule.model,
-                },
-                created_at=schedule.created_at,
-                updated_at=schedule.updated_at,
-                last_run_at=schedule.last_run_at,
-                next_run_at=schedule.next_run_at,
-            )
+            job = _job_response(schedule, f"Scheduled job from {schedule.name}")
             jobs.append(job)
 
         return jobs
 
     async def get_all_jobs_for_group(
-        self, group_context: GroupContext = None
+        self, group_context: Optional[GroupContext] = None
     ) -> List[SchedulerJobResponse]:
         """
         Get all scheduler jobs for a specific group.
@@ -955,23 +954,7 @@ class SchedulerService:
         # Convert schedules to job responses
         jobs = []
         for schedule in schedules:
-            job = SchedulerJobResponse(
-                id=schedule.id,
-                name=schedule.name,
-                description=f"Scheduled job from {schedule.name}",
-                schedule=schedule.cron_expression,
-                enabled=schedule.is_active,
-                job_data={
-                    "agents": schedule.agents_yaml,
-                    "tasks": schedule.tasks_yaml,
-                    "inputs": schedule.inputs,
-                    "model": schedule.model,
-                },
-                created_at=schedule.created_at,
-                updated_at=schedule.updated_at,
-                last_run_at=schedule.last_run_at,
-                next_run_at=schedule.next_run_at,
-            )
+            job = _job_response(schedule, f"Scheduled job from {schedule.name}")
             jobs.append(job)
 
         return jobs
@@ -1015,26 +998,12 @@ class SchedulerService:
         schedule = await self.repository.create(schedule_data.model_dump())
 
         # Convert back to job response
-        return SchedulerJobResponse(
-            id=schedule.id,
-            name=schedule.name,
-            description=job_create.description,
-            schedule=schedule.cron_expression,
-            enabled=schedule.is_active,
-            job_data={
-                "agents": schedule.agents_yaml,
-                "tasks": schedule.tasks_yaml,
-                "inputs": schedule.inputs,
-                "model": schedule.model,
-            },
-            created_at=schedule.created_at,
-            updated_at=schedule.updated_at,
-            last_run_at=schedule.last_run_at,
-            next_run_at=schedule.next_run_at,
-        )
+        return _job_response(schedule, job_create.description)
 
     async def create_job_with_group(
-        self, job_create: SchedulerJobCreate, group_context: GroupContext = None
+        self,
+        job_create: SchedulerJobCreate,
+        group_context: Optional[GroupContext] = None,
     ) -> SchedulerJobResponse:
         """
         Create a new scheduler job with group isolation.
@@ -1081,23 +1050,7 @@ class SchedulerService:
         schedule = await self.repository.create(schedule_dict)
 
         # Convert back to job response
-        return SchedulerJobResponse(
-            id=schedule.id,
-            name=schedule.name,
-            description=job_create.description,
-            schedule=schedule.cron_expression,
-            enabled=schedule.is_active,
-            job_data={
-                "agents": schedule.agents_yaml,
-                "tasks": schedule.tasks_yaml,
-                "inputs": schedule.inputs,
-                "model": schedule.model,
-            },
-            created_at=schedule.created_at,
-            updated_at=schedule.updated_at,
-            last_run_at=schedule.last_run_at,
-            next_run_at=schedule.next_run_at,
-        )
+        return _job_response(schedule, job_create.description)
 
     async def update_job(
         self, job_id: int, job_update: SchedulerJobUpdate
@@ -1118,7 +1071,7 @@ class SchedulerService:
             raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Prepare update data
-        update_data = {}
+        update_data: Dict[str, Any] = {}
         if job_update.name is not None:
             update_data["name"] = job_update.name
         if job_update.schedule is not None:
@@ -1139,32 +1092,20 @@ class SchedulerService:
 
         # Update schedule
         updated_schedule = await self.repository.update(job_id, update_data)
+        if updated_schedule is None:
+            raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Convert to job response
-        return SchedulerJobResponse(
-            id=updated_schedule.id,
-            name=updated_schedule.name,
-            description=job_update.description
-            or f"Scheduled job from {updated_schedule.name}",
-            schedule=updated_schedule.cron_expression,
-            enabled=updated_schedule.is_active,
-            job_data={
-                "agents": updated_schedule.agents_yaml,
-                "tasks": updated_schedule.tasks_yaml,
-                "inputs": updated_schedule.inputs,
-                "model": updated_schedule.model,
-            },
-            created_at=updated_schedule.created_at,
-            updated_at=updated_schedule.updated_at,
-            last_run_at=updated_schedule.last_run_at,
-            next_run_at=updated_schedule.next_run_at,
+        return _job_response(
+            updated_schedule,
+            job_update.description or f"Scheduled job from {updated_schedule.name}",
         )
 
     async def update_job_with_group_check(
         self,
         job_id: int,
         job_update: SchedulerJobUpdate,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> SchedulerJobResponse:
         """
         Update a scheduler job with group isolation.
@@ -1191,7 +1132,7 @@ class SchedulerService:
                 raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Prepare update data
-        update_data = {}
+        update_data: Dict[str, Any] = {}
         if job_update.name is not None:
             update_data["name"] = job_update.name
         if job_update.schedule is not None:
@@ -1212,25 +1153,13 @@ class SchedulerService:
 
         # Update schedule
         updated_schedule = await self.repository.update(job_id, update_data)
+        if updated_schedule is None:
+            raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Convert to job response
-        return SchedulerJobResponse(
-            id=updated_schedule.id,
-            name=updated_schedule.name,
-            description=job_update.description
-            or f"Scheduled job from {updated_schedule.name}",
-            schedule=updated_schedule.cron_expression,
-            enabled=updated_schedule.is_active,
-            job_data={
-                "agents": updated_schedule.agents_yaml,
-                "tasks": updated_schedule.tasks_yaml,
-                "inputs": updated_schedule.inputs,
-                "model": updated_schedule.model,
-            },
-            created_at=updated_schedule.created_at,
-            updated_at=updated_schedule.updated_at,
-            last_run_at=updated_schedule.last_run_at,
-            next_run_at=updated_schedule.next_run_at,
+        return _job_response(
+            updated_schedule,
+            job_update.description or f"Scheduled job from {updated_schedule.name}",
         )
 
     async def shutdown(self) -> None:

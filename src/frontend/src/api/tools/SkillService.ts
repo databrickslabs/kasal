@@ -1,4 +1,5 @@
 import { apiClient } from '../../shared/api/client';
+import { waitForRunResult } from '../execution/runResult';
 
 /**
  * Agent Skills — packaged procedural know-how an agent can load on demand.
@@ -108,6 +109,14 @@ export interface SkillValidationResult {
 
 const BASE = '/skills';
 
+function draftBody(request: string, transcript?: TranscriptTurn[], model?: string) {
+  return {
+    request,
+    transcript: transcript && transcript.length > 0 ? transcript : null,
+    model: model || null,
+  };
+}
+
 export const SkillService = {
   async list(): Promise<Skill[]> {
     const { data } = await apiClient.get<{ skills: Skill[]; count: number }>(BASE);
@@ -131,12 +140,34 @@ export const SkillService = {
     transcript?: TranscriptTurn[],
     model?: string,
   ): Promise<SkillDraft> {
-    const { data } = await apiClient.post<SkillDraft>(`${BASE}/draft`, {
-      request,
-      transcript: transcript && transcript.length > 0 ? transcript : null,
-      model: model || null,
-    });
+    const { data } = await apiClient.post<SkillDraft>(
+      `${BASE}/draft`,
+      draftBody(request, transcript, model),
+    );
     return data;
+  },
+
+  /**
+   * The same draft, with its run activity visible WHILE it is drafted: the
+   * backend answers with the run's job id before any LLM call, `onStarted`
+   * gets it (so the chat's activity can read the run's trace — the LLM request,
+   * then its response — live), and the draft is the run's result once it ends.
+   */
+  async draftWithTrace(
+    request: string,
+    transcript: TranscriptTurn[] | undefined,
+    model: string | undefined,
+    onStarted: (jobId: string) => void,
+    signal?: AbortSignal,
+  ): Promise<SkillDraft> {
+    const { data } = await apiClient.post<{ job_id: string }>(
+      `${BASE}/drafts`,
+      draftBody(request, transcript, model),
+      { signal },
+    );
+    onStarted(data.job_id);
+    const draft = await waitForRunResult<SkillDraft>(data.job_id, 'skill_draft', signal);
+    return { ...draft, job_id: draft.job_id || data.job_id };
   },
 
   async validate(input: SkillInput): Promise<SkillValidationResult> {

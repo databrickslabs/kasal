@@ -18,8 +18,15 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Optional, Protocol
 
+from src.services.tools.metric_view_utils.raw_fields import (
+    RawMap,
+    as_int,
+    as_list,
+    as_map,
+)
 from src.services.tools.metric_view_utils.reconciliation import (
     run_reconciliation_loop,
 )
@@ -27,9 +34,15 @@ from src.services.tools.metric_view_utils.reconciliation import (
 logger = logging.getLogger(__name__)
 
 
-def _loads(raw: Any) -> dict:
+class ToolRunner(Protocol):
+    """A tool the loop drives: ``_run(**kwargs)`` returns a JSON string."""
+
+    def _run(self, **kwargs: object) -> object: ...
+
+
+def _loads(raw: object) -> RawMap:
     """Parse a tool's JSON string output into a dict; {} on anything unexpected."""
-    if isinstance(raw, dict):
+    if isinstance(raw, Mapping):
         return raw
     if not isinstance(raw, str):
         return {}
@@ -41,8 +54,8 @@ def _loads(raw: Any) -> dict:
 
 
 def _carry_forward_overrides(
-    resolved_by_table: dict, specs_summary: dict, feedback: list
-) -> dict:
+    resolved_by_table: RawMap, specs_summary: RawMap, feedback: list[RawMap]
+) -> dict[str, list[dict[str, object]]]:
     """Build ``manual_overrides`` reusing the prior cycle's SQL for every measure
     NOT flagged as a failure in ``feedback``.
 
@@ -56,22 +69,23 @@ def _carry_forward_overrides(
     """
     if not resolved_by_table or not feedback:
         return {}
-    view_to_table = {
-        (info or {}).get("view_name"): tk
-        for tk, info in (specs_summary or {}).items()
-        if (info or {}).get("view_name")
+    view_to_table: dict[object, object] = {
+        as_map(info).get("view_name"): tk
+        for tk, info in specs_summary.items()
+        if as_map(info).get("view_name")
     }
-    failing: set = set()
+    failing: set[tuple[object, object]] = set()
     for item in feedback:
-        if not isinstance(item, dict) or not item.get("measure"):
+        if not item.get("measure"):
             continue
         # tk may be None when the view→table map misses — kept as a name-only
         # guard so the measure is still excluded from carry-forward.
         failing.add((view_to_table.get(item.get("view")), item["measure"]))
 
-    overrides: dict = {}
+    overrides: dict[str, list[dict[str, object]]] = {}
     for tk, rows in resolved_by_table.items():
-        for r in rows or []:
+        for row in as_list(rows):
+            r = as_map(row)
             name = r.get("measure_name")
             expr = r.get("sql_expr")
             if not name or not expr:
@@ -89,17 +103,27 @@ def _carry_forward_overrides(
     return overrides
 
 
+def _positive_or(value: object, default: float) -> float:
+    """``float(value)``, or ``default`` when the value is unset, falsy or not numeric."""
+    if not value:
+        return default
+    try:
+        return float(str(value))
+    except ValueError:
+        return default
+
+
 def run_iterative_ucmv_generation(
     *,
-    generator,
-    deployer,
-    reconciler,
-    gen_kwargs: Optional[dict] = None,
-    deploy_kwargs: Optional[dict] = None,
-    recon_kwargs: Optional[dict] = None,
+    generator: ToolRunner,
+    deployer: ToolRunner,
+    reconciler: ToolRunner,
+    gen_kwargs: Optional[Mapping[str, object]] = None,
+    deploy_kwargs: Optional[Mapping[str, object]] = None,
+    recon_kwargs: Optional[Mapping[str, object]] = None,
     max_cycles: int = 5,
     target_pct: float = 100.0,
-) -> dict:
+) -> dict[str, object]:
     """Run the generate→deploy→reconcile→refine loop and return a JSON-able report.
 
     - ``generator._run(**gen_kwargs[, refinement_feedback])`` → output with
@@ -109,65 +133,66 @@ def run_iterative_ucmv_generation(
 
     Returns ``{stop_reason, best_cycle, best_pct, cycles[], yaml, reconciliation}``.
     """
-    gen_kwargs = dict(gen_kwargs or {})
-    deploy_kwargs = dict(deploy_kwargs or {})
-    recon_kwargs = dict(recon_kwargs or {})
+    gen_base: dict[str, object] = dict(gen_kwargs or {})
+    deploy_base: dict[str, object] = dict(deploy_kwargs or {})
+    recon_base: dict[str, object] = dict(recon_kwargs or {})
 
     # Carry-forward state: the prior cycle's translations + view→table map, so a
     # refine cycle reuses already-reconciled measures instead of re-translating
     # the whole model.
-    _cf: dict = {"resolved": {}, "specs": {}}
+    resolved_state: RawMap = {}
+    specs_state: RawMap = {}
 
-    def generate(feedback) -> dict:
-        kw = dict(gen_kwargs)
+    def generate(feedback: Optional[list[RawMap]]) -> RawMap:
+        nonlocal resolved_state, specs_state
+        kw = dict(gen_base)
         if feedback:
             # The generator normalises this into the DAX LLM's per-measure hints.
             kw["refinement_feedback"] = json.dumps(feedback)
             # Incremental refinement: reuse SQL for every measure NOT flagged as a
             # failure, so only the missed measures hit the LLM again this cycle.
-            overrides = _carry_forward_overrides(
-                _cf["resolved"], _cf["specs"], feedback
-            )
+            overrides = _carry_forward_overrides(resolved_state, specs_state, feedback)
             if overrides:
-                merged = {
-                    k: list(v) for k, v in (kw.get("manual_overrides") or {}).items()
+                merged: dict[str, list[object]] = {
+                    k: list(as_list(v))
+                    for k, v in as_map(kw.get("manual_overrides")).items()
                 }
                 for tk, entries in overrides.items():
                     merged.setdefault(tk, []).extend(entries)
                 kw["manual_overrides"] = merged
+                carried_measures = sum(len(v) for v in overrides.values())
+                carried_tables = len(overrides)
                 logger.info(
                     "[UCMV] incremental refine: carrying forward %d measure(s) "
                     "across %d table(s); only failures re-translated",
-                    sum(len(v) for v in overrides.values()),
-                    len(overrides),
+                    carried_measures,
+                    carried_tables,
                 )
         out = _loads(generator._run(**kw))
-        _cf["resolved"] = out.get("resolved_measures_by_table") or {}
-        _cf["specs"] = out.get("specs_summary") or {}
+        resolved_state = as_map(out.get("resolved_measures_by_table"))
+        specs_state = as_map(out.get("specs_summary"))
         return {
-            "yaml": out.get("yaml") or {},
-            "mappings": out.get("pbi_ucmv_mapping") or {},
+            "yaml": as_map(out.get("yaml")),
+            "mappings": as_map(out.get("pbi_ucmv_mapping")),
         }
 
-    def deploy(yaml_specs) -> dict:
+    def deploy(yaml_specs: RawMap) -> RawMap:
         if not yaml_specs:
             return {"ok": False, "error": "generator produced no YAML"}
         out = _loads(
-            deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_kwargs)
+            deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_base)
         )
-        summary = out.get("summary") or {}
+        summary = as_map(out.get("summary"))
         # A clean deploy: at least one view deployed and no hard errors. A
         # deployed_incomplete view (truncated YAML) still counts as not-ok so the
         # loop does not reconcile a measureless view.
-        ok = summary.get("deployed", 0) > 0 and summary.get("errors", 0) == 0
+        ok = as_int(summary.get("deployed")) > 0 and as_int(summary.get("errors")) == 0
         return {"ok": ok, "raw": out}
 
-    def reconcile(yaml_specs, mappings) -> dict:
+    def reconcile(yaml_specs: RawMap, mappings: RawMap) -> RawMap:
         if not mappings:
             return {"views": {}, "overall": {"cells_total": 0}}
-        return _loads(
-            reconciler._run(mappings_json=json.dumps(mappings), **recon_kwargs)
-        )
+        return _loads(reconciler._run(mappings_json=json.dumps(mappings), **recon_base))
 
     result = run_reconciliation_loop(
         generate=generate,
@@ -201,7 +226,9 @@ _GEN_TO_RECON_PBI = {
 }
 
 
-def run_from_generator(generator_tool, kwargs: dict) -> Optional[dict]:
+def run_from_generator(
+    generator_tool: ToolRunner, kwargs: Mapping[str, object]
+) -> Optional[dict[str, object]]:
     """Bridge from the UC Metric View generator's ``enable_reconciliation`` toggle
     to the iterative loop. Returns the loop report, or ``None`` when prerequisites
     are missing (caller then falls back to single-pass generation).
@@ -209,11 +236,12 @@ def run_from_generator(generator_tool, kwargs: dict) -> Optional[dict]:
     The generate step re-invokes the SAME generator with ``enable_reconciliation``
     off and an ``_in_recon_loop`` guard, so there is no infinite recursion.
     """
+    default_config = as_map(getattr(generator_tool, "_default_config", {}))
 
-    def cfg(key):
+    def cfg(key: str) -> object:
         val = kwargs.get(key)
         if val is None:
-            val = getattr(generator_tool, "_default_config", {}).get(key)
+            val = default_config.get(key)
         return val
 
     warehouse_id = cfg("warehouse_id")
@@ -265,6 +293,6 @@ def run_from_generator(generator_tool, kwargs: dict) -> Optional[dict]:
             "warehouse_id": warehouse_id,
             "reference_years": reference_years,
         },
-        max_cycles=int(cfg("max_reconciliation_cycles") or 5),
-        target_pct=float(cfg("reconciliation_target_pct") or 100.0),
+        max_cycles=int(_positive_or(cfg("max_reconciliation_cycles"), 5)),
+        target_pct=_positive_or(cfg("reconciliation_target_pct"), 100.0),
     )

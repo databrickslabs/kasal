@@ -2,17 +2,22 @@
 
 These rewrite ROWS, not schema — renames that outlived the code that produced
 them, and a seed that shipped with the wrong flag. Each is idempotent and
-scoped tightly enough to run on every startup.
+scoped tightly enough to run on every startup. None catches its own error: the
+runner's SAVEPOINT must see it to roll the step back (``self_heal/report.py``).
 """
 
 import logging
+import re
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.db.self_heal.dialect import _conn_is_sqlite
 
 logger = logging.getLogger(__name__)
 
 
-async def _disable_bi_specialist_crew_memory(conn) -> None:
+async def _disable_bi_specialist_crew_memory(conn: AsyncConnection) -> None:
     """Idempotently disable crew/agent memory for the pre-seeded 'bi-specialist'
     workspace. These are deterministic ETL crews (PBI config extraction → UCMV
     generation → validation → deploy) that pass all data via the flow handoff and
@@ -29,39 +34,33 @@ async def _disable_bi_specialist_crew_memory(conn) -> None:
     # with a literal keeps this dialect-agnostic enough for both.
     true_val = "1" if is_sqlite else "true"
     false_val = "0" if is_sqlite else "false"
-    try:
-        for table in ("crews", "agents"):
-            if is_sqlite:
-                res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
-                cols = {row[1] for row in res.fetchall()}
-                if "memory" not in cols or "group_id" not in cols:
-                    continue  # table/columns not present yet (fresh DB handled by seed)
-            await conn.exec_driver_sql(
-                f"UPDATE {table} SET memory = {false_val} "
-                f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"
-            )
-        logger.info("Ensured bi-specialist crews/agents have memory disabled")
-    except Exception as e:
-        logger.warning(f"Could not disable bi-specialist crew memory: {e}")
+    for table in ("crews", "agents"):
+        if is_sqlite:
+            res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            cols = {row[1] for row in res.fetchall()}
+            if "memory" not in cols or "group_id" not in cols:
+                continue  # table/columns not present yet (fresh DB handled by seed)
+        await conn.exec_driver_sql(
+            f"UPDATE {table} SET memory = {false_val} "
+            f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"  # table from a literal tuple; boolean literal from dialect — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        )
+    logger.info("Ensured bi-specialist crews/agents have memory disabled")
 
 
-async def _heal_personal_group_names(conn) -> None:
+async def _heal_personal_group_names(conn: AsyncConnection) -> None:
     """One-time data heal for the workspace→teamspace rename: auto-created
     personal groups persisted the old display name ("Personal Workspace - …")
     in groups.name, which surfaces in the admin group list. The personal tenant
     is now the "Personal Space" (it is not a teamspace), so rewrite the prefix
     in place. Idempotent (the WHERE prefix no longer matches after the first
     run) and DML-only, so it also runs on deployments where DDL is unavailable."""
-    try:
-        res = await conn.exec_driver_sql(
-            "UPDATE \"groups\" SET name = REPLACE(name, 'Personal Workspace', 'Personal Space') "
-            "WHERE name LIKE 'Personal Workspace%'"
-        )
-        renamed = getattr(res, "rowcount", 0) or 0
-        if renamed > 0:
-            logger.info(f"Renamed {renamed} personal group(s) to 'Personal Space'")
-    except Exception as e:
-        logger.warning(f"Could not heal personal group names: {e}")
+    res = await conn.exec_driver_sql(
+        "UPDATE \"groups\" SET name = REPLACE(name, 'Personal Workspace', 'Personal Space') "
+        "WHERE name LIKE 'Personal Workspace%'"
+    )
+    renamed = getattr(res, "rowcount", 0) or 0
+    if renamed > 0:
+        logger.info(f"Renamed {renamed} personal group(s) to 'Personal Space'")
 
 
 #: The engineconfig keys that existed before the crewai→kasal rename. The heal
@@ -74,7 +73,7 @@ _LEGACY_ENGINE_CONFIG_KEYS = (
 )
 
 
-async def _heal_engine_config_names(conn) -> None:
+async def _heal_engine_config_names(conn: AsyncConnection) -> None:
     """One-time data heal for the crewai→kasal engine rename: engine_configs
     rows persisted engine_name='crewai' (the legacy name of what is now the
     kasal engine). Rewrite in place so lookups keyed on 'kasal' find them.
@@ -86,22 +85,82 @@ async def _heal_engine_config_names(conn) -> None:
     unscoped UPDATE here would rewrite a live CrewAI configuration to `kasal`
     at every startup, and the symptom — "the engine keeps switching back" —
     would point nowhere near this function."""
-    try:
-        keys = "', '".join(_LEGACY_ENGINE_CONFIG_KEYS)
-        res = await conn.exec_driver_sql(
-            "UPDATE engineconfig SET engine_name = 'kasal' "
-            f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"
+    keys = "', '".join(_LEGACY_ENGINE_CONFIG_KEYS)
+    res = await conn.exec_driver_sql(
+        "UPDATE engineconfig SET engine_name = 'kasal' "
+        f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"  # keys from the module constant _LEGACY_ENGINE_CONFIG_KEYS — nosemgrep: tmp.databricks.sql-injection.fstring-where
+    )
+    renamed = getattr(res, "rowcount", 0) or 0
+    if renamed > 0:
+        logger.info(f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'")
+
+
+#: Genie One's Beta and GA paths. Literal copies of GENIE_ONE_BETA_PATH and
+#: GENIE_ONE_PATH in services/mcp/mcp_client/databricks_presets (src.db may not
+#: import services); a unit test keeps the two pairs equal.
+_GENIE_ONE_BETA_PATH = "/api/2.0/mcp/genie"
+_GENIE_ONE_GA_PATH = "/ai-gateway/mcp-services/system.ai.genie_one_mcp"
+#: Exactly ``<scheme>://<host>/api/2.0/mcp/genie`` with an optional trailing
+#: slash: never a per-space ``/genie/{id}`` row, a query string, or a path with
+#: anything in front of ``/api``.
+_GENIE_ONE_BETA_URL = re.compile(r"^(https?://[^/?#\s]+)/api/2\.0/mcp/genie/?$")
+_DATABRICKS_MCP_AUTH_TYPES = ("databricks_obo", "databricks_spn")
+
+
+async def _migrate_genie_one_mcp_urls(conn: AsyncConnection) -> None:
+    """Re-point Genie One registrations from the Beta endpoint to the GA one.
+
+    Databricks retires the Beta workspace-wide Genie MCP on 2026-10-31. Rows
+    registered from the catalog before the move point at ``{host}/api/2.0/mcp/genie``;
+    this rewrites them to ``{host}/ai-gateway/mcp-services/system.ai.genie_one_mcp``
+    on the same host, in every tenant, with no admin action. It also sets a
+    Databricks ``auth_type``: the runtime treats any ``/api/2.0/mcp/`` URL as
+    Databricks-hosted, but sends Databricks credentials to an AI Gateway URL only
+    when ``auth_type`` is ``databricks_obo`` or ``databricks_spn``. A row that
+    already has one keeps it; anything else becomes ``databricks_obo``, what the
+    catalog registers. Name and scope are untouched.
+
+    Idempotent: a migrated row no longer matches. DML only. A failure raises
+    into the step's SAVEPOINT, so no row is left half-moved.
+    """
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT id, server_url, auth_type FROM mcp_servers "
+                "WHERE server_url LIKE :bare OR server_url LIKE :slash"
+            ),
+            {
+                "bare": f"%{_GENIE_ONE_BETA_PATH}",
+                "slash": f"%{_GENIE_ONE_BETA_PATH}/",
+            },
         )
-        renamed = getattr(res, "rowcount", 0) or 0
-        if renamed > 0:
-            logger.info(
-                f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'"
-            )
-    except Exception as e:
-        logger.warning(f"Could not heal engine_config engine names: {e}")
+    ).fetchall()
+    migrated = 0
+    for row_id, server_url, auth_type in rows:
+        match = _GENIE_ONE_BETA_URL.match(server_url or "")
+        if not match:
+            continue
+        if auth_type not in _DATABRICKS_MCP_AUTH_TYPES:
+            auth_type = "databricks_obo"
+        await conn.execute(
+            text(
+                "UPDATE mcp_servers SET server_url = :url, auth_type = :auth "
+                "WHERE id = :id"
+            ),
+            {
+                "url": match.group(1) + _GENIE_ONE_GA_PATH,
+                "auth": auth_type,
+                "id": row_id,
+            },
+        )
+        migrated += 1
+    if migrated:
+        logger.info(
+            "Moved %s Genie One MCP registration(s) to the GA endpoint", migrated
+        )
 
 
-async def _assign_personal_workspace_ids(conn) -> None:
+async def _assign_personal_workspace_ids(conn: AsyncConnection) -> None:
     """Preserve unambiguous IDs; stop granting ambiguous historical scopes.
 
     No application data is moved or deleted. A legacy scope derived by multiple

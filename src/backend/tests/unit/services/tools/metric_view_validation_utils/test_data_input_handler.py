@@ -68,9 +68,8 @@ class TestInit:
         with pytest.raises(ValueError):
             DataInputHandler("", "")
 
-    def test_initialises_caches_to_none(self, tmp_path):
+    def test_initialises_cache_to_none(self, tmp_path):
         h = _make_handler(tmp_path)
-        assert h._yaml_measures_cache is None
         assert h._dax_measures_cache is None
 
     def test_table_mappings_default_empty(self, tmp_path):
@@ -144,24 +143,6 @@ class TestGetDaxMeasure:
 # ---------------------------------------------------------------------------
 # get_all_yaml_measures() – cache behaviour
 # ---------------------------------------------------------------------------
-
-
-class TestGetAllYamlMeasures:
-    def test_returns_list(self, tmp_path):
-        h = _make_handler(tmp_path)
-        measures = h.get_all_yaml_measures()
-        assert isinstance(measures, list)
-        assert len(measures) == 2
-
-    def test_uses_cache_on_second_call(self, tmp_path):
-        h = _make_handler(tmp_path)
-        first = h.get_all_yaml_measures()
-        # Poison the parser so a second load would fail
-        h.mv_parser.extract_measures = lambda: (_ for _ in ()).throw(
-            AssertionError("should not be called again")
-        )
-        second = h.get_all_yaml_measures()
-        assert first is second
 
 
 # ---------------------------------------------------------------------------

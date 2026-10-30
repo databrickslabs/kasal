@@ -35,9 +35,14 @@ export interface Schedule {
   edges?: FlowEdge[];
   flow_config?: Record<string, unknown>;
 
+  /** The saved crew each run is rebuilt from; null runs the stored copy. */
+  crew_id?: string | null;
+
   // Common fields
   inputs?: Record<string, unknown>;
   is_active: boolean;
+  /** IANA zone the cron line is read in; null is the server's clock (UTC). */
+  timezone?: string | null;
   last_run_at?: string;
   next_run_at?: string;
   created_at: string;
@@ -66,6 +71,8 @@ export interface ScheduleCreate {
   inputs?: Record<string, unknown>;
   is_active?: boolean;
   model?: string;
+  /** IANA zone the cron line is read in — send the browser's. */
+  timezone?: string;
 }
 
 export interface ScheduleCreateFromExecution {
@@ -74,6 +81,8 @@ export interface ScheduleCreateFromExecution {
   /** Integer run id, or the run's job id (UUID) — chat anchors messages by job id. */
   execution_id: number | string;
   is_active?: boolean;
+  /** IANA zone the cron line is read in — send the browser's. */
+  timezone?: string;
 }
 
 export class ScheduleService {
@@ -114,5 +123,3 @@ export class ScheduleService {
     return response.data;
   }
 }
-
-export const scheduleService = new ScheduleService();

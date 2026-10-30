@@ -1,16 +1,20 @@
 """Metric View Deployer Tool for CrewAI — deploy YAML to Databricks via SQL Statement API."""
 
-import asyncio
 import json
 import logging
 import re as _re
 import time
 import urllib.parse
-from typing import Any, Optional, Type
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +39,7 @@ class MetricViewDeployerSchema(BaseModel):
     warehouse_id: Optional[str] = Field(None, description="Databricks SQL warehouse ID")
     catalog_remap: Optional[str] = Field(
         None,
-        description='JSON dict of source catalog replacements, e.g. {"dc_datalake_prod_001": "david_test_metrics"}',
+        description='JSON dict of source catalog replacements, e.g. {"acme_prod": "main"}',
     )
 
 
@@ -62,7 +66,7 @@ class MetricViewDeployerTool(BaseTool):
         ".databricksapps.com",
     )
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, **kwargs: object) -> None:
         config_keys = (
             "ucmv_output",
             "yaml_specs_json",
@@ -82,30 +86,18 @@ class MetricViewDeployerTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain AuthContext synchronously (OBO → PAT → SPN)."""
-        import concurrent.futures
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        from src.utils.databricks_auth import get_auth_context
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
+        """
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        def _run_in_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        return resolve_tool_auth(host_override)
 
     @staticmethod
     def _yaml_to_ddl(yaml_content: str, view_name: str) -> str:
@@ -136,7 +128,9 @@ class MetricViewDeployerTool(BaseTool):
             "on_wait_timeout": "CONTINUE",
         }
 
-        resp = _requests.post(url, json=payload, headers=headers, timeout=60)
+        resp = _requests.post(  # host checked by is_trusted_databricks_host in _run — nosemgrep: tmp.databricks.ssrf.requests-user-url
+            url, json=payload, headers=headers, timeout=60
+        )
         if resp.status_code not in (200, 201):
             return {
                 "success": False,
@@ -152,7 +146,9 @@ class MetricViewDeployerTool(BaseTool):
         polls = 0
         while state in ("RUNNING", "PENDING") and polls < 60:
             time.sleep(2)
-            pr = _requests.get(f"{url}/{statement_id}", headers=headers, timeout=30)
+            pr = _requests.get(  # same trusted host; statement_id from the API — nosemgrep: tmp.databricks.ssrf.requests-user-url
+                f"{url}/{statement_id}", headers=headers, timeout=30
+            )
             data = pr.json()
             state = data.get("status", {}).get("state", "")
             polls += 1
@@ -190,8 +186,8 @@ class MetricViewDeployerTool(BaseTool):
         if not isinstance(spec, dict):
             return set(), set()
 
-        def _names(items) -> set:
-            out: set = set()
+        def _names(items: object) -> set[str]:
+            out: set[str] = set()
             if isinstance(items, list):
                 for it in items:
                     if isinstance(it, dict):
@@ -215,7 +211,7 @@ class MetricViewDeployerTool(BaseTool):
             if not rows or not rows[0] or not rows[0][0]:
                 return None
             doc = json.loads(rows[0][0])
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — malformed DESCRIBE output → skip check
             return None
         cols = doc.get("columns")
         if not isinstance(cols, list):
@@ -295,54 +291,114 @@ class MetricViewDeployerTool(BaseTool):
         deployed_m, deployed_d = parsed
         return self._compare_schema(declared_m, declared_d, deployed_m, deployed_d)
 
-    def _run(self, **kwargs: Any) -> str:  # noqa: C901
-        def _get(key):
+    @staticmethod
+    def _resolve_yaml_specs(
+        yaml_raw: object, ucmv_raw: object
+    ) -> tuple[dict[str, object], Optional[str]]:
+        """Pick the YAML specs to deploy: a manual ``yaml_specs_json`` upload wins
+        over the flow-injected ``ucmv_output``. Returns ``(specs, error)``."""
+        yaml_specs: dict[str, object] = {}
+        # 1. Manual upload takes priority (explicit override)
+        if yaml_raw and yaml_raw != "{}":
+            try:
+                parsed = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
+                if isinstance(parsed, dict) and parsed:
+                    yaml_specs = dict(parsed)
+                    logger.info(
+                        "[MVDeployer] Using manual yaml_specs_json: %s views",
+                        len(yaml_specs),
+                    )
+            except json.JSONDecodeError as e:
+                return {}, f"Invalid JSON in yaml_specs_json: {e}"
+
+        # 2. Fall back to flow-injected ucmv_output
+        if not yaml_specs and ucmv_raw:
+            try:
+                ucmv = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+            except json.JSONDecodeError as e:
+                logger.warning("[MVDeployer] Could not parse ucmv_output: %s", e)
+            else:
+                if isinstance(ucmv, Mapping):
+                    yaml_dict = as_map(ucmv).get("yaml")
+                    if isinstance(yaml_dict, dict):
+                        yaml_specs = dict(yaml_dict)
+                    logger.info(
+                        "[MVDeployer] Using flow ucmv_output: %s views",
+                        len(yaml_specs),
+                    )
+                else:
+                    logger.warning(
+                        "[MVDeployer] Could not parse ucmv_output: not a JSON object"
+                    )
+        return yaml_specs, None
+
+    @staticmethod
+    def _apply_catalog_remap(
+        yaml_specs: dict[str, object], remap_raw: object
+    ) -> dict[str, object]:
+        """Replace source catalog names in every YAML spec (best-effort: a failure
+        logs a warning and leaves the specs untouched)."""
+        if not remap_raw:
+            return yaml_specs
+        try:
+            remap = json.loads(remap_raw) if isinstance(remap_raw, str) else remap_raw
+            if isinstance(remap, dict):
+                # SEC #7: validate both sides are plain (optionally dotted)
+                # identifiers before a blind substring replace into the YAML —
+                # config/agent-supplied new_cat must not inject arbitrary text.
+                _ident = _re.compile(r"^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$")
+                safe_remap = {
+                    old: new
+                    for old, new in remap.items()
+                    if isinstance(old, str)
+                    and isinstance(new, str)
+                    and _ident.match(old)
+                    and _ident.match(new)
+                }
+                dropped = set(remap) - set(safe_remap)
+                if dropped:
+                    logger.warning(
+                        "[MVDeployer] Ignoring catalog_remap entries with "
+                        "non-identifier values: %s",
+                        sorted(dropped),
+                    )
+                remapped: dict[str, object] = {}
+                for k, v in yaml_specs.items():
+                    text = v
+                    for old_cat, new_cat in safe_remap.items():
+                        if not isinstance(text, str):
+                            raise TypeError(f"YAML spec {k!r} is not text")
+                        text = text.replace(old_cat, new_cat)
+                    remapped[k] = text
+                logger.info("[MVDeployer] Applied catalog remap: %s", safe_remap)
+                return remapped
+        except Exception as e:
+            logger.warning(
+                "[MVDeployer] Could not apply catalog_remap: %s", e, exc_info=True
+            )
+        return yaml_specs
+
+    def _run(self, **kwargs: object) -> str:
+        def _get(key: str) -> object:
             val = kwargs.get(key)
             if val is not None:
                 return val
             return self._default_config.get(key)
 
-        catalog = _get("catalog") or "main"
-        schema = _get("schema_name") or "default"
+        catalog = str(_get("catalog") or "main")
+        schema = str(_get("schema_name") or "default")
         dry_run = _get("dry_run")
         if dry_run is None:
             dry_run = False
-        host_override = _get("databricks_host") or None
-        warehouse_id = _get("warehouse_id") or ""
+        host_override = opt_str(_get("databricks_host")) or None
+        warehouse_id = str(_get("warehouse_id") or "")
 
         # ── Parse yaml specs — manual upload wins over flow injection ────────
-        yaml_specs: dict = {}
-
-        # 1. Manual upload takes priority (explicit override)
-        yaml_raw = _get("yaml_specs_json") or "{}"
-        if yaml_raw and yaml_raw != "{}":
-            try:
-                parsed = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
-                if isinstance(parsed, dict) and parsed:
-                    yaml_specs = parsed
-                    logger.info(
-                        f"[MVDeployer] Using manual yaml_specs_json: {len(yaml_specs)} views"
-                    )
-            except json.JSONDecodeError as e:
-                return json.dumps({"error": f"Invalid JSON in yaml_specs_json: {e}"})
-
-        # 2. Fall back to flow-injected ucmv_output
-        if not yaml_specs:
-            ucmv_raw = _get("ucmv_output")
-            if ucmv_raw:
-                try:
-                    ucmv = (
-                        json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
-                    )
-                    yaml_dict = ucmv.get("yaml", {})
-                    if isinstance(yaml_dict, dict):
-                        yaml_specs = yaml_dict
-                    logger.info(
-                        f"[MVDeployer] Using flow ucmv_output: {len(yaml_specs)} views"
-                    )
-                except (json.JSONDecodeError, AttributeError) as e:
-                    logger.warning(f"[MVDeployer] Could not parse ucmv_output: {e}")
-
+        yaml_specs, spec_error = self._resolve_yaml_specs(
+            _get("yaml_specs_json") or "{}", _get("ucmv_output")
+        )
+        if spec_error:
+            return json.dumps({"error": spec_error})
         if not yaml_specs:
             return json.dumps(
                 {
@@ -351,46 +407,14 @@ class MetricViewDeployerTool(BaseTool):
             )
 
         # ── Apply catalog remapping to every YAML spec ────────────────────────
-        remap_raw = _get("catalog_remap")
-        if remap_raw:
-            try:
-                remap = (
-                    json.loads(remap_raw) if isinstance(remap_raw, str) else remap_raw
-                )
-                if isinstance(remap, dict):
-                    # SEC #7: validate both sides are plain (optionally dotted)
-                    # identifiers before a blind substring replace into the YAML —
-                    # config/agent-supplied new_cat must not inject arbitrary text.
-                    _ident = _re.compile(r"^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$")
-                    safe_remap = {
-                        old: new
-                        for old, new in remap.items()
-                        if isinstance(old, str)
-                        and isinstance(new, str)
-                        and _ident.match(old)
-                        and _ident.match(new)
-                    }
-                    dropped = set(remap) - set(safe_remap)
-                    if dropped:
-                        logger.warning(
-                            f"[MVDeployer] Ignoring catalog_remap entries with "
-                            f"non-identifier values: {sorted(dropped)}"
-                        )
-                    remapped = {}
-                    for k, v in yaml_specs.items():
-                        for old_cat, new_cat in safe_remap.items():
-                            v = v.replace(old_cat, new_cat)
-                        remapped[k] = v
-                    yaml_specs = remapped
-                    logger.info(f"[MVDeployer] Applied catalog remap: {safe_remap}")
-            except Exception as e:
-                logger.warning(f"[MVDeployer] Could not apply catalog_remap: {e}")
+        yaml_specs = self._apply_catalog_remap(yaml_specs, _get("catalog_remap"))
 
-        results = {}
+        results: dict[str, dict[str, object]] = {}
         schema_ensured = False  # create schema once before first deployment
 
         for table_key in sorted(yaml_specs.keys()):
-            yaml_content = yaml_specs.get(table_key, "")
+            raw_yaml = yaml_specs.get(table_key)
+            yaml_content = raw_yaml if isinstance(raw_yaml, str) else ""
 
             if dry_run:
                 safe_key = _re.sub(r"[^a-zA-Z0-9_]", "_", table_key.lower())
@@ -426,6 +450,9 @@ class MetricViewDeployerTool(BaseTool):
                 view_name = f"{safe_cat}.{safe_sch}.{safe_key}"
                 ddl = self._yaml_to_ddl(yaml_content, view_name)
             except Exception as e:
+                logger.warning(
+                    "[MVDeployer] DDL generation failed: %s", e, exc_info=True
+                )
                 results[table_key] = {
                     "status": "error",
                     "message": f"DDL generation failed: {e}",
@@ -447,6 +474,9 @@ class MetricViewDeployerTool(BaseTool):
                 headers.update(get_user_agent_header(KasalProduct.POWERBI))
                 workspace_url = (auth.workspace_url or "").rstrip("/")
             except Exception as e:
+                logger.warning(
+                    "[MVDeployer] Authentication error: %s", e, exc_info=True
+                )
                 results[table_key] = {
                     "status": "error",
                     "message": f"Authentication error: {e}",
@@ -465,7 +495,8 @@ class MetricViewDeployerTool(BaseTool):
                 from src.utils.url_security import is_trusted_databricks_host
 
                 _host_ok = is_trusted_databricks_host(workspace_url)
-            except Exception:  # noqa: BLE001 — no helper → do not trust
+            except Exception:
+                logger.warning("[MVDeployer] Host check unavailable", exc_info=True)
                 _host_ok = False
             if not _host_ok:
                 parsed_host = urllib.parse.urlparse(workspace_url)
@@ -487,11 +518,12 @@ class MetricViewDeployerTool(BaseTool):
                 )
                 if not schema_result["success"]:
                     logger.warning(
-                        f"[MVDeployer] Could not ensure schema: {schema_result.get('error')}"
+                        "[MVDeployer] Could not ensure schema: %s",
+                        schema_result.get("error"),
                     )
                 else:
                     logger.info(
-                        f"[MVDeployer] Schema {safe_cat_s}.{safe_sch_s} ensured"
+                        "[MVDeployer] Schema %s.%s ensured", safe_cat_s, safe_sch_s
                     )
                 schema_ensured = True
 
@@ -513,7 +545,10 @@ class MetricViewDeployerTool(BaseTool):
                     ddl, workspace_url, warehouse_id, headers
                 )
                 if result["success"]:
-                    entry: dict = {"status": "deployed", "view_name": view_name}
+                    entry: dict[str, object] = {
+                        "status": "deployed",
+                        "view_name": view_name,
+                    }
                     try:
                         schema_check = self._verify_deployed_schema(
                             yaml_content,
@@ -522,9 +557,10 @@ class MetricViewDeployerTool(BaseTool):
                             warehouse_id,
                             headers,
                         )
-                    except (
-                        Exception
-                    ) as e:  # noqa: BLE001 — guard rail must never break a good deploy
+                    except Exception as e:
+                        logger.warning(
+                            "[MVDeployer] schema check error: %s", e, exc_info=True
+                        )
                         schema_check = {
                             "schema_verified": None,
                             "note": f"schema check error: {e}",
@@ -547,6 +583,7 @@ class MetricViewDeployerTool(BaseTool):
                         "http_status": result.get("http_status"),
                     }
             except Exception as e:
+                logger.warning("[MVDeployer] deploy failed: %s", e, exc_info=True)
                 results[table_key] = {"status": "error", "message": str(e)}
 
         return json.dumps(

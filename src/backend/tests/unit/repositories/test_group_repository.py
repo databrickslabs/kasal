@@ -31,27 +31,6 @@ class TestGroupRepository:
         return GroupRepository(mock_session)
 
     @pytest.mark.asyncio
-    async def test_get_with_users(self, repo, mock_session):
-        group = MagicMock(spec=Group, id="g-1")
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = group
-        mock_session.execute.return_value = mock_result
-
-        result = await repo.get_with_users("g-1")
-
-        assert result == group
-
-    @pytest.mark.asyncio
-    async def test_get_with_users_not_found(self, repo, mock_session):
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        result = await repo.get_with_users("missing")
-
-        assert result is None
-
-    @pytest.mark.asyncio
     async def test_list_with_user_counts(self, repo, mock_session):
         group = MagicMock(spec=Group)
         group.id = "g-1"
@@ -161,16 +140,6 @@ class TestGroupUserRepository:
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_get_user_emails_by_group(self, repo, mock_session):
-        mock_result = MagicMock()
-        mock_result.scalars.return_value = iter(["a@b.com", "c@d.com"])
-        mock_session.execute.return_value = mock_result
-
-        result = await repo.get_user_emails_by_group("g-1")
-
-        assert result == ["a@b.com", "c@d.com"]
-
-    @pytest.mark.asyncio
     async def test_remove_user_from_group(self, repo, mock_session):
         mock_result = MagicMock(rowcount=1)
         mock_session.execute.return_value = mock_result
@@ -188,20 +157,6 @@ class TestGroupUserRepository:
         result = await repo.remove_user_from_group("g-1", "u-missing")
 
         assert result is False
-
-    @pytest.mark.asyncio
-    async def test_update_user_role(self, repo, mock_session):
-        updated = MagicMock(spec=GroupUser, role="admin")
-        # First call is the update, second is the get_by_group_and_user
-        update_result = MagicMock()
-        get_result = MagicMock()
-        get_result.scalars.return_value.first.return_value = updated
-        mock_session.execute.side_effect = [update_result, get_result]
-
-        result = await repo.update_user_role("g-1", "u-1", "admin")
-
-        assert result == updated
-        mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_user_groups_with_roles(self, repo, mock_session):

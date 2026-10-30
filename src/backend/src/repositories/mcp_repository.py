@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
+from sqlalchemy import ColumnElement
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -38,26 +39,41 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def find_enabled(self) -> List[MCPServer]:
+    def _base_or_in(self, group_ids: Sequence[str]) -> ColumnElement[bool]:
+        """Base rows (no group) plus the rows of ``group_ids``, never another
+        group's rows."""
+        if not group_ids:
+            return self.model.group_id.is_(None)
+        return or_(
+            self.model.group_id.is_(None), self.model.group_id.in_(list(group_ids))
+        )
+
+    async def find_enabled(self, group_ids: Sequence[str]) -> List[MCPServer]:
         """
-        Find all enabled MCP servers.
+        Find the enabled MCP servers visible to ``group_ids``: base rows plus
+        those groups' own rows.
 
         Returns:
             List of enabled MCP servers
         """
-        query = select(self.model).where(self.model.enabled == True)
+        query = select(self.model).where(
+            (self.model.enabled == True) & self._base_or_in(group_ids)
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_global_enabled(self) -> List[MCPServer]:
+    async def find_global_enabled(self, group_ids: Sequence[str]) -> List[MCPServer]:
         """
-        Find all globally enabled MCP servers.
+        Find the globally enabled MCP servers visible to ``group_ids``: base
+        rows plus those groups' own rows.
 
         Returns:
             List of globally enabled MCP servers
         """
         query = select(self.model).where(
-            (self.model.enabled == True) & (self.model.global_enabled == True)
+            (self.model.enabled == True)
+            & (self.model.global_enabled == True)
+            & self._base_or_in(group_ids)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -112,6 +128,28 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         view (Configuration → System Administration → MCP (Global)).
         """
         query = select(self.model).where(self.model.group_id.is_(None))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def find_legacy_external_in_scope(
+        self, group_id: Optional[str], include_base: bool
+    ) -> List[MCPServer]:
+        """Servers still on the legacy ``/api/2.0/mcp/external/`` proxy, limited
+        to ``group_id``'s own rows and, when ``include_base``, the base rows.
+
+        Filtered in SQL so one tenant's request never loads another's rows.
+        """
+        scopes = []
+        if group_id:
+            scopes.append(self.model.group_id == group_id)
+        if include_base:
+            scopes.append(self.model.group_id.is_(None))
+        if not scopes:
+            return []
+        query = select(self.model).where(
+            or_(*scopes),
+            self.model.server_url.like("%/api/2.0/mcp/external/%"),
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -310,38 +348,6 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
             await self.session.flush()
             await self.session.refresh(settings)
 
-        return settings
-
-    async def update_global_enabled(self, enabled: bool) -> MCPSettings:
-        """
-        Update the global enabled status.
-
-        Args:
-            enabled: New enabled status
-
-        Returns:
-            Updated MCPSettings object
-        """
-        settings = await self.get_settings()
-        settings.global_enabled = enabled
-        await self.session.flush()
-        await self.session.refresh(settings)
-        return settings
-
-    async def update_individual_enabled(self, enabled: bool) -> MCPSettings:
-        """
-        Update the individual enabled status.
-
-        Args:
-            enabled: New individual enabled status
-
-        Returns:
-            Updated MCPSettings object
-        """
-        settings = await self.get_settings()
-        settings.individual_enabled = enabled
-        await self.session.flush()
-        await self.session.refresh(settings)
         return settings
 
     async def update_settings(

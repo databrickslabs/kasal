@@ -243,8 +243,12 @@ class LLMCallCompletedEvent(LLMEventBase):
     #: the bridge's skip list for exactly that reason). Never part of `response`
     #: — that stays the answer the caller acts on.
     reasoning: str | None = None
+    #: The model that actually answered, when the provider named a different
+    #: one than ``model`` (a router such as OpenRouter's Jev Router). None when
+    #: it is the requested model; see ``src.core.llm.transport.served_model``.
+    served_model: str | None = None
 
-    @field_validator("finish_reason", "response_id", mode="before")
+    @field_validator("finish_reason", "response_id", "served_model", mode="before")
     @classmethod
     def _coerce_non_string_to_none(cls, value: Any) -> str | None:
         return value if isinstance(value, str) else None
@@ -603,3 +607,12 @@ class ToolUsageStartedEvent(ToolUsageEvent):
     """Engine replacement for crewai.events.types.tool_usage_events.ToolUsageStartedEvent"""
 
     type: Literal["tool_usage_started"] = "tool_usage_started"
+
+
+class DecisionEvaluatedEvent(BaseEvent):
+    type: Literal["decision_evaluated"] = "decision_evaluated"
+    output: str
+    policy: str
+    model: str
+    status: str
+    duration_ms: float

@@ -8,7 +8,7 @@ import base64
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
@@ -77,6 +77,58 @@ class EncryptionUtils:
             logger.info("Generated new SSH key pair for encryption")
 
         return private_key, public_key
+
+    # Parsed RSA keys, each with the PEM it was parsed from. Parsing a private
+    # key costs ~60-100 ms; the PEM read is cheap, so it is still done on every
+    # call and a changed file is re-parsed rather than served stale.
+    _cached_private: Optional[Tuple[bytes, rsa.RSAPrivateKey]] = None
+    _cached_public: Optional[Tuple[bytes, rsa.RSAPublicKey]] = None
+
+    @staticmethod
+    def reset_key_cache() -> None:
+        """Drop the parsed RSA keys, e.g. after the key files were replaced,
+        and every plaintext decrypted under them."""
+        EncryptionUtils._cached_private = None
+        EncryptionUtils._cached_public = None
+        EncryptionUtils._forget_decrypted_values()
+
+    @staticmethod
+    def _forget_decrypted_values() -> None:
+        # Lazy: sensitive_data_utils imports this module.
+        from src.utils.sensitive_data_utils import forget_decrypted_values
+
+        forget_decrypted_values()
+
+    @staticmethod
+    def _private_key() -> rsa.RSAPrivateKey:
+        pem, _ = EncryptionUtils.get_or_create_ssh_keys()
+        cached = EncryptionUtils._cached_private
+        if cached is not None and cached[0] == pem:
+            return cached[1]
+        if cached is not None:  # the key file changed under a running process
+            EncryptionUtils._forget_decrypted_values()
+        # get_or_create_ssh_keys only ever generates RSA keys.
+        key = cast(
+            rsa.RSAPrivateKey,
+            serialization.load_pem_private_key(
+                pem, password=None, backend=default_backend()
+            ),
+        )
+        EncryptionUtils._cached_private = (pem, key)
+        return key
+
+    @staticmethod
+    def _public_key() -> rsa.RSAPublicKey:
+        _, pem = EncryptionUtils.get_or_create_ssh_keys()
+        cached = EncryptionUtils._cached_public
+        if cached is not None and cached[0] == pem:
+            return cached[1]
+        key = cast(
+            rsa.RSAPublicKey,
+            serialization.load_pem_public_key(pem, backend=default_backend()),
+        )
+        EncryptionUtils._cached_public = (pem, key)
+        return key
 
     # Process-lifetime cache for the resolved key, so we don't hit the secrets
     # API on every encrypt/decrypt. Reset only on restart.
@@ -163,10 +215,7 @@ class EncryptionUtils:
     def encrypt_with_ssh(value: str) -> str:
         """Encrypt a value using RSA public key encryption"""
         try:
-            _, public_key_bytes = EncryptionUtils.get_or_create_ssh_keys()
-            public_key = serialization.load_pem_public_key(
-                public_key_bytes, backend=default_backend()
-            )
+            public_key = EncryptionUtils._public_key()
 
             # RSA can only encrypt limited data size, so we'll use a hybrid approach
             # Generate a symmetric key
@@ -197,10 +246,7 @@ class EncryptionUtils:
     def decrypt_with_ssh(encrypted_value: str) -> str:
         """Decrypt a value using RSA private key encryption"""
         try:
-            private_key_bytes, _ = EncryptionUtils.get_or_create_ssh_keys()
-            private_key = serialization.load_pem_private_key(
-                private_key_bytes, password=None, backend=default_backend()
-            )
+            private_key = EncryptionUtils._private_key()
 
             # Decode the combined value
             combined = base64.b64decode(encrypted_value.encode())

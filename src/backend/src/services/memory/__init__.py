@@ -20,6 +20,10 @@ Read this package by lifecycle stage; each subpackage is one stage:
                   merge, supersede, forget — and the sweep that schedules them
     text.py       normalisation both sides and the storage adapter share
 
+A teamspace can store an entity/fact graph instead of whole records (Memory
+Tuning ``graph_memory``): ``engine.GraphMemory`` answers to the same calls as
+``Memory``, over ``storage.local_graph`` / ``storage.lakebase_graph``.
+
 A record's path through a run: ``run.recall`` asks ``engine.Memory.recall``,
 which searches ``storage`` — then the task runs — then ``run.persist`` hands
 the output to ``engine.Memory.remember``, which labels it, folds it into a

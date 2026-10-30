@@ -1,16 +1,16 @@
 from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _validate_mcp_server_url(value: Optional[str]) -> Optional[str]:
     """
     Structural validation for an MCP server URL. Rejects non-http(s) schemes
     (e.g. file://, gopher://) and URLs with no host. Note: this does NOT decide
-    whether Databricks credentials may be sent there — that allow-list check is
-    enforced at request time in mcp_integration (see is_trusted_databricks_host).
+    whether Databricks credentials may be sent there — that is enforced at
+    request time in mcp_integration (see host_guard.assert_mcp_credential_host).
     """
     if value is None:
         return value
@@ -59,7 +59,8 @@ class MCPServerBase(BaseModel):
 class MCPServerCreate(MCPServerBase):
     """Schema for creating a new MCP server"""
 
-    api_key: str = Field(
+    # Empty default, not a credential: the real key arrives per request, encrypted.
+    api_key: str = Field(  # nosemgrep: tmp.databricks.auth.hardcoded-password-default
         default="",
         description="API key for authentication (will be encrypted). Not required for databricks_spn auth.",
     )
@@ -131,7 +132,7 @@ class MCPServerResponse(MCPServerBase):
         ..., description="Timestamp when the server was last updated"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MCPServerListResponse(BaseModel):
@@ -197,7 +198,7 @@ class MCPSettingsResponse(MCPSettingsBase):
         ..., description="Timestamp when the settings were last updated"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ToolCallRequest(BaseModel):

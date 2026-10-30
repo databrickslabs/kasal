@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { uniqueBy } from '../../../../shared/lib/collections';
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
@@ -6,6 +7,7 @@ import axios from 'axios';
 import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCatalog';
 import { Edge, Node } from 'reactflow';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
+import { useUnmountSafeTimeout } from '../../../../hooks/global/useUnmountSafeTimeout';
 import { buildFlowConfiguration } from '../../../../utils/flowConfigBuilder';
 import { declaredStateForTab } from '../../../../store/flowState';
 
@@ -24,8 +26,14 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
   const [isSaving, setIsSaving] = useState(false);
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
+  // Cleared on unmount: a bare setTimeout here outlived the component (and,
+  // in tests, the jsdom window), which failed CI after every test had passed.
+  const scheduleTimeout = useUnmountSafeTimeout();
 
-  const { activeCanvasId, updateCanvasFlowInfo } = useBuilderCanvasStore();
+  const { activeCanvasId, updateCanvasFlowInfo } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    updateCanvasFlowInfo: state.updateCanvasFlowInfo,
+  })));
 
   // Listen for the custom event to open the save flow dialog
   useEffect(() => {
@@ -133,7 +141,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         markCanvasClean(tabId);
 
         // Dispatch completion event
-        setTimeout(() => {
+        scheduleTimeout(() => {
           const completeEvent = new CustomEvent('updateFlowComplete', {
             detail: { flowId: updatedFlow.id, flowName: updatedFlow.name }
           });
@@ -156,7 +164,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       window.removeEventListener('openSaveFlowDialog', handleOpenSaveFlowDialog);
       window.removeEventListener('updateExistingFlow', handleUpdateExistingFlow);
     };
-  }, [disabled]);
+  }, [disabled, scheduleTimeout]);
 
   // Auto-save when name is set programmatically (via slash command)
   useEffect(() => {
@@ -313,7 +321,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       handleClose();
 
       // Wait for dialog to fully close before dispatching event
-      setTimeout(() => {
+      scheduleTimeout(() => {
         console.log('SaveFlow: Dispatching saveFlowComplete event');
         const event = new CustomEvent('saveFlowComplete', {
           detail: { flowId: savedFlow.id, flowName: name }

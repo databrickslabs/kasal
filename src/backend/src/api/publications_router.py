@@ -51,7 +51,7 @@ async def list_publications(
             "anything to route to."
         ),
     ] = None,
-):
+) -> List[CrewPublicationResponse]:
     """Everything this workspace has published, with entity ids.
 
     One request for the whole catalogue rather than one per card: a workspace

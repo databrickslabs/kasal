@@ -52,8 +52,8 @@ def _ctx():
 
 
 @pytest.fixture
-def fast_settle(monkeypatch):
-    monkeypatch.setattr(history_module, "EXCHANGE_SETTLE_SECONDS", 0.02)
+def fast_settle(engine_setting, monkeypatch):
+    engine_setting("chat_memory_settle_seconds", 0.02)
     history_module._settling.clear()
     yield
     history_module._settling.clear()

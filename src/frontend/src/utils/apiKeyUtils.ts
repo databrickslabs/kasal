@@ -56,7 +56,8 @@ export const providerToKeyName: ProviderKeyMapping = {
   'grok': 'GROK_API_KEY',
   'databricks': 'DATABRICKS_API_KEY',
   'gemini': 'GEMINI_API_KEY',
-  'kimi': 'KIMI_API_KEY'
+  'kimi': 'KIMI_API_KEY',
+  'openrouter': 'OPENROUTER_API_KEY'
 };
 
 /**

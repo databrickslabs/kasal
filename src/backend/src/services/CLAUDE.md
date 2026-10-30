@@ -54,9 +54,11 @@ one was itself called `services/` — which, once the package moved under
 and `flow_builder/`, over shared machinery in `execution/`. See
 `execution/CLAUDE.md`.
 
-The rule that keeps a capability a capability: it may import `kasal_engine` (the
-vendored LIBRARY — `BaseTool`, `event_bus`, `MemoryRecord`), but it must
-not import a PATH package. A guardrail that imports `flow_builder` has stopped
+The rule that keeps a capability a capability: it may import the shared library
+pieces (`BaseTool` in `services/tools/base.py`, `event_bus` in
+`core/events/bus.py`, `MemoryRecord` in `services/memory/engine/types.py`; the
+old vendored `kasal_engine` package is gone), but it must not import a PATH
+package. A guardrail that imports `flow_builder` has stopped
 being usable from a chat turn, which is the whole reason these moved.
 
 ## Layering, and how it is enforced
@@ -126,12 +128,13 @@ table without the rules.
 
 `tests/unit/architecture/test_service_repository_ownership.py` enforces this as a
 ratchet: `_OWNED` says which repositories each domain may use freely, and `_BASELINE`
-records what is left. It started at **42** pairs and is down to **6** — all of them
-the `repositories` dict the flow runner injects into `BackendFlow` inside the flow
+records what is left. It started at **42** pairs and is down to **3** (the
+`flow_builder -> agent / crew / task` entries in `_BASELINE`) — all of them the
+`repositories` dict the flow runner injects into `BackendFlow` inside the flow
 SUBPROCESS, which cannot be converted safely from in-process tests. Convert that and
-this becomes a hard ban.
+this becomes a hard ban. Count them in the test, not here, when the number matters.
 
-Closing the other 36 surfaced four real bugs, every one swallowed by an `except`:
+Closing the other 39 surfaced four real bugs, every one swallowed by an `except`:
 GEPA wrote agent/task rows past `get_with_group_check`;
 `TemplateService(template_repository)` passed a repository where a session was
 expected, so `generate_connections` never loaded its prompt; `tool_factory` called
@@ -371,10 +374,15 @@ Where its callers went, in case you are following an old example:
 
 ## Security
 
-- Encrypt sensitive fields before persisting and decrypt after reading, using the
-  helpers in `src.utils.sensitive_data_utils` (see `_encrypt_tool_configs_in_data`
-  / `_decrypt_agent_tool_configs`). Decrypted values are in-memory only — never
-  write them back to the DB or into logs.
+- Tool-config columns (`agents`/`crews`/`tasks.tool_configs`, `crews.nodes`,
+  `tasks.callback_config`, `tasks.config`, `tools`/`group_tools.config`) use the
+  `SensitiveJSON` column type (`src/db/sensitive_json.py`): it encrypts on write
+  and decrypts on load, so a service works with plaintext and must never encrypt
+  or decrypt them itself. A new credential-bearing JSON column gets the same
+  type. Log a config's key names, never its values; read responses mask
+  credentials for members without builder rights
+  (`services/catalog/secret_view.py`); a run record's inputs go through
+  `services/execution/stored_inputs.mask_run_inputs`.
 - For Databricks calls made from a service, add User-Agent telemetry
   (see `src/backend/CLAUDE.md`).
 

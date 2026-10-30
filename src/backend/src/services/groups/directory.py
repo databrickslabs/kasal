@@ -23,7 +23,7 @@ EMAIL_FALLBACK = " You can still add a person by their exact sign-in email."
 
 def _http_status(error: Exception) -> int | None:
     """Read status only, including HTTP errors wrapped by SDK configuration."""
-    current = error
+    current: BaseException | None = error
     for _ in range(8):
         if current is None:
             break
@@ -48,13 +48,13 @@ async def search_directory(
         "User directory search started: diagnostic=%s auth=%s", diagnostic, auth_method
     )
 
-    async def lookup():
+    async def lookup() -> list[DirectoryPerson]:
         nonlocal stage, response_status
         if installation.hosted:
             # Workspace SCIM is not an Apps user-authorization scope. This
             # system-admin-only operation uses the app's installed identity,
             # independent of the selected team's PAT or forwarded user token.
-            def app_headers():
+            def app_headers() -> dict[str, str]:
                 return Config(
                     host=installation.host,
                     auth_type="oauth-m2m",
@@ -76,9 +76,9 @@ async def search_directory(
         # JSON quoting prevents input from becoming a SCIM filter expression.
         value = json.dumps(search)
 
-        results = []
+        results: list[DirectoryPerson] = []
         received = inactive = unusable = pages = 0
-        seen_emails = set()
+        seen_emails: set[str] = set()
         start_index = 1
         truncated = False
         async with httpx.AsyncClient(timeout=10) as client:

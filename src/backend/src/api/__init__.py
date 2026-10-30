@@ -21,7 +21,7 @@ from src.api.crews_router import router as crews_router
 from src.api.database_management_router import router as database_management_router
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.databricks_router import router as databricks_router
-from src.api.databricks_secrets_router import router as databricks_secrets_router
+from src.api.decision_config_router import router as decision_config_router
 from src.api.decks_router import router as decks_router
 from src.api.dispatcher_router import router as dispatcher_router
 from src.api.documentation_embeddings_router import (
@@ -65,8 +65,8 @@ from src.api.tasks_router import router as tasks_router
 from src.api.template_generation_router import router as template_generation_router
 from src.api.templates_router import router as templates_router
 from src.api.tools_router import router as tools_router
-from src.api.ucmv_learning_router import router as ucmv_learning_router
 from src.api.triggers_router import router as triggers_router
+from src.api.ucmv_learning_router import router as ucmv_learning_router
 from src.api.ui_config_router import router as ui_config_router
 from src.api.users_router import router as users_router
 from src.api.workflow_recipe_router import router as workflow_recipe_router
@@ -93,6 +93,7 @@ api_router.include_router(chat_assets_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(ui_config_router)
+api_router.include_router(decision_config_router)
 api_router.include_router(databricks_knowledge_router)
 api_router.include_router(powerbi_router)
 api_router.include_router(flows_router)
@@ -100,7 +101,6 @@ api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
 api_router.include_router(billing_router)
 api_router.include_router(models_router)
-api_router.include_router(databricks_secrets_router)
 api_router.include_router(api_keys_router)
 api_router.include_router(tasks_router)
 api_router.include_router(templates_router)
@@ -158,7 +158,6 @@ __all__ = [
     "healthcheck_router",
     "logs_router",
     "models_router",
-    "databricks_secrets_router",
     "api_keys_router",
     "tasks_router",
     "templates_router",

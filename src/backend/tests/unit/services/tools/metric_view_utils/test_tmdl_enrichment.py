@@ -12,15 +12,13 @@ TMDL payloads are base64-encoded UTF-8 strings matching the format returned by
 ``generate_config.fetch_tmdl_parts``.  TMDL uses TAB indentation; all fixture
 strings below use literal ``\\t`` characters.
 """
+
 from __future__ import annotations
 
 import base64
 import importlib.util
 import os
 import re
-import sys
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Load tmdl_enrichment directly from the source file so we avoid the
@@ -32,7 +30,11 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _BACKEND_ROOT = os.path.normpath(os.path.join(_THIS_DIR, *[".."] * 5))
 _MODULE_PATH = os.path.join(
     _BACKEND_ROOT,
-    "src", "services", "tools", "metric_view_utils", "tmdl_enrichment.py",
+    "src",
+    "services",
+    "tools",
+    "metric_view_utils",
+    "tmdl_enrichment.py",
 )
 
 _spec = importlib.util.spec_from_file_location("tmdl_enrichment_mod", _MODULE_PATH)
@@ -52,6 +54,7 @@ _humanize = _mod._humanize
 # ---------------------------------------------------------------------------
 # TMDL fixture helpers
 # ---------------------------------------------------------------------------
+
 
 def _b64(text: str) -> str:
     """Base64-encode a TMDL text string (UTF-8)."""
@@ -73,7 +76,7 @@ CALENDAR445_TMDL_TEXT = (
     "\n"
     "\tcolumn 'Week445 Label'\n"
     "\t\tdataType: string\n"
-    "\t\texpression: \"FW\" & FORMAT(WEEKNUM([date_id], 2), \"00\")\n"
+    '\t\texpression: "FW" & FORMAT(WEEKNUM([date_id], 2), "00")\n'
     "\t\tlineageTag: col-003\n"
     "\n"
     "\tcolumn 'Latest Month Sort'\n"
@@ -106,7 +109,7 @@ FACT_OTC_TMDL_TEXT = (
     "\n"
     "\tmeasure 'Order Accuracy %' = DIVIDE([Accurate Orders], [Total Orders])\n"
     "\t\tdescription: Percentage of orders delivered without issues\n"
-    "\t\tformatString: \"0.00%\"\n"
+    '\t\tformatString: "0.00%"\n'
     "\t\tlineageTag: m-010\n"
     "\n"
     "\tmeasure 'Sum OTC FLTP' = SUM(Fact_OTC[fltp])\n"
@@ -148,6 +151,7 @@ ALL_PARTS = [CALENDAR445_PART, FACT_OTC_PART, AI_INVOICE_PART]
 # S6 — Calculated column extraction
 # ---------------------------------------------------------------------------
 
+
 class TestExtractCalculatedColumnsFromTmdl:
     """S6 — extract DAX calculated columns from TMDL parts."""
 
@@ -183,8 +187,10 @@ class TestExtractCalculatedColumnsFromTmdl:
 
     def test_non_table_parts_ignored(self):
         parts = [
-            {"path": "definition/model.tmdl",
-             "payload": _b64("model 'My Model'\n\tculture: en-US\n")},
+            {
+                "path": "definition/model.tmdl",
+                "payload": _b64("model 'My Model'\n\tculture: en-US\n"),
+            },
             CALENDAR445_PART,
         ]
         result = extract_calculated_columns_from_tmdl(parts)
@@ -206,7 +212,7 @@ class TestParseCalculatedColumns:
             "table T\n"
             "\tcolumn Calc\n"
             "\t\tdataType: string\n"
-            "\t\texpression: FORMAT([d], \"YYYY\")\n"
+            '\t\texpression: FORMAT([d], "YYYY")\n'
         )
         result = _parse_calculated_columns(content)
         assert len(result) == 1
@@ -222,7 +228,7 @@ class TestParseCalculatedColumns:
             "table T\n"
             "\tcolumn 'MyCol'\n"
             "\t\tdataType: string\n"
-            "\t\texpression: \"hello\"\n"
+            '\t\texpression: "hello"\n'
         )
         result = _parse_calculated_columns(content)
         assert result[0]["data_type"] == "string"
@@ -231,6 +237,7 @@ class TestParseCalculatedColumns:
 # ---------------------------------------------------------------------------
 # S9 — Fiscal calendar detection
 # ---------------------------------------------------------------------------
+
 
 class TestDetectFiscalCalendarTables:
     """S9 — detect fiscal 4-4-5 calendar tables."""
@@ -260,8 +267,9 @@ class TestDetectFiscalCalendarTables:
             "\t\tdataType: string\n"
             "\t\texpression: WEEKNUM([date_id], 2)\n"
         )
-        parts = [{"path": "definition/tables/FiscalCalendar.tmdl",
-                  "payload": _b64(tmdl)}]
+        parts = [
+            {"path": "definition/tables/FiscalCalendar.tmdl", "payload": _b64(tmdl)}
+        ]
         calc = extract_calculated_columns_from_tmdl(parts)
         result = detect_fiscal_calendar_tables(parts, calc)
         assert "FiscalCalendar" in result
@@ -278,6 +286,7 @@ class TestDetectFiscalCalendarTables:
 # ---------------------------------------------------------------------------
 # rec#9 — Measure metadata harvest
 # ---------------------------------------------------------------------------
+
 
 class TestHarvestMeasureMetadataFromTmdl:
     """rec#9 — extract measure descriptions from TMDL."""
@@ -355,9 +364,13 @@ class TestEnrichUcmvMeasuresWithMetadata:
 
     def test_existing_comment_not_overwritten(self):
         meta = harvest_measure_metadata_from_tmdl([FACT_OTC_PART])
-        measures = [{"measure_name": "order_accuracy__pct",
-                     "original_name": "Order Accuracy %",
-                     "comment": "existing comment"}]
+        measures = [
+            {
+                "measure_name": "order_accuracy__pct",
+                "original_name": "Order Accuracy %",
+                "comment": "existing comment",
+            }
+        ]
         enrich_ucmv_measures_with_metadata(measures, meta)
         assert measures[0]["comment"] == "existing comment"
 
@@ -372,6 +385,7 @@ class TestEnrichUcmvMeasuresWithMetadata:
 # ---------------------------------------------------------------------------
 # rec#10 — Reconciliation mapping scaffolds
 # ---------------------------------------------------------------------------
+
 
 class TestBuildReconciliationMappingScaffolds:
     """rec#10 — dqa/kpi_reconciliation scaffolds, direct binding."""
@@ -390,29 +404,39 @@ class TestBuildReconciliationMappingScaffolds:
 
     def _simple_measures(self):
         return [
-            {"measure_name": "order_accuracy__pct",
-             "original_name": "Order Accuracy %",
-             "proposed_allocation": "Fact_OTC"},
-            {"measure_name": "sum_otc_fltp",
-             "original_name": "Sum OTC FLTP",
-             "proposed_allocation": "Fact_OTC"},
-            {"measure_name": "unassigned",
-             "original_name": "Unassigned KPI",
-             "proposed_allocation": "__unassigned__"},
+            {
+                "measure_name": "order_accuracy__pct",
+                "original_name": "Order Accuracy %",
+                "proposed_allocation": "Fact_OTC",
+            },
+            {
+                "measure_name": "sum_otc_fltp",
+                "original_name": "Sum OTC FLTP",
+                "proposed_allocation": "Fact_OTC",
+            },
+            {
+                "measure_name": "unassigned",
+                "original_name": "Unassigned KPI",
+                "proposed_allocation": "__unassigned__",
+            },
         ]
 
     def test_one_scaffold_per_fact_table(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
         )
         fact_tables = [s["pbi_fact_table"] for s in scaffolds]
         assert "Fact_OTC" in fact_tables
 
     def test_unassigned_measures_excluded(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
         )
         otc = next(s for s in scaffolds if s["pbi_fact_table"] == "Fact_OTC")
         pbi_names = [m["pbi_measure"] for m in otc["measures"]]
@@ -420,8 +444,10 @@ class TestBuildReconciliationMappingScaffolds:
 
     def test_all_measures_direct(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
         )
         for s in scaffolds:
             for m in s["measures"]:
@@ -429,8 +455,10 @@ class TestBuildReconciliationMappingScaffolds:
 
     def test_workspace_and_dataset_id(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-abc", dataset_id="ds-xyz",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-abc",
+            dataset_id="ds-xyz",
         )
         otc = next(s for s in scaffolds if s["pbi_fact_table"] == "Fact_OTC")
         assert otc["pbi_workspace_id"] == "ws-abc"
@@ -438,8 +466,10 @@ class TestBuildReconciliationMappingScaffolds:
 
     def test_ucmv_measure_snake_case(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
         )
         otc = next(s for s in scaffolds if s["pbi_fact_table"] == "Fact_OTC")
         for m in otc["measures"]:
@@ -447,11 +477,17 @@ class TestBuildReconciliationMappingScaffolds:
             assert re.match(r"^[a-z0-9_]+$", snake), f"not snake: {snake!r}"
 
     def test_fiscal_calendar_adds_pbi_period_format(self):
-        fiscal = {"Calendar445": {"pbi_period_format": "date_to_fiscper",
-                                  "indicators": ["table name matches '445'"]}}
+        fiscal = {
+            "Calendar445": {
+                "pbi_period_format": "date_to_fiscper",
+                "indicators": ["table name matches '445'"],
+            }
+        }
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
             fiscal_calendars=fiscal,
         )
         otc = next(s for s in scaffolds if s["pbi_fact_table"] == "Fact_OTC")
@@ -459,8 +495,10 @@ class TestBuildReconciliationMappingScaffolds:
 
     def test_no_fiscal_calendar_no_period_format(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
             fiscal_calendars={},
         )
         otc = next(s for s in scaffolds if s["pbi_fact_table"] == "Fact_OTC")
@@ -468,8 +506,10 @@ class TestBuildReconciliationMappingScaffolds:
 
     def test_tolerance_present(self):
         scaffolds = build_reconciliation_mapping_scaffolds(
-            self._simple_measures(), self._simple_config(),
-            workspace_id="ws-001", dataset_id="ds-001",
+            self._simple_measures(),
+            self._simple_config(),
+            workspace_id="ws-001",
+            dataset_id="ds-001",
         )
         otc = next(s for s in scaffolds if s["pbi_fact_table"] == "Fact_OTC")
         for m in otc["measures"]:
@@ -480,19 +520,27 @@ class TestBuildReconciliationMappingScaffolds:
 
     def test_multiple_fact_tables(self):
         measures = [
-            {"measure_name": "m1", "original_name": "M1",
-             "proposed_allocation": "Fact_A"},
-            {"measure_name": "m2", "original_name": "M2",
-             "proposed_allocation": "Fact_B"},
+            {
+                "measure_name": "m1",
+                "original_name": "M1",
+                "proposed_allocation": "Fact_A",
+            },
+            {
+                "measure_name": "m2",
+                "original_name": "M2",
+                "proposed_allocation": "Fact_B",
+            },
         ]
         scaffolds = build_reconciliation_mapping_scaffolds(
-            measures, {}, workspace_id="ws", dataset_id="ds")
+            measures, {}, workspace_id="ws", dataset_id="ds"
+        )
         assert {s["pbi_fact_table"] for s in scaffolds} == {"Fact_A", "Fact_B"}
 
 
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
+
 
 class TestToSnake:
     def test_basic(self):

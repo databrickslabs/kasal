@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -33,17 +34,25 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_by_key(self, key: str) -> Optional[ModelConfig]:
-        """
-        Find a model configuration by key.
+    async def find_by_key(
+        self, key: str, group_id: Optional[str] = None
+    ) -> Optional[ModelConfig]:
+        """The row ``key`` resolves to for one teamspace.
 
-        Args:
-            key: Model configuration key to search for
-
-        Returns:
-            ModelConfig if found, else None
+        That teamspace's own row (its override) when ``group_id`` is given and
+        one exists, else the global row. Nothing else is returned. Without
+        ``group_id`` it is the global row only. Ordered, so the answer never
+        depends on the order the database returns rows in.
         """
-        query = select(self.model).where(self.model.key == key)
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.key == key) & scope)
+            .order_by(self.model.group_id.is_(None), self.model.id)
+            .limit(1)
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 
@@ -60,31 +69,37 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         Returns:
             ModelConfig if found, else None
         """
-        query = select(self.model).where(
-            (self.model.key == key) & (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.key == key) & (self.model.group_id == group_id))
+            .order_by(self.model.id)
+            .limit(1)
         )
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def find_enabled_models(self) -> List[ModelConfig]:
-        """
-        Find all enabled model configurations.
+    async def find_in_scope(self, group_id: Optional[str] = None) -> List[ModelConfig]:
+        """The rows one teamspace can resolve: the global rows and its own.
 
-        Returns:
-            List of enabled model configurations ordered by key
+        Never another teamspace's row. Without ``group_id``, the global rows
+        only. ``enabled`` is not filtered here: a teamspace's own row can turn
+        a global model off (or on), so the caller merges first, then filters.
         """
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
         query = (
             select(self.model)
-            .where(self.model.enabled.is_(True))
-            .order_by(self.model.key)
+            .where(scope)
+            .order_by(self.model.key, self.model.group_id.is_(None), self.model.id)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def toggle_enabled(self, key: str, enabled: bool) -> bool:
         """
-        Toggle the enabled status by key (first match). Avoid using this for
-        group-specific toggles; use toggle_enabled_in_group instead.
+        Toggle the enabled status of the global row for ``key``. Avoid using
+        this for group-specific toggles; use toggle_enabled_in_group instead.
         """
         try:
             model = await self.find_by_key(key)
@@ -190,93 +205,16 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             await self.session.rollback()
             raise
 
-    async def upsert_model(self, key: str, model_data: dict) -> ModelConfig:
-        """
-        Insert or update a model configuration atomically.
-
-        Args:
-            key: Model configuration key
-            model_data: Dictionary containing model configuration data
-
-        Returns:
-            The created or updated ModelConfig instance
-        """
-        import logging
-        from datetime import datetime
-
-        logger = logging.getLogger(__name__)
-
-        try:
-            # Try to find existing model first
-            existing_model = await self.find_by_key(key)
-
-            if existing_model:
-                # Update existing model
-                existing_model.name = model_data.get("name", existing_model.name)
-                existing_model.provider = model_data.get(
-                    "provider", existing_model.provider
-                )
-                existing_model.temperature = model_data.get(
-                    "temperature", existing_model.temperature
-                )
-
-                existing_model.context_window = model_data.get(
-                    "context_window", existing_model.context_window
-                )
-                existing_model.max_output_tokens = model_data.get(
-                    "max_output_tokens", existing_model.max_output_tokens
-                )
-                existing_model.extended_thinking = model_data.get(
-                    "extended_thinking", existing_model.extended_thinking
-                )
-                existing_model.thinking_budget_tokens = model_data.get(
-                    "thinking_budget_tokens", existing_model.thinking_budget_tokens
-                )
-                existing_model.reasoning_effort = model_data.get(
-                    "reasoning_effort", existing_model.reasoning_effort
-                )
-                existing_model.enabled = model_data.get(
-                    "enabled", existing_model.enabled
-                )
-                existing_model.updated_at = datetime.now().replace(tzinfo=None)
-
-                logger.debug(f"Updated existing model config: {key}")
-                return existing_model
-            else:
-                # Create new model
-                new_model = ModelConfig(
-                    key=key,
-                    name=model_data["name"],
-                    provider=model_data.get("provider"),
-                    temperature=model_data.get("temperature"),
-                    context_window=model_data.get("context_window"),
-                    max_output_tokens=model_data.get("max_output_tokens"),
-                    extended_thinking=model_data.get("extended_thinking", False),
-                    thinking_budget_tokens=model_data.get("thinking_budget_tokens"),
-                    reasoning_effort=model_data.get("reasoning_effort"),
-                    enabled=model_data.get("enabled", True),
-                    created_at=datetime.now().replace(tzinfo=None),
-                    updated_at=datetime.now().replace(tzinfo=None),
-                )
-                self.session.add(new_model)
-
-                logger.debug(f"Created new model config: {key}")
-                return new_model
-
-        except Exception as e:
-            logger.error(f"Error upserting model config {key}: {str(e)}")
-            await self.session.rollback()
-            raise
-
     async def delete_by_key(self, key: str) -> bool:
         """
-        Delete a model configuration by key.
+        Delete a catalog model: its global row and every teamspace's override
+        of it (an override of a model that no longer exists means nothing).
 
         Args:
             key: Key of the model configuration to delete
 
         Returns:
-            True if model was found and deleted, False otherwise
+            True if the global row was found and deleted, False otherwise
         """
         import logging
 
@@ -303,7 +241,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             stmt = sql_delete(self.model).where(self.model.key == key)
             result = await self.session.execute(stmt)
             logger.debug(
-                f"Executed SQL DELETE for model key={key}, rows affected: {result.rowcount}"
+                f"Executed SQL DELETE for model key={key}, rows affected: {cast('CursorResult[Any]', result).rowcount}"
             )
 
             # Flush to ensure the delete is sent to the database
@@ -311,7 +249,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             logger.debug("Flushed session after SQL DELETE")
 
             logger.info(f"Successfully deleted model with key {key} (ID: {model_id})")
-            return result.rowcount > 0
+            return cast("CursorResult[Any]", result).rowcount > 0
 
         except Exception as e:
             logger.error(f"Error deleting model with key {key}: {str(e)}")
@@ -333,11 +271,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
 
     async def find_global_by_key(self, key: str) -> Optional[ModelConfig]:
         """Find a global (system-wide) model configuration by key."""
-        query = select(self.model).where(
-            (self.model.key == key) & (self.model.group_id.is_(None))
-        )
-        result = await self.session.execute(query)
-        return result.scalars().first()
+        return await self.find_by_key(key)
 
     async def toggle_global_enabled(self, key: str, enabled: bool) -> bool:
         """Toggle enabled for the global model with the given key. Returns True if updated."""

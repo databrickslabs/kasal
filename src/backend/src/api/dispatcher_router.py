@@ -5,20 +5,25 @@ This module provides endpoints for analyzing user messages and determining
 whether they want to generate an agent, task, or crew, then calling the appropriate service.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
+from src.services.chat.auto_model import resolve_dispatch_model
 from src.services.chat.dispatcher import DEFAULT_DISPATCHER_MODEL, DispatcherService
 from src.services.chat.intent_dispatch import detect_request_intent
 from src.services.tools.tool_service import ToolService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(prefix="/dispatcher", tags=["dispatcher"])
 
 
-async def _fetch_available_tools(session, group_context) -> list:
+async def _fetch_available_tools(
+    session: AsyncSession, group_context: GroupContext
+) -> List[Dict[str, Any]]:
     """Fetch enabled tools for the workspace and return as list of dicts."""
     tool_service = ToolService(session)
     enabled_tools_resp = await tool_service.get_enabled_tools_for_group(group_context)
@@ -53,6 +58,9 @@ async def dispatch_request(
         if group_context.access_token:
             UserContext.set_user_token(group_context.access_token)
 
+    # "auto" becomes one of the workspace's enabled models before any model call.
+    selection = await resolve_dispatch_model(request, session, group_context)
+
     # Create service instance with injected session
     dispatcher_service = DispatcherService.create(session)
 
@@ -63,6 +71,8 @@ async def dispatch_request(
     result = await dispatcher_service.dispatch(
         request, group_context, available_tools=available_tools
     )
+    if selection is not None:
+        result["model_selection"] = selection.to_response()
 
     return result
 
@@ -95,6 +105,9 @@ async def detect_intent_only(
         UserContext.set_group_context(group_context)
         if group_context.access_token:
             UserContext.set_user_token(group_context.access_token)
+
+    # As in /dispatch: "auto" never reaches intent detection's model call.
+    await resolve_dispatch_model(request, session, group_context)
 
     # Create service instance with injected session
     dispatcher_service = DispatcherService.create(session)

@@ -76,3 +76,69 @@ describe('deck export security', () => {
     },
   );
 });
+
+describe('deck export image policy', () => {
+  const remote = 'https://images.example.org';
+  const slide =
+    '<section class="slide">' +
+    `<img src="${remote}/x.png?d=1" alt="Revenue chart">` +
+    '<img src="data:image/png;base64,AA==" alt="inline">' +
+    `<img src="/assets/a.png" srcset="${remote}/2x.png 2x" alt="local">` +
+    `<div id="bg" style="color: red; background: url(${remote}/bg.png) center"></div>` +
+    `<div id="bg2" style="background-image: url('data:image/png;base64,AA==')"></div>` +
+    `<table background="${remote}/t.png"><tr><td>x</td></tr></table>` +
+    `<svg><image href="${remote}/i.png"></image><rect fill="url(#g)" width="1" height="1"></rect></svg>` +
+    '<a href="https://example.com/page">source</a>' +
+    '</section>';
+
+  it('keeps nothing that would fetch from another host; inline and same-origin stay', () => {
+    const out = sanitizeForRender(slide);
+    expect(out).not.toContain('images.example.org');
+    const host = document.createElement('div');
+    host.innerHTML = out;
+    expect(host.textContent).toContain('Revenue chart');
+    expect([...host.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([
+      'data:image/png;base64,AA==',
+      '/assets/a.png',
+    ]);
+    // A style naming a remote resource is dropped whole, not edited.
+    expect(host.querySelector('#bg')?.hasAttribute('style')).toBe(false);
+    expect(host.querySelector('#bg2')?.getAttribute('style')).toContain('data:image/png');
+    expect(host.querySelector('rect')?.getAttribute('fill')).toBe('url(#g)');
+    expect(host.querySelector('a')?.getAttribute('href')).toBe('https://example.com/page');
+  });
+
+  it.each([
+    ['an unclosed, unquoted url(', `color: red; background: url(${remote}/a.png`],
+    ['an unclosed, quoted url(', `color: red; background: url('${remote}/a.png`],
+    ['image-set()', `background-image: image-set('${remote}/a.png' 1x)`],
+    ['-webkit-image-set()', `background-image: -webkit-image-set(url(/x.png) 1x, '${remote}/a.png' 2x)`],
+    ['an escaped url(', `background: u\\72l(${remote}/a.png)`],
+  ])('drops a style that could still fetch through %s', (_form, style) => {
+    const host = document.createElement('div');
+    host.innerHTML = sanitizeForRender(`<section class="slide"><div id="t" style="${style.replace(/"/g, '&quot;')}">x</div></section>`);
+    expect(host.querySelector('#t')?.hasAttribute('style')).toBe(false);
+    expect(host.innerHTML).not.toContain('images.example.org');
+  });
+
+  it('keeps a style whose every url() is local', () => {
+    const style = "color: red; background: url(/assets/a.png) no-repeat, url('data:image/png;base64,AA==')";
+    const host = document.createElement('div');
+    host.innerHTML = sanitizeForRender(`<section class="slide"><div id="t" style="${style.replace(/"/g, '&quot;')}">x</div></section>`);
+    const el = host.querySelector('#t') as HTMLElement;
+    expect(el.style.color).toBe('red');
+    expect(el.getAttribute('style')).toContain('/assets/a.png');
+    expect(el.getAttribute('style')).toContain('data:image/png');
+  });
+
+  it('applies to the document the PDF export rasterizes', async () => {
+    await downloadDeckPdf([slide]);
+    expect(capture.html).toContain('Revenue chart');
+    expect(capture.html).not.toContain('images.example.org');
+  });
+
+  it('leaves other DOMPurify callers alone', async () => {
+    const DOMPurify = (await import('dompurify')).default;
+    expect(DOMPurify.sanitize(`<img src="${remote}/x.png">`)).toContain('images.example.org');
+  });
+});

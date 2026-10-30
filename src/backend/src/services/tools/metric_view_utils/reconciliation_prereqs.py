@@ -21,10 +21,12 @@ carried from a prior pipeline step.
 
 from __future__ import annotations
 
-from typing import Any, Callable, List
+from collections.abc import Callable
+
+ConfigGetter = Callable[[str], object]
 
 
-def _has_pbi_auth(get: Callable[[str], Any]) -> bool:
+def _has_pbi_auth(get: ConfigGetter) -> bool:
     """True when a usable Power BI credential set is present via ``get``."""
     if get("access_token"):
         return True  # user OAuth / pasted bearer token
@@ -35,14 +37,14 @@ def _has_pbi_auth(get: Callable[[str], Any]) -> bool:
     return False
 
 
-def missing_reconciliation_inputs(get: Callable[[str], Any]) -> List[str]:
+def missing_reconciliation_inputs(get: ConfigGetter) -> list[str]:
     """Return human-readable names of the inputs reconciliation needs but lacks.
 
     ``get(key)`` resolves a config value (e.g. the generator's ``_get`` closure
     over the call kwargs and the tool's default config). An empty list means
     reconciliation has everything it needs to run.
     """
-    missing: List[str] = []
+    missing: list[str] = []
     if not get("warehouse_id"):
         missing.append("Databricks SQL warehouse ID (warehouse_id)")
     if not get("workspace_id"):

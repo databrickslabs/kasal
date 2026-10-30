@@ -114,3 +114,52 @@ def test_acall_active_fallback_short_circuits():
     llm._active_fallback = fake
     assert asyncio.run(llm.acall(**_CALL_KW)) == "FALLBACK_ASYNC"
     assert fake.async_calls == 1
+
+
+_ARGON_400 = _Err(
+    'BadRequestError: Error code: 400 - Unknown name "reasoning_effort" at '
+    "'generation_config': Cannot find field. INVALID_ARGUMENT",
+    status=400,
+)
+
+
+def _warned(llm, run):
+    """Run a fallback with the crew logger captured; return the warning text."""
+    from unittest.mock import MagicMock, patch
+
+    crew_logger = MagicMock()
+    with patch.object(DatabricksRetryLLM, "_get_crew_logger", return_value=crew_logger):
+        run(llm)
+    return " ".join(str(c.args[0]) for c in crew_logger.warning.call_args_list)
+
+
+def test_fallback_warning_names_the_endpoint_error():
+    """A fatal 4xx used to log only "model fallback (fatal_4xx): a -> b", so the
+    endpoint's reason (Argon rejecting reasoning_effort) was nowhere in the logs."""
+    llm = _llm_with_fallback(_FakeLLM())
+    text = _warned(
+        llm, lambda m: m._maybe_model_fallback(_ARGON_400, "call", dict(_CALL_KW))
+    )
+    assert "model fallback (fatal_4xx)" in text
+    assert 'Unknown name "reasoning_effort"' in text
+
+
+def test_async_fallback_warning_names_the_endpoint_error():
+    llm = _llm_with_fallback(_FakeLLM())
+    text = _warned(
+        llm,
+        lambda m: asyncio.run(
+            m._amaybe_model_fallback(_ARGON_400, "acall", dict(_CALL_KW))
+        ),
+    )
+    assert 'Unknown name "reasoning_effort"' in text
+
+
+def test_fallback_warning_truncates_a_long_error():
+    llm = _llm_with_fallback(_FakeLLM())
+    long_err = _Err("prompt is too long: " + "x" * 5000, status=400)
+    text = _warned(
+        llm, lambda m: m._maybe_model_fallback(long_err, "call", dict(_CALL_KW))
+    )
+    assert "x" * 300 not in text
+    assert len(text) < 600

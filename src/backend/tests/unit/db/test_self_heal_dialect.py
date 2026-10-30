@@ -45,7 +45,7 @@ def _conn(dialect: str) -> MagicMock:
 def _pg_conn_missing_columns(table_columns: list[str]) -> MagicMock:
     """A Postgres connection that reports ``table_columns`` as already present.
 
-    The Postgres branch now reads information_schema BEFORE altering (an ALTER on
+    The Postgres branch now reads the catalogue BEFORE altering (an ALTER on
     a table this role does not own raises "must be owner" even when the column is
     there, and that aborts the whole self-heal transaction). So the catalogue read
     has to be answered, and only the genuinely missing columns get an ALTER.
@@ -61,11 +61,11 @@ def _pg_conn_missing_columns(table_columns: list[str]) -> MagicMock:
 
 
 def _ddl(conn) -> list[str]:
-    """Statements issued, excluding the information_schema catalogue read."""
+    """Statements issued, excluding the pg_attribute catalogue read."""
     return [
         c.args[0]
         for c in conn.exec_driver_sql.await_args_list
-        if "information_schema" not in c.args[0]
+        if "pg_attribute" not in c.args[0]
     ]
 
 

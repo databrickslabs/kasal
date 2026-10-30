@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/ucmv-learning", tags=["ucmv-learning"])
 
 
 def get_learning_service(
-    session: SessionDep, group_context: GroupContextDep = None
+    session: SessionDep, group_context: GroupContextDep
 ) -> UCMVCorrectionLearningService:
     return UCMVCorrectionLearningService(session, group_context=group_context)
 
@@ -71,7 +71,5 @@ async def learn_from_corrections(
         )
         return LearnResponse(**result)
     except Exception as e:  # noqa: BLE001
-        logger.error(f"UCMV correction learning failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Correction learning failed: {str(e)}"
-        )
+        logger.exception("UCMV correction learning failed")
+        raise HTTPException(status_code=500, detail="Correction learning failed") from e

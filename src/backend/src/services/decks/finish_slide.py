@@ -1,9 +1,13 @@
 """One tool-free finalization attempt when a slide agent returns only prose."""
 
+from typing import Any, Callable, Optional
+
 from src.services.decks.slide_refine import first_slide_section
 
 
-def capture_evidence(evidence: list[str], tool: str, arguments: str, content: str):
+def capture_evidence(
+    evidence: list[str], tool: str, arguments: str, content: str
+) -> None:
     # Keep evidence, not the model's private reasoning. Bound large browser
     # snapshots and retain both ends; mark omissions so they cannot be mistaken
     # for complete sources. Keep recent results within a fixed context budget.
@@ -17,18 +21,18 @@ def capture_evidence(evidence: list[str], tool: str, arguments: str, content: st
 
 
 async def finish_slide(
-    service,
-    agent,
-    kicked,
-    prompt,
-    evidence,
-    config,
-    execution_id,
-    trace_context,
-    group_context,
-    group_id,
-    log,
-):
+    service: Any,
+    agent: Any,
+    kicked: Any,
+    prompt: str,
+    evidence: list[str],
+    config: Any,
+    execution_id: str,
+    trace_context: Any,
+    group_context: Any,
+    group_id: Optional[str],
+    log: Callable[[str], None],
+) -> Any:
     answer = getattr(kicked, "raw", "") or ""
     if getattr(kicked, "budget_exhausted", False) is True:
         return kicked
@@ -38,6 +42,13 @@ async def finish_slide(
     log(
         "Slide output incomplete; attempting one tool-free finalization using collected evidence"
     )
+    from src.services.decisions.output import evidence_guidance
+    from src.services.decisions.policies import rank
+
+    evidence = await rank(
+        "research_triage", prompt, evidence, evidence, group_id=group_id
+    )
+    review = await evidence_guidance(prompt, answer, evidence, group_id=group_id)
     evidence_text = "\n\n".join(evidence) or "No tool results were captured."
     messages = [
         {"role": "user", "content": prompt},
@@ -59,6 +70,7 @@ async def finish_slide(
                 "or other actions. Cite only sources actually present in the evidence. Do not "
                 "invent facts to fill gaps in excerpts. If the requested research could not be "
                 "completed, explain that limitation instead of fabricating a researched slide."
+                + (f"\n{review}" if review else "")
             ),
         },
     ]

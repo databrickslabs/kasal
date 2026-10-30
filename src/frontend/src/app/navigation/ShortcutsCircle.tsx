@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useMemo } from 'react';
 import { 
   Box, 
@@ -21,7 +22,11 @@ interface ShortcutsCircleProps {
 }
 
 const ShortcutsCircle: React.FC<ShortcutsCircleProps> = ({ shortcuts }) => {
-  const { setShortcutsVisible, shortcuts: storeShortcuts, showShortcuts } = useShortcutsStore();
+  const { setShortcutsVisible, shortcuts: storeShortcuts, showShortcuts } = useShortcutsStore(useShallow(state => ({
+    setShortcutsVisible: state.setShortcutsVisible,
+    shortcuts: state.shortcuts,
+    showShortcuts: state.showShortcuts,
+  })));
   const theme = useTheme();
   
   // Use provided shortcuts or fall back to store shortcuts

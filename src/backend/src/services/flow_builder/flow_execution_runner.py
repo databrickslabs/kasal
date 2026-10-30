@@ -30,6 +30,12 @@ CICD_ARTIFACT_QUERY = (
 )
 
 
+#: Statuses the child already persisted that a missing IPC result must not
+#: overwrite with FAILED: a stop, an approval pause, or COMPLETED (a large result
+#: can be lost in the queue after the child saved its success).
+_PRESERVED_STATUSES = ("STOPPED", "STOPPING", "WAITING_FOR_APPROVAL", "COMPLETED")
+
+
 async def update_execution_status_with_retry(
     execution_id: str,
     status: str,
@@ -301,30 +307,13 @@ async def run_flow_in_process(
                 if execution_record and hasattr(execution_record, "status")
                 else None
             )
-            if current_status and current_status.upper() in [
-                "STOPPED",
-                "STOPPING",
-                "WAITING_FOR_APPROVAL",
-            ]:
+            if current_status and current_status.upper() in _PRESERVED_STATUSES:
                 logger.info(
-                    f"Flow execution {execution_id} has status {current_status} - preserving it"
+                    "Flow execution %s has status %s - preserving it",
+                    execution_id,
+                    current_status,
                 )
                 final_status = None  # Don't update status
-                final_message = None
-            elif current_status and current_status.upper() == "COMPLETED":
-                # The subprocess ran the flow to completion and persisted
-                # COMPLETED + its result to the DB (flow_runner_service), then the
-                # parent watchdog reported no IPC result. For a large result this
-                # is a FALSE failure: the child's os._exit discarded the queued
-                # payload before the feeder thread flushed it (the queue path is
-                # hardened in process_executor, but this DB fallback guarantees a
-                # completed run is never overwritten with FAILED). Preserve the
-                # persisted success instead of clobbering it.
-                logger.warning(
-                    f"Flow execution {execution_id} reported no IPC result but DB "
-                    "shows COMPLETED - preserving success (large-result queue race)."
-                )
-                final_status = None  # Don't update status; DB already COMPLETED
                 final_message = None
             else:
                 final_status = ExecutionStatus.FAILED.value

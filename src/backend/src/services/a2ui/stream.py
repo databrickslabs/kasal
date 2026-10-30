@@ -125,7 +125,8 @@ class _Reader:
                 raw = s[self.i : j + 1]
                 self.i = j + 1
                 try:
-                    return json.loads(raw)
+                    result: str = json.loads(raw)
+                    return result
                 except Exception:  # noqa: BLE001 — an unparseable string is not done
                     raise _Incomplete
             j += 1
@@ -500,7 +501,7 @@ class SurfaceStreamer:
         keys = self._parser.new_keys if self._created else None
         return self._feed_part(part, keys)
 
-    def _feed_part(self, part: PartialSurface, keys=None) -> int:
+    def _feed_part(self, part: PartialSurface, keys: Optional[List[str]] = None) -> int:
         before = len(self.messages)
         try:
             # Check the gate FIRST so a surface that is allowed to stream never

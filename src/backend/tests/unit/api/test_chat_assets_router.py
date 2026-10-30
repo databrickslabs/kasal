@@ -1,6 +1,7 @@
 """The chat assets router: upload, serve, delete."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -27,7 +28,8 @@ def _client(monkeypatch, **overrides):
     )
 
     async def session():
-        yield "SESSION"
+        # SessionDep commits the session before replying, so it is awaitable.
+        yield AsyncMock(name="SESSION")
 
     app.dependency_overrides[get_smart_db_session] = session
     for name, fn in overrides.items():

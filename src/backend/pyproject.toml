@@ -1,6 +1,6 @@
 [project]
 name = "kasal-backend"
-version = "0.1.0"
+version = "2.0.0"
 description = "Kasal Backend - AI Agent Workflow Orchestration Platform"
 requires-python = ">=3.11,<3.12"
 dependencies = [
@@ -33,38 +33,40 @@ dependencies = [
     # HTTP clients
     "httpx>=0.26.0",
     "aiohttp>=3.9.0",
-    "httpx-sse==0.4.0",
     "urllib3>=1.26.6",
     # Auth
     # NOTE: python-jose + passlib removed — they were unused (0 imports) and
-    # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt is
-    # used directly; auth is via the Databricks OAuth proxy (no homegrown JWT).
-    "bcrypt==4.0.1",
+    # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt (once
+    # pinned ==4.0.1 for passlib) went with them; auth is via the Databricks
+    # OAuth proxy (no homegrown JWT).
     "cryptography",
     "python-multipart>=0.0.9",
     # Document parsing
     "pdfminer.six", # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
     # Databricks
-    "databricks",
     "databricks-sdk>=0.102.0",
     "databricks-vectorsearch",
+    # No first-party import, but a real runtime dependency: MLflow's built-in
+    # GenAI scorers (RelevanceToQuery, Safety, Correctness, Groundedness, ...
+    # used by services/mlflow/evaluation_runner.py) delegate to
+    # `databricks.agents.evals.judges` when the judge model is the Databricks
+    # default, as do mlflow.genai.datasets and labeling. Do not prune.
     "databricks-agents>=1.4.0",
     # Azure
     "azure-identity>=1.15.0",
     # AI/ML
-    "litellm[caching]==1.84.0", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.84.0 clears PYSEC-2026-388/390/2597-2600/3476-3479 + GHSA-69x8-hrgq-fjj8
-    "langchain",
-    "langchain-text-splitters", # langchain 1.x moved text splitters out of core
-    "mcp>=1.28.1,<1.29.0", # Kasal's own MCP integration. The floor is set by
-    # crewai, which requires ~=1.28.1; this was <1.27.0 and `uv` refused the
-    # resolution outright. Kasal's own use is narrow — the sse / streamable-http
+    "litellm[caching]==1.96.2", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.96.2 clears PYSEC-2026-4066 (and everything 1.84.0 cleared); never 1.107.0 (compromised release)
+    "mcp>=1.30.0,<1.31.0", # Kasal's own MCP integration. 1.30.0 clears
+    # CVE-2026-59951; crewai 1.15.28 still declares ~=1.28.1, so this is held by
+    # the override in [tool.uv] until the crewai 1.15.30 bump (which requires
+    # >=1.30,<2 itself). Kasal's own use is narrow — the sse / streamable-http
     # clients, McpError, and the JSON-RPC server side — so the bump is contained,
     # but it is a shipped feature and gets exercised rather than assumed.
     # `mcpadapt` is NOT here: it was only ever present because crewai-tools[mcp]
     # imported mcpadapt.core, and crewai-tools is deliberately not a dependency
     # (see below).
-    #
-    # The SECOND agent runtime. Kasal's own runtime lives in
+
+    # CrewAI — the SECOND agent runtime. Kasal's own runtime lives in
     # services/execution/runtime/; which of the two executes a run is an
     # operator setting (Configuration -> Engines), resolved once per execution
     # and stamped on the row so a run — and its resume — sticks to one engine.
@@ -73,14 +75,26 @@ dependencies = [
     # adapts them onto whichever engine is active; crewai-tools would add
     # pymupdf, pytube and youtube-transcript-api for nothing.
     #
-    # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84,
-    # which this project pins at 1.74.9 above. The CrewAI engine runs on Kasal's
-    # own transport instead (a BaseLLM subclass), so the extra is unnecessary
-    # AND the conflict never arises — and Databricks auth, retry/fallback, the
+    # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84;
+    # litellm is pinned independently above (==1.96.2, for completion_with_usage
+    # only). The CrewAI engine runs on Kasal's own transport instead (a BaseLLM
+    # subclass), so the extra is unnecessary and the two pins never have to move
+    # together — and Databricks auth, retry/fallback, the
     # context-window clamp and every LLM event stay identical across engines.
-    "crewai==1.15.20",
+    # 1.15.28: the newest release through the PyPI proxy's 7-day hold. It already
+    # brings chromadb ~=1.5.9 (from ~=1.1), pyjwt >=2.15, oauthlib >=4 and
+    # instructor <1.16. NEXT: 1.15.30 is the first to allow mcp>=1.30 and (via
+    # crewai-cli) uv>=0.13.4; published 2026-10-24, the proxy serves it from about
+    # 2026-10-31. Until then [tool.uv] override-dependencies holds those two; drop
+    # the overrides when this pin moves.
+    "crewai==1.15.28",
     # Observability
-    "mlflow>=3.11,<4", # >=3.11 required for Unity Catalog trace storage (OTel tables)
+    # Pinned to the 3.17 line: the built-in judge bridge (services/prompt_optimization/
+    # builtin_judges/bridge.py) wraps mlflow internals (judges.adapters.utils.get_adapter),
+    # pinned by tests/.../builtin_judges/test_bridge_contract.py. Re-run that test before
+    # widening. 3.17.2 is the floor that clears the 3.16 advisories.
+    # (>=3.11 was already required for Unity Catalog trace storage.)
+    "mlflow>=3.17.2,<3.18",
     "dspy>=3.3,<4", # MemAlign judge alignment (mlflow.genai.judges.optimizers) is built on DSPy; mlflow does not pull it in
     "opentelemetry-sdk>=1.27.0,<2.0.0",
     "opentelemetry-api>=1.27.0,<2.0.0",
@@ -88,25 +102,21 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0,<2.0.0",
     # Utils
     "openpyxl>=3.1.0", # PowerBI MQuery conversion report parsing (was transitive via crewai)
-    "tenacity>=8.2.3",
     "croniter",
     "psutil",
-    "rich>=14.2.0",
-    "redis>=5.0.0",
+    "redis>=5.0.0", # no direct import: backs LITELLM_CACHE_TYPE=redis (litellm) and redis:// rate-limit storage (limits)
     "aiofiles>=23.0.0",
     "rapidfuzz>=3.0.0", # Power BI metadata fuzzy matching (optional; falls back to difflib)
     # Protobuf (version pinned for compatibility)
     "protobuf>=5.29.0,<6.0.0",
     "grpcio-status>=1.62.0,<1.71.0",
     # Tools
-    "google-api-python-client",
-    "pysendpulse",
-    "nixtla",
-    "selenium",
-    "python-pptx",
-    "wheel",
+    # google-api-python-client, pysendpulse, nixtla, selenium, python-pptx and
+    # wheel were removed: 0 imports (they backed crewai-tools-era tools that no
+    # longer exist; PPTX export is client-side via pptxgenjs).
     "ollama>=0.6.2",
     "gepa>=0.1.4",
+    "anthropic>=1.8.0",
 ]
 
 [dependency-groups]
@@ -116,11 +126,19 @@ dev = [
     "pytest-asyncio>=0.23.5",
     "pytest-xdist>=3.5.0",
     "pytest-mock>=3.12.0",
+    "pytest-timeout>=2.3.1",
     "black>=24.1.1",
     "isort>=5.13.2",
     "mypy>=1.8.0",
     "ruff>=0.2.1",
     "import-linter>=2.0",
+    "types-psutil>=7.2.2.20260906",
+    "types-requests>=2.33.0.20260906",
+    "types-pyyaml>=6.0.12.20260906",
+    "types-croniter>=6.2.4.20260711",
+    "types-aiofiles>=25.1.0.20260518",
+    "types-openpyxl>=3.1.5.20260827",
+    "pandas-stubs>=2.3,<2.4",
 ]
 
 [tool.uv]
@@ -128,6 +146,20 @@ dev = [
 # a wheel. The app runs from source via PYTHONPATH (see app.yaml), and the deployed
 # bundle root has no matching package layout, so `uv sync` must not try to build it.
 package = false
+# Security overrides, until crewai 1.15.30 is through the PyPI proxy's 7-day hold
+# (published 2026-10-24; that release itself requires mcp>=1.30,<2 and, via
+# crewai-cli, uv>=0.13.4). crewai 1.15.28 still declares mcp~=1.28.1 and
+# crewai-cli uv~=0.11.6, which would keep two advisories in the lock:
+#   - mcp 1.30.0 clears CVE-2026-59951 (stateful Streamable HTTP servers; Kasal
+#     only uses the client side, but the audit gates on it).
+#   - uv 0.13.4 clears PYSEC-2026-4321 (compromised CA root in uv's bundled
+#     store). crewai-cli only shells out to uv for its own CLI, which Kasal
+#     never runs; the app's startup uses the platform's uv, not this one.
+# Drop both lines when the crewai pin moves to 1.15.30.
+override-dependencies = [
+    "mcp>=1.30.0,<1.31.0",
+    "uv>=0.13.4,<0.14.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -179,11 +211,35 @@ extend_skip_glob = [
 
 [tool.mypy]
 python_version = "3.11"
+# Without the plugin mypy does not know a pydantic field with a default is
+# optional, and every model built without it reads as a missing argument.
+plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+# A suppression must earn its keep: a `type: ignore` that no longer silences
+# anything is an error, and every one must name the error code it silences, so
+# it cannot quietly swallow a different error later. Their count (and `cast(`)
+# is ratcheted by tests/unit/architecture/test_typing_escape_ratchet.py.
+warn_unused_ignores = true
+enable_error_code = ["ignore-without-code"]
 exclude = ["src/services/export/templates/"]
+
+# Installed libraries that ship neither inline types nor a stub package. Each is
+# named explicitly: a blanket ignore_missing_imports would hide a typo'd import.
+[[tool.mypy.overrides]]
+module = [
+    "asyncpg",
+    "asyncpg.*",
+    "dspy",
+    "dspy.*",
+    "skills_ref",
+    "skills_ref.*",
+    # Optional instrumentation; imported inside a try/except ImportError.
+    "openinference.instrumentation.crewai",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 cache-dir = "tests/.artifacts/ruff"
@@ -216,6 +272,19 @@ select = ["E", "F"]
 # something everyone passes with --no-verify.
 ignore = ["E501"]
 
+# RUF100: a `noqa` that suppresses nothing is a lie about the code next to it, and
+# it hides the day the suppressed rule would fire for real. The 110 dead ones that
+# had piled up were removed mechanically (ruff's fix for RUF100 touches noqa
+# comments and nothing else).
+extend-select = ["RUF100"]
+
+# Rules ENFORCED as a per-file COUNT ratchet by
+# tests/unit/architecture/test_ruff_ratchet.py (baseline: ruff_ratchet_baseline.json
+# next to it), not selected here, because thousands of pre-existing hits would turn
+# this gate red. Listing them as `external` keeps RUF100 from deleting the `noqa`
+# comments that suppress them — those comments ARE honoured by the ratchet.
+external = ["BLE001", "S110", "TRY400", "G004", "B904"]
+
 [tool.ruff.lint.per-file-ignores]
 # SQLAlchemy filters are built with `==`, not truthiness: `where(Model.flag == True)`
 # compiles to SQL, while ruff's suggested `where(Model.flag)` evaluates the COLUMN
@@ -229,11 +298,35 @@ python_files = "test_*.py"
 python_functions = "test_*"
 python_classes = "Test*"
 asyncio_mode = "auto"
+# A hung test must fail, not stall an xdist worker (and CI) indefinitely.
+# 300 s is far above the slowest legitimate test. "signal" raises inside the
+# stuck test and keeps the worker alive, so fixture teardown still runs — that
+# teardown is what reaps the real subprocesses some suites spawn. "thread"
+# would os._exit the whole worker, skip teardown and orphan those children.
+# Override per test with @pytest.mark.timeout(n).
+timeout = 300
+timeout_method = "signal"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "slow: Slow running tests",
 ]
+
+# ─── Coverage (pytest-cov) ───────────────────────────────────────────────────
+# Run: uv run python run_tests.py --coverage   (reports land in tests/.artifacts/; CI uploads coverage.xml)
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+# The floor. pytest-cov and `coverage report` both fail below it, and the
+# "backend-coverage" CI job gates on it. Measured 2026-09-27 on the full suite
+# (branch coverage, -n 4): 85% (105,369 statements, 33,306 branches). Only
+# ever raise it. It applies to any --cov run, so a --cov run over a subset of
+# tests fails it by design; use --cov-fail-under=0 for a partial local report.
+fail_under = 80
 
 # ─── Architecture contracts (import-linter) ──────────────────────────────────
 # Run: .venv/bin/lint-imports
@@ -326,3 +419,91 @@ ignore_imports = [
     "src.utils.databricks_auth -> src.services.settings.api_keys",
     "src.utils.prompt_utils -> src.services.catalog.templates",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Routers never import repositories or db"
+type = "forbidden"
+source_modules = ["src.api"]
+forbidden_modules = ["src.repositories", "src.db"]
+# Direct imports only: every router reaches the db transitively through
+# src.dependencies / services, which is how it is supposed to work.
+allow_indirect_imports = true
+# SHRINK-ONLY BASELINE. A router takes a session from src.dependencies and calls
+# a service; it never builds a repository or reaches into src.db itself. Each
+# line below predates this contract and is a known leak. import-linter errors on
+# an ignore that no longer matches, so fixing a router forces deleting its line
+# here. Never ADD to this list: move the work into a service instead.
+ignore_imports = [
+    # --- router -> repository (5 import lines, 4 edges): the service should own these ---
+    "src.api.logs_router -> src.repositories.log_repository",
+    "src.api.mcp_router -> src.repositories.databricks_config_repository",
+    "src.api.mcp_router -> src.repositories.mcp_repository",
+    "src.api.sse_router -> src.repositories.execution_history_repository",
+    # --- router -> db (9 import lines, 6 edges) ---
+    # Background worker owning a fresh routed session (sanctioned helper, but it
+    # belongs in the service that runs the job).
+    "src.api.builder_generation_router -> src.db.session",
+    # _local_session_factory / dispose_engines: belongs in a LakebaseService.
+    "src.api.database_management_router -> src.db.session",
+    # get_lakebase_session + raw f-string SQL: belongs in services/memory/storage.
+    "src.api.memory_backend.record_browsers -> src.db.lakebase_session",
+    # PERMANENT: /health/db reports on THIS process's raw factory and Lakebase
+    # state; routing it through a service would make the check pass by
+    # construction (see the comment in healthcheck_router.db_health).
+    "src.api.healthcheck_router -> src.db.database_router",
+    "src.api.healthcheck_router -> src.db.lakebase_state",
+    "src.api.healthcheck_router -> src.db.session",
+]
+
+[[tool.importlinter.contracts]]
+name = "db never imports services"
+type = "forbidden"
+source_modules = ["src.db"]
+forbidden_modules = ["src.services"]
+# Direct imports are zero. Transitively src.db reaches services only through the
+# five accepted lazy utils -> services edges documented on the "Core and utils
+# never import services" contract above; those are that contract's business.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Execution shared machinery never imports a path package"
+type = "forbidden"
+# The kernel and the machinery the three paths share (see
+# src/services/execution/CLAUDE.md) must not depend on any one path.
+source_modules = [
+    "src.services.execution.kernel",
+    "src.services.execution.config",
+    "src.services.execution.checkpointing",
+]
+forbidden_modules = [
+    "src.services.agent_builder",
+    "src.services.flow_builder",
+    "src.services.chat",
+]
+allow_indirect_imports = true
+# SHRINK-ONLY BASELINE: the four existing edges (audit #16). Each should move the
+# helper it needs down into the kernel. Never add to this list.
+ignore_imports = [
+    "src.services.execution.config.manager_config_builder -> src.services.agent_builder.agent_adapter",
+    "src.services.execution.kernel.output_contract -> src.services.agent_builder.schema_converter",
+    "src.services.execution.kernel.task_builder -> src.services.agent_builder.task_adapter",
+    "src.services.execution.checkpointing.resume_config -> src.services.flow_builder.flow_service",
+]
+
+[[tool.importlinter.contracts]]
+name = "Vendored runtime modules never import backend-only decisions"
+type = "forbidden"
+# These modules ship inside the exported Databricks App (see
+# services/export/runtime_vendor.py); src.services.decisions does not, so an
+# import of it raises ImportError in the exported app.
+source_modules = [
+    "src.services.tools.serper_search",
+    "src.services.tools.web_fetch",
+    "src.services.tools.scrape_website",
+    "src.services.tools.image_generation",
+    "src.services.execution.runtime",
+]
+forbidden_modules = ["src.services.decisions"]
+allow_indirect_imports = true
+# serper_search loads the ranker lazily and falls back to unranked results when
+# the decisions package is absent (fix/tests-green), so no static edge remains.

@@ -259,32 +259,6 @@ class TestGetAllSchedules:
         assert result.count == 0
 
 
-class TestGetScheduleById:
-    """Tests for get_schedule_by_id."""
-
-    @pytest.mark.asyncio
-    async def test_returns_schedule_when_found(self):
-        service = _make_service()
-        mock_schedule = MagicMock()
-        service.repository.find_by_id = AsyncMock(return_value=mock_schedule)
-
-        with patch(
-            "src.schemas.schedule.ScheduleResponse.model_validate",
-            return_value=MagicMock(),
-        ):
-            await service.get_schedule_by_id(1)
-
-        service.repository.find_by_id.assert_called_once_with(1)
-
-    @pytest.mark.asyncio
-    async def test_raises_not_found_when_missing(self):
-        service = _make_service()
-        service.repository.find_by_id = AsyncMock(return_value=None)
-
-        with pytest.raises(NotFoundError):
-            await service.get_schedule_by_id(999)
-
-
 class TestGetScheduleByIdWithGroupCheck:
     """Tests for get_schedule_by_id_with_group_check."""
 

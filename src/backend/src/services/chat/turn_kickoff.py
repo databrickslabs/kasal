@@ -3,27 +3,30 @@
 import asyncio
 import time
 from types import SimpleNamespace
+from typing import Any, Callable, Dict, List, Optional
 
+from src.core.execution_scope import execution_scope
 from src.core.llm.effort import resolve_effort
+from src.core.llm.transport.budget import turn_cap
 from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 from src.core.llm.transport.request_deadline import run_deadline
 
 
 async def kickoff_chat_turn(
-    service,
-    agent,
-    config,
-    execution_id,
-    trace_context,
-    group_context,
-    group_id,
-    prompt,
-    agent_spec,
-    conversation_preamble,
-    _agent_memory,
-    _log,
-    output_evidence=None,
-):
+    service: Any,
+    agent: Any,
+    config: Any,
+    execution_id: str,
+    trace_context: Any,
+    group_context: Any,
+    group_id: Optional[str],
+    prompt: str,
+    agent_spec: Dict[str, Any],
+    conversation_preamble: Optional[str],
+    _agent_memory: Any,
+    _log: Callable[[str], None],
+    output_evidence: Optional[List[Any]] = None,
+) -> Any:
     raw = (getattr(config, "inputs", None) or {}).get(
         "execution_effort"
     ) or agent_spec.get("execution_effort")
@@ -31,14 +34,17 @@ async def kickoff_chat_turn(
         budget = resolve_effort(raw)
         seconds = min(
             budget["run_max_seconds"],
-            getattr(agent, "max_execution_time", None) or budget["max_execution_time"],
+            turn_cap(agent) or budget["max_execution_time"],
         )
         # Chat has no Crew.kickoff: stamp the same fixed point on its lone agent.
         deadline = time.monotonic() + seconds
         object.__setattr__(agent, "run_deadline", deadline)
         object.__setattr__(agent, "_kasal_run_deadline", deadline)
     try:
-        with run_deadline(seconds if raw else None):
+        # The turn's execution, for its whole kickoff (the slide finish too):
+        # the tool hooks are process-wide and other turns' hooks are installed
+        # alongside this turn's, so wrap_tool needs to know whose call it is.
+        with run_deadline(seconds if raw else None), execution_scope(execution_id):
             kicked = await _kickoff(
                 service,
                 agent,
@@ -82,19 +88,19 @@ async def kickoff_chat_turn(
 
 
 async def _kickoff(
-    service,
-    agent,
-    config,
-    execution_id,
-    trace_context,
-    group_context,
-    group_id,
-    prompt,
-    agent_spec,
-    conversation_preamble,
-    _agent_memory,
-    _log,
-):
+    service: Any,
+    agent: Any,
+    config: Any,
+    execution_id: str,
+    trace_context: Any,
+    group_context: Any,
+    group_id: Optional[str],
+    prompt: str,
+    agent_spec: Dict[str, Any],
+    conversation_preamble: Optional[str],
+    _agent_memory: Any,
+    _log: Callable[[str], None],
+) -> Any:
     # ── Memory recall — Kasal's engine Agent does not consult
     # memory itself, so recall here and prepend a capped context
     # block. One embedding + one search (no LLM calls);

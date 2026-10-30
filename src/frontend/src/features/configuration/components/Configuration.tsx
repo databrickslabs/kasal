@@ -1,16 +1,19 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdornment, InputLabel, List, ListItemButton, ListItemIcon, ListItemText, MenuItem, Select, TextField, Typography } from '@mui/material';
 import { Zap, Search, X, Settings2, SlidersHorizontal, Bot, Wrench, BookOpen, MessageSquare, Brain, LayoutTemplate, Cloud, Plug, Network, Activity, KeyRound, Users, Cpu, Database, Boxes, Building2, UserRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePermissionStore } from '../../../store/permissions';
-import { useUserStore } from '../../../store/user';
+import { isPersonalWorkspaceId, usePersonalGroupId, useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useThemeStore } from '../../../store/theme';
 import { useEventTriggersStore } from '../../../store/eventTriggers';
+import SystemSettingsPanel from './SystemSettings/SystemSettingsPanel';
 import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 import { getSettingsSections, SettingsGroup, SettingsScope, SettingsSection, SettingsSectionId } from './settingsSections';
 import GeneralSettings from './GeneralSettings';
 import SettingsContent from './SettingsContent';
+import { ErrorBoundary } from '../../../shared/errors/ErrorBoundary';
 import { readSettingsNavigation, clearSettingsNavigation, switchSettingsTeamspace } from '../lib/settingsNavigation';
 import { readSettingsIntent, clearSettingsIntent, OPEN_SETTINGS_EVENT } from '../lib/settingsIntent';
 
@@ -40,17 +43,17 @@ const groups: { id: SettingsGroup; label: string }[] = [
 function SectionContent({ id, scope, onNavigate }: { id: SettingsSectionId; scope: SettingsScope; onNavigate: (id: SettingsSectionId) => void }) {
   const mode = scope === 'system' ? 'system' : 'workspace';
   switch (id) {
-    case 'event-triggers': return <TriggersPanel embedded />;
+    case 'event-triggers': return <><TriggersPanel embedded /><SystemSettingsPanel group="triggers" /></>;
     case 'general': return <GeneralSettings />;
     case 'overview': return <WorkspaceOverview embedded onConfigureSection={section => { if (section === 'mcp') onNavigate('mcp'); }} />;
-    case 'models': return <ModelConfiguration mode={mode} />;
-    case 'tools': return <ToolsConfiguration mode={mode} />;
+    case 'models': return <><ModelConfiguration mode={mode} />{mode === 'system' && <SystemSettingsPanel group="models" />}</>;
+    case 'tools': return <><ToolsConfiguration mode={mode} /><SystemSettingsPanel group="tools" /></>;
     case 'mcp': return <MCPConfiguration mode={mode} />;
     case 'remote-agents': return <RemoteAgents mode={mode} />;
     case 'skills': return <SkillsConfiguration />;
-    case 'prompts': return <Prompts />;
+    case 'prompts': return <><Prompts /><SystemSettingsPanel group="recipes" /></>;
     case 'memory': return <MemoryConfiguration />;
-    case 'ui': return <UIConfigurator />;
+    case 'ui': return mode === 'system' ? <SystemSettingsPanel group="a2ui" standalone /> : <UIConfigurator />;
     case 'databricks': return <DatabricksConfiguration />;
     case 'mlflow': return <MLflowConfiguration />;
     case 'api-keys': return <APIKeys />;
@@ -67,14 +70,21 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   const loadEventTriggers = useEventTriggersStore(state => state.load);
   useEffect(() => { void loadEventTriggers(); }, [loadEventTriggers]);
   const dark = useThemeStore(state => state.isDarkMode);
-  const { userRole, isLoading, isSystemAdmin, isPersonalWorkspaceManager, loadPermissions } = usePermissionStore();
+  const { userRole, isLoading, isSystemAdmin, isPersonalWorkspaceManager, loadPermissions } = usePermissionStore(useShallow(state => ({
+    userRole: state.userRole,
+    isLoading: state.isLoading,
+    isSystemAdmin: state.isSystemAdmin,
+    isPersonalWorkspaceManager: state.isPersonalWorkspaceManager,
+    loadPermissions: state.loadPermissions,
+  })));
   const email = useUserStore(state => state.currentUser?.email);
+  const personalGroupId = usePersonalGroupId();
   const groupId = useGroupStore(state => state.currentGroupId);
   const teamspaces = useGroupStore(state => state.groups);
   const fetchMyGroups = useGroupStore(state => state.fetchMyGroups);
   const currentGroup = useGroupStore(state => state.getCurrentGroup());
   const permissionsReady = !isLoading && (isSystemAdmin || isPersonalWorkspaceManager || userRole !== null);
-  const isWorkspaceAdmin = isSystemAdmin || userRole === 'admin' || (!!groupId?.startsWith('user_') && isPersonalWorkspaceManager);
+  const isWorkspaceAdmin = isSystemAdmin || userRole === 'admin' || (isPersonalWorkspaceId(groupId, personalGroupId) && isPersonalWorkspaceManager);
   const access = useMemo(() => ({ isSystemAdmin, isWorkspaceAdmin, isEditor: userRole === 'editor' }), [isSystemAdmin, isWorkspaceAdmin, userRole]);
   const [scope, setScope] = useState<SettingsScope>('workspace');
   const [selected, setSelected] = useState<SettingsSectionId>(() => readSettingsNavigation()?.section || readSettingsIntent()?.section || 'overview');
@@ -86,7 +96,7 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   const canConfigureCurrent = getSettingsSections('workspace', access).length > 0;
   const administeredTeamspaces = teamspaces.filter(group => group.status === 'active' && (
     (group.id === groupId && canConfigureCurrent) || isSystemAdmin || group.user_role === 'ADMIN' ||
-    (group.id.startsWith('user_') && isPersonalWorkspaceManager)
+    (isPersonalWorkspaceId(group.id, personalGroupId) && isPersonalWorkspaceManager)
   ));
   const scopeOptions = [
     { id: 'personal', scope: 'personal' as const, label: 'My preferences', icon: UserRound },
@@ -177,9 +187,11 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
           <Typography component="h2" sx={{ fontSize: 26, fontWeight: 650, letterSpacing: '-0.025em' }}>{label(active)}</Typography>
           <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 0.75, mb: 4 }}>{active.description}</Typography>
           <SettingsContent>
-            <Suspense fallback={<Box role="status" sx={{ py: 5, display: 'flex', alignItems: 'center', gap: 1.5 }}><CircularProgress size={18} color="inherit" /><Typography variant="body2">Loading {label(active).toLocaleLowerCase()}…</Typography></Box>}>
-              <SectionContent key={`${groupId}:${activeScope}:${active.id}`} id={active.id} scope={activeScope} onNavigate={setSelected} />
-            </Suspense>
+            <ErrorBoundary resetKeys={[groupId, activeScope, active.id]}>
+              <Suspense fallback={<Box role="status" sx={{ py: 5, display: 'flex', alignItems: 'center', gap: 1.5 }}><CircularProgress size={18} color="inherit" /><Typography variant="body2">Loading {label(active).toLocaleLowerCase()}…</Typography></Box>}>
+                <SectionContent key={`${groupId}:${activeScope}:${active.id}`} id={active.id} scope={activeScope} onNavigate={setSelected} />
+              </Suspense>
+            </ErrorBoundary>
           </SettingsContent>
         </Box>
       </Box>

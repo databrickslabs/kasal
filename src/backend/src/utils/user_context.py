@@ -29,13 +29,18 @@ Example:
 """
 
 import logging
-import os
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from fastapi import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from src.utils.request_identity import identity_from_headers
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,7 @@ _group_context: ContextVar[Optional["GroupContext"]] = ContextVar(
     "group_context", default=None
 )
 
+
 # --- Group-membership resolution cache ---------------------------------------
 # Resolving a user's group memberships costs several DB round-trips
 # (users + group_users + groups) plus a commit, and it runs on EVERY
@@ -60,9 +66,9 @@ _group_context: ContextVar[Optional["GroupContext"]] = ContextVar(
 # email for a short TTL so repeat polls do zero DB work. Membership mutations
 # call clear_membership_cache() to drop stale entries immediately, and the TTL
 # bounds staleness for anything that mutates outside this process.
-_MEMBERSHIP_CACHE_TTL = float(os.getenv("GROUP_MEMBERSHIP_CACHE_TTL", "30"))
+_MEMBERSHIP_CACHE_TTL = 30.0
 # email -> (expires_at_monotonic, (user, groups_with_roles))
-_membership_cache: Dict[str, tuple] = {}
+_membership_cache: Dict[str, Tuple[float, Tuple[Any, List[Any]]]] = {}
 
 
 def clear_membership_cache(email: Optional[str] = None) -> None:
@@ -78,6 +84,20 @@ def clear_membership_cache(email: Optional[str] = None) -> None:
         _membership_cache.clear()
     else:
         _membership_cache.pop(email, None)
+
+
+_ROLE_RANK = {"operator": 0, "editor": 1, "admin": 2}
+
+
+def _least_privileged_role(roles: List[Any]) -> Optional[str]:
+    """The lowest of ``roles``; None if any is missing or unknown (fail closed)."""
+    ranked = []
+    for role in roles:
+        rank = _ROLE_RANK.get(str(role or "").lower())
+        if rank is None:
+            return None
+        ranked.append((rank, role))
+    return min(ranked, key=lambda pair: pair[0])[1] if ranked else None
 
 
 @dataclass
@@ -101,7 +121,7 @@ class GroupContext:
         user_id: Optional user identifier from authentication system
         access_token: Databricks or OAuth access token for API calls
         user_role: User's role in the primary group (admin, editor, operator)
-        highest_role: User's highest role across ALL groups (for authorization)
+        highest_role: User's highest role across ALL groups (display only; never authorises)
         current_user: The User model instance with permission fields
 
     Properties:
@@ -124,14 +144,18 @@ class GroupContext:
     group_email: Optional[str] = None  # e.g., "alice@acme-corp.com"
     email_domain: Optional[str] = None  # e.g., "acme-corp.com"
     user_id: Optional[str] = None  # User ID if available
-    access_token: Optional[str] = None  # Databricks access token
+    # The user's Databricks bearer token. Excluded from repr so that logging a
+    # GroupContext (f"{group_context}") can never write the token to a log sink.
+    access_token: Optional[str] = field(default=None, repr=False)
     user_role: Optional[str] = (
         None  # User's role in primary group (admin/editor/operator)
     )
     highest_role: Optional[str] = (
         None  # User's highest role across ALL groups (for authorization)
     )
-    current_user: Optional[Any] = None  # User model instance with permission fields
+    # User model instance with permission fields; kept out of repr for the same
+    # reason (it is an ORM row, and its repr is not ours to control).
+    current_user: Optional[Any] = field(default=None, repr=False)
 
     @property
     def primary_group_id(self) -> Optional[str]:
@@ -173,9 +197,9 @@ class GroupContext:
     async def from_email(
         cls,
         email: str,
-        access_token: str = None,
-        user_id: str = None,
-        group_id: str = None,
+        access_token: Optional[str] = None,
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> "GroupContext":
         """Create GroupContext from user email with hybrid individual/group-based groups.
 
@@ -220,13 +244,11 @@ class GroupContext:
                 highest_role = None  # No highest role when not in any groups
             else:
                 # User IS in groups - use group-based groups
-                user_group_ids = []
-                roles_by_group = {}
-                for group, role in user_groups_with_roles:
-                    user_group_ids.append(group.id)
-                    roles_by_group[group.id] = role
+                roles_by_group = {
+                    group.id: role for group, role in user_groups_with_roles
+                }
 
-                # Determine user's highest role across ALL groups (for authorization)
+                # Highest role across ALL groups: display only, never an authorisation input (V4-5)
                 highest_role = None
                 if any(role == "admin" for group, role in user_groups_with_roles):
                     highest_role = "admin"
@@ -239,63 +261,13 @@ class GroupContext:
                         user_groups_with_roles[0][1] if user_groups_with_roles else None
                     )
 
-                # Always generate the user's personal workspace ID for inclusion in queries
-                # This ensures users can always access their personal data regardless of selected workspace
                 personal_workspace_id = cls.personal_workspace_id_of(user, email)
 
-                # If a specific group_id was provided, validate it
-                if group_id:
-                    # Check if it's a regular group the user belongs to
-                    if group_id in roles_by_group:
-                        user_role = roles_by_group[group_id]
-                        # Strict workspace isolation: only show data from the selected workspace.
-                        # Personal workspace data is accessible when the user switches back to it.
-                        user_group_ids = [group_id]
-                        logger.debug(
-                            f"Strict isolation: group_ids=['{group_id}'] (personal workspace excluded)"
-                        )
-                    # Check if it's a personal workspace
-                    elif group_id.startswith("user_"):
-                        # Validate that the personal workspace matches the user's email
-                        if group_id != personal_workspace_id:
-                            # SECURITY: Reject unauthorized personal workspace access
-                            logger.warning(
-                                f"SECURITY: User {email} attempted to access unauthorized personal workspace {group_id}"
-                            )
-                            raise ValueError(
-                                f"Access denied: User does not have access to group {group_id}"
-                            )
-
-                        # Personal workspace selected (e.g., user_admin_admin_com)
-                        # For personal workspaces, inherit the highest role for authorization
-                        # but keep data isolated to personal workspace
-                        user_role = highest_role  # Use highest role for authorization
-
-                        # Add the personal workspace as primary for data filtering
-                        # This ensures data isolation to personal workspace
-                        user_group_ids = [group_id] + user_group_ids
-                        logger.info(
-                            f"Personal workspace {group_id} selected for {email}, using highest role: {user_role}"
-                        )
-                    else:
-                        # SECURITY: Reject unauthorized group access
-                        logger.warning(
-                            f"SECURITY: User {email} attempted to access unauthorized group {group_id}"
-                        )
-                        raise ValueError(
-                            f"Access denied: User does not have access to group {group_id}"
-                        )
-                else:
-                    # No specific group_id provided - use the role from the first group
-                    user_role = (
-                        user_groups_with_roles[0][1] if user_groups_with_roles else None
-                    )
-                    # ALWAYS include personal workspace so users can see their personal data
-                    if personal_workspace_id not in user_group_ids:
-                        user_group_ids.append(personal_workspace_id)
-                        logger.debug(
-                            f"Added personal workspace {personal_workspace_id} to group list for data access"
-                        )
+                # The role always describes the scope it authorises (audit M2 /
+                # V3-3); see _scope_for_selection.
+                user_group_ids, user_role = cls._scope_for_selection(
+                    email, group_id, user, roles_by_group, personal_workspace_id
+                )
 
                 logger.info(
                     f"User {email} belongs to groups: {user_group_ids} with role: {user_role}, highest role: {highest_role}"
@@ -326,6 +298,56 @@ class GroupContext:
             ) from e
 
     @staticmethod
+    def _scope_for_selection(
+        email: str,
+        group_id: Optional[str],
+        user: Any,
+        roles_by_group: Dict[str, Any],
+        personal_workspace_id: str,
+    ) -> Tuple[list, Optional[str]]:
+        """``(group_ids, user_role)`` for a member of at least one team workspace.
+
+        The role must hold in EVERY workspace the scope covers, or a role check
+        passes for data the user holds a lesser role on (audit M2 / V3-3):
+
+        - A team workspace selected: that workspace only, with its role.
+        - The personal workspace selected: the personal workspace only, and no
+          team role. ``core.permissions.get_effective_role`` gives the personal
+          role (admin for a personal-workspace manager, otherwise editor), as it
+          does for users in no group and as the frontend's permission store does.
+          It used to add every team id with the HIGHEST team role, so a viewer
+          in A and admin in B passed admin checks over A's data.
+        - Nothing selected (identity discovery, and MCP/A2A callers that list
+          every teamspace's publications by identity alone): the union of the
+          user's workspaces, as before, with the LEAST privileged role held
+          across them. The first membership's role used to apply to all of
+          them, and membership order is not even defined.
+        """
+        if group_id:
+            if group_id in roles_by_group:
+                # Strict isolation: only the selected workspace's data.
+                return [group_id], roles_by_group[group_id]
+            if group_id == personal_workspace_id:
+                return [group_id], None
+            logger.warning(
+                f"SECURITY: User {email} attempted to access unauthorized group {group_id}"
+            )
+            raise ValueError(
+                f"Access denied: User does not have access to group {group_id}"
+            )
+        personal_role = (
+            "admin"
+            if getattr(user, "is_system_admin", False)
+            or getattr(user, "is_personal_workspace_manager", False)
+            else "editor"
+        )
+        scope = list(roles_by_group)
+        if personal_workspace_id not in roles_by_group:
+            scope.append(personal_workspace_id)
+        roles = list(roles_by_group.values()) + [personal_role]
+        return scope, _least_privileged_role(roles)
+
+    @staticmethod
     def generate_group_id(email_domain: str) -> str:
         """
         Generate group ID from email domain.
@@ -345,26 +367,6 @@ class GroupContext:
 
         digest = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:8]
         return f"{GroupContext.generate_individual_group_id(email)}_{digest}"
-
-    @staticmethod
-    def personal_workspace_candidates(email: str) -> tuple:
-        """The two ids a user's personal workspace can carry."""
-        return (
-            GroupContext.generate_individual_group_id(email),
-            GroupContext.disambiguated_individual_group_id(email),
-        )
-
-    @staticmethod
-    def is_personal_workspace_of(group_id: Optional[str], email: Optional[str]) -> bool:
-        """Whether ``group_id`` is this user's personal workspace, under either
-        form of its id. No lookup: both forms are functions of the email."""
-        if not group_id or not email:
-            return False
-        wanted = group_id.lower()
-        return any(
-            c.lower() == wanted
-            for c in GroupContext.personal_workspace_candidates(email)
-        )
 
     @staticmethod
     def personal_workspace_id_of(user: Any, email: str) -> str:
@@ -398,52 +400,6 @@ class GroupContext:
         return bool(self.group_ids and len(self.group_ids) > 0 and self.email_domain)
 
     @staticmethod
-    async def _get_user_group_memberships(email: str) -> list:
-        """
-        Get list of group IDs that the user belongs to.
-        Auto-creates the user if they don't exist (proxy authentication).
-
-        Args:
-            email: User email address
-
-        Returns:
-            List of group IDs the user is a member of
-        """
-        try:
-            # Import here to avoid circular imports
-            from src.services.groups.groups import GroupService
-            from src.services.groups.users import UserService
-            from src.utils.asyncio_utils import execute_db_operation_smart
-
-            async def _lookup(session):
-                # Get or create the user
-                user_service = UserService(session)
-                user = await user_service.get_or_create_user_by_email(email)
-
-                if not user:
-                    logger.error(f"Failed to get or create user for email: {email}")
-                    return []
-
-                # Commit the session to ensure user and any groups are saved
-                await session.commit()
-
-                group_service = GroupService(session)
-                user_groups = await group_service.get_user_group_memberships(email)
-
-                # Commit any pending changes
-                await session.commit()
-
-                return [group.id for group in user_groups]
-
-            # Use the smart session which routes to Lakebase when active
-            # (where groups/users live) and falls back to local SQLite otherwise.
-            return await execute_db_operation_smart(_lookup)
-
-        except Exception as e:
-            logger.error(f"Error getting user group memberships for {email}: {e}")
-            return []
-
-    @staticmethod
     async def _get_user_group_memberships_with_roles(email: str) -> tuple:
         """
         Get list of groups and roles that the user belongs to, along with the user object.
@@ -473,7 +429,7 @@ class GroupContext:
             from src.services.groups.users import UserService
             from src.utils.asyncio_utils import execute_db_operation_smart
 
-            async def _lookup(session):
+            async def _lookup(session: "AsyncSession") -> Tuple[Any, List[Any]]:
                 # Get or create the user
                 logger.debug(
                     f"[USER CONTEXT] Creating UserService and calling get_or_create_user_by_email for {email}"
@@ -677,14 +633,16 @@ async def extract_group_context_from_request(
         GroupContext object if group can be determined, None otherwise
     """
     try:
-        # Extract email from Databricks Apps header
-        email = request.headers.get("X-Forwarded-Email")
+        # Same resolver as the get_group_context dependency, so the request
+        # context and the route never disagree about who is calling (and
+        # X-Auth-Request-* is ignored inside Databricks Apps).
+        identity = identity_from_headers(request.headers)
+        email = identity.email
         if not email:
-            logger.debug("No X-Forwarded-Email header found")
+            logger.debug("No identity header found")
             return None
 
-        # Extract access token
-        access_token = extract_user_token_from_request(request)
+        access_token = identity.access_token or extract_user_token_from_request(request)
 
         # Honor the explicitly selected workspace from the `group_id` header.
         # WITHOUT this, from_email() ignores the selection and returns the UNION of
@@ -724,7 +682,7 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
     Returns:
         Dictionary containing user context information
     """
-    context = {}
+    context: Dict[str, Any] = {}
 
     try:
         # Extract user token
@@ -732,8 +690,7 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
         if user_token:
             context["access_token"] = user_token
 
-        # Extract Databricks Apps email
-        email = request.headers.get("X-Forwarded-Email")
+        email = identity_from_headers(request.headers).email
         if email:
             context["email"] = email
 
@@ -776,10 +733,10 @@ class UserContextMiddleware:
     (e.g. Databricks Apps).  See: https://github.com/encode/starlette/issues/1012
     """
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -841,50 +798,3 @@ class UserContextMiddleware:
 
         finally:
             UserContext.clear_context()
-
-
-# Keep the old function for backward compatibility (used in tests)
-async def user_context_middleware(request: Request, call_next):
-    """Legacy BaseHTTPMiddleware-style dispatch function (kept for tests)."""
-    try:
-        try:
-            group_context = await extract_group_context_from_request(request)
-            if group_context:
-                UserContext.set_group_context(group_context)
-        except Exception:
-            pass
-
-        user_context = extract_user_context_from_request(request)
-        if user_context:
-            UserContext.set_user_context(user_context)
-            if "access_token" in user_context:
-                UserContext.set_user_token(user_context["access_token"])
-
-        response = await call_next(request)
-        return response
-    except Exception:
-        UserContext.clear_context()
-        return await call_next(request)
-    finally:
-        UserContext.clear_context()
-
-
-def is_databricks_app_context() -> bool:
-    """
-    Check if we're running in a Databricks App context.
-
-    This can be determined by checking if we have a user token
-    from the X-Forwarded-Access-Token header.
-
-    Returns:
-        True if running in Databricks App context, False otherwise
-    """
-    user_context = UserContext.get_user_context()
-    if not user_context:
-        return False
-
-    # Check if we have databricks-specific headers or forwarded token
-    return "access_token" in user_context and (
-        "databricks_headers" in user_context
-        or any("databricks" in key.lower() for key in user_context.keys())
-    )

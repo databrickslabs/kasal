@@ -5,7 +5,6 @@ Validates the raw extraction artifacts persisted per Pipeline Config Generator
 run (see :class:`src.models.powerbi_extraction.PowerBIExtraction`).
 """
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -52,24 +51,3 @@ class PowerBIExtractionCreate(PowerBIExtractionBase):
     measures_count: Optional[int] = Field(None)
     measures_with_dax_count: Optional[int] = Field(None)
     admin_tables_count: Optional[int] = Field(None)
-
-
-class PowerBIExtractionResponse(PowerBIExtractionBase):
-    """A PowerBI extraction record returned to a caller."""
-
-    id: int
-    relationships: Optional[List[Dict[str, Any]]] = None
-    measures: Optional[List[Dict[str, Any]]] = None
-    admin_tables: Optional[Dict[str, Any]] = None
-    expressions: Optional[Dict[str, str]] = None
-    report_definition: Optional[Dict[str, Any]] = None
-    proposed_config: Optional[Dict[str, Any]] = None
-    warnings: Optional[List[str]] = None
-    relationships_count: Optional[int] = None
-    measures_count: Optional[int] = None
-    measures_with_dax_count: Optional[int] = None
-    admin_tables_count: Optional[int] = None
-    created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

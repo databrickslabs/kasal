@@ -344,16 +344,17 @@ class TestTaskServiceUpdateWithPartialData:
     async def test_update_with_partial_data_empty_agent_id(
         self, task_service, mock_repository
     ):
-        """Test update with empty agent_id converts to None."""
+        """An empty agent_id is not nulled: "" means "not provided", and the
+        repository drops it rather than unassigning the task."""
         update_data = TaskUpdate(agent_id="")
-        updated_task = MockTask(agent_id=None)
+        updated_task = MockTask(agent_id="agent-123")
         mock_repository.update.return_value = updated_task
 
         result = await task_service.update_with_partial_data("task-123", update_data)
 
         assert result == updated_task
         call_args = mock_repository.update.call_args[0]
-        assert call_args[1]["agent_id"] is None
+        assert call_args[1]["agent_id"] == ""
 
     @pytest.mark.asyncio
     async def test_update_with_partial_data_not_found(
@@ -365,52 +366,6 @@ class TestTaskServiceUpdateWithPartialData:
         result = await task_service.update_with_partial_data(
             "non-existent", sample_task_update
         )
-
-        assert result is None
-        mock_repository.update.assert_called_once()
-
-
-class TestTaskServiceUpdateFull:
-    """Test cases for update_full method."""
-
-    @pytest.mark.asyncio
-    async def test_update_full_success(self, task_service, mock_repository):
-        """Test successful full update."""
-        update_data = {
-            "name": "Fully Updated Task",
-            "description": "Fully updated description",
-            "expected_output": "Fully updated output",
-            "agent_id": "agent-789",
-        }
-        updated_task = MockTask(name="Fully Updated Task")
-        mock_repository.update.return_value = updated_task
-
-        result = await task_service.update_full("task-123", update_data)
-
-        assert result == updated_task
-        mock_repository.update.assert_called_once_with("task-123", update_data)
-
-    @pytest.mark.asyncio
-    async def test_update_full_empty_agent_id(self, task_service, mock_repository):
-        """Test full update with empty agent_id converts to None."""
-        update_data = {"name": "Task", "agent_id": ""}
-        updated_task = MockTask(agent_id=None)
-        mock_repository.update.return_value = updated_task
-
-        result = await task_service.update_full("task-123", update_data)
-
-        assert result == updated_task
-        # Verify the update_data was modified in place
-        assert update_data["agent_id"] is None
-        mock_repository.update.assert_called_once_with("task-123", update_data)
-
-    @pytest.mark.asyncio
-    async def test_update_full_not_found(self, task_service, mock_repository):
-        """Test full update when task is not found."""
-        update_data = {"name": "Updated"}
-        mock_repository.update.return_value = None
-
-        result = await task_service.update_full("non-existent", update_data)
 
         assert result is None
         mock_repository.update.assert_called_once()
@@ -683,7 +638,7 @@ async def test_create_converts_empty_agent_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_with_partial_data_exclude_none_and_empty_agent_to_none(
+async def test_update_with_group_check_excludes_none_and_never_nulls_agent_id(
     monkeypatch,
 ):
     from src.services.catalog import tasks as module
@@ -696,10 +651,10 @@ async def test_update_with_partial_data_exclude_none_and_empty_agent_to_none(
     gc = SimpleNamespace(group_ids=["g1"])
     out = await svc.update_with_group_check("t1", upd, gc)
     assert out.id == "t1"
-    # Verify update_data excludes None and converts empty agent_id
+    # update_data excludes None; "" is left for the repository to drop
     _, data = svc.repository.updated
     assert "name" not in data
-    assert data["agent_id"] is None
+    assert data["agent_id"] == ""
     assert data["tool_configs"] == {"a": 1}
 
 

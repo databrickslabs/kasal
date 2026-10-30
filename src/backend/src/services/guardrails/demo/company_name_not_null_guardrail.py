@@ -34,7 +34,7 @@ class CompanyNameNotNullGuardrail(BaseGuardrail):
         """
         try:
             # Parse config from JSON string if needed
-            parsed_config = config
+            parsed_config: Any = config
             if isinstance(config, str):
                 try:
                     parsed_config = json.loads(config)

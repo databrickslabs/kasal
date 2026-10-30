@@ -10,6 +10,7 @@ import logging
 import pytest
 from pydantic import BaseModel, Field
 
+from src.core.llm.transport.budget import TURN_CAP_ATTR
 from src.core.llm.transport.llm import LLM
 from src.services.execution.harnesses import bind, binding_for
 from src.services.execution.harnesses.crewai import build as crew_build
@@ -62,7 +63,10 @@ class TestAgent:
         agent = crew_build.build_agent(**_agent_kwargs())
         assert agent.max_iter == 25
         assert agent.max_rpm == 10
-        assert agent.max_execution_time == 900
+        # Carried beside CrewAI's field, not in it: CrewAI's own timeout fails
+        # the task, while the turn deadline the transport enforces degrades it.
+        assert agent.max_execution_time is None
+        assert getattr(agent, TURN_CAP_ATTR) == 900
         assert agent.inject_date is True
         assert agent.date_format == "%Y-%m-%d"
 
@@ -233,3 +237,18 @@ class TestTheBindingSwapsWhatIsBuilt:
         assert kasal.supports(Capability.AGENT_PLAN)
         assert crewai.supports(Capability.EXPORT)
         assert kasal.supports(Capability.EXPORT)
+
+
+class TestAutoNeverBecomesACrewAIModel:
+    """CrewAI turns a model-name string into its own (OpenAI) client, outside
+    Kasal's transport. "auto" is not a model, so it must never get that far."""
+
+    @pytest.mark.parametrize("key", ["llm", "manager_llm", "function_calling_llm"])
+    def test_auto_is_refused_on_every_llm_kwarg(self, key):
+        with pytest.raises(ValueError, match="auto"):
+            crew_build._wrap_llms({key: " Auto "})
+
+    def test_a_real_model_name_string_is_still_left_alone(self):
+        kwargs = {"llm": "gpt-4o"}
+        crew_build._wrap_llms(kwargs)
+        assert kwargs["llm"] == "gpt-4o"

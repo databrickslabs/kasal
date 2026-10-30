@@ -299,3 +299,25 @@ async def test_generic_mutators_refuse_a_workspace_admin():
         )
     svc.create_engine_config.assert_not_awaited()
     svc.update_engine_config.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_a_workspace_admin():
+    """Audit V4-3: DELETE reached the same global rows with a workspace admin."""
+    from src.api.engine_config_router import delete_engine_config
+    from src.core.exceptions import ForbiddenError
+
+    svc = AsyncMock()
+    with pytest.raises(ForbiddenError):
+        await delete_engine_config(
+            "kasal",
+            service=svc,
+            group_context=Ctx(user_role="admin", is_system_admin=False),
+        )
+    svc.delete_engine_config.assert_not_awaited()
+
+    svc.delete_engine_config.return_value = True
+    await delete_engine_config(
+        "kasal", service=svc, group_context=Ctx(is_system_admin=True)
+    )
+    svc.delete_engine_config.assert_awaited_once_with("kasal")

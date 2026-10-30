@@ -21,16 +21,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
 from src.schemas.execution import CrewConfig
+from src.services.execution.stored_inputs import mask_run_inputs
+from src.utils.sensitive_data_utils import (
+    REDACTED_PLACEHOLDER,
+    is_sensitive_key,
+    mask_sensitive_strings,
+)
 from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().system
@@ -42,6 +48,17 @@ TRIGGER_TYPE = "lakebase_queue"
 def _backoff_at(attempts: int) -> datetime:
     """Exponential backoff visibility time, capped at 5 minutes."""
     return datetime.utcnow() + timedelta(seconds=min(300, (2 ** max(0, attempts)) * 10))
+
+
+def _masked_event_input(key: str, value: object) -> object:
+    """An event input as the task's description may show it.
+
+    The whole value under a secret key, whatever its type; under any other key,
+    the secret strings nested in it.
+    """
+    if is_sensitive_key(key):
+        return REDACTED_PLACEHOLDER
+    return mask_sensitive_strings(value)
 
 
 class TriggerQueueConsumerService:
@@ -135,7 +152,6 @@ class TriggerQueueConsumerService:
                 group_ids=[group_id] if group_id else [],
                 group_email=None,
             )
-            await self._load_databricks_auth()
 
             from src.services.execution.service import ExecutionService
 
@@ -146,8 +162,12 @@ class TriggerQueueConsumerService:
                     session, snap["target"], snap["payload"], group_context
                 )
                 self._inject_event_context(config, execution_type)
+                from src.services.execution.config import run_freeze
+
+                # "auto" in the target becomes one enabled model for this run.
+                auto = await run_freeze.resolve(config, session, group_context)
                 run_name = await self._resolve_run_name(
-                    session, snap["target"], execution_type, job_id
+                    session, snap["target"], execution_type, job_id, group_context
                 )
 
                 config_dict: Dict[str, Any] = {
@@ -171,7 +191,9 @@ class TriggerQueueConsumerService:
                     session,
                     job_id=job_id,
                     run_name=run_name,
-                    inputs=config_dict,
+                    # A saved crew comes back from the catalog decrypted; the
+                    # run gets that, its record the masked copy.
+                    inputs=mask_run_inputs(config_dict),
                     execution_type=execution_type,
                     group_id=group_id,
                     flow_id=config.flow_id if execution_type == "flow" else None,
@@ -183,6 +205,7 @@ class TriggerQueueConsumerService:
                     trigger_type=TRIGGER_TYPE,
                     commit=True,
                 )
+                run_freeze.record(auto, job_id, group_context)
                 # Announce the run over SSE. The UI did not start this run, so
                 # this event is its FIRST sight of it — without the name here it
                 # renders a "Run <id>" placeholder forever.
@@ -272,10 +295,8 @@ class TriggerQueueConsumerService:
         # UnsafeUrlError is a ValueError, so a blocked URL dead-letters
         # immediately instead of burning retries. Local dev can opt out to
         # deliver to a localhost receiver.
-        _allow_private = os.getenv(
-            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
-        ).lower() in ("1", "true", "yes")
-        if not _allow_private:
+        # Refused inside Databricks Apps (config/settings.py).
+        if not settings.KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS:
             from src.utils.url_security import assert_safe_outbound_url
 
             await assert_safe_outbound_url(url)
@@ -319,9 +340,7 @@ class TriggerQueueConsumerService:
         from src.utils.safe_http import PublicResolver
         from src.utils.url_security import check_url_structure
 
-        allow_private = os.getenv(
-            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
-        ).lower() in ("1", "true", "yes")
+        allow_private = settings.KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS
         if not allow_private:
             check_url_structure(url)
         # The connector uses the resolver's returned IPs directly. Literal IPs
@@ -358,6 +377,13 @@ class TriggerQueueConsumerService:
         as an explicit context block instead; later tasks see it through normal
         task-output chaining. A task that DOES reference ``{payload}`` (or any
         event key) keeps full control — nothing is appended for that key.
+
+        The description is stored with the run and shown in its trace, so a
+        secret is masked in the block. Masking is by key name only
+        (``is_sensitive_key``, at any depth); a secret value under an ordinary
+        key is shown as it is. A secret input that no template references
+        therefore reaches no prompt at all: the run still receives the real
+        value in ``config.inputs``, but no task text carries it.
         """
         if execution_type != "crew" or not config.tasks_yaml or not config.inputs:
             return
@@ -375,9 +401,10 @@ class TriggerQueueConsumerService:
         task = config.tasks_yaml[first]
         if not isinstance(task, dict):
             return
+        shown = {k: _masked_event_input(k, v) for k, v in leftover.items()}
         lines = "\n".join(
             f"- {k}: {json.dumps(v) if isinstance(v, (dict, list)) else v}"
-            for k, v in leftover.items()
+            for k, v in shown.items()
         )
         task["description"] = (
             str(task.get("description") or "")
@@ -391,13 +418,15 @@ class TriggerQueueConsumerService:
         target: Dict[str, Any],
         execution_type: str,
         job_id: str,
+        group_context: Optional[GroupContext] = None,
     ) -> str:
         """Name the run after the saved crew/flow, so it reads like any other run
         in the history rather than an opaque ``Event crew <id>``.
 
         Resolved through the owning domain's SERVICE (catalog crew / flow_builder
         flow), never their repositories. Best-effort — falls back to a generic
-        label if the definition is gone or the target is inline.
+        label if the definition is gone or the target is inline. A crew is read
+        only from the row's workspace: the id is the enqueuer's.
         """
         import uuid
 
@@ -405,14 +434,18 @@ class TriggerQueueConsumerService:
         try:
             if execution_type == "crew" and tid:
                 from src.services.catalog.crews import CrewService
+                from src.services.catalog.run_lookup import crew_for_run
 
-                crew = await CrewService(session).get(uuid.UUID(str(tid)))
-                if crew and getattr(crew, "name", None):
+                crew = await crew_for_run(CrewService(session), tid, group_context)
+                if crew and crew.name:
                     return crew.name
             elif execution_type == "flow" and tid:
                 from src.services.flow_builder.flow_service import FlowService
 
-                flow = await FlowService(session).get_flow(uuid.UUID(str(tid)))
+                flow = await FlowService(session).get_flow_with_group_check(
+                    uuid.UUID(str(tid)), group_context
+                )
+                FlowService.require_execution_access(flow, group_context)
                 if flow and getattr(flow, "name", None):
                     return flow.name
         except Exception:  # noqa: BLE001 — naming must never block dispatch
@@ -462,8 +495,12 @@ class TriggerQueueConsumerService:
             resolved = await build_crew_execution_config_by_id(
                 session, crew_id, group_context
             )
-            if not resolved:
-                raise ValueError(f"crew {crew_id!r} not found or unreadable")
+            # None: not in this workspace. An empty side: none of its agents or
+            # tasks are. Either way there is nothing of the caller's to run.
+            if not resolved or not resolved[0] or not resolved[1]:
+                raise ValueError(
+                    f"crew {crew_id!r} not found or unreadable in this workspace"
+                )
             agents_yaml, tasks_yaml = resolved
             return (
                 CrewConfig(
@@ -486,26 +523,3 @@ class TriggerQueueConsumerService:
             return config, (config.execution_type or "crew")
 
         raise ValueError(f"unknown target kind: {kind!r}")
-
-    async def _load_databricks_auth(self) -> None:
-        """Best-effort: put Databricks host/token in env for the launched run.
-
-        Mirrors the scheduler (``run_schedule_job``) so a queue-triggered run
-        authenticates the same way a scheduled one does. Best-effort by design —
-        the subprocess re-resolves auth; failures here must not abort dispatch.
-        """
-        import os
-
-        try:
-            from src.utils.databricks_auth import get_auth_context
-
-            auth = await get_auth_context()
-        except Exception:  # noqa: BLE001
-            return
-        if not auth:
-            return
-        if getattr(auth, "workspace_url", None):
-            os.environ["DATABRICKS_HOST"] = auth.workspace_url
-        if getattr(auth, "token", None):
-            os.environ["DATABRICKS_TOKEN"] = auth.token
-            os.environ["DATABRICKS_API_KEY"] = auth.token

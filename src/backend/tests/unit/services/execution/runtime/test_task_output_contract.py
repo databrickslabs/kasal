@@ -158,3 +158,51 @@ class TestDegradeInsteadOfAbort:
         output = task.execute_sync(_BudgetAgent(partial="what I found so far"))
         assert "what I found so far" in output.raw
         assert "⚠️ Truncated" in output.raw
+
+    def test_a_truncated_answer_is_marked_degraded(self):
+        """In structure, not only in text: memory skips outputs marked degraded,
+        and would otherwise store the truncated answer as a finding."""
+        task = Task(description="d", expected_output="e", on_budget_exceeded="degrade")
+        output = task.execute_sync(_BudgetAgent(partial="what I found so far"))
+        assert output.degraded is True
+        assert output.degradation_reason
+
+    def test_a_clean_guardrail_retry_is_not_marked_and_is_remembered(self):
+        """Attempt one runs out of time, the guardrail asks again, and the retry
+        answers in full. That answer is the task's, and it is not truncated."""
+        from unittest.mock import MagicMock, patch
+
+        from src.services.memory.run.persist import make_memory_output_sink
+
+        class _TruncatedThenClean:
+            role = "tester"
+            llm = None
+            attempts = 0
+
+            def execute_task(self, task, context=None, tools=None):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise ExecutionBudgetExceededError("out of time", partial="so far")
+                return "the complete answer"
+
+        task = Task(
+            description="d",
+            expected_output="e",
+            on_budget_exceeded="degrade",
+            guardrail=_reject_then_accept(),
+            max_retries=1,
+        )
+        output = task.execute_sync(_TruncatedThenClean())
+        assert output.raw == "the complete answer"
+        assert output.degraded is False
+
+        sink = make_memory_output_sink(MagicMock())
+        with patch("src.services.memory.run.persist.remember_async") as remember:
+            sink(task=task, output=output)
+        remember.assert_called_once()
+
+    def test_the_mark_does_not_outlive_the_turn_that_earned_it(self):
+        task = Task(description="d", expected_output="e", on_budget_exceeded="degrade")
+        task.execute_sync(_BudgetAgent(partial="so far"))
+        output = task.execute_sync(_Agent(["a clean answer"]))
+        assert output.degraded is False

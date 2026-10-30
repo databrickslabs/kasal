@@ -1,7 +1,8 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -85,7 +86,7 @@ class PowerBIBusinessMappingRepository(BaseRepository[PowerBIBusinessMapping]):
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def get_as_dict(
         self, group_id: str, semantic_model_id: str
@@ -176,7 +177,7 @@ class PowerBIFieldSynonymRepository(BaseRepository[PowerBIFieldSynonym]):
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def get_as_dict(
         self, group_id: str, semantic_model_id: str

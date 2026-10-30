@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { normalizeEdgeColor } from '../../../../config/edgeConfig';
 import React, { useCallback, useRef, useState, memo, useEffect, useLayoutEffect } from 'react';
 import ReactFlow, {
@@ -23,9 +24,7 @@ import { Agent } from '../../../../types/workflow/agent';
 import { ToolService } from '../../../../api/tools/ToolService';
 import { Tool as ToolType } from '../../../../types/workflow/agent';
 import { useJobManagementStore } from '../../../../store/jobManagement';
-import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useErrorStore } from '../../../../store/error';
-import { useRunStatusStore } from '../../../../store/runStatus';
 import { useCrewExecution } from '../../../../hooks/workflow/useCrewExecution';
 import { useConnectionGenerator } from '../../../../hooks/workflow/useConnectionGenerator';
 import { useAgentHandlers } from '../../../../hooks/workflow/useAgentHandlers';
@@ -110,8 +109,12 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   const { isDarkMode } = useThemeManager();
 
-  const errorStore = useErrorStore();
-  const _runStatusStore = useRunStatusStore();
+  const errorStore = useErrorStore(useShallow(state => ({
+    showError: state.showError,
+    errorMessage: state.errorMessage,
+    setErrorMessage: state.setErrorMessage,
+    clearError: state.clearError,
+  })));
   
   const fetchAgents = useCallback(async () => {
     try {
@@ -137,18 +140,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   const [_agents, setAgents] = useState<Agent[]>([]);
   const [tools, setTools] = useState<ToolType[]>([]);
 
-  const { 
-    selectedTools: _selectedAgentGenerationTools, 
-    setSelectedTools: _setSelectedAgentGenerationTools,
-    selectedTools: _jobTrackerSelectedTools,
-    setSelectedTools: _setJobTrackerSelectedTools
-  } = useJobManagementStore();
-
-  const {
-    selectedModel: _selectedModel,
-    processType: _processType,
-    setProcessType: _setProcessType
-  } = useCrewExecutionStore();
+  // Atomic selectors: a whole-store subscription re-rendered the canvas on
+  // every unrelated job-management/crew-execution update.
+  const _selectedAgentGenerationTools = useJobManagementStore(state => state.selectedTools);
+  const _setSelectedAgentGenerationTools = useJobManagementStore(state => state.setSelectedTools);
   const { handleExecuteCrew, isExecuting: _isExecuting } = useCrewExecution();
 
   const {

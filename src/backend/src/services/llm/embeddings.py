@@ -11,13 +11,14 @@ Five knowledge/RAG services use them, all through ``LLMManager.get_embedding`` /
 """
 
 import logging
-import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, overload
 
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
+from src.services.llm.endpoints import require_ollama_base_url
 from src.services.settings.api_keys import ApiKeysService
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,14 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 _embedding_failures: Dict[str, Dict[str, float]] = {}
 _EMBEDDING_FAILURE_THRESHOLD = 3
 _CIRCUIT_RESET_SECONDS = 300
+
+
+@overload
+def _get_group_id_from_context(required: Literal[True] = ...) -> str: ...
+
+
+@overload
+def _get_group_id_from_context(required: bool) -> Optional[str]: ...
 
 
 def _get_group_id_from_context(required: bool = True) -> Optional[str]:
@@ -69,7 +78,7 @@ async def get_embeddings(
         ]
 
     if batch_size is None:
-        batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+        batch_size = int(engine_setting("embedding_batch_size"))
 
     try:
         from src.utils.databricks_app_auth import get_model_auth_context
@@ -102,11 +111,13 @@ async def get_embeddings(
         endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(
             auth.workspace_url, embedding_model
         )
+        if endpoint_url is None:  # already logged; every batch would fail the same way
+            return [None] * len(texts)
 
         import aiohttp
 
         timeout = aiohttp.ClientTimeout(
-            total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "60"))
+            total=float(engine_setting("embedding_timeout_seconds"))
         )
         results: List[Optional[List[float]]] = []
         from src.utils.aiohttp_session import shared_client_session
@@ -114,7 +125,7 @@ async def get_embeddings(
         async with shared_client_session() as session:
             for start in range(0, len(texts), batch_size):
                 batch = texts[start : start + batch_size]
-                payload = {"input": batch}
+                payload: Dict[str, Any] = {"input": batch}
                 if body_model:
                     payload["model"] = body_model
                 try:
@@ -217,7 +228,6 @@ async def get_embedding(
             f"Creating embedding using provider: {provider}, model: {embedding_model}"
         )
 
-        # Handle different embedding providers
         if provider == "databricks" or "databricks" in embedding_model:
             # Use unified Databricks authentication for embeddings
             try:
@@ -276,11 +286,9 @@ async def get_embedding(
             if not embedding_model.startswith("databricks/"):
                 embedding_model = f"databricks/{embedding_model}"
 
-            # Use direct HTTP request to avoid config file issues
             import aiohttp
 
             try:
-                # Construct the direct API endpoint using centralized utility.
                 # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
                 # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
                 workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(
@@ -289,6 +297,8 @@ async def get_embedding(
                 endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(
                     workspace_url, embedding_model
                 )
+                if endpoint_url is None:  # already logged; the request could not go out
+                    return None
 
                 # Use OAuth headers if available, otherwise fall back to API key
                 if headers:
@@ -301,12 +311,14 @@ async def get_embedding(
                         "Content-Type": "application/json",
                     }
 
-                payload = {"input": [text] if isinstance(text, str) else text}
+                payload: Dict[str, Any] = {
+                    "input": [text] if isinstance(text, str) else text
+                }
                 if body_model:
                     payload["model"] = body_model
 
                 timeout = aiohttp.ClientTimeout(
-                    total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30"))
+                    total=float(engine_setting("embedding_request_timeout_seconds"))
                 )
                 from src.utils.aiohttp_session import shared_client_session
 
@@ -321,7 +333,7 @@ async def get_embedding(
                             result = await response.json()
                             # Databricks embedding API returns embeddings in 'data' field
                             if "data" in result and len(result["data"]) > 0:
-                                embedding = result["data"][0].get(
+                                embedding: List[float] = result["data"][0].get(
                                     "embedding", result["data"][0]
                                 )
                                 embedding_logger.info(
@@ -427,12 +439,12 @@ async def get_embedding(
             # Use Ollama for embeddings via direct HTTP
             import aiohttp
 
-            api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            api_base = require_ollama_base_url()
             # Strip ollama/ prefix if present for the raw API call
             raw_model = embedding_model.removeprefix("ollama/")
 
             timeout_val = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
+                total=float(engine_setting("embedding_timeout_seconds"))
             )
             from src.utils.aiohttp_session import shared_client_session
 
@@ -488,7 +500,7 @@ async def get_embedding(
             }
 
             timeout_val = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
+                total=float(engine_setting("embedding_timeout_seconds"))
             )
             from src.utils.aiohttp_session import shared_client_session
 
@@ -504,7 +516,7 @@ async def get_embedding(
                         return None
                     result = await resp.json()
                     embedding_data = result.get("embedding", {})
-                    values = embedding_data.get("values", [])
+                    values: List[float] = embedding_data.get("values", [])
                     if values:
                         embedding_logger.info(
                             f"Successfully created embedding with {len(values)} dimensions using Google"
@@ -541,7 +553,7 @@ async def get_embedding(
             payload = {"model": embedding_model, "input": text}
 
             timeout_val = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
+                total=float(engine_setting("embedding_timeout_seconds"))
             )
             from src.utils.aiohttp_session import shared_client_session
 
@@ -579,7 +591,6 @@ async def get_embedding(
         _embedding_failures[provider]["count"] += 1
         _embedding_failures[provider]["last_failure"] = time.time()
 
-        # Log circuit breaker status
         failure_count = _embedding_failures[provider]["count"]
         if failure_count >= _EMBEDDING_FAILURE_THRESHOLD:
             embedding_logger.error(

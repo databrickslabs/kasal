@@ -11,26 +11,22 @@ import logging
 import os
 import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
+from src.core.databricks_app import fallback_trace_experiment
 from src.services.prompt_optimization.gepa import reflection
-from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
-    _distill_requirements,
+from src.services.prompt_optimization.gepa.crew_doc import (
     _parse_crew_doc,
     _parse_requirement_lines,
 )
-from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (
     _grade_judge_verdict,
     _median_sample,
-    _parse_grade_from_text,
     _to_float,
 )
 from src.services.prompt_optimization.gepa.judge_memory import (
     JudgeMemory,
     majority_embedder,
-)
-from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
-    _stored_judge_model_to_key,
 )
 from src.services.prompt_optimization.gepa.reflection import (
     _GEPA_REFLECTION_STATE,
@@ -39,6 +35,10 @@ from src.services.prompt_optimization.gepa.reflection import (
     _make_reflection_fn,
     _preflight_reflection,
 )
+from src.services.prompt_optimization.gepa.registered_judges import (
+    grade_registered_judges,
+)
+from src.services.prompt_optimization.labels.review import trace_tags
 from src.services.prompt_optimization.run_state import _RUNS
 from src.utils.user_context import GroupContext
 
@@ -66,18 +66,27 @@ class CrewRunnerMixin:
         cancel_run_id: str = "",
         group_context: Optional[GroupContext] = None,
         crew_traces_experiment: str = "",
+        judge_samples: Optional[int] = None,
+        builtin_judges: Sequence[str] = (),
+        label_expectations: Optional[Dict[str, object]] = None,
+        human_requirements: Sequence[str] = (),
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
         template body's MLflow span setup; predict = execute the crew.
 
         ``crew_traces_experiment`` is the experiment to pin on the Databricks
         backend, resolved from the MLflow configuration (Configuration.tsx) by
-        the async caller — the source of truth, not a hardcoded default."""
+        the async caller — the source of truth, not a hardcoded default.
+
+        ``human_requirements`` (deduplicated review notes) and
+        ``label_expectations`` (the user's confirmed labels) were read by the
+        async caller (``labels.operations``) on either backend."""
         import copy
 
         user_token = (
             getattr(group_context, "access_token", None) if group_context else None
         )
+        group_id = getattr(group_context, "primary_group_id", None)
         os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
         import mlflow
         from mlflow.entities import Feedback
@@ -114,9 +123,9 @@ class CrewRunnerMixin:
                 # creds and a PAT (DATABRICKS_TOKEN, exported by the LLM auth
                 # path). The Databricks SDK refuses "oauth and pat" and MLflow
                 # falls back to legacy auth, so the registry call is not made as
-                # the granted SP → a misleading PERMISSION_DENIED. Present OAuth
-                # only for this call, and rebuild the client INSIDE that window
-                # so it picks up the single-method env.
+                # the granted SP → a misleading PERMISSION_DENIED. Scope the SP
+                # bearer to this call (sp_auth; no env writes) and build the
+                # client INSIDE the scope so it resolves that credential.
                 from src.services.mlflow.sp_auth import sp_single_auth
 
                 with sp_single_auth():
@@ -154,78 +163,25 @@ class CrewRunnerMixin:
             # run searching the default experiment).
             # Pin on BOTH backends — scorers/judges are per-experiment, so the
             # scorer lookup below must run against the same experiment they were
-            # registered on. Local uses the launch experiment name; Databricks
-            # uses the shared crew-traces path (where judges are registered by
-            # JudgeOperationsMixin, and where this run's traces already land).
-            exp_name = (
-                saved_exp_env.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
-                if local_mode
-                else (
-                    crew_traces_experiment
-                    or os.getenv(
-                        "MLFLOW_CREW_TRACES_EXPERIMENT",
-                        "/Shared/kasal-crew-execution-traces",
-                    )
-                )
+            # registered on: the one Configuration → MLflow resolves to
+            # (``crew_traces_experiment``, where judges are registered by
+            # JudgeOperationsMixin and this run's traces land), on either backend.
+            exp_name = crew_traces_experiment or fallback_trace_experiment(
+                getattr(group_context, "primary_group_id", None)
             )
-            try:
+            try:  # None (nothing configured) raises and is logged, never invented
                 mlflow.set_experiment(exp_name)
             except Exception as exp_err:
                 logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")
 
             # HUMAN JUDGMENT via MLflow Assessments: every evaluation logs its
-            # deliverable as a trace (tagged kasal_crew_id); Feedback and
-            # Expectations the user adds on those traces in the MLflow UI are
-            # harvested here and folded into the judge's rubric on the NEXT run.
+            # deliverable as a trace (tagged with the crew and workspace);
+            # Feedback and Expectations the user adds on those traces were
+            # harvested at run start and steer the judge on this run.
             judge_rubric = rubric
             objective_for_training = objective
-            train_expectations: Dict[str, str] = {}
-            human_requirements: List[str] = []
-            if local_mode and crew_id:
-                try:
-                    prior = mlflow.search_traces(
-                        filter_string=f"tags.kasal_crew_id = '{crew_id}'",
-                        max_results=50,
-                        return_type="list",
-                    )
-                    # Oldest-first so the "keep the last 12" slice below keeps
-                    # the NEWEST notes (search order is not guaranteed).
-                    prior.sort(key=lambda t: t.info.request_time or 0)
-                    notes: List[str] = []
-                    req_texts: List[str] = []
-                    for trace in prior:
-                        for assessment in trace.search_assessments() or []:
-                            name = getattr(assessment, "name", "") or ""
-                            value = getattr(
-                                getattr(assessment, "feedback", None), "value", None
-                            )
-                            exp_value = getattr(
-                                getattr(assessment, "expectation", None),
-                                "value",
-                                None,
-                            )
-                            if exp_value is not None:
-                                req_texts.append(str(exp_value))
-                            if value is None:
-                                value = exp_value
-                            rationale = getattr(assessment, "rationale", None) or ""
-                            if rationale:
-                                req_texts.append(rationale)
-                            if value is not None or rationale:
-                                notes.append(
-                                    f"- {name}: {value if value is not None else ''} {rationale}".strip()
-                                )
-                    # Deduplicated constraints, NOT the grade litany: repeating
-                    # "human_grade: 0.0 ..." thirteen times anchored the judge
-                    # to zero even for a compliant answer (verified live A/B).
-                    human_requirements = _distill_requirements(req_texts)
-                    harvest_entry = _RUNS.get(cancel_run_id) if cancel_run_id else None
-                    if harvest_entry is not None:
-                        harvest_entry["human_feedback_count"] = len(notes)
-                except Exception as assess_err:
-                    logger.warning(
-                        f"Could not harvest MLflow assessments: {assess_err}"
-                    )
+            train_expectations: Dict[str, object] = dict(label_expectations or {})
+            human_requirements = list(human_requirements)
 
             if human_requirements:
                 # LLM-refine the raw complaints into testable imperatives —
@@ -280,7 +236,7 @@ class CrewRunnerMixin:
                 # Ground truth rides GEPA's expectations channel too — the
                 # reflective dataset surfaces it to the mutator as explicit
                 # targets, not just prose inside the request.
-                train_expectations = {"human_requirements": req_block[:2000]}
+                train_expectations["human_requirements"] = req_block[:2000]
                 # The requirements must ALSO reach GEPA's reflection model,
                 # which only sees training inputs and scorer feedback — a
                 # judge that grades 0 "because wrong region" is useless to a
@@ -340,8 +296,32 @@ class CrewRunnerMixin:
                 )
                 for judge in registered_scorers
             }
+            # MLflow built-in judges the user picked for this run (mlflow is
+            # imported by now, so the lazy import below is safe).
+            from src.services.prompt_optimization.builtin_judges import bridge
+            from src.services.prompt_optimization.builtin_judges.runner import (
+                BuiltinJudgeRunner,
+            )
+            from src.services.prompt_optimization.builtin_judges.runner import (
+                combine as combine_builtin_verdicts,
+            )
 
-            def _apply_fields(fields: Dict[str, str]):
+            builtin_runner = BuiltinJudgeRunner.for_run(
+                builtin_judges,
+                judge_model,
+                bridge.JudgeRoute(loop, group_context, user_token),
+                rubric=judge_rubric,
+                # The label judges' row: the user's labels, and the refined
+                # review requirements as ExpectationsGuidelines' guidelines.
+                expectations={
+                    **(label_expectations or {}),
+                    **(
+                        {"guidelines": human_requirements} if human_requirements else {}
+                    ),
+                },
+            )
+
+            def _apply_fields(fields: Dict[str, str]) -> Tuple[Any, Any]:
                 agents_over = copy.deepcopy(agents_yaml)
                 tasks_over = copy.deepcopy(tasks_yaml)
                 for cfg_map in (agents_over, tasks_over):
@@ -361,25 +341,23 @@ class CrewRunnerMixin:
                                 entity[field] = fields[key].strip()
                 return agents_over, tasks_over
 
-            # Result caches, keyed by content. GEPA re-evaluates the SAME
-            # candidate doc many times (upfront smoke test, baseline valset
-            # pass, and a fresh reflective-minibatch pass EVERY iteration).
-            # Uncached, those re-runs burned most of a small execution budget
-            # re-measuring the baseline — a 4-execution run bought exactly ONE
-            # distinct candidate (observed live: total_metric_calls=7,
-            # candidates=1). Worse, the stochastic judge re-grading identical
-            # prompts drew 0.0 and then 4/10 two minutes apart, so accept/
-            # reject was a coin flip. With caching, each DISTINCT candidate
-            # costs exactly one execution and one judgment, and comparisons
-            # against the baseline are stable within the run.
+            # Result caches, keyed by content. GEPA re-evaluates the SAME candidate doc
+            # many times (upfront smoke test, baseline valset pass, and a fresh
+            # reflective-minibatch pass EVERY iteration). Uncached, those re-runs burned
+            # most of a small execution budget re-measuring the baseline — a 4-execution
+            # run bought exactly ONE distinct candidate (observed live:
+            # total_metric_calls=7, candidates=1). Worse, the stochastic judge
+            # re-grading identical prompts drew 0.0 and then 4/10 two minutes apart, so
+            # accept/reject was a coin flip. With caching, each DISTINCT candidate
+            # costs exactly one execution and one judgment, and comparisons against the
+            # baseline are stable within the run.
             deliverable_cache: Dict[str, str] = {}
             judge_cache: Dict[str, Any] = {}
-            # Serializes check-then-execute: mlflow's eval harness runs batch
-            # records through a thread pool, and concurrent calls for the SAME
-            # candidate all missed the cache and each ran the crew (observed
-            # live: two executions of one candidate finishing in the same
-            # second). GEPA itself steps sequentially, so the lock costs
-            # nothing in wall-clock.
+            # Serializes check-then-execute: mlflow's eval harness runs batch records
+            # through a thread pool, and concurrent calls for the SAME candidate all
+            # missed the cache and each ran the crew (observed live: two executions of
+            # one candidate finishing in the same second). GEPA itself steps
+            # sequentially, so the lock costs nothing in wall-clock.
             execute_lock = threading.Lock()
 
             # ANSWER-FIRST JUDGING. A reference-free judge — one that only ever
@@ -459,7 +437,7 @@ class CrewRunnerMixin:
                     )
                 return reference
 
-            def predict_fn(**inputs) -> str:
+            def predict_fn(**inputs: Any) -> str:
                 run_entry = _RUNS.get(cancel_run_id, {}) if cancel_run_id else {}
                 # User-requested stop: abort BEFORE spending a crew execution.
                 if run_entry.get("cancel_requested"):
@@ -469,7 +447,9 @@ class CrewRunnerMixin:
                 with execute_lock:
                     return _predict_locked(doc_key, candidate, run_entry, inputs)
 
-            def _predict_locked(doc_key, candidate, run_entry, inputs) -> str:
+            def _predict_locked(
+                doc_key: str, candidate: Any, run_entry: Dict[str, Any], inputs: Any
+            ) -> str:
                 # Cache lookup BEFORE the cap check: re-evaluations of an
                 # already-executed candidate (usually the baseline) stay
                 # truthful even after the budget is spent.
@@ -477,10 +457,10 @@ class CrewRunnerMixin:
                     return deliverable_cache[doc_key]
                 # HARD execution cap: the user's budget is a promise about crew
                 # executions, but GEPA overshoots (parallel batches are only
-                # budget-checked between iterations, plus the upfront smoke
-                # test). Once the cap is spent, further NEW candidates get a
-                # free empty result — they score 0, never win, and GEPA wraps
-                # up returning the best already-evaluated candidate.
+                # budget-checked between iterations, plus the upfront smoke test). Once
+                # the cap is spent, further NEW candidates get a free empty result —
+                # they score 0, never win, and GEPA wraps up returning the best
+                # already-evaluated candidate.
                 if run_entry.get("executions_used", 0) >= max_metric_calls:
                     logger.info(
                         "Crew optimization execution cap reached "
@@ -511,7 +491,8 @@ class CrewRunnerMixin:
                 # Log this evaluation as an MLflow trace so the user can attach
                 # Feedback/Expectations (Assessments panel) that steer the judge
                 # on the next run. Advisory only — never fail the eval over it.
-                if local_mode and crew_id:
+                # Both backends: the review is how labels are suggested.
+                if crew_id:
                     try:
                         with mlflow.start_span(name="crew_optimization_eval") as span:
                             span.set_inputs(
@@ -521,7 +502,9 @@ class CrewRunnerMixin:
                                 }
                             )
                             span.set_outputs({"deliverable": deliverable[:8000]})
-                            mlflow.update_current_trace(tags={"kasal_crew_id": crew_id})
+                            mlflow.update_current_trace(
+                                tags=trace_tags(crew_id, group_id)
+                            )
                     except Exception as trace_err:
                         # Warning, not debug: a lost trace means the user
                         # cannot grade that answer (a baseline eval vanished
@@ -530,12 +513,12 @@ class CrewRunnerMixin:
                 return deliverable
 
             @scorer
-            def output_format(outputs) -> float:
+            def output_format(outputs: Any) -> float:
                 text = str(outputs or "").strip()
                 return 1.0 if len(text) > 50 else 0.0
 
             @scorer
-            def output_correct(inputs, outputs):
+            def output_correct(inputs: Any, outputs: Any) -> Any:
                 # GRADED, not binary: a pass/fail judge saturates at 1.0 for any
                 # acceptable baseline, leaving GEPA no gradient to climb (observed
                 # live: 1.00 -> 1.00 with zero exploration payoff). A harsh 0-10
@@ -678,7 +661,7 @@ class CrewRunnerMixin:
                 # minutes apart. N samples reduced by median absorb that. The
                 # per-candidate cost is bounded because judge_cache means a
                 # DISTINCT deliverable is only ever sampled once per run.
-                sample_count = _judge_sample_count()
+                sample_count = _judge_sample_count(judge_samples)
                 samples: List[tuple] = []
                 judge_error: Optional[Exception] = None
                 for index in range(sample_count):
@@ -734,75 +717,26 @@ class CrewRunnerMixin:
                     grades.append(median_grade)
                     if median_rationale:
                         rationale_parts.append(median_rationale)
-                # Registered judges grade the SAME deliverable here rather than
-                # running as separate MLflow scorers — trace-based scorers were
-                # each re-triggering their own crew execution (observed live as
-                # bursts of one execution per judge), multiplying the budget.
-                # Registered judges are RENDERED AND INVOKED HERE through
-                # LLMManager — never via mlflow's own model client. The judge
-                # entity contributes its instructions, retrieved examples and model key;
-                # provider routing, keys and request quirks stay centralized
-                # in the manager (invoking judges through mlflow's client is
-                # what produced the retired-DeepSeek and Kimi failures).
-                for judge in registered_scorers:
-                    judge_name = getattr(judge, "name", "judge")
-                    try:
-                        instructions = judge_memories[judge_name].instructions(
-                            inputs=inputs.get("request", objective), outputs=text
-                        )
-                        rendered = (
-                            instructions.replace("{{ outputs }}", text)
-                            .replace("{{outputs}}", text)
-                            .replace(
-                                "{{ inputs }}", str(inputs.get("request", objective))
-                            )
-                            .replace(
-                                "{{inputs}}", str(inputs.get("request", objective))
-                            )
-                        )
-                        judge_reply = reflection._sync_llm_completion(
-                            loop,
-                            messages=[
-                                {
-                                    "role": "user",
-                                    "content": (
-                                        f"{rendered}\n\nEnd your reply with the "
-                                        "numeric grade 0-10 alone on the LAST line."
-                                    ),
-                                }
-                            ],
-                            model=_stored_judge_model_to_key(
-                                getattr(judge, "model", None)
-                            )
-                            or judge_model,
-                            max_tokens=1500,
-                            group_context=group_context,
-                            user_token=user_token,
-                        )
-                        grade = _parse_grade_from_text(judge_reply)
-                        if grade is None:
-                            logger.warning(
-                                f"Registered judge '{judge_name}' reply not "
-                                f"numeric; skipping: {judge_reply!r:.200}"
-                            )
-                        else:
-                            grades.append(grade)
-                            if judge_reply and judge_reply.strip():
-                                rationale_parts.append(
-                                    f"[{judge_name}] {judge_reply.strip()}"
-                                )
-                    except Exception as judge_err:
-                        if getattr(judge, "memory", None):
-                            # Do not silently drop an aligned judge from the
-                            # optimization metric when memory/provider access fails.
-                            raise RuntimeError(
-                                f"Aligned judge '{judge_name}' could not score with its memory"
-                            ) from judge_err
-                        logger.warning(
-                            f"Registered judge '{judge_name}' failed: {judge_err}"
-                        )
-                grade_value = sum(grades) / len(grades) if grades else 0.0
-                rationale = "\n".join(rationale_parts)[:4000]
+                # Custom judges (gepa/registered_judges.py), then the selected
+                # MLflow built-ins (builtin_judges/runner.py), fold into one grade.
+                request_text = str(inputs.get("request", objective))
+                custom_grades, custom_lines = grade_registered_judges(
+                    loop,
+                    registered_scorers,
+                    judge_memories,
+                    request_text,
+                    text,
+                    judge_model,
+                    group_context,
+                    user_token,
+                )
+                grades += custom_grades
+                rationale_parts += custom_lines
+                verdicts = (
+                    builtin_runner.score(request_text, text) if builtin_runner else []
+                )
+                grade_value, builtin_lines = combine_builtin_verdicts(grades, verdicts)
+                rationale = "\n".join(rationale_parts + builtin_lines)[:4000]
                 judge_cache[text_key] = (grade_value, rationale)
                 return Feedback(
                     name="output_correct", value=grade_value, rationale=rationale
@@ -832,9 +766,9 @@ class CrewRunnerMixin:
             # resolves a SQL warehouse via a bare WorkspaceClient(). On Databricks
             # Apps the injected DATABRICKS_AUTH_TYPE=oauth-m2m makes that client
             # fail ("cannot configure default credentials ... auth_type=oauth-m2m")
-            # and stops the run mid-optimization. Pin token auth for the whole
-            # call so the bare client uses the PAT — without stripping the SP
-            # creds the crew's own LLM auth may still fall back to. No-op locally.
+            # and stops the run mid-optimization. Scope the SP bearer to the
+            # whole call (context-local, reaches MLflow's worker pools, never
+            # written to os.environ). No-op without SP creds.
             # optimize_prompts re-enables tracing per eval and calls
             # mlflow.get_trace(request_id, silent=True) to read each trace back.
             # On a Databricks App that read blocks/retries against trace storage
@@ -851,13 +785,13 @@ class CrewRunnerMixin:
             from src.services.mlflow.sp_auth import pat_auth_env
 
             @contextmanager
-            def _suppressed_trace_reads():
+            def _suppressed_trace_reads() -> Iterator[None]:
                 original = getattr(mlflow, "get_trace", None)
                 if original is None:
                     yield
                     return
 
-                def _noop_get_trace(*_a, **_k):
+                def _noop_get_trace(*_a: Any, **_k: Any) -> None:
                     return None
 
                 mlflow.get_trace = _noop_get_trace
@@ -961,7 +895,7 @@ class CrewRunnerMixin:
                     AUTOLOGGING_INTEGRATIONS[_flavor]["disable"] = old_flag
 
         optimized = result.optimized_prompts[0]
-        optimized_fields = _parse_crew_doc(optimized.template) or {}
+        optimized_fields = _parse_crew_doc(str(optimized.template)) or {}
         return {
             "optimized_template": optimized.template,
             "optimized_fields": optimized_fields,

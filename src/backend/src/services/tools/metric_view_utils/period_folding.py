@@ -29,6 +29,7 @@ isolation and identical across every view of the report.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 # ── Canonical period dimensions ──────────────────────────────────────────────
@@ -148,15 +149,15 @@ _CANONICAL_NAMES = frozenset(pd.name for pd in _PERIOD_DIMENSIONS)
 @dataclass
 class PeriodConfig:
     """Per-model overrides for period-column detection. The default name patterns
-    are the CCH/Total-SC vocabulary; a model that names its columns differently
+    are the reference model vocabulary; a model that names its columns differently
     (e.g. ``IsCurrentMonth`` for the latest-month flag) passes an explicit map so
     the fold still fires. Defaults change nothing."""
 
     # canonical period name -> exact source column that implements it. Takes
     # precedence over pattern detection.
-    column_overrides: dict
+    column_overrides: dict[str, str]
 
-    def __init__(self, column_overrides=None):
+    def __init__(self, column_overrides: Mapping[str, object] | None = None) -> None:
         self.column_overrides = {
             str(k).strip(): str(v).strip()
             for k, v in (column_overrides or {}).items()
@@ -164,7 +165,7 @@ class PeriodConfig:
         }
 
     @classmethod
-    def from_dict(cls, data) -> "PeriodConfig":
+    def from_dict(cls, data: object) -> "PeriodConfig":
         """Build from a crew-supplied dict. Recognised key: ``column_overrides``
         (``{canonical_period_name: source_column}``). Junk is ignored."""
         if not isinstance(data, dict):
@@ -173,8 +174,9 @@ class PeriodConfig:
 
 
 def detect_period_columns(
-    available_columns, config: "PeriodConfig | None" = None
-) -> dict:
+    available_columns: Iterable[object] | None,
+    config: "PeriodConfig | None" = None,
+) -> dict[str, str]:
     """Map each canonical period name to the calendar column that implements it.
 
     ``available_columns`` is the calendar table's column names (any iterable of
@@ -184,8 +186,8 @@ def detect_period_columns(
     most one canonical name (so 'fiscal_year' does not also swallow 'fiscper')."""
     cols = [c for c in (available_columns or []) if isinstance(c, str) and c.strip()]
     overrides = (config.column_overrides if config else {}) or {}
-    claimed: set = set()
-    resolved: dict = {}
+    claimed: set[str] = set()
+    resolved: dict[str, str] = {}
 
     # Explicit overrides first (only if the named column actually exists).
     col_by_lower = {c.lower(): c for c in cols}
@@ -209,7 +211,8 @@ def detect_period_columns(
 
 
 def has_closed_period_logic(
-    available_columns, config: "PeriodConfig | None" = None
+    available_columns: Iterable[object] | None,
+    config: "PeriodConfig | None" = None,
 ) -> bool:
     """True if the calendar exposes at least one closed-period column (past_flag /
     latest_month_label / latest_year_label). Used to decide whether a table is the
@@ -220,10 +223,10 @@ def has_closed_period_logic(
 
 def fold_period_dimensions(
     calendar_alias: str,
-    available_columns,
-    existing_dim_names=None,
+    available_columns: Iterable[object] | None,
+    existing_dim_names: Iterable[str] | None = None,
     config: "PeriodConfig | None" = None,
-) -> list:
+) -> list[dict[str, str | list[str]]]:
     """Return canonical period dimension dicts to fold into a metric view.
 
     - ``calendar_alias``: the join alias of the report's calendar dimension in this
@@ -243,7 +246,7 @@ def fold_period_dimensions(
         return []
 
     existing = {n.strip().lower() for n in (existing_dim_names or set()) if n}
-    out: list = []
+    out: list[dict[str, str | list[str]]] = []
     for pd in _PERIOD_DIMENSIONS:
         src = resolved.get(pd.name)
         if src is None or pd.name.lower() in existing:
@@ -272,7 +275,9 @@ _PRIOR_PERIOD_RE = re.compile(
 )
 
 
-def detect_prior_period_column(available_columns) -> "str | None":
+def detect_prior_period_column(
+    available_columns: Iterable[object] | None,
+) -> str | None:
     """Return a calendar column holding the PRIOR-period/year key, or None.
 
     Phase-2 time-intelligence can self-join the calendar on this to resolve

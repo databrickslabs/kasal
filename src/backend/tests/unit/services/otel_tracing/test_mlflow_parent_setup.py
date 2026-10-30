@@ -179,8 +179,11 @@ class TestSetupSyncAuth:
             ):
                 ok = _setup_sync("/Shared/base", "c", "s", "wh", "X")
         assert ok is True
-        # Bearer from authenticate() replaces the PAT; SPN vars preserved.
-        assert os.environ.get("DATABRICKS_TOKEN") == "tok"
+        # The minted bearer is never exported into the shared env (the SDK
+        # refreshes its own from the SP credentials, pinned to oauth-m2m); the
+        # platform-injected SP vars stay.
+        assert os.environ.get("DATABRICKS_TOKEN") != "tok"
+        assert os.environ.get("DATABRICKS_AUTH_TYPE") == "oauth-m2m"
         assert os.environ.get("DATABRICKS_CLIENT_ID") == "cid"
         assert os.environ.get("DATABRICKS_CLIENT_SECRET") == "csecret"
         mock_mlflow.set_tracking_uri.assert_called_with("databricks")
@@ -405,7 +408,7 @@ class TestConfigureParentMlflowTracing:
             return_value="/Shared/kasal-team-traces-uc"
         )
         cfg = MagicMock()
-        cfg.catalog = "nemotemo_catalog"
+        cfg.catalog = "example_catalog"
         cfg.db_schema = "kasal"
         cfg.warehouse_id = "wh-1"
         dbx = MagicMock()
@@ -444,7 +447,7 @@ class TestConfigureParentMlflowTracing:
         # Experiment name comes from the authority (already -uc); _setup_sync's
         # uc_experiment_name() is idempotent so it stays unchanged.
         assert captured["exp_name"] == "/Shared/kasal-team-traces-uc"
-        assert captured["uc_catalog"] == "nemotemo_catalog"
+        assert captured["uc_catalog"] == "example_catalog"
         assert captured["uc_schema"] == "kasal"
         assert captured["warehouse_id"] == "wh-1"
         assert captured["label"] == "CrewGeneration"

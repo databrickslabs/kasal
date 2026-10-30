@@ -6,7 +6,7 @@ These serve as templates that users can import and customize.
 """
 
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -187,7 +187,7 @@ DYNAMIC_CREW = {
 # This crew has all parameters configured directly in the UI.
 # Credentials are placeholders that users must replace with their own values.
 
-STATIC_CREW_AGENT = {
+STATIC_CREW_AGENT: dict[str, object] = {
     "id": "example-msc-static-agent-001",
     "name": "Measure Converter",
     "role": "Measure Conversion Manager",
@@ -338,7 +338,7 @@ STATIC_CREW = {
 # All Example Crews
 # ============================================================================
 
-EXAMPLE_CREWS = [
+EXAMPLE_CREWS: List[Dict[str, Dict[str, Any]]] = [
     # Measure Conversion Pipeline Crews
     {
         "crew": DYNAMIC_CREW,

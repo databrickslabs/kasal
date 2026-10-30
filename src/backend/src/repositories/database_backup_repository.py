@@ -6,14 +6,14 @@ import json
 import os
 import sqlite3
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
+from src.utils.sql_backup_format import BackupFormatError, restore_statements
 
 logger = LoggerManager.get_instance().system
 
@@ -49,25 +49,47 @@ class DatabaseBackupRepository:
         Raises:
             ValueError: If the identifier contains unsafe characters
         """
-        if not name or not cls._SAFE_IDENTIFIER_RE.match(name):
+        if not name or not cls._SAFE_IDENTIFIER_RE.fullmatch(name):
             raise ValueError(f"Invalid SQL {kind}: {name!r}")
         return name
 
-    @staticmethod
-    def get_database_type() -> str:
-        """
-        Determine the database type from settings.
+    @classmethod
+    def _column_names(cls, pragma_rows: List[tuple]) -> List[str]:
+        """Column names from ``PRAGMA table_info`` rows, each validated.
 
-        Returns:
-            Database type ('sqlite' or 'postgres')
+        On restore they come from the uploaded file, so they are checked before
+        the target table is cleared: a hostile name skips that table intact.
         """
-        db_uri = str(settings.DATABASE_URI)
-        if "sqlite" in db_uri.lower():
-            return "sqlite"
-        elif "postgresql" in db_uri.lower() or "postgres" in db_uri.lower():
-            return "postgres"
-        else:
-            return "unknown"
+        return [
+            cls._validate_identifier(str(row[1]), "column name") for row in pragma_rows
+        ]
+
+    @staticmethod
+    def dialect_name(session: AsyncSession) -> str:
+        """The SQLAlchemy dialect ``session`` is bound to; '' when it has none."""
+        try:
+            name = session.get_bind().dialect.name
+        except Exception:  # noqa: BLE001 — no usable bind: say so, never guess
+            return ""
+        return name if isinstance(name, str) else ""
+
+    @staticmethod
+    def get_database_type(session: AsyncSession) -> str:
+        """'sqlite', 'postgres' or 'unknown': the database ``session`` talks to.
+
+        Asked of the session, never of ``settings.DATABASE_URI``. Inside
+        Databricks Apps that URI names the boot SQLite file while every request
+        runs on Lakebase, so reading it made export, import and housekeeping act
+        on a file no request uses.
+        """
+        name = DatabaseBackupRepository.dialect_name(session)
+        return {"sqlite": "sqlite", "postgresql": "postgres"}.get(name, "unknown")
+
+    async def get_current_schema(self, session: Optional[AsyncSession] = None) -> str:
+        """The schema unqualified table names resolve to on a PostgreSQL session."""
+        db_session = session if session else self.session
+        result = await db_session.execute(text("SELECT current_schema()"))
+        return str(result.scalar() or "")
 
     async def create_sqlite_backup(
         self,
@@ -228,6 +250,8 @@ class DatabaseBackupRepository:
                 )
                 columns = [(row[0], row[1]) for row in col_result.fetchall()]
                 column_names = [col[0] for col in columns]
+                for col_name in column_names:
+                    self._validate_identifier(col_name, "column name")
 
                 # Disable triggers and constraints for this table
                 sql_content.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
@@ -235,7 +259,11 @@ class DatabaseBackupRepository:
                 sql_content.append("")
 
                 # Get table data (table name validated above)
-                result = await db_session.execute(text(f"SELECT * FROM {table}"))
+                result = await db_session.execute(
+                    text(
+                        f"SELECT * FROM {table}"  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    )
+                )
                 rows = result.fetchall()
 
                 if rows:
@@ -262,7 +290,7 @@ class DatabaseBackupRepository:
                                 escaped_value = str(value).replace("'", "''")
                                 values.append(f"'{escaped_value}'")
 
-                        insert_stmt = f"INSERT INTO {table} ({', '.join(column_names)}) VALUES ({', '.join(values)});"
+                        insert_stmt = f"INSERT INTO {table} ({', '.join(column_names)}) VALUES ({', '.join(values)});"  # dump text; identifiers validated, values quote-doubled — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                         sql_content.append(insert_stmt)
 
                     total_rows += len(rows)
@@ -417,18 +445,24 @@ class DatabaseBackupRepository:
                 cursor.execute(create_table_sql)
 
                 # Get data from PostgreSQL
-                result = await session.execute(text(f"SELECT * FROM {table_name}"))
+                result = await session.execute(
+                    text(
+                        f"SELECT * FROM {table_name}"  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    )
+                )
                 rows = result.fetchall()
 
                 if rows:
                     # Prepare column names for insertion
                     col_names = [col[0] for col in columns]
+                    for col_name in col_names:
+                        self._validate_identifier(col_name, "column name")
                     placeholders = ", ".join(["?" for _ in col_names])
-                    insert_sql = f"INSERT INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders})"
+                    insert_sql = f"INSERT INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
 
                     # Convert and insert rows
                     for row in rows:
-                        row_values = []
+                        row_values: List[Any] = []
                         for i, value in enumerate(row):
                             if value is None:
                                 row_values.append(None)
@@ -645,14 +679,14 @@ class DatabaseBackupRepository:
                         # Get column names from backup table
                         backup_cursor.execute(f"PRAGMA table_info({table_name})")
                         columns_info = backup_cursor.fetchall()
-                        column_names = [col[1] for col in columns_info]
+                        column_names = self._column_names(columns_info)
 
                         # Clear existing data in target table
                         target_cursor.execute(f"DELETE FROM {table_name}")
                         logger.info(f"[IMPORT]   Cleared {table_name} table")
 
                         # Get all data from backup table
-                        backup_cursor.execute(f"SELECT * FROM {table_name}")
+                        backup_cursor.execute(f"SELECT * FROM {table_name}")  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select  # fmt: skip
                         rows = backup_cursor.fetchall()
 
                         if rows:
@@ -664,7 +698,7 @@ class DatabaseBackupRepository:
 
                                 # Insert rows, but update admin user's UUID
                                 placeholders = ",".join(["?" for _ in column_names])
-                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
 
                                 admin_email = current_admin_info["email"]
                                 admin_uuid = current_admin_info["id"]
@@ -696,7 +730,7 @@ class DatabaseBackupRepository:
                             else:
                                 # Regular table - insert all rows
                                 placeholders = ",".join(["?" for _ in column_names])
-                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                                 target_cursor.executemany(insert_sql, rows)
 
                             logger.info(
@@ -797,60 +831,36 @@ class DatabaseBackupRepository:
 
             # Check if it's SQL or JSON format
             if backup_filename.endswith(".sql"):
-                # Execute SQL statements
-                sql_content = backup_content.decode("utf-8")
+                # Only the statement shapes the exporter writes are run (see
+                # utils/sql_backup_format): a file holding anything else is
+                # refused whole, before a single statement executes.
+                try:
+                    statements = restore_statements(backup_content.decode("utf-8"))
+                except (BackupFormatError, UnicodeDecodeError) as exc:
+                    logger.warning("Refusing SQL backup %s: %s", backup_filename, exc)
+                    return {
+                        "success": False,
+                        "error": "Backup file is not a Kasal SQL backup; nothing was restored",
+                    }
 
-                # Split SQL statements and execute them
-                # We need to be careful with statements that contain semicolons in strings
-                statements = []
-                current_statement = []
-                in_string = False
-                escape_next = False
-
-                for line in sql_content.split("\n"):
-                    # Skip comments and empty lines
-                    if line.strip().startswith("--") or not line.strip():
-                        continue
-
-                    current_statement.append(line)
-
-                    # Check if this line ends a statement (ends with ; and not in a string)
-                    for char in line:
-                        if escape_next:
-                            escape_next = False
-                            continue
-                        if char == "\\":
-                            escape_next = True
-                        elif char == "'":
-                            in_string = not in_string
-
-                    if line.rstrip().endswith(";") and not in_string:
-                        statements.append("\n".join(current_statement))
-                        current_statement = []
-
-                # Execute statements
-                restored_tables = set()
+                restored_names: Set[str] = set()
                 total_rows = 0
-
-                for stmt in statements:
-                    if stmt.strip():
-                        try:
-                            # Track which tables we're working with
-                            if "INSERT INTO" in stmt.upper():
-                                # Extract table name
-                                table_match = (
-                                    stmt.upper()
-                                    .split("INSERT INTO")[1]
-                                    .split("(")[0]
-                                    .strip()
-                                )
-                                restored_tables.add(table_match.lower())
-                                total_rows += 1
-
-                            await db_session.execute(text(stmt))
-                        except Exception as stmt_error:
-                            logger.warning(f"Error executing statement: {stmt_error}")
-                            # Continue with other statements
+                for number, stmt in enumerate(statements, start=1):
+                    try:
+                        await db_session.execute(text(stmt.sql))
+                    except Exception:  # noqa: BLE001 — reported, never half-applied
+                        # PostgreSQL aborts the transaction on the first failure, so
+                        # carrying on (as this used to) restored nothing after it
+                        # while still reporting success.
+                        logger.exception("Restore failed at statement %d", number)
+                        await db_session.rollback()
+                        return {
+                            "success": False,
+                            "error": f"Restore failed at statement {number}; rolled back",
+                        }
+                    if stmt.insert_table:
+                        restored_names.add(stmt.insert_table)
+                        total_rows += 1
 
                 await db_session.commit()
 
@@ -858,7 +868,7 @@ class DatabaseBackupRepository:
                     "success": True,
                     "restored_from": f"{catalog}.{schema}.{volume_name}/{backup_filename}",
                     "database_type": "postgres",
-                    "restored_tables": list(restored_tables),
+                    "restored_tables": list(restored_names),
                     "total_rows": total_rows,
                 }
 
@@ -873,7 +883,7 @@ class DatabaseBackupRepository:
                     }
 
                 # Clear existing data and restore
-                restored_tables = []
+                restored_tables: List[str] = []
                 for table_name, rows in backup_data["tables"].items():
                     # Validate table name from backup JSON (untrusted source)
                     self._validate_identifier(table_name, "table name")
@@ -890,7 +900,7 @@ class DatabaseBackupRepository:
                             self._validate_identifier(col_name, "column name")
                         columns = ", ".join(row_data.keys())
                         placeholders = ", ".join([f":{k}" for k in row_data.keys()])
-                        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+                        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                         await db_session.execute(text(insert_query), row_data)
 
                     restored_tables.append(f"{table_name} ({len(rows)} rows)")
@@ -1104,7 +1114,7 @@ class DatabaseBackupRepository:
         """
         try:
             # Determine database type based on parameters
-            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > check settings
+            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > own session
             logger.debug(
                 f"[DB INFO] get_database_info called with db_path={db_path}, session={session is not None}"
             )
@@ -1122,9 +1132,9 @@ class DatabaseBackupRepository:
                     "[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)"
                 )
             else:
-                # No explicit parameters - check settings
-                db_type = self.get_database_type()
-                logger.debug(f"[DB INFO] Using database type from settings: {db_type}")
+                # No explicit parameters - ask this repository's own session
+                db_type = self.get_database_type(self.session)
+                logger.debug(f"[DB INFO] Using database type of the session: {db_type}")
 
             # Use provided session or stored session for PostgreSQL/Lakebase
             db_session = session if session else self.session
@@ -1169,7 +1179,9 @@ class DatabaseBackupRepository:
                 table_info = {}
                 for table in tables:
                     self._validate_identifier(table, "table name")
-                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    cursor.execute(
+                        f"SELECT COUNT(*) FROM {table}"  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    )
                     count = cursor.fetchone()[0]
                     table_info[table] = count
 
@@ -1231,7 +1243,9 @@ class DatabaseBackupRepository:
                 for table in tables:
                     self._validate_identifier(table, "table name")
                     result = await db_session.execute(
-                        text(f"SELECT COUNT(*) FROM {target_schema}.{table}")
+                        text(
+                            f"SELECT COUNT(*) FROM {target_schema}.{table}"  # literal schema, validated table — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                        )
                     )
                     count = result.scalar()
                     table_info[table] = count

@@ -19,7 +19,7 @@ import base64
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Coroutine, Dict, List, Optional, Type
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -52,10 +52,8 @@ def _sql_int(value: Any, default: int = 0) -> int:
 class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
     """Input schema for PowerBIFieldParametersCalculationGroupsTool."""
 
-    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
-    # schema. Those values are injected at tool-construction time from
-    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
-    # bloated every LLM call and invited the model to echo credentials.
+    # NOTE: connection/auth/LLM plumbing is injected from tool_configs (__init__),
+    # not exposed here: as LLM-fillable params it bloated calls, echoed credentials.
 
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
@@ -88,8 +86,7 @@ class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
 
 
 class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
-    """
-    Power BI Field Parameters & Calculation Groups Extraction Tool.
+    """Power BI Field Parameters & Calculation Groups Extraction Tool.
 
     Extracts field parameters and calculation groups from Fabric semantic models
     using the Fabric API getDefinition endpoint (TMDL format). Generates:
@@ -125,7 +122,6 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
     )
     args_schema: Type[BaseModel] = PowerBIFieldParametersCalculationGroupsSchema
 
-    # Private attributes
     _instance_id: str = PrivateAttr()
     _default_config: Dict[str, Any] = PrivateAttr()
 
@@ -476,7 +472,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             )
             return f"Error: {str(e)}"
 
-    def _run_sync(self, coro):
+    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
 
@@ -604,7 +600,10 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                             )
                             result_response.raise_for_status()
                             definition = result_response.json()
-                            return definition.get("definition", {}).get("parts", [])
+                            parts: List[Dict[str, Any]] = definition.get(
+                                "definition", {}
+                            ).get("parts", [])
+                            return parts
                         elif status == "Failed":
                             error = poll_data.get("error", {})
                             logger.error(f"Definition fetch failed: {error}")
@@ -615,7 +614,8 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
                 elif response.status_code == 200:
                     definition = response.json()
-                    return definition.get("definition", {}).get("parts", [])
+                    parts = definition.get("definition", {}).get("parts", [])
+                    return parts
                 else:
                     logger.error(f"Unexpected status code: {response.status_code}")
                     response.raise_for_status()
@@ -1005,7 +1005,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             if field_parameters:
                 output.append("```sql")
                 output.append(
-                    f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters VALUES"
+                    f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters VALUES"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                 )
                 inserts = []
                 for fp in field_parameters:
@@ -1045,7 +1045,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             if calculation_groups:
                 output.append("```sql")
                 output.append(
-                    f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups VALUES"
+                    f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups VALUES"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                 )
                 inserts = []
                 for cg in calculation_groups:
@@ -1257,7 +1257,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
         if field_parameters:
             sql_lines.append(
-                f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters"
+                f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             )
             sql_lines.append(
                 "(parameter_name, label, source_table, source_measure, ordinal)"
@@ -1290,7 +1290,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
         if calculation_groups:
             sql_lines.append(
-                f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups"
+                f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             )
             sql_lines.append(
                 "(group_name, item_name, dax_expression, sql_pattern, precedence, ordinal)"
@@ -1336,20 +1336,20 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
         if referenced_measures:
             sql_lines.append(
-                f"INSERT INTO {target_catalog}.{target_schema}._config_measures"
+                f"INSERT INTO {target_catalog}.{target_schema}._config_measures"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-insert
             )
             sql_lines.append(
                 "(measure_name, source_table, dax_expression, sql_expression)"
             )
             sql_lines.append("VALUES")
             inserts = []
-            for measure in referenced_measures:
-                dax_expr = (measure.get("expression") or "").replace("\n", "\\n")
+            for ref_m in referenced_measures:
+                dax_expr = (ref_m.get("expression") or "").replace("\n", "\\n")
                 sql_expr = self._translate_dax_to_sql_simple(
-                    measure.get("expression"), measure.get("table")
+                    ref_m.get("expression"), ref_m.get("table")
                 )
                 inserts.append(
-                    f"({_sql_lit(measure['name'])}, {_sql_lit(measure.get('table', ''))}, "
+                    f"({_sql_lit(ref_m['name'])}, {_sql_lit(ref_m.get('table', ''))}, "
                     f"{_sql_lit(dax_expr)}, {_sql_lit(sql_expr)})"
                 )
             sql_lines.append(",\n".join(inserts) + ";")
@@ -1410,10 +1410,10 @@ FROM {qualified_table}"""
             # Also create a simple usage example
             sql_lines.append("-- Usage examples:")
             sql_lines.append(
-                f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base;"
+                f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base;"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append(
-                f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base WHERE kpi_name = 'Confirmed PHC';"
+                f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base WHERE kpi_name = 'Confirmed PHC';"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select, tmp.databricks.sql-injection.fstring-where
             )
             sql_lines.append("")
 
@@ -1614,36 +1614,36 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
                 f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_all_periods AS"
             )
             sql_lines.append(
-                f"SELECT kpi_name, 'Current' AS time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_base"
+                f"SELECT kpi_name, 'Current' AS time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_base"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append("UNION ALL")
             sql_lines.append(
-                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_ytd"
+                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_ytd"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append("UNION ALL")
             sql_lines.append(
-                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_mtd"
+                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_mtd"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append("UNION ALL")
             sql_lines.append(
-                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_py;"
+                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_py;"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append("")
 
             sql_lines.append("-- Usage examples:")
             sql_lines.append("-- Get all KPIs with all time periods:")
             sql_lines.append(
-                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append("")
             sql_lines.append("-- Get specific KPI across time periods:")
             sql_lines.append(
-                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE kpi_name = 'Confirmed PHC';"
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE kpi_name = 'Confirmed PHC';"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select, tmp.databricks.sql-injection.fstring-where
             )
             sql_lines.append("")
             sql_lines.append("-- Compare Current vs YTD for all KPIs:")
             sql_lines.append(
-                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE time_period IN ('Current', 'YTD');"
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE time_period IN ('Current', 'YTD');"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select, tmp.databricks.sql-injection.fstring-where
             )
             sql_lines.append("")
 
@@ -1682,10 +1682,10 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
 
             sql_lines.append("-- Usage:")
             sql_lines.append(
-                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;"
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
             )
             sql_lines.append(
-                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy WHERE yoy_pct_change > 10;  -- KPIs up more than 10%"
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy WHERE yoy_pct_change > 10;  -- KPIs up more than 10%"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select, tmp.databricks.sql-injection.fstring-where
             )
             sql_lines.append("")
 
@@ -1737,10 +1737,10 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
         sql_lines.append("-- Quick Start:")
         sql_lines.append("--   1. Run this SQL to create all objects")
         sql_lines.append(
-            f"--   2. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"
+            f"--   2. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
         )
         sql_lines.append(
-            f"--   3. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;"
+            f"--   3. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;"  # emitted SQL script text returned to the user, never executed by Kasal — nosemgrep: tmp.databricks.sql-injection.fstring-select
         )
 
         return "\n".join(sql_lines)

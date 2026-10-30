@@ -7,13 +7,17 @@ second pass the configured URI still says sqlite.
 """
 
 import logging
+from typing import Union
+
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _conn_is_sqlite(conn) -> bool:
+def _conn_is_sqlite(conn: Union[AsyncConnection, Connection]) -> bool:
     """Whether THIS connection is SQLite — asked of the connection, not the env.
 
     Every ``_ensure_*`` helper branches on dialect, and reading
@@ -35,12 +39,13 @@ def _conn_is_sqlite(conn) -> bool:
     Asking the connection removes the coupling entirely.
     """
     try:
-        return conn.engine.dialect.name == "sqlite"
+        is_sqlite: bool = conn.engine.dialect.name == "sqlite"
+        return is_sqlite
     except Exception:  # noqa: BLE001 — fall back to the configured default
         return str(settings.DATABASE_URI).startswith("sqlite")
 
 
-async def _pg_columns(conn, table: str) -> set[str]:
+async def _pg_columns(conn: AsyncConnection, table: str) -> set[str]:
     """Column names of ``table`` on PostgreSQL; empty set if it does not exist.
 
     The Postgres counterpart of ``PRAGMA table_info``. Reading the catalogue
@@ -49,11 +54,33 @@ async def _pg_columns(conn, table: str) -> set[str]:
     "must be owner" on a table this role does not own EVEN WHEN the column is
     already there and the statement would do nothing.
 
-    Unqualified so it follows ``search_path``, matching the DDL that uses it.
+    Resolved with ``to_regclass``, so it reads exactly the table an unqualified
+    ``ALTER TABLE`` would change (the first match on ``search_path``), not a
+    same-named table in another schema on the path.
     """
     res = await conn.exec_driver_sql(
-        "SELECT column_name FROM information_schema.columns "
-        f"WHERE table_name = '{table}' "
-        "AND table_schema = ANY (current_schemas(false))"
+        "SELECT attname FROM pg_attribute "
+        f"WHERE attrelid = to_regclass('{table}') AND attnum > 0 AND NOT attisdropped"  # table is a heal-step literal or model metadata name — nosemgrep: tmp.databricks.sql-injection.fstring-where
     )
     return {row[0] for row in res.fetchall()}
+
+
+async def _index_exists(conn: AsyncConnection, table: str, name: str) -> bool:
+    """Whether ``table`` has an index called ``name``, on either dialect.
+
+    On PostgreSQL the table is resolved like :func:`_pg_columns`, so an index of
+    that name in another schema on ``search_path`` does not count. Both names are
+    always literals from the heal steps, never user input.
+    """
+    if _conn_is_sqlite(conn):
+        sql = (
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' "
+            f"AND name = '{name}' AND tbl_name = '{table}'"
+        )
+    else:
+        sql = (
+            "SELECT 1 FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid "
+            f"WHERE x.indrelid = to_regclass('{table}') AND i.relname = '{name}'"  # table/index names are heal-step literals — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        )
+    res = await conn.exec_driver_sql(sql)
+    return res.fetchone() is not None

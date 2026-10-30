@@ -24,23 +24,28 @@ Design rules honored here:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from .utils import to_snake_case
+
+if TYPE_CHECKING:
+    from .dax_translator import DaxTranslator
 
 
 # ── SQL literal escaping (mirrors dax_translator._sql_str_literal; kept local to
 #    avoid a circular import — dax_translator imports THIS module) ──────────────
-def _lit(value: str) -> str:
+def _lit(value: object) -> str:
     """Safe single-quoted SQL string literal (doubles quotes, strips NULs)."""
     s = str(value).replace("\x00", "")
     return "'" + s.replace("'", "''") + "'"
 
 
-def _in_list_str(values) -> str:
+def _in_list_str(values: Iterable[object]) -> str:
     return ", ".join(_lit(v) for v in values)
 
 
-def _in_list_num(values) -> str:
+def _in_list_num(values: Iterable[object]) -> str:
     return ", ".join(str(v) for v in values)
 
 
@@ -120,6 +125,17 @@ def _atom_to_sql(atom: str) -> str | None:
     return None
 
 
+def _sql_parts(conditions: list[str]) -> list[str] | None:
+    """SQL for each sub-condition, or ``None`` if any one is untranslatable."""
+    parts: list[str] = []
+    for condition in conditions:
+        sql = cond_to_sql(condition)
+        if sql is None:
+            return None
+        parts.append(sql)
+    return parts
+
+
 def cond_to_sql(cond: str) -> str | None:
     """Translate a DAX filter condition (supporting && / ||) to SQL. Returns None
     if any sub-atom cannot be translated (so the caller can bail cleanly)."""
@@ -127,13 +143,13 @@ def cond_to_sql(cond: str) -> str | None:
     if not cond:
         return None
     if "&&" in cond:
-        parts = [cond_to_sql(p) for p in re.split(r"\s*&&\s*", cond)]
-        if any(p is None for p in parts):
+        parts = _sql_parts(re.split(r"\s*&&\s*", cond))
+        if parts is None:
             return None
         return " AND ".join(parts)
     if "||" in cond:
-        parts = [cond_to_sql(p) for p in re.split(r"\s*\|\|\s*", cond)]
-        if any(p is None for p in parts):
+        parts = _sql_parts(re.split(r"\s*\|\|\s*", cond))
+        if parts is None:
             return None
         return "(" + " OR ".join(parts) + ")"
     return _atom_to_sql(cond)
@@ -258,7 +274,9 @@ def match_summarize_distinct(dax: str, name: str) -> dict | None:
     }
 
 
-def _resolve_nps_var(body: str, score_col: str, id_col: str, translator) -> str | None:
+def _resolve_nps_var(
+    body: str, score_col: str, id_col: str, translator: DaxTranslator
+) -> str | None:
     """Resolve one NPS VAR body to SQL, or None if it isn't a known shape."""
     body = body.strip()
     # SUMX(FILTER(_GroupTable, <cond>), [@Count]) → filtered distinct-pair count
@@ -284,12 +302,14 @@ def _resolve_nps_var(body: str, score_col: str, id_col: str, translator) -> str 
     if mref:
         res = translator._measure_resolutions.get(mref.group(1))
         if res and res.get("base_expr") and not res.get("base_filters"):
-            return res["base_expr"]
+            return str(res["base_expr"])
         return f"COUNT(DISTINCT source.{id_col})"
     return None
 
 
-def translate_summarize_distinct(match: dict, dax: str, table_key, translator):
+def translate_summarize_distinct(
+    match: dict, dax: str, table_key: str, translator: DaxTranslator
+) -> tuple[str | None, str]:
     score_col, id_col = match["score_col"], match["id_col"]
     var_map = match["var_map"]
     ret = match["return_expr"].strip()
@@ -361,7 +381,7 @@ def _reduce_if_isblank(expr: str) -> str:
     return expr
 
 
-def _resolve_base_sum_col(translator, ref_name: str) -> str | None:
+def _resolve_base_sum_col(translator: DaxTranslator, ref_name: str) -> str | None:
     """A measure ref that resolves to SUM(source.<col>) → return <col>."""
     res = translator._measure_resolutions.get(ref_name)
     if not res:
@@ -385,7 +405,9 @@ def match_calc_measure_code_ratio(dax: str, name: str) -> dict | None:
     return {"var_map": var_map, "return_expr": ret_expr}
 
 
-def translate_calc_measure_code_ratio(match: dict, dax: str, table_key, translator):
+def translate_calc_measure_code_ratio(
+    match: dict, dax: str, table_key: str, translator: DaxTranslator
+) -> tuple[str | None, str]:
     var_map = match["var_map"]
     ret = _reduce_if_isblank(match["return_expr"].strip())
 
@@ -508,7 +530,9 @@ def match_calc_filters(dax: str, name: str) -> dict | None:
     }
 
 
-def translate_calc_filters(match: dict, dax: str, table_key, translator):
+def translate_calc_filters(
+    match: dict, dax: str, table_key: str, translator: DaxTranslator
+) -> tuple[str | None, str]:
     if match["sum_col"]:
         agg = f"SUM(source.{match['sum_col']})"
     else:
@@ -591,7 +615,9 @@ def match_latest_week_ratio(dax: str, name: str) -> dict | None:
     }
 
 
-def translate_latest_week_ratio(match: dict, dax: str, table_key, translator):
+def translate_latest_week_ratio(
+    match: dict, dax: str, table_key: str, translator: DaxTranslator
+) -> tuple[str, str]:
     sum_cols = match["sum_cols"]
     num_terms = [
         f"COALESCE(SUM(source.{_snake_col(sum_cols[v])}), 0)" for v in match["num_vars"]

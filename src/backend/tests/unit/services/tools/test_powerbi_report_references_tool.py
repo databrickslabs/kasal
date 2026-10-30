@@ -839,44 +839,6 @@ class TestFormatJsonOutput:
 # ===========================================================================
 
 
-class TestFormatMatrixOutput:
-    """Tests for _format_matrix_output."""
-
-    def setup_method(self):
-        self.tool = PowerBIReportReferencesTool()
-
-    def test_returns_string(self):
-        # _format_matrix_output(workspace_id, report_id, report_info, pages, visual_refs, cross_ref)
-        result = self.tool._format_matrix_output(WS_ID, REPORT_ID, {}, [], [], {})
-        assert isinstance(result, str)
-
-    def test_report_id_in_output(self):
-        result = self.tool._format_matrix_output(WS_ID, REPORT_ID, {}, [], [], {})
-        assert REPORT_ID in result or isinstance(result, str)
-
-    def test_with_pages_and_refs(self):
-        pages = [{"id": "p1", "displayName": "Overview"}]
-        refs = [
-            {
-                "visual_id": "v1",
-                "page_id": "p1",
-                "measures": ["Revenue"],
-                "tables": ["Sales"],
-                "columns": [],
-                "visual_type": "card",
-                "visual_name": "v1",
-            }
-        ]
-        cross_ref = {
-            "measure_pages": {"Revenue": ["Overview"]},
-            "table_pages": {"Sales": ["Overview"]},
-        }
-        result = self.tool._format_matrix_output(
-            WS_ID, REPORT_ID, {"name": "Report"}, pages, refs, cross_ref
-        )
-        assert isinstance(result, str)
-
-
 # ===========================================================================
 # Async methods: _list_workspace_reports, _fetch_report_definition
 # ===========================================================================

@@ -46,12 +46,14 @@ from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
+from src.services.prompt_optimization.host import PromptOptimizationHost
 from src.services.prompt_optimization.judge_registry import (
     JudgeRegistry,
     strip_guidelines,
     uc_schema_of,
     with_guidelines,
 )
+from src.services.prompt_optimization.labels.review import trace_filter
 from src.utils.user_context import GroupContext, UserContext
 
 logger = logging.getLogger(__name__)
@@ -118,7 +120,7 @@ def has_human_feedback(trace: Any, judge_name: str) -> bool:
     return False
 
 
-class JudgeAlignmentMixin:
+class JudgeAlignmentMixin(PromptOptimizationHost):
     """``align_judge`` for PromptOptimizationService — see the module docstring."""
 
     async def align_judge(
@@ -185,7 +187,9 @@ class JudgeAlignmentMixin:
                     feedback_value_type=float,
                 )
                 traces = mlflow.search_traces(
-                    filter_string=f"tags.kasal_crew_id = '{crew_id}'",
+                    filter_string=trace_filter(
+                        crew_id, getattr(group_context, "primary_group_id", None)
+                    ),
                     max_results=TRACE_WINDOW,
                     return_type="list",
                 )

@@ -18,12 +18,14 @@ Executor contracts:
 from __future__ import annotations
 
 import concurrent.futures
-from typing import Optional
+from collections.abc import Sequence
+from typing import Optional, Protocol
 
 import pandas as pd
 
+from ..raw_fields import DimensionValue
 from . import pbi_query as pq
-from .mapping import UCMVMapping
+from .mapping import Measure, UCMVMapping
 from .periods import normalize_snapshot_date
 from .values import parse_value
 
@@ -34,8 +36,25 @@ from .values import parse_value
 # are byte-for-byte identical to a serial run — only wall-clock changes.
 _RECON_QUERY_CONCURRENCY = 6
 
+# (frame or None, error detail) — the shape both executors return.
+QueryOutcome = tuple[Optional[pd.DataFrame], object]
 
-def _execute_many(executor, model_id, daxes: list) -> list:
+
+class PbiExecutor(Protocol):
+    """Runs one DAX query against a semantic model."""
+
+    def execute(self, semantic_model_id: str, dax_query: str) -> QueryOutcome: ...
+
+
+class UcmvExecutor(Protocol):
+    """Runs one Spark SQL query against the UC Metric View side."""
+
+    def execute(self, sql: str) -> QueryOutcome: ...
+
+
+def _execute_many(
+    executor: PbiExecutor, model_id: str, daxes: list[str]
+) -> list[QueryOutcome]:
     """``executor.execute(model_id, dax)`` for each dax, concurrently (bounded),
     returning ``(df, err)`` tuples in the SAME order as ``daxes``.
 
@@ -68,7 +87,9 @@ def _merge_on_dimension(
     return a.merge(b, on=(dimension_name, "period"), how="outer")
 
 
-def run_ucmv_query(executor, sql: str, dimension_name: str) -> pd.DataFrame:
+def run_ucmv_query(
+    executor: UcmvExecutor, sql: str, dimension_name: str
+) -> pd.DataFrame:
     """Run one UCMV SQL query and return its result frame. The executor yields a
     frame already keyed by (dimension_name, period, <measure columns>) — the
     column names ``build_ucmv_query`` aliased them to."""
@@ -81,15 +102,20 @@ def run_ucmv_query(executor, sql: str, dimension_name: str) -> pd.DataFrame:
 
 
 def _run_direct_queries(
-    executor, model_id, mapping, dimension_name, dimension_values, direct
-):
+    executor: PbiExecutor,
+    model_id: str,
+    mapping: UCMVMapping,
+    dimension_name: str,
+    dimension_values: list[DimensionValue],
+    direct: list[Measure],
+) -> Optional[pd.DataFrame]:
     result: Optional[pd.DataFrame] = None
-    filter_groups: dict = {}
+    filter_groups: dict[tuple[str, ...], list[Measure]] = {}
     for m in direct:
         filter_groups.setdefault(pq._extra_filter_key(m), []).append(m)
     # Build every group's DAX first, then run the (non-empty) queries concurrently;
     # process results in the SAME order the groups merged serially.
-    pending = []
+    pending: list[tuple[str, list[Measure]]] = []
     for group_measures in filter_groups.values():
         dax = pq.build_direct_query(
             mapping, dimension_name, dimension_values, group_measures
@@ -111,33 +137,35 @@ def _run_direct_queries(
 
 
 def _run_direct_context_queries(
-    executor,
-    model_id,
-    mapping,
-    dimension_name,
-    dimension_values,
-    context_periods,
-    direct_context,
-):
+    executor: PbiExecutor,
+    model_id: str,
+    mapping: UCMVMapping,
+    dimension_name: str,
+    dimension_values: list[DimensionValue],
+    context_periods: list[str],
+    direct_context: list[Measure],
+) -> Optional[pd.DataFrame]:
     result: Optional[pd.DataFrame] = None
-    ctx_filter_groups: dict = {}
+    ctx_filter_groups: dict[tuple[str, ...], list[Measure]] = {}
     for m in direct_context:
         ctx_filter_groups.setdefault(pq._extra_filter_key(m), []).append(m)
     groups = list(ctx_filter_groups.values())
     # Flatten every (group, period) query, run them all concurrently, then
     # re-group the results per group IN ORDER so the merge is identical to serial.
-    flat: list = []  # (group_index, period, dax)
+    flat: list[tuple[int, str, str]] = []  # (group_index, period, dax)
     for gi, ctx_group in enumerate(groups):
         for dax, period in pq.build_direct_context_queries(
             mapping, dimension_name, dimension_values, context_periods, ctx_group
         ):
             flat.append((gi, period, dax))
     outcomes = _execute_many(executor, model_id, [dax for _, _, dax in flat])
-    rows_by_group: dict = {gi: [] for gi in range(len(groups))}
+    rows_by_group: dict[int, list[tuple[str, Optional[pd.DataFrame]]]] = {
+        gi: [] for gi in range(len(groups))
+    }
     for (gi, period, _dax), (df, _err) in zip(flat, outcomes):
         rows_by_group[gi].append((period, df))
     for gi, ctx_group in enumerate(groups):
-        per_period_rows = []
+        per_period_rows: list[pd.DataFrame] = []
         for period, df in rows_by_group[gi]:
             if df is None or df.empty:
                 continue
@@ -156,8 +184,13 @@ def _run_direct_context_queries(
 
 
 def _switch_group_result(
-    df, group_measures, sel_col_out, sel2_col_out, dimension_name, strict=False
-):
+    df: pd.DataFrame,
+    group_measures: list[Measure],
+    sel_col_out: str,
+    sel2_col_out: Optional[str],
+    dimension_name: str,
+    strict: bool = False,
+) -> Optional[pd.DataFrame]:
     """Slice a switch-group frame into one column per measure by matching its
     selector value(s), case-insensitively (matching DAX's text semantics)."""
     result: Optional[pd.DataFrame] = None
@@ -181,10 +214,15 @@ def _switch_group_result(
 
 
 def _run_switch_queries(
-    executor, model_id, mapping, dimension_name, dimension_values, switch
-):
+    executor: PbiExecutor,
+    model_id: str,
+    mapping: UCMVMapping,
+    dimension_name: str,
+    dimension_values: list[DimensionValue],
+    switch: list[Measure],
+) -> tuple[Optional[pd.DataFrame], list[str]]:
     result: Optional[pd.DataFrame] = None
-    failed_measures: list = []
+    failed_measures: list[str] = []
     strict = mapping.binding.time_dimension.grain == "snapshot"
     specs = list(
         pq.build_switch_queries(mapping, dimension_name, dimension_values, switch)
@@ -208,7 +246,9 @@ def _run_switch_queries(
 class _SnapshotExecutor:
     """Wrap a PBI executor to scope every query to the snapshot load date(s)."""
 
-    def __init__(self, executor, mapping, periods):
+    def __init__(
+        self, executor: PbiExecutor, mapping: UCMVMapping, periods: Sequence[str]
+    ) -> None:
         if not periods:
             raise ValueError(
                 "Snapshot reconciliation requires at least one UCMV load date."
@@ -224,7 +264,7 @@ class _SnapshotExecutor:
         ]
         self.filter = f"TREATAS({{{', '.join(literals)}}}, '{table}'[{column}])"
 
-    def execute(self, model_id, query):
+    def execute(self, model_id: str, query: str) -> QueryOutcome:
         if not query.lstrip().startswith("EVALUATE"):
             raise ValueError("Snapshot queries must be EVALUATE table expressions.")
         expression = query.lstrip()[len("EVALUATE") :].strip()
@@ -237,13 +277,13 @@ class _SnapshotExecutor:
 
 
 def run_pbi_queries(
-    executor,
+    executor: PbiExecutor,
     semantic_model_id: str,
     mapping: UCMVMapping,
     dimension_name: str,
-    dimension_values: list,
-    measures: Optional[list] = None,
-    context_periods: Optional[list] = None,
+    dimension_values: list[DimensionValue],
+    measures: Optional[list[Measure]] = None,
+    context_periods: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     """Run whatever queries ``measures`` needs (default: every resolved measure)
     and return one wide frame, one column per ucmv_measure, keyed on
@@ -266,7 +306,7 @@ def run_pbi_queries(
             raise ValueError(
                 "Snapshot extra grouping requires a reviewed date-context implementation."
             )
-        executor = _SnapshotExecutor(executor, mapping, context_periods)
+        executor = _SnapshotExecutor(executor, mapping, context_periods or [])
 
     direct, direct_context, switch = pq.partition_measures_by_shape(measures)
     if direct_context and not context_periods:
@@ -284,7 +324,7 @@ def run_pbi_queries(
         mapping,
         dimension_name,
         dimension_values,
-        context_periods,
+        context_periods or [],
         direct_context,
     )
     result = _merge_on_dimension(result, context_result, dimension_name)

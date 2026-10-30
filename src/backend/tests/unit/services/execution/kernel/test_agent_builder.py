@@ -190,6 +190,14 @@ class TestBuildAgentLlm:
             out = await build_agent_llm({"llm": "fallback-model"}, group_id="grp")
             assert out == "fallback-model"
 
+    @pytest.mark.asyncio
+    async def test_a_failed_auto_never_falls_back_to_the_string_auto(self):
+        """A harness handed the bare string would build a native client from it."""
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
+            MockLM.configure_kasal_llm = AsyncMock(side_effect=RuntimeError("boom"))
+            with pytest.raises(RuntimeError):
+                await build_agent_llm({"llm": "auto"}, group_id="grp")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reasoning = the MODEL's native reasoning budget on the agent's own LLM.
@@ -263,6 +271,15 @@ class TestReasoningEffortReachesTheLLM:
         assert llm.reasoning_effort == "max"
 
     @pytest.mark.asyncio
+    async def test_databricks_gpt6_sol_takes_its_documented_max(self):
+        llm = await self._build(
+            "databricks-gpt-6-sol",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "max"},
+        )
+        assert llm.reasoning_effort == "max"
+
+    @pytest.mark.asyncio
     async def test_model_specific_invalid_effort_is_ignored(self):
         llm = await self._build(
             "databricks-gemini-3-8-flash",
@@ -283,16 +300,14 @@ class TestReasoningEffortReachesTheLLM:
         assert out == "databricks-gpt-5-2"
 
     @pytest.mark.asyncio
-    async def test_kill_switch_env_disables_effort(self, monkeypatch):
+    async def test_env_overrides_do_not_change_effort(self, monkeypatch):
+        """The removed KASAL_REASONING_EFFORT_* env overrides have no effect."""
         monkeypatch.setenv("KASAL_REASONING_EFFORT_DISABLED", "true")
-        llm = await self._build("databricks-gpt-5-2", reasoning=True)
-        assert not hasattr(llm, "reasoning_effort")
-
-    @pytest.mark.asyncio
-    async def test_env_allow_list_extends_supported_models(self, monkeypatch):
         monkeypatch.setenv("KASAL_REASONING_EFFORT_MODELS", "my-thinking-endpoint")
-        llm = await self._build("my-thinking-endpoint", reasoning=True)
-        assert llm.reasoning_effort == "low"
+        supported = await self._build("databricks-gpt-5-2", reasoning=True)
+        assert supported.reasoning_effort == "low"
+        unknown = await self._build("my-thinking-endpoint", reasoning=True)
+        assert not hasattr(unknown, "reasoning_effort")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

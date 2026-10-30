@@ -1,14 +1,8 @@
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    Integer,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -33,41 +27,47 @@ class A2AAgent(Base):
         UniqueConstraint("name", "group_id", name="uq_a2aagent_name_group"),
     )
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     #: The name agents refer to this remote by. Unique per workspace, not
     #: globally: two tenants naming their own remote "Researcher" is normal.
-    name = Column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
     #: Where the Agent Card lives. Either the card URL itself or the agent's
     #: base URL — the client resolves /.well-known/agent.json from the latter,
     #: because "paste the agent's URL" is what an operator will actually do.
-    card_url = Column(String, nullable=False)
-    description = Column(String, nullable=True)
+    card_url: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     #: "obo" forwards the CALLING user's Databricks token, which keeps the
     #: identity model consistent with the rest of Kasal: work at the far end
     #: runs as the person who asked for it, not as the workspace.
-    auth_type = Column(String, default="obo")  # "obo" | "api_key" | "none"
-    encrypted_api_key = Column(String, nullable=True)
+    auth_type: Mapped[str] = mapped_column(
+        String, default="obo", nullable=True
+    )  # "obo" | "api_key" | "none"
+    encrypted_api_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    enabled = Column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
     #: Available to every agent without being listed per-agent, matching what
     #: the same flag means for an MCP server.
-    global_enabled = Column(Boolean, default=False)
+    global_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
 
-    group_id = Column(String, nullable=True)
-    created_by_email = Column(String, nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_by_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    timeout_seconds = Column(Integer, default=300)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=300, nullable=True)
 
     #: The last card Kasal fetched, cached so the tool description and the UI
     #: can name the remote's skills without a network round-trip per render.
     #: A cache, never a source of truth — a call always re-reads the card when
     #: it needs to resolve a skill.
-    cached_card = Column(JSON, nullable=True)
-    card_fetched_at = Column(DateTime, nullable=True)
+    cached_card: Mapped[Any] = mapped_column(JSON, nullable=True)
+    card_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     #: Why the last card fetch failed, so a misconfigured remote is visible in
     #: the UI instead of only showing up as a tool that silently does nothing.
-    last_error = Column(String, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )

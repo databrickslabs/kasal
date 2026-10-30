@@ -29,6 +29,7 @@ from src.services.memory.run.recall import _task_event_context, _usable_memory
 from src.services.memory.run.write_hygiene import screen_memory_write
 from src.services.memory.text import (
     normalized_text,
+    readable_output,
     says_the_same,
     strip_run_boilerplate,
 )
@@ -71,6 +72,21 @@ def flush_memory_writes(timeout: float = 15.0) -> int:
             timeout,
         )
     return len(not_done)
+
+
+# What reaches memory from one write. A record store keeps the text itself, so
+# it stays short. A fact store keeps only what it extracts, and the extractor
+# can only find what it is shown: with the record budget, an answer that opened
+# with a paragraph of method never showed it a single figure, and a campaign
+# report came back as a one-line note.
+_RECORD_ANSWER_CHARS = 1400
+_RECORD_WRITE_CHARS = 4000
+_FACT_ANSWER_CHARS = 12000
+_FACT_WRITE_CHARS = 13000
+
+
+def _extracts_facts(memory: object) -> bool:
+    return getattr(memory, "extracts_facts", False) is True
 
 
 #: Stricter, because a skipped WRITE cannot be undone while a suppressed snippet
@@ -158,19 +174,24 @@ def remember_async(
     if mem is None or not text:
         return
 
-    verdict = screen_memory_write(text, source=source)
+    verdict = screen_memory_write(text, source=source, memory=mem)
     if not verdict.persist:
         return  # quarantined — write_hygiene has already logged why
     findings = verdict.as_metadata()
     if findings:
         metadata = {**(metadata or {}), **findings}
 
+    facts = _extracts_facts(mem)
+    cap = _FACT_WRITE_CHARS if facts else _RECORD_WRITE_CHARS
+
     def _write() -> None:
         try:
-            if _already_remembered(mem, text, own=pending):
+            # A fact store dedupes per fact, on its key — comparing the whole
+            # turn against one-sentence facts would only spend an embedding.
+            if not facts and _already_remembered(mem, text, own=pending):
                 return
             mem.remember(
-                text[:4000],
+                text[:cap],
                 categories=categories,
                 metadata=metadata,
                 importance=importance,
@@ -185,14 +206,17 @@ def remember_async(
     # writing memory's root scope so the overlay honours the tenant boundary.
     write_scope = getattr(mem, "root_scope", None)
     pending = _PendingMemory(
-        content=text[:4000],
+        content=text[:cap],
         source=source,
         agent_role=agent_role,
         # Only a real scope string counts; see pending_memory_for. Anything else
         # makes the entry unreadable rather than globally readable.
         scope=write_scope if isinstance(write_scope, str) and write_scope else None,
     )
-    _add_pending(pending)
+    # A fact store's write is a whole turn on its way to becoming facts; shown
+    # to the next task as "memory", it would be the raw turn, not a fact.
+    if not facts:
+        _add_pending(pending)
 
     try:
         # copy_context: the caller's ambient event attribution (agent/task set
@@ -214,7 +238,7 @@ def remember_async(
         _drop_pending(pending)
 
 
-def format_turn_for_memory(prompt: str, answer: str) -> str:
+def format_turn_for_memory(prompt: str, answer: str, memory: object = None) -> str:
     """Compact single-record representation of one exchange. The record's
     ``source`` field carries the kind ("chat"/"crew_task") — no prefix here.
 
@@ -222,9 +246,17 @@ def format_turn_for_memory(prompt: str, answer: str) -> str:
     those phrases, so records that carry them all embed close to each other —
     and to every scaffolded query — which is how an off-topic prompt recalled
     a store full of news at 0.84 cosine. The record should embed what the USER
-    asked, not the wrapper."""
+    asked, not the wrapper.
+
+    Pass the ``memory`` the turn is for: a fact store is shown far more of the
+    answer, with JSON tool output made readable, because it keeps only what it
+    extracts and can only extract what it sees."""
     user = strip_run_boilerplate(prompt)[:600]
-    assistant = " ".join((answer or "").split())[:1400]
+    if _extracts_facts(memory):
+        answer, budget = readable_output(answer or ""), _FACT_ANSWER_CHARS
+    else:
+        budget = _RECORD_ANSWER_CHARS
+    assistant = " ".join((answer or "").split())[:budget]
     return f"User: {user}\nAssistant: {assistant}"
 
 
@@ -245,6 +277,11 @@ def _persist_task_output(
     """
     raw = str(getattr(output, "raw", "") or "")
     if not raw.strip():
+        return
+    # A truncated or unverified answer would be recalled into later runs as a
+    # finding. `is True`: getattr on a test double returns a truthy mock.
+    if getattr(output, "degraded", None) is True:
+        logger.info("[memory] task output is degraded; not remembering it")
         return
     task_name = getattr(task, "name", None) or "task"
     description = " ".join(str(getattr(task, "description", "") or "").split())[:300]
@@ -278,7 +315,14 @@ def _persist_task_output(
             # embeds the one-sentence fact and keeps the episode in its own
             # scope. Provenance belongs in metadata, where it can filter and
             # label but cannot score.
-            " ".join(raw.split())[:1400],
+            (
+                # A fact store is not searched by this text; it extracts from
+                # it, and needs to know what the task was for.
+                f"Task: {description}\nResult: "
+                + " ".join(readable_output(raw).split())[:_FACT_ANSWER_CHARS]
+                if _extracts_facts(mem)
+                else " ".join(raw.split())[:_RECORD_ANSWER_CHARS]
+            ),
             source="crew_task",
             agent_role=getattr(output, "agent", None),
             metadata=metadata,

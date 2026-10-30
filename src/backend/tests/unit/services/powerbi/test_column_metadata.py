@@ -7,9 +7,7 @@ from src.services.powerbi import column_metadata as cm
 
 def _resp(status=200, rows=None):
     resp = MagicMock(status_code=status)
-    resp.json.return_value = {
-        "results": [{"tables": [{"rows": rows or []}]}]
-    }
+    resp.json.return_value = {"results": [{"tables": [{"rows": rows or []}]}]}
     return resp
 
 

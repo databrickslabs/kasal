@@ -11,10 +11,13 @@ from __future__ import annotations
 import json
 import threading
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.services.prompt_optimization.gepa.memalign_bridge import _make_embedder
 from src.services.prompt_optimization.judge_registry import JudgeSpec, strip_guidelines
+
+if TYPE_CHECKING:
+    from src.utils.user_context import GroupContext
 
 
 def serialize_memory(aligned: Any) -> Dict[str, Any]:
@@ -35,7 +38,7 @@ def majority_embedder(configs: list) -> Optional[Dict[str, Any]]:
     return json.loads(Counter(choices).most_common(1)[0][0]) if choices else None
 
 
-def load_memory_trace(trace_id: str):
+def load_memory_trace(trace_id: str) -> Any:
     """Expired/deleted traces are absent; auth and connectivity failures are errors."""
     import mlflow
     from mlflow.exceptions import MlflowException
@@ -55,19 +58,19 @@ class JudgeMemory:
         self,
         spec: JudgeSpec,
         loop: Any,
-        embedder_config=None,
-        group_context=None,
-        user_token=None,
-    ):
+        embedder_config: Optional[Dict[str, Any]] = None,
+        group_context: Optional[GroupContext] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
         self.spec = spec
         self.loop = loop
         self.embedder_config = embedder_config
         self.group_context = group_context
         self.user_token = user_token
-        self._judge = None
+        self._judge: Any = None  # mlflow MemoryAugmentedJudge, built lazily
         self._lock = threading.Lock()
 
-    def _load(self):
+    def _load(self) -> Any:
         from mlflow.genai.judges import make_judge
         from mlflow.genai.judges.optimizers.dspy_utils import (
             create_dspy_signature,
@@ -78,6 +81,7 @@ class JudgeMemory:
         )
 
         base, _ = strip_guidelines(self.spec.instructions)
+        memory = self.spec.memory or {}  # instructions() only loads with memory
         judge = MemoryAugmentedJudge(
             base_judge=make_judge(
                 name=self.spec.name,
@@ -85,7 +89,7 @@ class JudgeMemory:
                 model="openai:/kasal-llm-manager",
                 feedback_value_type=float,
             ),
-            retrieval_k=self.spec.memory.get("retrieval_k", 5),
+            retrieval_k=memory.get("retrieval_k", 5),
             embedding_model="openai:/kasal-embedder",
             _defer_init=True,
         )
@@ -95,7 +99,7 @@ class JudgeMemory:
         judge._embedder = _make_embedder(
             self.loop, self.embedder_config, self.group_context, self.user_token
         )
-        judge._episodic_trace_ids = self.spec.memory.get("episodic_trace_ids", [])
+        judge._episodic_trace_ids = memory.get("episodic_trace_ids", [])
         # MLflow's default reconstruction uses get_trace(silent=True), which
         # also hides permission/server errors. Only missing traces may be skipped.
         judge._episodic_memory = []
@@ -129,6 +133,7 @@ class JudgeMemory:
                 signature=judge._base_signature,
             )
             _, guidelines = strip_guidelines(self.spec.instructions)
-            return judge._build_augmented_instructions(
+            augmented: str = judge._build_augmented_instructions(
                 guidelines, [example for example, _ in examples]
             )
+            return augmented

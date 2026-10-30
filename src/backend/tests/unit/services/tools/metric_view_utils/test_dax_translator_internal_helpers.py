@@ -1809,12 +1809,12 @@ class TestParseCalculateFiltersEdge:
         assert "source.Status = 'Active'" in result[0]
 
     def test_filter_with_unresolvable_condition(self, translator):
-        """Line 919-920 — FILTER condition not translatable → not appended."""
+        """An untranslatable FILTER condition refuses the whole filter list."""
         result = translator._parse_calculate_filters(
             "FILTER(Sales, SELECTEDVALUE(Sales[X]))", "fact"
         )
-        # condition not translatable → not appended
-        assert result == []
+        # never a smaller filter: the measure becomes a gap
+        assert result is None
 
 
 # ─── line 442 — DIVIDE args not extractable after resolution in _translate_divide_calc ─

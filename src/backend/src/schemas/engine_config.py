@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -142,3 +142,52 @@ class HarnessUpdate(BaseModel):
     """Change the harness runs default to."""
 
     harness: str = Field(..., description="'kasal' or 'crewai'")
+
+
+class EngineSettings(BaseModel):
+    """Configuration → Engines system settings, with defaults filled in."""
+
+    #: The Jev decisions API URL; None when not set (Jev then stays off).
+    jev_api_base: Optional[str] = None
+    #: How the decision model is reached: "jev" (the API above), "openrouter"
+    #: or "databricks" (the workspace's AI Gateway).
+    decision_connection: str = "jev"
+    #: OpenRouter's API URL (its public API when not set).
+    openrouter_api_base: Optional[str] = None
+    #: The model the Databricks connection asks (the effective value).
+    databricks_decision_model: Optional[str] = None
+    #: Wall-clock seconds for one agent call when the agent sets none (0 = off).
+    agent_max_execution_time: int
+    agent_max_execution_time_default: int
+    #: Effective run budgets per answer mode, and the built-in defaults.
+    budgets: Dict[str, Dict[str, int]]
+    budget_defaults: Dict[str, Dict[str, int]]
+    #: Server-wide scalar settings (memory sweep, knowledge limits): the
+    #: effective value per key, and each key's default and bounds.
+    advanced: Dict[str, Union[bool, int, float, str]] = Field(default_factory=dict)
+    advanced_specs: Dict[str, "EngineSettingSpec"] = Field(default_factory=dict)
+
+
+class EngineSettingSpec(BaseModel):
+    """Default and bounds of one scalar engine setting (drives the form)."""
+
+    default: Union[bool, int, float, str]
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+
+
+class EngineSettingsUpdate(BaseModel):
+    """Partial update. An omitted field is left alone; null (or "") resets it."""
+
+    jev_api_base: Optional[str] = None
+    decision_connection: Optional[str] = None
+    openrouter_api_base: Optional[str] = None
+    databricks_decision_model: Optional[str] = None
+    agent_max_execution_time: Optional[int] = Field(default=None, ge=0, le=86400)
+    #: {mode: {field: value}}; a null value resets that field to its default.
+    budgets: Optional[Dict[str, Dict[str, Optional[int]]]] = None
+    #: {key: value}; a null value resets that setting to its default.
+    advanced: Optional[Dict[str, Optional[Union[bool, int, float, str]]]] = None
+
+
+EngineSettings.model_rebuild()

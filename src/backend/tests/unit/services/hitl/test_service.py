@@ -1412,3 +1412,16 @@ async def test_required_comment_rejected_before_deciding(
             mock_approval.id, "reviewer@example.com", "group-1", comment=comment
         )
     hitl_service.approval_repo.update_status.assert_not_awaited()
+
+
+class TestGetApprovalCoercesId:
+    """Cross-domain callers hold the approval id as ``str(approval.id)``; the
+    column is an integer and asyncpg rejects a str bound to it."""
+
+    @pytest.mark.asyncio
+    async def test_string_id_is_queried_as_int(
+        self, hitl_service, mock_approval_repository
+    ):
+        mock_approval_repository.get_by_id = AsyncMock(return_value=None)
+        await hitl_service.get_approval("42")
+        mock_approval_repository.get_by_id.assert_awaited_once_with(42)

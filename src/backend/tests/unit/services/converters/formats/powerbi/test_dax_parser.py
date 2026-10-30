@@ -238,25 +238,6 @@ class TestDAXExpressionParser:
 
     # ========== Transpilability Tests ==========
 
-    def test_check_transpilability_simple(self, parser):
-        """Test transpilability check for simple expression"""
-        expression = "SUM(Sales[Amount])"
-        is_transpilable, reason = parser.check_transpilability(expression)
-
-        assert isinstance(is_transpilable, bool)
-        if not is_transpilable:
-            assert reason is not None
-
-    def test_check_transpilability_with_measures(self, parser):
-        """Test transpilability check with measures list"""
-        expression = "[Total Sales]"
-        measures_list = ["Total Sales"]
-        is_transpilable, reason = parser.check_transpilability(
-            expression, measures_list
-        )
-
-        assert isinstance(is_transpilable, bool)
-
     def test_parse_advanced_transpilability_result(self, parser):
         """Test advanced parse includes transpilability info"""
         expression = "SUM(Sales[Amount])"
@@ -460,11 +441,6 @@ class TestDAXExpressionParserEdgeCases:
         result = parser._format_filter(raw)
         assert "  " not in result  # no double spaces
         assert result.strip() == result
-
-    # --- check_transpilability ---
-    def test_check_transpilability_returns_tuple(self, parser):
-        is_transpilable, reason = parser.check_transpilability("SUM(Sales[Amount])")
-        assert isinstance(is_transpilable, bool)
 
     # --- parse() basic coverage ---
     def test_parse_empty_expression(self, parser):

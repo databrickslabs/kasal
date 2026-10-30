@@ -252,14 +252,14 @@ class TestMergeSimilarMemories:
         memory, _ = _memory_with_records(tmp_path, 30, llm=None)
         assert merge_similar_memories(memory)["merged_clusters"] == 0
 
-    def test_env_kill_switch(self, tmp_path, monkeypatch):
+    def test_tuning_kill_switch(self, tmp_path):
         from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
-        monkeypatch.setenv("KASAL_MEMORY_LLM_CONSOLIDATION", "false")
         llm = _FakeLLM("[]")
         memory, _ = _memory_with_records(tmp_path, 30, llm=llm)
+        memory.llm_consolidation_enabled = False  # Memory Tuning
         merge_similar_memories(memory)
         assert not llm.prompts
 

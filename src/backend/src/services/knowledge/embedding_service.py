@@ -6,13 +6,13 @@ Separated from DatabricksKnowledgeService for clean architecture.
 """
 
 import logging
-import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
 
 # TTL for uploaded knowledge embeddings: rows older than this are purged and
 # excluded from search, so the store never accumulates stale uploads. 0 or a
@@ -29,7 +29,13 @@ logger = logging.getLogger(__name__)
 # and a daily sweep (``main.py``) removes rows from disk even in a workspace
 # where nobody uploads again — without it, "we keep files for 7 days" would be
 # true of search results and false of the database.
-KNOWLEDGE_TTL_DAYS = int(os.getenv("KNOWLEDGE_TTL_DAYS", "7"))
+#
+# The number of days is Configuration → Engines → Advanced (was the
+# KNOWLEDGE_TTL_DAYS env var); 0 keeps uploads forever.
+def knowledge_ttl_days() -> int:
+    from src.services.settings import engine_settings
+
+    return int(engine_settings.setting(engine_settings.KNOWLEDGE_TTL_DAYS))
 
 
 class KnowledgeEmbeddingService:
@@ -345,7 +351,7 @@ class KnowledgeEmbeddingService:
             return 0
 
     async def purge_expired(self, user_token: Optional[str] = None) -> int:
-        """Delete knowledge embeddings past the TTL (KNOWLEDGE_TTL_DAYS).
+        """Delete knowledge embeddings past the TTL (``knowledge_ttl_days()``).
 
         Runs opportunistically before each upload so the table never
         accumulates stale uploads — there is no scheduler dependency. Search
@@ -355,7 +361,8 @@ class KnowledgeEmbeddingService:
         Returns:
             Number of purged chunk rows.
         """
-        if KNOWLEDGE_TTL_DAYS <= 0:
+        ttl_days = knowledge_ttl_days()
+        if ttl_days <= 0:
             return 0
         from src.models.documentation_embedding import KnowledgeEmbedding
         from src.repositories.documentation_embedding_repository import (
@@ -363,7 +370,7 @@ class KnowledgeEmbeddingService:
         )
         from src.services.knowledge.embedding_session import knowledge_embedding_session
 
-        cutoff = datetime.utcnow() - timedelta(days=KNOWLEDGE_TTL_DAYS)
+        cutoff = datetime.utcnow() - timedelta(days=ttl_days)
         try:
             async with knowledge_embedding_session(
                 self.session, self.group_id, user_token
@@ -395,7 +402,7 @@ class KnowledgeEmbeddingService:
                 if purged:
                     logger.info(
                         f"[EMBEDDING] TTL purge removed {purged} knowledge chunks "
-                        f"older than {KNOWLEDGE_TTL_DAYS} days"
+                        f"older than {ttl_days} days"
                     )
                 return purged
         except Exception as e:

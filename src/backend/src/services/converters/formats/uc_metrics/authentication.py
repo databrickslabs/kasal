@@ -13,6 +13,25 @@ Supports multiple authentication methods:
 import logging
 from typing import Dict, Optional
 
+from src.utils.url_security import (
+    UnsafeUrlError,
+    check_url_structure,
+    is_trusted_databricks_host,
+)
+
+
+def require_databricks_workspace(url: str) -> str:
+    """``url`` when it is an https Databricks workspace URL; raises otherwise.
+
+    Every request to the workspace carries a credential (a client secret, a PAT
+    or an OAuth token), so a caller-supplied ``workspace_url`` must never be able
+    to aim one at another host.
+    """
+    check_url_structure(url)
+    if not is_trusted_databricks_host(url):
+        raise UnsafeUrlError(f"Not a Databricks workspace URL: {url}")
+    return url
+
 
 class DatabricksAuthService:
     """
@@ -119,7 +138,7 @@ class DatabricksAuthService:
         # Priority 4: Database credentials (future implementation)
         if self.use_database:
             self.logger.info("Fetching credentials from database")
-            credentials = self._get_credentials_from_database()
+            credentials = self._get_credentials_from_database() or {}
             if credentials.get("api_key"):
                 return credentials["api_key"]
             elif credentials.get("client_id") and credentials.get("client_secret"):
@@ -160,19 +179,21 @@ class DatabricksAuthService:
         client_id = client_id or self.client_id
         client_secret = client_secret or self.client_secret
 
-        if not all([client_id, client_secret]):
+        if not client_id or not client_secret:
             raise ValueError(
                 "Incomplete Service Principal credentials. Required: client_id, client_secret"
             )
 
         try:
-            # Databricks OAuth token endpoint
-            token_url = f"{self.workspace_url}/oidc/v1/token"
+            # Databricks OAuth token endpoint — the client secret is sent to it.
+            token_url = (
+                f"{require_databricks_workspace(self.workspace_url)}/oidc/v1/token"
+            )
 
             self.logger.info(f"Acquiring token for workspace: {self.workspace_url}")
 
             # Request access token using client credentials grant
-            response = requests.post(
+            response = requests.post(  # workspace_url passed require_databricks_workspace — nosemgrep: tmp.databricks.ssrf.requests-user-url
                 token_url,
                 data={
                     "grant_type": "client_credentials",
@@ -187,7 +208,8 @@ class DatabricksAuthService:
 
             if "access_token" in result:
                 self.logger.info("Access token acquired successfully")
-                return result["access_token"]
+                token: str = result["access_token"]
+                return token
             else:
                 raise Exception(f"Failed to acquire access token. Response: {result}")
 

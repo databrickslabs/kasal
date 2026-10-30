@@ -44,7 +44,8 @@ def _isolate_lakebase_env(monkeypatch):
     # Remove env vars that change code paths inside lakebase_session
     for _var in (
         "USE_NULLPOOL",
-        "LAKEBASE_INSTANCE_NAME",
+        "KASAL_LAKEBASE_RESOURCE",
+        "DATABRICKS_APP_NAME",
         "DATABRICKS_HOST",
         "DATABRICKS_CLIENT_ID",
         "DATABRICKS_CLIENT_SECRET",
@@ -52,6 +53,8 @@ def _isolate_lakebase_env(monkeypatch):
         "DATABRICKS_API_KEY",
     ):
         monkeypatch.delenv(_var, raising=False)
+    # The instance an unnamed factory/session resolves to (the Apps binding).
+    monkeypatch.setenv("KASAL_LAKEBASE_RESOURCE", "test-instance")
 
     yield
 
@@ -70,8 +73,8 @@ class TestLakebaseSessionFactoryInit:
         """Test factory initializes with correct defaults."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
-        assert factory.instance_name == "kasal-lakebase"
+        factory = LakebaseSessionFactory("test-instance")
+        assert factory.instance_name == "test-instance"
         assert factory.user_token is None
         assert factory.user_email is None
         assert factory.group_id is None
@@ -80,6 +83,22 @@ class TestLakebaseSessionFactoryInit:
         assert factory._session_factory is None
         assert factory._token_holder == {"token": "", "refreshed_at": 0.0}
         assert factory._refresh_task is None
+
+    def test_no_instance_name_and_no_binding_raises(self, monkeypatch):
+        """There is no invented default instance (it used to be kasal-lakebase)."""
+        from src.core.exceptions import LakebaseNotConfiguredError
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        monkeypatch.delenv("KASAL_LAKEBASE_RESOURCE", raising=False)
+
+        with pytest.raises(LakebaseNotConfiguredError):
+            LakebaseSessionFactory()
+
+    def test_no_instance_name_uses_the_apps_binding(self, monkeypatch):
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        monkeypatch.setenv("KASAL_LAKEBASE_RESOURCE", "bound-instance")
+        assert LakebaseSessionFactory().instance_name == "bound-instance"
 
     def test_custom_parameters(self):
         """Test factory initializes with provided arguments."""
@@ -100,8 +119,8 @@ class TestLakebaseSessionFactoryInit:
         """Test token holder is a fresh mutable dict on each instance."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        f1 = LakebaseSessionFactory()
-        f2 = LakebaseSessionFactory()
+        f1 = LakebaseSessionFactory("test-instance")
+        f2 = LakebaseSessionFactory("test-instance")
         assert f1._token_holder is not f2._token_holder
 
 
@@ -134,7 +153,7 @@ class TestGetWorkspaceClient:
         """Test that the same client is returned without calling get_workspace_client again."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_client = MagicMock()
 
         with patch(
@@ -153,7 +172,7 @@ class TestGetWorkspaceClient:
         """Test ValueError when get_workspace_client returns None."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         with patch(
             "src.utils.databricks_auth.get_workspace_client",
@@ -169,7 +188,7 @@ class TestGetWorkspaceClient:
         """Test that exceptions from get_workspace_client propagate."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         with patch(
             "src.utils.databricks_auth.get_workspace_client",
@@ -185,7 +204,7 @@ class TestGetWorkspaceClient:
         """Test that SPN OAuth is preferred when all env vars are present."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         env = {
             "DATABRICKS_CLIENT_ID": "test-client-id",
             "DATABRICKS_CLIENT_SECRET": "test-secret",
@@ -238,7 +257,7 @@ class TestGetWorkspaceClient:
         ):
             os.environ.pop(v, None)
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_ws = MagicMock()
         with patch(
             "src.db.lakebase_session.WorkspaceClient", return_value=mock_ws
@@ -259,7 +278,7 @@ class TestGetWorkspaceClient:
         """Test that SPN workspace client is cached on subsequent calls."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         env = {
             "DATABRICKS_CLIENT_ID": "test-client-id",
             "DATABRICKS_CLIENT_SECRET": "test-secret",
@@ -336,7 +355,7 @@ class TestGetUsername:
         from src.db.lakebase_session import LakebaseSessionFactory
 
         monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        factory = LakebaseSessionFactory()  # no user_email
+        factory = LakebaseSessionFactory("test-instance")  # no user_email
 
         mock_user = MagicMock()
         mock_user.user_name = "workspace-user@example.com"
@@ -359,7 +378,7 @@ class TestGetUsername:
         from src.db.lakebase_session import LakebaseSessionFactory
 
         monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         mock_client = MagicMock()
         mock_client.current_user.me.side_effect = Exception("no user")
@@ -379,7 +398,7 @@ class TestGetUsername:
         from src.db.lakebase_session import LakebaseSessionFactory
 
         monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         mock_user = MagicMock()
         mock_user.user_name = ""  # empty
@@ -445,7 +464,7 @@ class TestScheduleTokenRefresh:
         """Test that the refresh loop respects cancellation."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         with patch.object(
             factory, "_refresh_token", new_callable=AsyncMock
@@ -465,7 +484,7 @@ class TestScheduleTokenRefresh:
         """Test that the refresh loop retries on errors and stops on cancel."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         call_count = 0
 
         async def controlled_sleep(seconds):
@@ -590,7 +609,7 @@ class TestGetConnectionString:
         """Test that errors from _get_workspace_client propagate."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         with patch.object(
             factory,
@@ -613,7 +632,7 @@ class TestCreateEngine:
         """Test that create_engine creates engine, session factory, and starts refresh task."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_engine = MagicMock()
         mock_engine.sync_engine = MagicMock()
         mock_sf = MagicMock()
@@ -655,7 +674,7 @@ class TestCreateEngine:
         """Test that an existing engine is disposed before creating a new one."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         old_engine = AsyncMock()
         factory._engine = old_engine
 
@@ -690,7 +709,7 @@ class TestCreateEngine:
         """Test that an existing refresh task is cancelled before creating a new one."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         old_task = MagicMock()
         old_task.done.return_value = False
         factory._refresh_task = old_task
@@ -725,7 +744,7 @@ class TestCreateEngine:
         """Test that a completed refresh task is not cancelled."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         old_task = MagicMock()
         old_task.done.return_value = True
         factory._refresh_task = old_task
@@ -760,7 +779,7 @@ class TestCreateEngine:
         """Test that errors from get_connection_string propagate."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         with patch.object(
             factory,
@@ -776,7 +795,7 @@ class TestCreateEngine:
         """Test that async_sessionmaker is configured correctly."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_engine = MagicMock()
         mock_engine.sync_engine = MagicMock()
 
@@ -819,7 +838,7 @@ class TestGetSession:
         """Test that get_session yields a session from the session factory."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         # Mock session factory as an async context manager
@@ -841,7 +860,7 @@ class TestGetSession:
         """Test that get_session creates engine when _engine is None."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         # get_session now manages the session lifecycle manually (the
@@ -868,7 +887,7 @@ class TestGetSession:
         """Test that get_session creates engine when _session_factory is None."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         factory._engine = MagicMock()  # engine exists but session factory doesn't
         mock_session = AsyncMock()
 
@@ -894,7 +913,7 @@ class TestGetSession:
         """Test that engine creation errors propagate from get_session."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         with patch.object(
             factory,
@@ -911,7 +930,7 @@ class TestGetSession:
         """Test that token/auth errors trigger engine recreation and re-raise."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         mock_sf = MagicMock()
@@ -937,7 +956,7 @@ class TestGetSession:
         """Test that password-related errors also trigger engine recreation."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         # get_session now manages the session lifecycle manually (the
@@ -959,7 +978,7 @@ class TestGetSession:
         """Test that non-auth errors propagate without recreating the engine."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         # get_session now manages the session lifecycle manually (the
@@ -983,7 +1002,7 @@ class TestGetSession:
         """Test that GeneratorExit inside the session block is caught and does not propagate."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         # get_session now manages the session lifecycle manually (the
@@ -1018,7 +1037,7 @@ class TestDispose:
         """Test that dispose cancels the refresh task and disposes the engine."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
 
         # Create a real asyncio.Future so it supports cancel() / done() / await natively
         loop = asyncio.get_running_loop()
@@ -1046,7 +1065,7 @@ class TestDispose:
         """Test dispose is safe to call when nothing is initialized."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         # All None by default - should not raise
         await factory.dispose()
         assert factory._engine is None
@@ -1057,7 +1076,7 @@ class TestDispose:
         """Test that a completed task is not cancelled during dispose."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_task = MagicMock()
         mock_task.done.return_value = True
         factory._refresh_task = mock_task
@@ -1139,7 +1158,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = None
 
@@ -1167,7 +1186,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = None
 
@@ -1198,7 +1217,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = None
 
@@ -1225,7 +1244,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = None
 
@@ -1254,7 +1273,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = None
 
@@ -1273,7 +1292,7 @@ class TestGetLakebaseSession:
         """Test that a new factory is created when _lakebase_factory is None."""
         import src.db.lakebase_session as mod
 
-        monkeypatch.setenv("LAKEBASE_INSTANCE_NAME", "env-instance")
+        monkeypatch.setenv("KASAL_LAKEBASE_RESOURCE", "env-instance")
 
         mock_session = AsyncMock()
         mock_inner_ctx = AsyncMock()
@@ -1349,7 +1368,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
 
         mock_factory = MagicMock()
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_email = None
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
         mock_factory.create_engine = AsyncMock()
@@ -1377,7 +1396,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
 
         mock_factory = MagicMock()
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = "old@example.com"
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
@@ -1406,7 +1425,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
 
         mock_factory = MagicMock()
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = "same-token"
         mock_factory.user_email = None
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
@@ -1424,11 +1443,11 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = original
 
     @pytest.mark.asyncio
-    async def test_default_instance_name_from_env(self, monkeypatch):
-        """Test that default instance name comes from LAKEBASE_INSTANCE_NAME env var."""
+    async def test_default_instance_name_from_the_apps_binding(self, monkeypatch):
+        """With no name passed, the Apps binding (KASAL_LAKEBASE_RESOURCE) is used."""
         import src.db.lakebase_session as mod
 
-        monkeypatch.setenv("LAKEBASE_INSTANCE_NAME", "custom-from-env")
+        monkeypatch.setenv("KASAL_LAKEBASE_RESOURCE", "custom-from-env")
 
         mock_session = AsyncMock()
         mock_inner_ctx = AsyncMock()
@@ -1460,10 +1479,9 @@ class TestGetLakebaseSession:
 
     @pytest.mark.asyncio
     async def test_default_instance_name_fallback(self, monkeypatch):
-        """Test that instance name falls back to 'kasal-lakebase' when env var is not set."""
+        """With no name passed, the Apps binding names the instance (the fixture
+        sets KASAL_LAKEBASE_RESOURCE=test-instance); nothing is invented."""
         import src.db.lakebase_session as mod
-
-        monkeypatch.delenv("LAKEBASE_INSTANCE_NAME", raising=False)
 
         mock_session = AsyncMock()
         mock_inner_ctx = AsyncMock()
@@ -1476,7 +1494,7 @@ class TestGetLakebaseSession:
 
             with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
                 mock_factory_instance = MagicMock()
-                mock_factory_instance.instance_name = "kasal-lakebase"
+                mock_factory_instance.instance_name = "test-instance"
                 mock_factory_instance.user_token = None
                 mock_factory_instance.user_email = None
                 mock_factory_instance.get_session = MagicMock(
@@ -1488,7 +1506,7 @@ class TestGetLakebaseSession:
                     pass
 
                 MockFactory.assert_called_once_with(
-                    "kasal-lakebase", user_email=None, group_id=None
+                    "test-instance", user_email=None, group_id=None
                 )
         finally:
             mod._lakebase_factory = original
@@ -1504,7 +1522,7 @@ class TestGetLakebaseSession:
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
 
         mock_factory = MagicMock()
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_token = None
         mock_factory.user_email = None
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
@@ -1567,7 +1585,7 @@ class TestMissingCoverage:
         """Line 87: PAT env vars are stripped (popped) while creating SPN client."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
         monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "secret")
         monkeypatch.setenv("DATABRICKS_HOST", "https://example.com")
@@ -1625,7 +1643,7 @@ class TestMissingCoverage:
         """Lines 276-277: dispose error on old engine is swallowed."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         old_engine = AsyncMock()
         old_engine.dispose.side_effect = RuntimeError("event loop closed")
         factory._engine = old_engine
@@ -1674,7 +1692,7 @@ class TestMissingCoverage:
         from src.db.lakebase_session import LakebaseSessionFactory
 
         monkeypatch.setenv("USE_NULLPOOL", "true")
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
         mock_task = MagicMock()
@@ -1711,7 +1729,7 @@ class TestMissingCoverage:
         """An old refresh task whose loop is gone must not break engine recreation."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         old_task = MagicMock()
         old_task.done.return_value = False
         old_task.cancel.side_effect = RuntimeError("Event loop is closed")
@@ -1747,7 +1765,7 @@ class TestMissingCoverage:
         """Line 327: the inject_token event listener sets cparams['password'] from holder."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         factory._token_holder["token"] = "injected-token"
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
@@ -1793,7 +1811,7 @@ class TestMissingCoverage:
         """Lines 340-341: engine_loop_id set to None when no running loop available."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
@@ -1827,7 +1845,7 @@ class TestMissingCoverage:
         """Lines 362-363: _is_engine_loop_stale returns True on RuntimeError (no running loop)."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         factory._engine = MagicMock()
         factory._engine_loop_id = 12345  # not None so we reach the loop check
 
@@ -1842,7 +1860,7 @@ class TestMissingCoverage:
         """Line 390: GeneratorExit thrown into the session block is caught silently."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_session = AsyncMock()
 
         # get_session now manages the session lifecycle manually (the
@@ -1869,7 +1887,7 @@ class TestMissingCoverage:
         """Lines 416-417: dispose() swallows errors from engine.dispose()."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_engine = AsyncMock()
         mock_engine.dispose.side_effect = RuntimeError("loop closed")
         factory._engine = mock_engine
@@ -2013,7 +2031,7 @@ class TestMissingCoverage:
         mock_inner_ctx.__aexit__ = AsyncMock(return_value=False)
 
         mock_factory = MagicMock()
-        mock_factory.instance_name = "kasal-lakebase"
+        mock_factory.instance_name = "test-instance"
         mock_factory.user_email = None
         mock_factory.get_session = MagicMock(return_value=mock_inner_ctx)
 
@@ -2041,7 +2059,7 @@ class TestLazyTokenRefresh:
     def _factory_with_session(self):
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         mock_sf = MagicMock()
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=AsyncMock())
@@ -2132,7 +2150,7 @@ class TestLazyTokenRefresh:
             LakebaseSessionFactory,
         )
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         factory._token_holder["refreshed_at"] = (
             _time.time() - TOKEN_REFRESH_INTERVAL_SECONDS - 1
         )
@@ -2152,7 +2170,7 @@ class TestCancellationSafeTeardown:
     def _factory_with(self, mock_session):
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         factory._engine = MagicMock()
         factory._session_factory = MagicMock(return_value=mock_session)
         factory._engine_loop_id = id(asyncio.get_event_loop())
@@ -2226,7 +2244,7 @@ class TestDomainErrorsNotLoggedAsSessionErrors:
     def _factory_with(self, mock_session):
         from src.db.lakebase_session import LakebaseSessionFactory
 
-        factory = LakebaseSessionFactory()
+        factory = LakebaseSessionFactory("test-instance")
         factory._engine = MagicMock()
         factory._session_factory = MagicMock(return_value=mock_session)
         factory._engine_loop_id = id(asyncio.get_event_loop())

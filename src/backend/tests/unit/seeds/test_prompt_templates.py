@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.seeds.errors import SeederIncomplete
 from src.seeds.prompt_templates import (
     DEFAULT_TEMPLATES,
     DETECT_INTENT_TEMPLATE,
@@ -232,13 +233,14 @@ class TestSeedEntryPoint:
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_seed_does_not_raise_on_error(self):
-        """Test that seed() suppresses exceptions and logs them."""
+    async def test_seed_reraises_on_error(self):
+        """seed() logs the failure and re-raises it for the runner to report."""
         with patch(
             "src.seeds.prompt_templates.seed_async", new_callable=AsyncMock
         ) as mock:
             mock.side_effect = Exception("Seed failure")
-            await seed()
+            with pytest.raises(Exception, match="Seed failure"):
+                await seed()
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -249,7 +251,8 @@ class TestSeedEntryPoint:
         ) as mock_async:
             with patch("src.seeds.prompt_templates.logger") as mock_logger:
                 mock_async.side_effect = Exception("Test error")
-                await seed()
+                with pytest.raises(Exception, match="Test error"):
+                    await seed()
 
                 mock_logger.info.assert_any_call(
                     "Starting prompt templates seeding process..."
@@ -282,7 +285,7 @@ class TestSeedAsyncRaceConditionUpdate:
     @pytest.mark.asyncio
     async def test_seed_async_race_condition_updates_existing(self):
         """Lines 826-831: template not in existing_names but found in DB check."""
-        mock_existing_template = MagicMock()
+        mock_existing_template = MagicMock(is_active=False)
 
         # Use a single-item DEFAULT_TEMPLATES to keep it simple
         test_templates = [DEFAULT_TEMPLATES[0]]
@@ -322,7 +325,7 @@ class TestSeedAsyncRaceConditionUpdate:
         # Should have updated the existing template's fields (race condition path)
         assert mock_existing_template.description == test_templates[0]["description"]
         assert mock_existing_template.template == test_templates[0]["template"]
-        assert mock_existing_template.is_active == test_templates[0]["is_active"]
+        assert mock_existing_template.is_active is False  # not part of what ships
         assert mock_existing_template.updated_at is not None
 
 
@@ -332,16 +335,15 @@ class TestSeedAsyncUpdateExistingNames:
     @pytest.mark.asyncio
     async def test_seed_async_updates_template_in_existing_names(self):
         """Lines 847-858: template is in existing_names, fetched and updated."""
-        mock_existing_template = MagicMock()
+        mock_existing_template = MagicMock(is_active=False)
         test_templates = [DEFAULT_TEMPLATES[0]]
         template_name = test_templates[0]["name"]
 
         # Session for initial query: returns the template name as existing
-        # Note: code does {row[0] for row in result.scalars().all()}
-        # so we return tuples so row[0] gives the full name
+        # scalars() of select(PromptTemplate.name) yields the name strings
         mock_initial_session = AsyncMock()
         initial_result = MagicMock()
-        initial_result.scalars.return_value.all.return_value = [(template_name,)]
+        initial_result.scalars.return_value.all.return_value = [template_name]
         mock_initial_session.execute = AsyncMock(return_value=initial_result)
 
         # Session for per-template work
@@ -369,10 +371,10 @@ class TestSeedAsyncUpdateExistingNames:
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 await seed_async()
 
-        # Should have updated existing template
+        # Should have updated existing template, leaving is_active as it was
         assert mock_existing_template.description == test_templates[0]["description"]
         assert mock_existing_template.template == test_templates[0]["template"]
-        assert mock_existing_template.is_active == test_templates[0]["is_active"]
+        assert mock_existing_template.is_active is False
 
 
 class TestSeedAsyncCommitExceptions:
@@ -457,7 +459,8 @@ class TestSeedAsyncCommitExceptions:
         ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
-                    await seed_async()
+                    with pytest.raises(SeederIncomplete):
+                        await seed_async()
 
         mock_template_session.rollback.assert_awaited()
         # Should log error (not warning)
@@ -495,14 +498,16 @@ class TestSeedAsyncCommitExceptions:
         # the `async with` statement. Since __aenter__ fails, session won't be
         # bound. But Python's `with` will raise before binding. The except block
         # references `session` which would be the mock_initial_session from the
-        # prior `async with` (the initial query). Let's just verify no crash.
+        # prior `async with` (the initial query). The failure is counted and
+        # reported as SeederIncomplete once every template has had its turn.
         with patch(
             "src.seeds.prompt_templates.async_session_factory",
             side_effect=session_factory,
         ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
-                    await seed_async()
+                    with pytest.raises(SeederIncomplete):
+                        await seed_async()
 
         mock_logger.error.assert_called()
 

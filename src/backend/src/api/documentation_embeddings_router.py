@@ -4,7 +4,7 @@ API endpoints for documentation embeddings.
 This module provides endpoints for managing and searching documentation embeddings.
 """
 
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, Query
 
@@ -12,6 +12,9 @@ from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.documentation_embedding import (
+    DocumentationEmbedding as DocumentationEmbeddingModel,
+)
 from src.schemas.documentation_embedding import (
     DocumentationEmbedding as DocumentationEmbeddingSchema,
 )
@@ -19,6 +22,7 @@ from src.schemas.documentation_embedding import (
     DocumentationEmbeddingCreate,
 )
 from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
+from src.utils.request_identity import resolve_request_identity
 
 logger = LoggerManager.get_instance().api
 
@@ -65,14 +69,17 @@ async def create_documentation_embedding(
     x_auth_request_access_token: Optional[str] = Header(
         None, alias="X-Auth-Request-Access-Token"
     ),
-):
+) -> DocumentationEmbeddingModel:
     """Create a new documentation embedding."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError(
             "Only editors and admins can create documentation embeddings"
         )
-    # Extract user token from headers (OAuth2-Proxy takes priority)
-    user_token = x_auth_request_access_token or x_forwarded_access_token
+    # Shared resolver: X-Forwarded-* only inside Databricks Apps.
+    user_token = resolve_request_identity(
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_access_token=x_auth_request_access_token,
+    ).access_token
     result = await service.create_documentation_embedding(
         embedding, user_token=user_token
     )
@@ -82,10 +89,10 @@ async def create_documentation_embedding(
 @router.get("/search", response_model=List[DocumentationEmbeddingSchema])
 async def search_documentation_embeddings(
     service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
     query_embedding: List[float] = Query(..., description="Query embedding vector"),
     limit: int = Query(5, ge=1, le=20, description="Maximum number of results"),
-    group_context: GroupContextDep = None,
-):
+) -> List[DocumentationEmbeddingModel]:
     """Search for similar documentation embeddings."""
     results = await service.search_similar_embeddings(
         query_embedding=query_embedding, limit=limit
@@ -96,14 +103,14 @@ async def search_documentation_embeddings(
 @router.get("/", response_model=List[DocumentationEmbeddingSchema])
 async def get_documentation_embeddings(
     service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(
         100, ge=1, le=1000, description="Maximum number of items to return"
     ),
     source: Optional[str] = Query(None, description="Filter by source"),
     title: Optional[str] = Query(None, description="Filter by title (partial match)"),
-    group_context: GroupContextDep = None,
-):
+) -> List[Dict[str, Any]]:
     """Get documentation embeddings with optional filtering."""
     if source:
         results = await service.search_by_source(source, skip, limit)
@@ -134,9 +141,9 @@ async def get_documentation_embeddings(
 @router.get("/recent", response_model=List[DocumentationEmbeddingSchema])
 async def get_recent_documentation_embeddings(
     service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
     limit: int = Query(10, ge=1, le=50, description="Maximum number of recent items"),
-    group_context: GroupContextDep = None,
-):
+) -> List[DocumentationEmbeddingModel]:
     """Get the most recently created documentation embeddings."""
     results = await service.get_recent_embeddings(limit)
     return results
@@ -146,8 +153,8 @@ async def get_recent_documentation_embeddings(
 async def get_documentation_embedding(
     embedding_id: int,
     service: DocumentationEmbeddingServiceDep,
-    group_context: GroupContextDep = None,
-):
+    group_context: GroupContextDep,
+) -> DocumentationEmbeddingModel:
     """Get a specific documentation embedding by ID."""
     result = await service.get_documentation_embedding(embedding_id)
 
@@ -157,12 +164,12 @@ async def get_documentation_embedding(
     return result
 
 
-@router.delete("/{embedding_id}")
+@router.delete("/{embedding_id}", response_model=None)
 async def delete_documentation_embedding(
     embedding_id: int,
     service: DocumentationEmbeddingServiceDep,
-    group_context: GroupContextDep = None,
-):
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
     """Delete a documentation embedding by ID."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError(

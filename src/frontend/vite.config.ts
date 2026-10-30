@@ -1,4 +1,4 @@
-import { defineConfig, type UserConfig } from 'vite';
+import { defineConfig, loadEnv, type UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
 import path from 'path';
@@ -6,9 +6,22 @@ import { createRequire } from 'node:module';
 
 const { preparePublic } = createRequire(import.meta.url)('../scripts/build-tasks.cjs');
 
+/**
+ * The local backend's port: VITE_KASAL_PORT, else KASAL_PORT (what run.sh
+ * reads), else 8000. Used for the /api proxy, and handed to the browser as
+ * import.meta.env.VITE_KASAL_PORT (see src/shared/api/backendOrigin.ts).
+ */
+function resolveBackendPort(env: Record<string, string>): string {
+  const raw = (env.VITE_KASAL_PORT || env.KASAL_PORT || '').trim();
+  const port = Number(raw);
+  return /^\d+$/.test(raw) && port > 0 && port <= 65535 ? raw : '8000';
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const analyze = process.env.ANALYZE === 'true';
+  // '' prefix: read KASAL_PORT as well as VITE_* from .env files and the shell.
+  const backendPort = resolveBackendPort(loadEnv(mode, __dirname, ''));
 
   const config: UserConfig = {
     // Development, direct Vite builds and npm builds all use the same docs
@@ -45,7 +58,7 @@ export default defineConfig(({ mode }) => {
       open: true,
       proxy: {
         '/api': {
-          target: 'http://localhost:8000',
+          target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
       },
@@ -65,6 +78,17 @@ export default defineConfig(({ mode }) => {
       // terser mangles correctly; the 4GB NODE_OPTIONS heap (build script) covers
       // its higher memory use.
       minify: 'terser',
+      // Keep debug logging out of production. console.log/info/debug/trace and
+      // `debugger` are dropped; console.warn and console.error are kept so
+      // real problems still reach the browser console. (Stripping was lost when
+      // the build briefly moved to esbuild and then oxc, neither of which could
+      // express it here; terser can, and it is the minifier again.)
+      terserOptions: {
+        compress: {
+          drop_console: ['log', 'info', 'debug', 'trace'],
+          drop_debugger: true,
+        },
+      },
       // Manual vendor/mui/redux chunk grouping removed: rolldown-vite types
       // reject the object form of manualChunks, and rolldown's default
       // chunking already splits vendors sensibly. Re-add via
@@ -76,16 +100,6 @@ export default defineConfig(({ mode }) => {
       reportCompressedSize: false,
     },
 
-    // Strip console.*/debugger from production bundles (previously handled by
-    // terserOptions.compress; esbuild's `drop` is the equivalent). The literal
-    // cast is required because rolldown-vite types `drop` as
-    // ('console' | 'debugger')[], and a bare array infers as string[].
-    // NOTE: console/debugger stripping via `esbuild.drop` was removed —
-    // rolldown-vite dropped the esbuild transform (transformWithEsbuild) and the
-    // block broke the build. Stripping is cosmetic (dev-noise only); the default
-    // oxc minifier still fully minifies the bundle. Re-add via oxc minify options
-    // if console removal is required.
-
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-router-dom'],
     },
@@ -93,6 +107,8 @@ export default defineConfig(({ mode }) => {
     define: {
       // Handle process.env for libraries that might use it
       'process.env': {},
+      // So `KASAL_PORT=8001 npm start` reaches a backend started the same way.
+      'import.meta.env.VITE_KASAL_PORT': JSON.stringify(backendPort),
     },
   };
   return config;

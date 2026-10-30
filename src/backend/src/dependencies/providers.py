@@ -1,34 +1,99 @@
 """FastAPI session, request-context and generic dependency providers."""
 
 import logging
-import os
-from typing import Annotated, Callable, Optional, Type
+from typing import Annotated, AsyncIterator, Callable, Optional, Type
 
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
+from src.core.databricks_app import is_production
+from src.core.exceptions import ForbiddenError, KasalError, UnauthorizedError
 from src.db.base import Base
 from src.db.database_router import get_smart_db_session
-from src.db.session import get_db, get_local_db
+from src.db.session import get_local_db
+from src.utils.request_identity import (
+    resolve_request_identity,
+    running_in_databricks_apps,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger("src.core.dependencies")
 
-# Type definitions for dependencies
-# Use smart session that automatically selects between regular DB and Lakebase
-SessionDep = Annotated[AsyncSession, Depends(get_smart_db_session)]
-# Ordinary mutation endpoints must commit before their response is sent. Keep
-# SessionDep for streams and consumers that need a session during response work.
+
+async def _commit_before_response(
+    session: Annotated[AsyncSession, Depends(get_smart_db_session)],
+) -> AsyncIterator[AsyncSession]:
+    """The request session, committed when the handler returns.
+
+    FastAPI tears a yield dependency down at its scope's end. The router
+    (``get_smart_db_session``) keeps the default "request" scope, which ends only
+    after the response has been SENT and BackgroundTasks have run, so its commit
+    came too late: a client could get a 2xx for an unsaved write, and a commit
+    failure was never reported. This wrapper is "function" scoped, which ends
+    once the handler has returned and its result is serialised, but BEFORE the
+    response goes out. A failing commit therefore becomes a 500.
+
+    The session itself stays open until the request ends, so a StreamingResponse
+    body or a BackgroundTask that uses it keeps working, now in a fresh
+    transaction rather than inside the handler's write. The router still closes
+    it, and commits anything written after this point.
+
+    On an exception there is nothing to do here: it propagates through the
+    router's own teardown, which rolls back, before FastAPI turns it into the
+    error response.
+    """
+    yield session
+    await session.commit()
+
+
+async def _commit_local_before_response(
+    session: Annotated[AsyncSession, Depends(get_local_db)],
+) -> AsyncIterator[AsyncSession]:
+    """The LOCAL database session, committed when the handler returns.
+
+    The same timing as ``_commit_before_response``, over ``get_local_db``
+    instead of the router, so a commit failure on a Lakebase admin route is a
+    500 rather than a 2xx for an unsaved config.
+    """
+    yield session
+    await session.commit()
+
+
+# The request session, routed to SQLite/PostgreSQL or Lakebase, committed before
+# the response is sent. Every consumer in one request shares it.
+SessionDep = Annotated[AsyncSession, Depends(_commit_before_response, scope="function")]
+# Like SessionDep, but also CLOSED before the response is sent. Its session is
+# separate from SessionDep's, so do not mix the two in one request.
 WriteSessionDep = Annotated[
     AsyncSession, Depends(get_smart_db_session, scope="function")
 ]
-# Keep legacy session dependency for backward compatibility if needed
-LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
-# Always use the LOCAL database (SQLite/PG), bypassing Lakebase swap.
-# Used for bootstrap config tables like database_configs.
-LocalSessionDep = Annotated[AsyncSession, Depends(get_local_db)]
+# Always the LOCAL database (SQLite/PG), never Lakebase: the bootstrap config
+# tables such as database_configs live there. Committed before the response.
+LocalSessionDep = Annotated[
+    AsyncSession, Depends(_commit_local_before_response, scope="function")
+]
+
+
+#: Returned when the selected workspace (``group_id`` header) is not one of the
+#: caller's. The frontend's API client matches the phrase "access to group" to
+#: drop a stale saved workspace and retry a read, so keep that phrase.
+GROUP_ACCESS_DENIED_DETAIL = "Access denied: no access to group"
+#: Returned for every other authorisation refusal from the workspace resolver.
+WORKSPACE_ACCESS_DENIED_DETAIL = "Access denied: workspace could not be resolved"
+
+
+def _forbidden_detail(error: ValueError) -> str:
+    """The client-facing message for a resolver refusal: fixed text, no details.
+
+    Only the CATEGORY is carried over (a group the caller may not use vs. any
+    other refusal), because the client acts on it. The resolver's own message,
+    which includes the requested group id, stays in the server log.
+    """
+    if "access to group" in str(error).lower():
+        return GROUP_ACCESS_DENIED_DETAIL
+    return WORKSPACE_ACCESS_DENIED_DETAIL
 
 
 async def get_group_context(
@@ -45,46 +110,38 @@ async def get_group_context(
     x_group_id: Optional[str] = Header(None, alias="group_id"),
     x_group_domain: Optional[str] = Header(None, alias="X-Group-Domain"),
 ) -> GroupContext:
-    """
-    Extract group context from Databricks Apps or OAuth2-Proxy headers.
+    """Resolve the caller's workspace (GroupContext), or refuse the request.
+
+    Identity comes from :func:`src.utils.request_identity.resolve_request_identity`:
+    inside Databricks Apps only the ``X-Forwarded-*`` headers the platform proxy
+    sets are trusted; elsewhere oauth2-proxy's ``X-Auth-Request-*`` headers are
+    preferred with ``X-Forwarded-*`` as the fallback. ``group_id`` selects the
+    workspace and is validated against the user's memberships.
+
+    FAILS CLOSED. Every protected API route depends on this, so it is the
+    identity gate for the API:
+
+    - no identity                              -> 401
+    - identity that resolves to no workspace   -> 401 (e.g. a non-email name)
+    - workspace not permitted / not resolvable -> 403
+    - unexpected resolver failure              -> 503
+
+    It used to return an empty ``GroupContext`` in the first, second and last
+    cases, and some repositories read "no groups" as "no filter" (audit M1).
+    Routes that must stay public (health checks) simply do not depend on it;
+    ``tests/unit/architecture/test_api_routes_require_identity.py`` keeps that
+    list explicit.
 
     PERFORMANCE: Uses request-scoped caching to avoid repeated database queries
-    when multiple endpoints/dependencies need the GroupContext in the same request.
-
-    For Databricks Apps deployment with OAuth2-Proxy, this extracts group information from:
-    - group_id: Explicit group ID from frontend group selector (matches database column name)
-    - X-Group-Domain: Explicit group domain from frontend group selector
-    - X-Auth-Request-Email: User email from OAuth2-Proxy (preferred)
-    - X-Forwarded-Email: User email from Databricks Apps (fallback)
-    - X-Auth-Request-Access-Token: Access token from OAuth2-Proxy (preferred)
-    - X-Forwarded-Access-Token: Access token from Databricks Apps (fallback)
-
-    Args:
-        request: FastAPI request object
-        x_forwarded_email: User email from Databricks Apps
-        x_forwarded_access_token: Access token from Databricks Apps
-        x_auth_request_email: User email from OAuth2-Proxy
-        x_auth_request_user: Username from OAuth2-Proxy
-        x_auth_request_access_token: Access token from OAuth2-Proxy
-        x_group_id: Explicit group ID from frontend (from group_id header, matches database column name)
-        x_group_domain: Explicit group domain from frontend
-
-    Returns:
-        GroupContext: Extracted group context with group_id, email, etc.
+    when multiple dependencies need the GroupContext in the same request.
     """
-    import logging
-
-    logger = logging.getLogger("src.core.dependencies")
-
     # Native EventSource cannot attach the local-development headers used by
     # the Axios client. Direct loopback SSE URLs therefore carry the same email
     # and selected workspace as query parameters. Never honor those parameters
     # in Databricks Apps, production, non-SSE routes, or non-loopback requests.
     path = getattr(getattr(request, "url", None), "path", "")
     client_host = getattr(getattr(request, "client", None), "host", "")
-    production = bool(os.getenv("DATABRICKS_APP_NAME")) or os.getenv(
-        "ENVIRONMENT", ""
-    ).strip().lower() in ("production", "prod")
+    production = running_in_databricks_apps() or is_production()
     local_sse = (
         not production
         and isinstance(path, str)
@@ -95,72 +152,124 @@ async def get_group_context(
     sse_email = query.get("_sse_email") if local_sse else None
     sse_group_id = query.get("_sse_group_id") if local_sse else None
 
-    # Prefer OAuth2-Proxy headers over direct headers. Query values are local
-    # SSE fallbacks only; real proxy/header identity always wins.
-    user_email = x_auth_request_email or x_forwarded_email or sse_email
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email,
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_email=x_auth_request_email,
+        auth_request_user=x_auth_request_user,
+        auth_request_access_token=x_auth_request_access_token,
+    )
+    # Query values are local SSE fallbacks only; header identity always wins.
+    user_email = identity.email or sse_email
     x_group_id = x_group_id or sse_group_id
-    access_token = x_auth_request_access_token or x_forwarded_access_token
+    access_token = identity.access_token
 
-    # =========================================================================
-    # REQUEST-SCOPED CACHE: Check if GroupContext already exists for this request
-    # =========================================================================
-    # Create a cache key that includes email and group_id to handle group switching
+    if not user_email:
+        logger.debug("Request to %s carries no identity; refusing with 401", path)
+        raise UnauthorizedError("Authentication required")
+
+    # Request-scoped cache: keyed by email and group_id to handle switching.
     cache_key = f"group_context:{user_email}:{x_group_id}"
-
-    if hasattr(request.state, "_group_context_cache"):
-        cached = request.state._group_context_cache.get(cache_key)
+    cache = getattr(request.state, "_group_context_cache", None)
+    if isinstance(cache, dict):
+        cached: Optional[GroupContext] = cache.get(cache_key)
         if cached is not None:
-            logger.info(f"[CACHE HIT] Returning cached GroupContext for {user_email}")
             return cached
 
-    logger.debug("get_group_context called with:")
-    logger.debug(f"  X-Auth-Request-Email: {x_auth_request_email}")
-    logger.debug(f"  X-Forwarded-Email: {x_forwarded_email}")
-    logger.debug(f"  group_id: {x_group_id}")
-    logger.debug(f"  X-Group-Domain: {x_group_domain}")
-    logger.debug(f"  Final email: {user_email}")
+    try:
+        group_context = await GroupContext.from_email(
+            email=user_email,
+            access_token=access_token,
+            group_id=x_group_id,  # Pass the selected group ID from header
+        )
+    except ValueError as e:
+        # SECURITY: unauthorized workspace, or one that could not be resolved.
+        # The resolver's message names the group id and says why it was refused;
+        # that is for the log, not the client. The client gets a fixed message.
+        logger.warning(
+            "Unauthorized group access attempt (group_id=%s): %s", x_group_id, e
+        )
+        raise ForbiddenError(_forbidden_detail(e)) from e
+    except Exception as e:
+        # An unexpected failure must not become an empty context: that reads
+        # as "no tenant filter" in some queries. Tell the client to retry.
+        logger.exception("Error resolving group context for %s", user_email)
+        raise KasalError(
+            "Could not resolve the caller's workspace; try again", status_code=503
+        ) from e
 
-    # Get group context with the specific group_id if provided
-    if user_email:
-        try:
-            group_context = await GroupContext.from_email(
-                email=user_email,
-                access_token=access_token,
-                group_id=x_group_id,  # Pass the selected group ID from header
-            )
-            logger.debug(
-                f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}"
-            )
+    if not group_context.group_ids:
+        # from_email returns an empty context for an identity it cannot map to
+        # a workspace (no "@"). That is not an authenticated tenant.
+        logger.warning("Identity from %s resolved to no workspace", identity.source)
+        raise UnauthorizedError("Authentication required")
 
-            # =========================================================================
-            # CACHE: Store in request.state for subsequent accesses in this request
-            # =========================================================================
-            if not hasattr(request.state, "_group_context_cache"):
-                request.state._group_context_cache = {}
-            request.state._group_context_cache[cache_key] = group_context
-            logger.debug(f"[CACHE SET] Cached GroupContext for {user_email}")
+    logger.debug(
+        "Resolved group context: primary_group_id=%s, group_ids=%s, role=%s",
+        group_context.primary_group_id,
+        group_context.group_ids,
+        group_context.user_role,
+    )
+    if not isinstance(cache, dict):
+        cache = {}
+        request.state._group_context_cache = cache
+    cache[cache_key] = group_context
+    return group_context
 
-            return group_context
-        except ValueError as e:
-            # SECURITY: Unauthorized group access attempt
-            logger.error(f"Unauthorized group access attempt: {e}")
-            from fastapi import HTTPException
 
-            raise HTTPException(status_code=403, detail=str(e))
-        except Exception as e:
-            # Database or other unexpected errors during group resolution.
-            # Return empty GroupContext so the endpoint's own ForbiddenError
-            # check can cleanly return 403 instead of crashing with 500.
-            logger.error(f"Error resolving group context for {user_email}: {e}")
-            return GroupContext()
+async def get_request_email(
+    x_forwarded_email: Annotated[
+        Optional[str], Header(alias="X-Forwarded-Email")
+    ] = None,
+    x_auth_request_email: Annotated[
+        Optional[str], Header(alias="X-Auth-Request-Email")
+    ] = None,
+) -> str:
+    """The caller's email, via the shared resolver; 401 when there is none.
 
-    # Fallback: No group context available
-    logger.debug("No email header found, returning empty group context")
-    return GroupContext()
+    For the few routes that need the bare identity rather than a workspace.
+    """
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email, auth_request_email=x_auth_request_email
+    )
+    if not identity.email:
+        raise UnauthorizedError("Authentication required")
+    return identity.email
 
+
+RequestEmailDep = Annotated[str, Depends(get_request_email)]
 
 # Type definitions for group-aware dependencies
 GroupContextDep = Annotated[GroupContext, Depends(get_group_context)]
+
+
+async def get_tool_secrets_visible(
+    session: SessionDep, group_context: GroupContextDep
+) -> bool:
+    """Whether the caller may read the credentials stored in tool configs.
+
+    Read endpoints for agents, tasks, crews and tools mask them when this is
+    False; see ``services/catalog/secret_view``.
+    """
+    from src.services.catalog.secret_view import ToolSecretView
+
+    return await ToolSecretView(session).visible_to(group_context)
+
+
+ToolSecretsVisibleDep = Annotated[bool, Depends(get_tool_secrets_visible)]
+
+
+def require_group_id(group_context: GroupContext) -> str:
+    """The caller's primary workspace id, for services that scope by one group.
+
+    ``get_group_context`` always resolves at least the personal workspace, so
+    this only refuses a context with no group at all — rather than letting a
+    ``group_id=None`` reach a tenant-scoped read or write.
+    """
+    group_id = group_context.primary_group_id
+    if group_id is None:
+        raise ForbiddenError("No workspace selected for this request")
+    return group_id
 
 
 def get_repository(
@@ -184,7 +293,9 @@ def get_repository(
 
 
 def get_service(
-    service_class: Type[BaseService],
+    # A factory rather than Type[BaseService]: the fallback below passes
+    # repository_class/model_class, which only some subclasses accept.
+    service_class: Callable[..., BaseService],
     repository_class: Type[BaseRepository],
     model_class: Type[Base],
 ) -> Callable[[SessionDep], BaseService]:

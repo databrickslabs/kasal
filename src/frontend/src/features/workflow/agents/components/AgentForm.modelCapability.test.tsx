@@ -37,49 +37,38 @@ vi.mock('../../../../api/tools/ToolService', () => ({
 
 // The measured capability of three real models. `refused_params`,
 // `thinking_mode` and `allowed_efforts` all arrive from the API.
-vi.mock('../../../../api/config/ModelService', () => ({
-  ModelService: {
-    getInstance: vi.fn(() => ({
-      getActiveModels: vi.fn().mockResolvedValue({
-        // Accepts temperature; takes a thinking BUDGET.
-        'databricks-claude-sonnet-4-5': {
-          name: 'databricks-claude-sonnet-4-5',
-          provider: 'databricks',
-          enabled: true,
-          thinking_mode: 'manual',
-          allowed_efforts: [],
-          refused_params: ['frequency_penalty', 'presence_penalty'],
-          returns_thinking_text: true,
-        },
-        // REFUSES temperature; takes an EFFORT with five levels.
-        'databricks-claude-opus-5': {
-          name: 'databricks-claude-opus-5',
-          provider: 'databricks',
-          enabled: true,
-          thinking_mode: 'adaptive',
-          allowed_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-          refused_params: [
-            'temperature',
-            'top_p',
-            'frequency_penalty',
-            'presence_penalty',
-          ],
-          returns_thinking_text: true,
-        },
-        // Accepts temperature; no thinking surface at all.
-        'databricks-llama-4-maverick': {
-          name: 'databricks-llama-4-maverick',
-          provider: 'databricks',
-          enabled: true,
-          max_output_tokens: 8192,
-          thinking_mode: null,
-          allowed_efforts: [],
-          refused_params: [],
-          returns_thinking_text: false,
-        },
-      }),
-    })),
-  },
+// The form reads the shared models store, which loads these rows.
+const { row } = vi.hoisted(() => ({ row: (key: string, extra: Record<string, unknown>) => ({
+  id: 0, key, name: key, provider: 'databricks', temperature: null, context_window: null,
+  max_output_tokens: null, extended_thinking: false, enabled: true, created_at: '', updated_at: '',
+  ...extra,
+}) }));
+vi.mock('../../../../api/config/EnabledModelsService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../api/config/EnabledModelsService')>()),
+  fetchEnabledModelRows: vi.fn().mockResolvedValue([
+    // Accepts temperature; takes a thinking BUDGET.
+    row('databricks-claude-sonnet-4-5', {
+      thinking_mode: 'manual',
+      allowed_efforts: [],
+      refused_params: ['frequency_penalty', 'presence_penalty'],
+      returns_thinking_text: true,
+    }),
+    // REFUSES temperature; takes an EFFORT with five levels.
+    row('databricks-claude-opus-5', {
+      thinking_mode: 'adaptive',
+      allowed_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      refused_params: ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty'],
+      returns_thinking_text: true,
+    }),
+    // Accepts temperature; no thinking surface at all.
+    row('databricks-llama-4-maverick', {
+      max_output_tokens: 8192,
+      thinking_mode: null,
+      allowed_efforts: [],
+      refused_params: [],
+      returns_thinking_text: false,
+    }),
+  ]),
 }));
 
 vi.mock('../../api/LLMProviderService', () => ({

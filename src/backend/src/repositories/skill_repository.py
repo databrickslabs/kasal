@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,7 +24,7 @@ class SkillRepository(BaseRepository[Skill]):
     def __init__(self, session: AsyncSession):
         super().__init__(Skill, session)
 
-    def _with_files(self):
+    def _with_files(self) -> Select[Tuple[Skill]]:
         return select(self.model).options(selectinload(self.model.files))
 
     async def list_visible(self, group_ids: List[str]) -> List[Skill]:

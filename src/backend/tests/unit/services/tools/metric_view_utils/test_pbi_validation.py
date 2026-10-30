@@ -12,7 +12,6 @@ are required.  Fixtures are derived from the OTC Management post-mortem:
 import pytest
 
 from src.services.tools.metric_view_utils.pbi_validation import (
-    ColumnMismatch,
     EvaluateFn,
     MeasureSpec,
     MeasureValidationResult,
@@ -26,7 +25,6 @@ from src.services.tools.metric_view_utils.pbi_validation import (
     validate_measure,
     validate_view,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: build a mock evaluate_fn
@@ -126,7 +124,10 @@ def test_compare_period_sums_mismatch():
 
 def test_compare_period_sums_missing_uc_period():
     """Period present in PBI but absent in UC → mismatch."""
-    pbi = [{"period": "2026-07", "amount": 50.0}, {"period": "2026-08", "amount": 100.0}]
+    pbi = [
+        {"period": "2026-07", "amount": 50.0},
+        {"period": "2026-08", "amount": 100.0},
+    ]
     uc = [{"period": "2026-08", "amount": 100.0}]
     mismatches = _compare_period_sums(pbi, uc, "period", ["amount"], 1e-4)
     assert any(m.period == "2026-07" for m in mismatches)
@@ -194,7 +195,7 @@ def test_validate_view_verified_row_count_match():
 def test_validate_view_unverified_row_count_mismatch():
     """Row count differs → UNVERIFIED."""
     pbi = [{"id": i} for i in range(31)]  # OTC: 31 Dim_Country rows
-    uc = [{"id": i} for i in range(29)]   # 2 rows missing
+    uc = [{"id": i} for i in range(29)]  # 2 rows missing
     fn = _make_evaluate_fn(pbi_rows=pbi, uc_rows=uc)
     result = validate_view("Dim_Country", "SELECT * FROM dim_country_view", fn)
 
@@ -271,7 +272,7 @@ def test_validate_view_uc_error():
 NPS_SPEC = MeasureSpec(
     pbi_measure_name="NPS Total",
     pbi_table_name="Fact_NPS",
-    metric_view_fqn="`dc_adb-landing-zone-002`.`idor`.`otc_ucm_mv_fact_nps`",
+    metric_view_fqn="`acme_adb-landing-zone-002`.`idor`.`otc_ucm_mv_fact_nps`",
     measure_sql_name="nps_total",
 )
 
@@ -342,7 +343,7 @@ def test_validate_measure_uc_query_uses_measure_syntax():
     assert uc_queries
     uc_sql = uc_queries[0]
     assert "MEASURE(nps_total)" in uc_sql
-    assert "`dc_adb-landing-zone-002`.`idor`.`otc_ucm_mv_fact_nps`" in uc_sql
+    assert "`acme_adb-landing-zone-002`.`idor`.`otc_ucm_mv_fact_nps`" in uc_sql
     assert "GROUP BY ALL" in uc_sql
 
 
@@ -374,7 +375,9 @@ def test_validate_measure_within_tolerance():
     pbi_rows = [{"fiscper_date": "2026-08-15", "country_id": "IE", "val": 74.37}]
     uc_rows = [{"fiscper_date": "2026-08-15", "country_id": "IE", "val": 74.3700001}]
     fn = _make_evaluate_fn(pbi_rows=pbi_rows, uc_rows=uc_rows)
-    result = validate_measure(NPS_SPEC, "fiscper_date", "country_id", fn, tolerance=1e-4)
+    result = validate_measure(
+        NPS_SPEC, "fiscper_date", "country_id", fn, tolerance=1e-4
+    )
     assert result.status == ValidationStatus.VERIFIED
 
 
@@ -382,7 +385,9 @@ def test_validate_measure_outside_tolerance():
     pbi_rows = [{"fiscper_date": "2026-08-15", "country_id": "IE", "val": 74.37}]
     uc_rows = [{"fiscper_date": "2026-08-15", "country_id": "IE", "val": 73.0}]
     fn = _make_evaluate_fn(pbi_rows=pbi_rows, uc_rows=uc_rows)
-    result = validate_measure(NPS_SPEC, "fiscper_date", "country_id", fn, tolerance=0.01)
+    result = validate_measure(
+        NPS_SPEC, "fiscper_date", "country_id", fn, tolerance=0.01
+    )
     assert result.status == ValidationStatus.UNVERIFIED
 
 

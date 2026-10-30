@@ -11,13 +11,14 @@ executionhistory table with execution_type='flow'.
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ForbiddenError
 from src.core.logger import LoggerManager
 from src.models.execution_history import ExecutionHistory
+from src.services.execution.stored_inputs import strip_run_credentials
 
 logger = LoggerManager.get_instance().flow
 
@@ -48,16 +49,20 @@ class FlowExecutionService:
 
         self.execution_service = ExecutionService(session)
 
-    async def get_owned_existing_execution(self, job_id: str, group_id: Optional[str]):
+    async def get_owned_existing_execution(
+        self, job_id: str, group_id: Optional[str]
+    ) -> Optional[ExecutionHistory]:
         """Allow precreated jobs to be reused only by their existing workspace."""
-        execution = await self.execution_service.get_run_by_job_id(job_id)
+        execution: Optional[ExecutionHistory] = (
+            await self.execution_service.get_run_by_job_id(job_id)
+        )
         if execution and (not group_id or execution.group_id != group_id):
             raise ForbiddenError(detail="Access denied to this execution")
         return execution
 
     async def create_execution(
         self,
-        flow_id: Union[uuid.UUID, str],
+        flow_id: Optional[Union[uuid.UUID, str]],
         job_id: str,
         run_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
@@ -123,7 +128,9 @@ class FlowExecutionService:
             if run_name:
                 execution.run_name = run_name
             if config:
-                execution.inputs = config
+                # The run's record, never the caller's credentials. (A new row
+                # gets the same treatment inside create_run_record.)
+                execution.inputs = strip_run_credentials(config)
             await self.session.commit()
             await self.execution_service.reload_run(execution)
             logger.info(
@@ -168,7 +175,7 @@ class FlowExecutionService:
             )
             # Detached on context exit; only scalar attributes (.id) are read by
             # callers, which SQLAlchemy keeps available after refresh+commit.
-            return execution
+            return cast(ExecutionHistory, execution)
 
     async def get_execution(self, execution_id: int) -> Optional[ExecutionHistory]:
         """
@@ -250,33 +257,6 @@ class FlowExecutionService:
         await self.execution_service.reload_run(execution)
 
         logger.info(f"Updated execution {execution_id} to status {status}")
-
-        return execution
-
-    async def update_execution_config(
-        self, execution_id: int, config: Dict[str, Any]
-    ) -> ExecutionHistory:
-        """
-        Update the configuration/state of a flow execution.
-
-        This method is used to persist flow state during execution.
-
-        Args:
-            execution_id: ID of the execution
-            config: Updated configuration/state data
-
-        Returns:
-            Updated ExecutionHistory instance
-        """
-        logger.debug(f"Updating execution {execution_id} config")
-
-        execution = await self.get_execution(execution_id)
-        if not execution:
-            raise ValueError(f"Execution {execution_id} not found")
-
-        execution.inputs = config
-        await self.session.commit()
-        await self.execution_service.reload_run(execution)
 
         return execution
 

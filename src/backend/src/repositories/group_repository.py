@@ -4,15 +4,15 @@ Repository for Group and GroupUser models.
 Handles database operations for group management and user membership.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.base_repository import BaseRepository
 from src.models.group import Group, GroupUser, GroupUserStatus
-from src.models.user import User
 
 
 class GroupRepository(BaseRepository[Group]):
@@ -32,16 +32,6 @@ class GroupRepository(BaseRepository[Group]):
             select(Group.name).where(Group.id == group_id)
         )
         return result.scalar_one_or_none()
-
-    async def get_with_users(self, group_id: str) -> Optional[Group]:
-        """Get a group with its users loaded"""
-        query = (
-            select(self.model)
-            .options(selectinload(self.model.group_users).selectinload(GroupUser.user))
-            .where(self.model.id == group_id)
-        )
-        result = await self.session.execute(query)
-        return result.scalars().first()
 
     async def list_with_user_counts(
         self, skip: int = 0, limit: int = 100
@@ -147,7 +137,7 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         )
 
         result = await self.session.execute(query)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     async def get_groups_by_user(self, user_id: str) -> List[GroupUser]:
         """Get all groups a user belongs to"""
@@ -158,18 +148,7 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         )
 
         result = await self.session.execute(query)
-        return result.scalars().all()
-
-    async def get_user_emails_by_group(self, group_id: str) -> List[str]:
-        """Get all user emails in a group"""
-        query = (
-            select(User.email)
-            .join(self.model, User.id == self.model.user_id)
-            .where(self.model.group_id == group_id)
-        )
-
-        result = await self.session.execute(query)
-        return [email for email in result.scalars()]
+        return list(result.scalars().all())
 
     async def remove_user_from_group(self, group_id: str, user_id: str) -> bool:
         """Remove a user from a group"""
@@ -179,24 +158,7 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         result = await self.session.execute(query)
         # Don't commit here - let the session dependency handle it
         await self.session.flush()
-        return result.rowcount > 0
-
-    async def update_user_role(
-        self, group_id: str, user_id: str, role: str
-    ) -> Optional[GroupUser]:
-        """Update a user's role in a group"""
-        query = (
-            update(self.model)
-            .where(and_(self.model.group_id == group_id, self.model.user_id == user_id))
-            .values(role=role)
-        )
-
-        await self.session.execute(query)
-        # Don't commit here - let the session dependency handle it
-        await self.session.flush()
-
-        # Return updated GroupUser
-        return await self.get_by_group_and_user(group_id, user_id)
+        return cast("CursorResult[Any]", result).rowcount > 0
 
     async def get_user_groups_with_roles(self, user_id: str) -> List[Dict[str, Any]]:
         """Get user's group memberships with roles"""

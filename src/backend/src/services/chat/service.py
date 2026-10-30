@@ -17,17 +17,19 @@ refactor, so existing callers/tests keep working.
 import asyncio
 import hashlib
 import logging
-import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
+from src.services.chat.llm_trace_text import messages_text
 from src.services.chat.run_trace_writer import RunTraceWriter as _RunTraceWriter
+from src.services.execution.config.auto_model import link_run_row
 from src.services.execution.finalization import (
     ExecutionOutcome,
     persist_execution_outcome,
 )
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -43,8 +45,8 @@ class LightAgentService:
         self,
         execution_id: str,
         config: Any,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Any = None,
     ) -> Dict[str, Any]:
         """Run a SINGLE agent via CrewAI ``Agent.kickoff_async`` — the "chat"
         (light) answer mode. No crew, no tasks/process, no planning/reasoning.
@@ -83,7 +85,7 @@ class LightAgentService:
         # chat silently read local SQLite: an MCP server enabled for the workspace
         # gave "Added 1 explicit MCP servers" in Agent Builder and "Added 0" here.
         from src.db.session import routed_scoped_session
-        from src.services.catalog.agents import AgentService
+        from src.services.chat.catalog_agent import fill_tool_configs_from_catalog
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.logs.queue import enqueue_log
         from src.utils.user_context import UserContext
@@ -106,8 +108,8 @@ class LightAgentService:
         if group_context:
             try:
                 UserContext.set_group_context(group_context)
-                if getattr(group_context, "access_token", None):
-                    UserContext.set_user_token(group_context.access_token)
+                if _obo_token := getattr(group_context, "access_token", None):
+                    UserContext.set_user_token(_obo_token)
             except Exception as ctx_err:  # noqa: BLE001
                 logger.warning(f"[light_agent] Could not set user context: {ctx_err}")
 
@@ -134,25 +136,9 @@ class LightAgentService:
                     "Light agent execution requires exactly one agent in the config"
                 )
 
-            # Best-effort: merge DB tool_configs when the spec lacks them (catalog
-            # agents). Chat-generated agents already carry their own tool_configs.
-            if not agent_spec.get("tool_configs"):
-                try:
-                    async with routed_scoped_session() as db_session:
-                        db_id = (
-                            str(agent_spec.get("id", ""))
-                            .replace("agent_", "")
-                            .replace("agent-", "")
-                        )
-                        db_agent = (
-                            await AgentService(db_session).get(db_id) if db_id else None
-                        )
-                        if db_agent and getattr(db_agent, "tool_configs", None):
-                            agent_spec["tool_configs"] = db_agent.tool_configs
-                except Exception as enrich_err:  # noqa: BLE001
-                    logger.debug(
-                        f"[light_agent] tool_configs enrichment skipped: {enrich_err}"
-                    )
+            # The catalog agent of THIS workspace fills missing tool_configs; a
+            # turn with no workspace is refused (see chat/catalog_agent.py).
+            await fill_tool_configs_from_catalog(agent_spec, group_context)
 
             # ── Prompt = the (already user-grounded) first task description ────
             prompt = ""
@@ -351,6 +337,7 @@ class LightAgentService:
                     td["group_id"] = group_id
                 if group_email:
                     td["group_email"] = group_email
+                link_run_row(td, execution_id)  # under the run's Auto decision
                 return td
 
             # ── Build the ToolFactory (DB-backed API keys), then the agent, then
@@ -462,10 +449,8 @@ class LightAgentService:
                 # Token streaming (chat live-typing): opt the per-run LLM into
                 # streamed completions so the engine emits LLMStreamChunkEvent
                 # per text delta. Both the Chat Completions and Responses API
-                # adapters honor the flag. Kill-switch: CHAT_TOKEN_STREAMING=false.
-                if _agent_llm is not None and os.getenv(
-                    "CHAT_TOKEN_STREAMING", "true"
-                ).strip().lower() not in ("0", "false", "no"):
+                # adapters honor the flag. Kill switch: Engines → Advanced → Chat.
+                if _agent_llm is not None and engine_setting("chat_token_streaming"):
                     try:
                         _agent_llm.stream = True
                     except Exception as stream_err:  # noqa: BLE001
@@ -513,7 +498,7 @@ class LightAgentService:
 
                 _role_lower = str(role or "").strip().lower()
 
-                def _matches(event, source=None) -> bool:
+                def _matches(event: Any, source: Any = None) -> bool:
                     if self._event_matches_run(
                         event,
                         source,
@@ -535,7 +520,7 @@ class LightAgentService:
                     )
                     return False
 
-                def _args_str(event) -> str:
+                def _args_str(event: Any) -> str:
                     ta = getattr(event, "tool_args", None)
                     if ta is None:
                         return ""
@@ -546,7 +531,7 @@ class LightAgentService:
                     except Exception:  # noqa: BLE001
                         return str(ta)
 
-                def _on_tool_started(source, event) -> None:
+                def _on_tool_started(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -569,7 +554,7 @@ class LightAgentService:
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] tool-start trace skipped: {h_err}")
 
-                def _on_tool_finished(source, event) -> None:
+                def _on_tool_finished(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -623,7 +608,7 @@ class LightAgentService:
                             f"[light_agent] tool-finish trace skipped: {h_err}"
                         )
 
-                def _on_tool_error(source, event) -> None:
+                def _on_tool_error(source: Any, event: Any) -> None:
                     # Without this a tool that ERRORS (e.g. an MCP server timeout or
                     # 4xx) fires ToolUsageErrorEvent — NOT Finished — so the chat
                     # showed "using tool" then nothing. Surface the failure as a
@@ -655,33 +640,12 @@ class LightAgentService:
                 # tool-calling turn) fires LLMCall{Started,Completed,Failed}. The
                 # crew/flow OTel bridge maps these to ``llm_call`` / ``llm_response``;
                 # mirror that here so the chat trace shows the model calls too.
-                def _msgs_str(event) -> str:
-                    """Flatten the request messages to readable text for the trace
-                    detail (so 'LLM Request' → View shows the actual prompt)."""
-                    msgs = getattr(event, "messages", None)
-                    if msgs is None:
-                        return ""
-                    if isinstance(msgs, str):
-                        return msgs
-                    try:
-                        parts = []
-                        for m in msgs:
-                            if isinstance(m, dict):
-                                parts.append(
-                                    f"{m.get('role', '?')}: {m.get('content', '')}"
-                                )
-                            else:
-                                parts.append(str(m))
-                        return "\n\n".join(parts)
-                    except Exception:  # noqa: BLE001
-                        return str(msgs)
-
-                def _on_llm_started(source, event) -> None:
+                def _on_llm_started(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
                         model_name = str(getattr(event, "model", "") or "llm")
-                        prompt_text = _msgs_str(event)
+                        prompt_text = messages_text(event)
                         max_len = 20000
                         if len(prompt_text) > max_len:
                             prompt_text = prompt_text[:max_len] + "…[truncated]"
@@ -707,7 +671,7 @@ class LightAgentService:
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] llm-start trace skipped: {h_err}")
 
-                def _on_llm_completed(source, event) -> None:
+                def _on_llm_completed(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -721,18 +685,16 @@ class LightAgentService:
                             "model": model_name,
                             "output_length": len(content),
                         }
-                        # The model's thinking, when it exposed any. This path
-                        # builds `extra` BY HAND rather than going through the
-                        # otel bridge's kasal.extra.* pass-through, so a new field
-                        # on LLMCallCompletedEvent reaches the crew timeline and
-                        # silently misses ChatMode — which is exactly what
-                        # happened here: the same gemini-3-1-pro run showed 608
-                        # chars of reasoning in Jobs and nothing in the chat's Run
-                        # activity. Mirrored into trace_metadata too, since the
-                        # timeline row label reads from there.
+                        # Built BY HAND, not via the otel bridge's kasal.extra.*
+                        # pass-through, so each new LLMCallCompletedEvent field
+                        # (reasoning, the router's served model) is copied here
+                        # or it silently misses ChatMode's Run activity. Also
+                        # mirrored into trace_metadata: the row label reads there.
                         reasoning = getattr(event, "reasoning", None)
                         if reasoning:
                             extra["reasoning"] = str(reasoning)
+                        if served := getattr(event, "served_model", None):
+                            extra["served_model"] = str(served)
                         usage = getattr(event, "usage", None)
                         if usage is not None:
                             try:
@@ -754,6 +716,8 @@ class LightAgentService:
                         td["trace_metadata"]["model"] = model_name
                         if reasoning:
                             td["trace_metadata"]["reasoning"] = str(reasoning)
+                        if served:
+                            td["trace_metadata"]["served_model"] = str(served)
                         _log(f"LLM responded ({len(content)} chars, {model_name})")
                         _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001
@@ -761,7 +725,7 @@ class LightAgentService:
                             f"[light_agent] llm-complete trace skipped: {h_err}"
                         )
 
-                def _on_llm_failed(source, event) -> None:
+                def _on_llm_failed(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -810,7 +774,7 @@ class LightAgentService:
                 # still shows a "Response" step instead of an empty trace pane.
                 # NB: chat mode does NOT reason or plan (that's the 'research'/'deep'
                 # crew modes) — this is just the agent's single answer generation.
-                def _on_agent_started(source, event) -> None:
+                def _on_agent_started(source: Any, event: Any) -> None:
                     try:
                         if source is not agent:
                             return
@@ -820,7 +784,7 @@ class LightAgentService:
                             f"[light_agent] agent-start trace skipped: {h_err}"
                         )
 
-                def _on_agent_completed(source, event) -> None:
+                def _on_agent_completed(source: Any, event: Any) -> None:
                     try:
                         if source is not agent:
                             return
@@ -850,7 +814,7 @@ class LightAgentService:
                             f"[light_agent] agent-complete trace skipped: {h_err}"
                         )
 
-                def _on_agent_error(source, event) -> None:
+                def _on_agent_error(source: Any, event: Any) -> None:
                     try:
                         if source is not agent:
                             return
@@ -996,7 +960,7 @@ class LightAgentService:
                             f"[light_agent] llm_chunk broadcast skipped: {sse_err}"
                         )
 
-                def _on_llm_chunk(source, event) -> None:
+                def _on_llm_chunk(source: Any, event: Any) -> None:
                     try:
                         if _agent_llm is None or source is not _agent_llm:
                             return
@@ -1192,14 +1156,14 @@ class LightAgentService:
 
                     remember_async(
                         _agent_memory,
-                        format_turn_for_memory(prompt, answer),
+                        format_turn_for_memory(prompt, answer, _agent_memory),
                         source="chat",
                         agent_role=role,
                         metadata={"execution_id": execution_id},
                     )
 
                 # ── Sleep-time maintenance — fire-and-forget, and throttled to
-                # at most one pass per scope per KASAL_MEMORY_MAINTENANCE_INTERVAL.
+                # at most one pass per scope per maintenance interval (Engines settings).
                 # The crew path runs this at teardown; chat never did, so a
                 # workspace that only used chat accumulated duplicate records
                 # forever and they crowded the 6-snippet recall budget. A turn is
@@ -1270,7 +1234,8 @@ class LightAgentService:
                         "Check its execution trace for details."
                     )
                 result_payload = {
-                    "section": section, "model": getattr(config, "model", None)
+                    "section": section,
+                    "model": getattr(config, "model", None),
                 }
             try:
                 # Diagram/slides/presentation are rendered from the agent's own
@@ -1278,7 +1243,7 @@ class LightAgentService:
                 # generic handler below keeps the plain answer.)
                 if _html_owned or budget_exhausted:
                     raise _HtmlOwnedSkip()
-                from src.services.a2ui.runner import compose_surface
+                from src.services.a2ui.runner import compose_surface, compose_timeout
 
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
                 # hangs it must NOT block the terminal status — the prose answer has
@@ -1305,8 +1270,8 @@ class LightAgentService:
                     # 60s timed out EVERY presentation. The prose answer has already
                     # streamed, so a generous bound only delays the surface, never the
                     # text. Still bounded so a hung compose can't wedge the terminal
-                    # status; tune with A2UI_COMPOSE_TIMEOUT.
-                    timeout=float(os.getenv("A2UI_COMPOSE_TIMEOUT", "240")),
+                    # status; tune in Output design → Advanced.
+                    timeout=await compose_timeout(group_id),
                 )
                 if surface:
                     result_payload = {"text": answer, "a2ui": surface}
@@ -1397,7 +1362,7 @@ class LightAgentService:
                 "status_persisted": outcome.persisted,
             }
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error(
                 f"[light_agent] Error in light agent execution {execution_id}: {e}",
                 exc_info=True,
@@ -1497,26 +1462,17 @@ class LightAgentService:
         server enabled only for this workspace resolves to 0 servers under
         ``"default"`` (find_by_names_group_scope matches group_id exactly), so
         chat "answer mode" silently dropped MCP tools while crew/research kept them.
+
+        Otherwise the turn's own group id. A turn with none is refused (and
+        already was, by ``fill_tool_configs_from_catalog``); no group is ever
+        derived from the email or defaulted.
         """
-        resolved = (
-            getattr(config, "group_id", None)
-            or getattr(group_context, "primary_group_id", None)
-            or (
-                group_context.group_ids[0]
-                if group_context and getattr(group_context, "group_ids", None)
-                else None
-            )
+        from src.services.catalog.run_lookup import require_run_workspace
+
+        resolved: Optional[str] = getattr(config, "group_id", None) or getattr(
+            group_context, "primary_group_id", None
         )
-        if resolved:
-            return resolved
-        # Personal-workspace fallback uses the allocated ID. Re-deriving it
-        # from email could select a different workspace when IDs collide.
-        email = getattr(group_context, "group_email", None)
-        if email and "@" in email:
-            return GroupContext.personal_workspace_id_of(
-                getattr(group_context, "current_user", None), email
-            )
-        return "default"
+        return resolved or require_run_workspace(group_context)[0]
 
     @staticmethod
     def _build_mcp_configs(
@@ -1574,170 +1530,23 @@ class LightAgentService:
         group_context: Optional[GroupContext],
         group_id: str,
     ) -> Any:
-        """Run ``agent.kickoff_async`` inside an MLflow root trace that lands in
-        the SAME UC trace experiment crew/flow use, so chat LLM spans show up
-        alongside crew/flow runs.
+        """Run ``agent.kickoff_async`` inside this teamspace's MLflow root trace.
 
-        Crew/flow run in a subprocess and call ``configure_mlflow_in_subprocess``
-        (which ``set_experiment(name, trace_location=UnityCatalog(...))`` and
-        flips global env). The light path runs IN-PROCESS, so instead of mutating
-        the shared process we route THIS run's trace **context-locally** to the
-        configured UC experiment (``mlflow.tracing.set_destination(..., context_local=True)``)
-        — isolated per async task, concurrency-safe. The experiment name comes
-        from the workspace's Databricks config (``mlflow_experiment_name``) + the
-        ``-uc`` suffix, exactly like ``configure_mlflow_in_subprocess`` derives it.
-        MLflow autolog is already enabled process-wide by ``LLMManager``, so the
-        root trace is what groups the kickoff's LLM call(s) into one trace.
-
-        CHAT-ONLY: also tags the trace with the chat ``session_id`` (and user) via
-        MLflow's session metadata keys, so the MLflow UI groups a conversation's
-        turns into one session. Crew/flow deliberately do NOT set this.
-
-        Fully best-effort: any MLflow problem falls back to a plain kickoff, and
-        ``kickoff_async`` runs exactly once (a real kickoff error propagates).
+        See ``chat/turn_trace``: the parent-process MLflow setup, never the crew
+        subprocess's, because this runs in the server beside other turns.
         """
+        from src.services.chat.turn_trace import kickoff_with_mlflow_trace
 
-        async def _do() -> Any:
-            # Cooperative stop: POST /executions/{id}/stop sets this event and
-            # the transport round loop checks it before every LLM round, so
-            # Stop reaches an in-process chat run mid-flight. contextvars flow
-            # through kickoff_async's asyncio.to_thread.
-            from src.core.execution_stop import (
-                bind_stop_event,
-                discard_stop_event,
-                reset_stop_event,
-                stop_event_for,
-            )
-
-            stop_token = bind_stop_event(stop_event_for(execution_id))
-            try:
-                return await agent.kickoff_async(kickoff_prompt)
-            finally:
-                reset_stop_event(stop_token)
-                discard_stop_event(execution_id)
-
-        try:
-            import logging as _logging
-
-            import mlflow
-
-            # Load the workspace's Databricks config (same source crew/flow use).
-            # The provider ROUTES: chat runs IN-PROCESS, where the raw factory is a
-            # snapshot only a subprocess ever swaps to Lakebase — so this read got
-            # the LOCAL databricksconfig while the crew subprocess got the Lakebase
-            # one (verified: 1 row in Lakebase, 2 locally, different contents).
-            from src.services.databricks.workspace.config_provider import (
-                DatabricksConfigProvider,
-            )
-            from src.services.mlflow.tracing import start_root_trace
-            from src.services.otel_tracing.mlflow_setup import (
-                configure_mlflow_in_subprocess,
-                extract_trace_outputs,
-                set_trace_attributes,
-            )
-
-            db_config = await DatabricksConfigProvider.get(group_id=group_id)
-
-            # Run the EXACT MLflow setup crew/flow use — auth → bind the `-uc`
-            # experiment to the UC Delta-table trace location → enable native
-            # autolog. The lightweight set_experiment-only variant did NOT work
-            # (autolog stayed bound to the startup experiment), so we use the same
-            # function crew/flow use. It configures the CURRENT process (the light
-            # path is in-process), which is acceptable: traces route to the same UC
-            # experiment crew/flow write to. Its verbose diagnostics are routed to
-            # the "crew" logger (crew.log) — NOT the main app log — to keep the app
-            # console clean.
-            mlflow_result = await configure_mlflow_in_subprocess(
-                db_config=db_config,
-                job_id=execution_id,
-                execution_id=execution_id,
-                group_id=group_id,
-                group_context=group_context,
-                async_logger=_logging.getLogger("crew"),
-            )
-        except Exception as setup_err:  # noqa: BLE001
-            logger.warning(
-                f"[light_agent] MLflow setup failed; running without trace: {setup_err}",
-                exc_info=True,
-            )
-            return await _do()
-
-        if not mlflow_result or not getattr(mlflow_result, "tracing_ready", False):
-            logger.info(
-                "[light_agent] MLflow tracing not ready (enabled=%s, error=%s) — "
-                "running chat kickoff without an MLflow trace",
-                getattr(mlflow_result, "enabled", None),
-                getattr(mlflow_result, "error", None),
-            )
-            return await _do()
-        uc_name = getattr(mlflow_result, "experiment_name", None)
-
-        run_name = (getattr(config, "inputs", None) or {}).get("run_name")
-        flow_config = {
-            "model": getattr(config, "model", None),
-            "execution_type": "agent",
-            "run_name": run_name,
-        }
-        # Show the ACTUAL prompt sent to the model (conversation preamble + the
-        # user's current message) on the trace, not the generic one-line task
-        # label — so the MLflow trace's Inputs reflect the real request. Capped so
-        # a long conversation doesn't bloat the trace.
-        _prompt_for_trace = (
-            kickoff_prompt if isinstance(kickoff_prompt, str) else str(kickoff_prompt)
+        return await kickoff_with_mlflow_trace(
+            agent, kickoff_prompt, config, execution_id, trace_context, group_context
         )
-        if len(_prompt_for_trace) > 20000:
-            _prompt_for_trace = _prompt_for_trace[:20000] + "…[truncated]"
-        inputs = {"run_name": run_name or trace_context, "prompt": _prompt_for_trace}
-        # session_id can ride on the config top-level OR inside inputs depending on
-        # the entry path (the service copies it into execution_config["session_id"]).
-        # Read both so the MLflow session tag is set consistently across runs.
-        session_id = getattr(config, "session_id", None) or (
-            getattr(config, "inputs", None) or {}
-        ).get("session_id")
-        user = getattr(group_context, "group_email", None)
-
-        logger.info(
-            "[light_agent] MLflow tracing chat kickoff → experiment=%s session=%s",
-            uc_name,
-            session_id,
-        )
-        with start_root_trace(
-            f"chat_kickoff:{run_name or trace_context}", inputs
-        ) as root_span:
-            # CHAT-ONLY: group this conversation's turns into one MLflow session.
-            if session_id:
-                try:
-                    metadata = {"mlflow.trace.session": str(session_id)}
-                    if user:
-                        metadata["mlflow.trace.user"] = str(user)
-                    mlflow.update_current_trace(metadata=metadata)
-                except Exception as sess_err:  # noqa: BLE001
-                    logger.debug(
-                        f"[light_agent] mlflow session tag skipped: {sess_err}"
-                    )
-            try:
-                set_trace_attributes(root_span, flow_config, logger, run_name=run_name)
-            except Exception:  # noqa: BLE001
-                pass
-            result = await _do()
-            try:
-                outputs = extract_trace_outputs(result, logger)
-                if (
-                    outputs
-                    and root_span is not None
-                    and hasattr(root_span, "set_outputs")
-                ):
-                    root_span.set_outputs(outputs)
-            except Exception:  # noqa: BLE001
-                pass
-            return result
 
     async def _conversation_preamble(
         self,
         config: Any,
         group_context: Optional[GroupContext],
         group_id: str,
-        log,
+        log: Callable[[str], None],
     ) -> str:
         """Recent turns of THIS chat session as a transcript, prepended to the
         kickoff prompt. The scoring — which turns survive a long session and
@@ -1758,7 +1567,7 @@ class LightAgentService:
         group_id: str,
         prompt: str,
         execution_id: str,
-        log,
+        log: Callable[[str], None],
     ) -> Optional[Any]:
         """Build this run's unified ``Memory`` and return it. The
         engine Agent does not consult memory itself — recall/persist are done
@@ -1902,7 +1711,7 @@ async def run_light_agent(
     execution_id: str,
     config: Any,
     group_context: Optional[GroupContext] = None,
-    session=None,
+    session: Any = None,
 ) -> Dict[str, Any]:
     """Module-level entry point for the single-agent ("chat"/light) run.
 

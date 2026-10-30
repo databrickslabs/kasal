@@ -72,11 +72,15 @@ async def _auth_headers(host_override: Optional[str] = None) -> tuple[str, dict]
     auth = await get_auth_context(user_token=user_token)
     if auth is None:
         raise UCQueryError("authentication failed (no AuthContext)")
-    if host_override:
-        url = host_override.strip().rstrip("/")
-        if not url.startswith("https://"):
-            url = f"https://{url}"
-        auth.workspace_url = url
+    # The override (tool input, or a warehouse endpoint URL) may only name the
+    # credential's own workspace (audit N1/F3a).
+    from src.core.exceptions import ForbiddenError
+    from src.services.tools.databricks_tool_utils import apply_host_override
+
+    try:
+        apply_host_override(auth, host_override)
+    except ForbiddenError as e:
+        raise UCQueryError(f"untrusted host: {e.detail}") from e
     workspace_url = (auth.workspace_url or "").rstrip("/")
     if not workspace_url:
         raise UCQueryError("workspace_url not configured")
@@ -151,9 +155,7 @@ async def run_query(
         workspace_url, wid, headers = _resolved
     except UCQueryError as e:
         return {"success": False, "error": str(e)}
-    except (
-        Exception
-    ) as e:  # noqa: BLE001 — surface as a skip reason, don't crash config-gen
+    except Exception as e:  # surface as a skip reason, don't crash config-gen
         return {"success": False, "error": f"warehouse resolve failed: {e}"}
 
     url = f"{workspace_url}/api/2.0/sql/statements"
@@ -232,9 +234,9 @@ async def select_distinct(
         flag = _quote_ident(flag_col) if flag_col else None
     except UCQueryError as e:
         return {"success": False, "error": str(e)}
-    sql = f"SELECT DISTINCT {col} FROM {tbl}"
+    sql = f"SELECT DISTINCT {col} FROM {tbl}"  # both _quote_ident-validated — nosemgrep: tmp.databricks.sql-injection.fstring-select
     if flag is not None:
-        sql += f" WHERE {col} IS NOT NULL AND {flag} = {int(flag_value)}"
+        sql += f" WHERE {col} IS NOT NULL AND {flag} = {int(flag_value)}"  # quoted identifiers, int literal — nosemgrep: tmp.databricks.sql-injection.fstring-where
     sql += f" ORDER BY {col} LIMIT {int(limit)}"
     res = await run_query(sql, warehouse_id, host_override, _resolved=_resolved)
     if res.get("success"):

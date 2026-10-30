@@ -7,14 +7,18 @@ This service manages execution status operations:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.process_role import in_run_subprocess
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
 from src.utils.asyncio_utils import execute_db_operation_smart
+
+if TYPE_CHECKING:
+    from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +64,7 @@ class ExecutionStatusService:
 
         try:
             # Define the database operation
-            async def _update_operation(session):
+            async def _update_operation(session: AsyncSession) -> bool:
                 repo = ExecutionRepository(session)
 
                 # Find the execution record by job_id (string UUID)
@@ -120,7 +124,7 @@ class ExecutionStatusService:
                     return True
 
                 # Prepare complete update data with all fields
-                update_data = {
+                update_data: Dict[str, Any] = {
                     "status": status,
                     "error": message,  # Changed from "message" to "error" to match the database column
                 }
@@ -136,7 +140,7 @@ class ExecutionStatusService:
                         # Check if we need to serialize to JSON
                         if isinstance(result, (dict, list)):
                             # For dict or list, store as is (SQLAlchemy handles JSON conversion)
-                            stored_result = result
+                            stored_result: Any = result
                         else:
                             # For other types, convert to string representation
                             stored_result = str(result)
@@ -158,9 +162,7 @@ class ExecutionStatusService:
                             canonical = normalize_ui_document(stored_result)
                             if canonical is not None:
                                 stored_result = canonical
-                        except (
-                            Exception
-                        ) as norm_err:  # noqa: BLE001 — never affect persistence
+                        except Exception as norm_err:  # never affect persistence
                             logger.warning(
                                 f"[ExecutionStatusService] UI-document normalization "
                                 f"skipped for job_id {job_id}: {norm_err}"
@@ -219,9 +221,8 @@ class ExecutionStatusService:
                     )
 
                     # Announce the new status for real-time updates.
-                    import os
 
-                    is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+                    is_subprocess = in_run_subprocess()
                     try:
                         from datetime import datetime as dt
 
@@ -422,7 +423,7 @@ class ExecutionStatusService:
 
         try:
             # Define the database operation
-            async def _update_trace_operation(session):
+            async def _update_trace_operation(session: AsyncSession) -> bool:
                 repo = ExecutionRepository(session)
 
                 # Find the execution record by job_id
@@ -513,7 +514,7 @@ class ExecutionStatusService:
 
         try:
 
-            async def _update_name_operation(session):
+            async def _update_name_operation(session: AsyncSession) -> bool:
                 repo = ExecutionRepository(session)
 
                 execution_record = await repo.get_execution_by_job_id(job_id=job_id)
@@ -625,7 +626,7 @@ class ExecutionStatusService:
 
         try:
             # Define the database operation
-            async def _get_operation(session):
+            async def _get_operation(session: AsyncSession) -> Any:
                 repo = ExecutionRepository(session)
                 return await repo.get_execution_by_job_id(job_id=execution_id)
 
@@ -639,8 +640,9 @@ class ExecutionStatusService:
             return None
 
     @staticmethod
-    @staticmethod
-    async def _fill_harness(session, execution_data: Dict[str, Any]) -> None:
+    async def _fill_harness(
+        session: AsyncSession, execution_data: Dict[str, Any]
+    ) -> None:
         """Record which agent runtime this run uses, if the caller did not say.
 
         Decided ONCE, here, and read back from the row forever after — a run
@@ -669,9 +671,10 @@ class ExecutionStatusService:
                 f"engine ({e}); leaving it unrecorded"
             )
 
+    @staticmethod
     async def create_execution(
         execution_data: Dict[str, Any],
-        group_context=None,
+        group_context: Optional["GroupContext"] = None,
         session: AsyncSession | None = None,
     ) -> bool:
         """
@@ -686,6 +689,7 @@ class ExecutionStatusService:
         """
         from src.db.session import get_isolated_db_session
         from src.repositories.execution_repository import ExecutionRepository
+        from src.services.execution.stored_inputs import strip_run_credentials
 
         # Validate job_id
         job_id = execution_data.get("job_id")
@@ -694,6 +698,10 @@ class ExecutionStatusService:
                 f"[ExecutionStatusService] Invalid job_id in execution data: {job_id}"
             )
             return False
+
+        # The row records the run; the caller's credentials are not part of it.
+        if "inputs" in execution_data:
+            execution_data["inputs"] = strip_run_credentials(execution_data["inputs"])
 
         try:
             # Add group information to execution data if group context is provided
@@ -809,11 +817,11 @@ class ExecutionStatusService:
             from datetime import datetime as dt
 
             job_id = execution_data.get("job_id", "")
-            created_at = execution_data.get("created_at")
+            created_at: Any = execution_data.get("created_at")
             if hasattr(created_at, "isoformat"):
                 created_at = created_at.isoformat()
             elif not isinstance(created_at, str):
-                created_at = dt.now().isoformat()
+                created_at = dt.utcnow().isoformat()
 
             event_data = {
                 "job_id": job_id,

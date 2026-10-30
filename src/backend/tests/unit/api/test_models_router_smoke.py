@@ -72,7 +72,9 @@ async def test_list_enabled_global_and_get_404():
 async def test_create_update_delete_and_toggles_permissions_and_success():
     svc = AsyncMock()
     ctx_user = Ctx(user_role="user")
-    ctx_admin = Ctx(user_role="admin")
+    ctx_admin = Ctx(user_role="admin")  # workspace admin
+    ctx_sys = Ctx(user_role="admin")
+    ctx_sys.current_user.is_system_admin = True
 
     # create forbidden
     with pytest.raises(Exception):
@@ -89,14 +91,17 @@ async def test_create_update_delete_and_toggles_permissions_and_success():
     out = await create_model(
         ModelConfigCreate(key="k", name="n", provider="openai"),
         service=svc,
-        group_context=ctx_admin,
+        group_context=ctx_sys,
     )
     assert out.key == "k"
 
     # update forbidden
     with pytest.raises(Exception):
         await update_model(
-            "k", ModelConfigUpdate(name="n2"), service=svc, group_context=ctx_user
+            "k",
+            ModelConfigUpdate(key="k", name="n2", provider="openai"),
+            service=svc,
+            group_context=ctx_user,
         )
 
     # update not found -> 404
@@ -104,9 +109,9 @@ async def test_create_update_delete_and_toggles_permissions_and_success():
     with pytest.raises(Exception):
         await update_model(
             "missing",
-            ModelConfigUpdate(name="n2"),
+            ModelConfigUpdate(key="k", name="n2", provider="openai"),
             service=svc,
-            group_context=ctx_admin,
+            group_context=ctx_sys,
         )
 
     # toggle per-group
@@ -150,7 +155,7 @@ async def test_create_update_delete_and_toggles_permissions_and_success():
     # delete not found -> 404
     svc.delete_model_config = AsyncMock(return_value=False)
     with pytest.raises(Exception):
-        await delete_model("missing", service=svc, group_context=ctx_admin)
+        await delete_model("missing", service=svc, group_context=ctx_sys)
 
     # enable-all/disable-all require admin
     with pytest.raises(Exception):
@@ -172,9 +177,57 @@ async def test_create_update_delete_and_toggles_permissions_and_success():
         )
     ]
     svc.enable_all_models = AsyncMock(return_value=models2)
-    out4 = await enable_all_models(service=svc, group_context=ctx_admin)
+    out4 = await enable_all_models(service=svc, group_context=ctx_sys)
     assert out4.count == 1
 
     svc.disable_all_models = AsyncMock(return_value=models2)
-    out5 = await disable_all_models(service=svc, group_context=ctx_admin)
+    out5 = await disable_all_models(service=svc, group_context=ctx_sys)
     assert out5.count == 1
+
+
+@pytest.mark.asyncio
+async def test_workspace_admin_cannot_change_the_global_catalog():
+    """Audit H2: every key-resolved write and the bulk toggles are system-admin only."""
+    from src.core.exceptions import ForbiddenError
+
+    svc = AsyncMock()
+    ws_admin = Ctx(user_role="admin")
+    calls = [
+        create_model(
+            ModelConfigCreate(key="k", name="n", provider="openai"),
+            service=svc,
+            group_context=ws_admin,
+        ),
+        update_model(
+            "k",
+            ModelConfigUpdate(key="k", name="n", provider="attacker"),
+            service=svc,
+            group_context=ws_admin,
+        ),
+        delete_model("k", service=svc, group_context=ws_admin),
+        enable_all_models(service=svc, group_context=ws_admin),
+        disable_all_models(service=svc, group_context=ws_admin),
+    ]
+    for call in calls:
+        with pytest.raises(ForbiddenError) as exc:
+            await call
+        assert "system admins" in exc.value.detail
+    svc.create_model_config.assert_not_called()
+    svc.update_model_config.assert_not_called()
+    svc.delete_model_config.assert_not_called()
+    svc.enable_all_models.assert_not_called()
+    svc.disable_all_models.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_workspace_admin_keeps_the_per_workspace_toggle():
+    svc = AsyncMock()
+    svc.toggle_model_enabled_with_group = AsyncMock(
+        return_value=SimpleNamespace(key="k", enabled=False)
+    )
+    ws_admin = Ctx(user_role="admin")
+    out = await toggle_model(
+        "k", ModelToggleUpdate(enabled=False), service=svc, group_context=ws_admin
+    )
+    assert out.enabled is False
+    svc.toggle_model_enabled_with_group.assert_awaited_once_with("k", False, ws_admin)

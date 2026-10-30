@@ -14,7 +14,7 @@ class BuilderCanvasRequest(BaseModel):
 
     @field_validator("state")
     @classmethod
-    def bounded_canvas(cls, value):
+    def bounded_canvas(cls, value: dict[str, Any]) -> dict[str, Any]:
         if len(json.dumps(value).encode()) > 4 * 1024 * 1024:
             raise ValueError("Canvas exceeds the 4 MB session limit")
         for key in ("nodes", "edges", "flowNodes", "flowEdges"):

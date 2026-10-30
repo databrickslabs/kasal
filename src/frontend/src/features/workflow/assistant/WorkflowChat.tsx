@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useGroupStore } from '../../../store/groups';
 import { usePlanGenerationStore, planGenerationKey, startPlanGeneration, resumePlanGeneration, consumePlanGeneration } from './store/planGenerationStore';
 import { applyCrewDispatchResult } from './utils/applyCrewDispatchResult';
@@ -36,11 +37,9 @@ import { useWorkflowStore } from '../../../store/workflow';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from './store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../../store/knowledgeConfigStore';
-import { useModelConfigStore } from '../../../store/modelConfig';
 import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
-import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../../api/chat/ChatHistoryService';
-import { ModelService } from '../../../api/config/ModelService';
+import { useBuilderModels } from '../../../hooks/global/useEnabledModels';
 import TraceService from '../../../api/execution/TraceService';
 import { CanvasLayoutManager } from '../canvas/lib/CanvasLayoutManager';
 import { buildModelLabels } from '../../../utils/modelDisplay';
@@ -50,8 +49,9 @@ import { useUILayoutState, useUILayoutStore } from '../../../store/uiLayout';
 import {
   WorkflowChatProps,
   ChatMessage,
-  ModelConfig
 } from './types/index';
+
+const noopSetModel = () => undefined;
 
 // Import utilities
 import { hasCrewContent, isExecuteCommand, isExecuteFlowCommand, extractJobIdFromCommand, filterSlashCommands, SlashCommand } from './utils/chatHelpers';
@@ -78,6 +78,7 @@ import { builderTranscript } from './utils/builderTranscript';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import BuilderCatalogAction from './components/BuilderCatalogAction';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
+import { useKnowledgeUploadWiring } from './hooks/useKnowledgeUploadWiring';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
 import SlashCommandMenu from './components/SlashCommandMenu';
 import { openConversationCanvas } from './utils/conversationCanvas';
@@ -137,11 +138,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
-  const [models, setModels] = useState<Record<string, ModelConfig>>({});
+  // The shared, live enabled-model list: updates in place when an admin
+  // changes models (here or in another tab); a disabled pick falls back.
+  const { models, loadingModels: isLoadingModels } = useBuilderModels(selectedModel, setSelectedModel ?? noopSetModel);
   // Built over the whole set so colliding labels fall back to raw names —
   // three "GPT-5" rows you can't tell apart is worse than three long ids.
   const modelLabels = useMemo(() => buildModelLabels(models), [models]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   // rather than in Configuration because it is a per-RUN choice: the value is
   // sent with the execution payload and recorded on the run's own row.
@@ -158,24 +160,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [pendingExecutionType, setPendingExecutionType] = useState<'crew' | 'flow'>('crew');
 
   // Use Zustand store for knowledge configuration
-  const {
-    isMemoryBackendConfigured,
-    isKnowledgeSourceEnabled,
-    checkConfiguration,
-  } = useKnowledgeConfigStore();
-
-  // Use Zustand store for model configuration
-  const { refreshKey } = useModelConfigStore();
+  const { isMemoryBackendConfigured, isKnowledgeSourceEnabled, checkConfiguration } = useKnowledgeConfigStore(useShallow(s => ({
+    isMemoryBackendConfigured: s.isMemoryBackendConfigured, isKnowledgeSourceEnabled: s.isKnowledgeSourceEnabled, checkConfiguration: s.checkConfiguration })));
 
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Lets the composer's "+" menu open the knowledge-file picker, whose input
   // and chips live inside KnowledgeFileUpload.
   const knowledgeUploadRef = useRef<KnowledgeFileUploadHandle>(null);
-  const { setNodes, setEdges } = useWorkflowStore();
-  const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
+  const knowledgeUploadWiring = useKnowledgeUploadWiring();
+  const { setNodes, setEdges } = useWorkflowStore(useShallow(s => ({ setNodes: s.setNodes, setEdges: s.setEdges })));
+  const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore(useShallow(s => ({
+    setInputMode: s.setInputMode, inputMode: s.inputMode, setInputVariables: s.setInputVariables, executeCrew: s.executeCrew, executeFlow: s.executeFlow })));
   const uiLayoutState = useUILayoutState();
-  const { chatPanelSide, setChatPanelSide } = useUILayoutStore();
+  const { chatPanelSide, setChatPanelSide } = useUILayoutStore(useShallow(s => ({ chatPanelSide: s.chatPanelSide, setChatPanelSide: s.setChatPanelSide })));
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
@@ -203,10 +201,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   );
 
   // Use Zustand store for messages
-  const {
-    setMessages: setZustandMessages,
-    setCurrentSession,
-  } = useChatMessagesStore();
+  const { setMessages: setZustandMessages, setCurrentSession } = useChatMessagesStore(useShallow(s => ({
+    setMessages: s.setMessages, setCurrentSession: s.setCurrentSession })));
 
   // Use extracted hooks (excluding messages which are now handled by Zustand)
   const {
@@ -465,32 +461,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       return () => clearTimeout(timeoutId);
     }
   }, [isVisible]);
-
-  // Fetch models when component mounts or when refreshKey changes
-  useEffect(() => {
-    const fetchModels = async () => {
-      setIsLoadingModels(true);
-      try {
-        const modelService = ModelService.getInstance();
-        const response = await modelService.getEnabledModels();
-        setModels(response as Record<string, ModelConfig>);
-      } catch (error) {
-
-        setModels({
-          [getDefaultModel()]: {
-            name: getDefaultModel(),
-            temperature: 0.7,
-            context_window: 128000,
-            max_output_tokens: 4096,
-            enabled: true
-          }
-        });
-      } finally {
-        setIsLoadingModels(false);
-      }
-    };
-    fetchModels();
-  }, [refreshKey]);
 
   // Initialize knowledge configuration on mount
   useEffect(() => {
@@ -1485,147 +1455,15 @@ showSessionList && (
                 onFilesUploaded={(files) => {
                   console.log('Knowledge files uploaded:', files);
                 }}
-                onTasksUpdated={async (uploadedFilePath) => {
-                  console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
-
-                  // Find the agent connected to tasks (for agent_id in tool_configs)
-                  const agentNode = nodes.find(n => n.type === 'agentNode');
-                  const agentId = agentNode?.data?.agentId || agentNode?.id;
-                  console.log('[WorkflowChat] Found agent for access control:', agentId);
-
-                  // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
-                  const updatedNodes = nodes.map(node => {
-                    if (node.type === 'taskNode') {
-                      const currentTools = node.data.tools || [];
-                      const currentToolConfigs = node.data.tool_configs || {};
-
-                      // Add DatabricksKnowledgeSearchTool to tools array if not present
-                      const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
-                                                currentTools.includes('36');
-                      const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
-
-                      // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
-                      const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
-                      const updatedToolConfigs = {
-                        ...currentToolConfigs,
-                        DatabricksKnowledgeSearchTool: {
-                          ...currentToolConfigs.DatabricksKnowledgeSearchTool,
-                          file_paths: existingFilePaths.includes(uploadedFilePath)
-                            ? existingFilePaths
-                            : [...existingFilePaths, uploadedFilePath],
-                          agent_id: agentId  // Add agent_id for access control filtering
-                        }
-                      };
-
-
-                      // Update the task in the backend
-                      if (node.data.taskId) {
-                        import('../../../api/workflow/TaskService').then(({ TaskService }) => {
-                          TaskService.updateTask(node.data.taskId, {
-                            tools: updatedTools,
-                            tool_configs: updatedToolConfigs
-                          }).catch(err => {
-                            console.error(`Failed to update task ${node.data.taskId}:`, err);
-                          });
-                        });
-                      }
-
-                      return {
-                        ...node,
-                        data: {
-                          ...node.data,
-                          tools: updatedTools,
-                          tool_configs: updatedToolConfigs
-                        }
-                      };
-                    }
-                    return node;
-                  });
-
-                  setNodes(updatedNodes as FlowNode[]);
-                  console.log('[WorkflowChat] Task nodes updated successfully');
-                }}
-                onAgentsUpdated={(updatedAgents) => {
-
-
-
-
-
-
-// Check if any agent has knowledge sources
-                  const hasKnowledgeSources = updatedAgents.some(agent =>
-                    agent.knowledge_sources && agent.knowledge_sources.length > 0
-                  );
-
-                  // Update the canvas nodes with the updated agent data
-                  const updatedNodes = nodes.map(node => {
-                    if (node.type === 'agentNode') {
-                      const updatedAgent = updatedAgents.find(a => {
-                        // Try multiple matching strategies
-                        const matches =
-                          a.id === node.data.agentId ||  // Match by agentId
-                          a.id === node.data.id ||        // Match by id
-                          (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
-                          `agent-${a.name}` === node.id;  // Match by name pattern
-
-                        return matches;
-                      });
-
-                      if (updatedAgent) {
-                        return {
-                          ...node,
-                          data: {
-                            ...node.data,
-                            ...updatedAgent,  // Update all agent fields
-                            agentId: updatedAgent.id,  // Ensure agentId is set
-                            tools: updatedAgent.tools,  // Explicitly set tools array
-                            knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
-                          }
-                        };
-                      }
-                    }
-
-                    // Update task nodes to add DatabricksKnowledgeSearchTool if knowledge sources exist
-                    if (node.type === 'taskNode' && hasKnowledgeSources) {
-                      const currentTools = node.data.tools || [];
-                      const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
-                                                currentTools.includes('36');
-
-                      // Add the tool if it doesn't exist
-                      if (!hasKnowledgeTool) {
-                        return {
-                          ...node,
-                          data: {
-                            ...node.data,
-                            tools: [...currentTools, 'DatabricksKnowledgeSearchTool']
-                          }
-                        };
-                      }
-                    }
-
-                    return node;
-                  });
-                  setNodes(updatedNodes as FlowNode[]);
-
-
-
-                }}
+                // Bound to this canvas; they read it as each file lands.
+                {...knowledgeUploadWiring}
                 // Pass only agents that are currently on the canvas
                 availableAgents={nodes
                   .filter(node => node.type === 'agentNode')
-                  .map(node => {
-
-
-
-
-
-
-
-                    return {
-                      ...node.data,
-                      id: node.data.agentId || node.data.id  // Ensure we have an ID
-                    };
-                  })}
+                  .map(node => ({
+                    ...node.data,
+                    id: node.data.agentId || node.data.id  // Ensure we have an ID
+                  }))}
                     compact={true}
                   />
             </Box>

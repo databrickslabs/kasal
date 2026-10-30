@@ -3,6 +3,7 @@ import { CircularProgress, IconButton, Tooltip } from '@mui/material';
 import { Play, Square } from 'lucide-react';
 import type { Edge } from 'reactflow';
 import { useBuilderExecutionControls } from '../../store/builderExecutionControls';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 
 interface Props {
   mode: 'crew' | 'flow';
@@ -13,6 +14,8 @@ interface Props {
 
 export default function CanvasRunButton({ mode, hasNodes, edges, onRun }: Props) {
   const execution = useBuilderExecutionControls(state => state[mode]);
+  // Between the click and the job existing: show it, and take no second click.
+  const starting = useCrewExecutionStore(state => state.isStartingRun);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -33,6 +36,7 @@ export default function CanvasRunButton({ mode, hasNodes, edges, onRun }: Props)
   const name = mode === 'flow' ? 'Flow' : 'Crew';
   const label = execution
     ? (execution.stopping ? 'Stopping execution' : `Stop ${name}`)
+    : starting ? `Starting ${name}`
     : (!hasNodes ? `No ${name} to Execute` : !canRun ? 'Configure flow connections to run' : `Run ${name}`);
 
   return <Tooltip title={label}>
@@ -40,7 +44,7 @@ export default function CanvasRunButton({ mode, hasNodes, edges, onRun }: Props)
       <IconButton
         data-tour="play-execution"
         aria-label={label}
-        disabled={execution ? execution.stopping : !canRun}
+        disabled={execution ? execution.stopping : starting || !canRun}
         onClick={execution ? execution.stop : onRun}
         sx={{
           width: 44, height: 44, borderRadius: 3, color: 'text.primary',
@@ -49,7 +53,7 @@ export default function CanvasRunButton({ mode, hasNodes, edges, onRun }: Props)
           transition: 'background-color 0.2s',
         }}
       >
-        {execution?.stopping ? <CircularProgress size={16} color="inherit" />
+        {execution?.stopping || (!execution && starting) ? <CircularProgress size={16} color="inherit" />
           : execution ? <Square size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
       </IconButton>
     </span>

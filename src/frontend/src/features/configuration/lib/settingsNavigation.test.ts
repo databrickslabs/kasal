@@ -37,7 +37,7 @@ describe('teamspace settings navigation', () => {
   });
   it('does not reopen another teamspace’s settings if context has changed', () => {
     switchSettingsTeamspace('admin-team', 'models', vi.fn());
-    localStorage.setItem('selectedGroupId', 'old-team');
+    useGroupStore.getState().setCurrentGroup('old-team');
     expect(readSettingsNavigation()).toBeNull();
   });
 });

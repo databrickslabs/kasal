@@ -6,17 +6,27 @@ unpriced, never inferred from text lengths and never represented as free calls.
 
 from collections import defaultdict
 from decimal import Decimal
+from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, ForbiddenError
 from src.core.permissions import check_role_in_context
+from src.models.model_billing_rate import ModelBillingRate
 from src.repositories.model_billing_rate_repository import ModelBillingRateRepository
-from src.schemas.billing import BillingSummary, UsageBreakdown, UsageTotals
+from src.schemas.billing import (
+    BillingQuery,
+    BillingSummary,
+    ModelRate,
+    UsageBreakdown,
+    UsageTotals,
+)
 from src.services.trace.usage import TraceUsageService
+from src.utils.user_context import GroupContext
 
 
-def _number(value):
+def _number(value: Any) -> Optional[int]:
     if isinstance(value, bool):
         return None
     try:
@@ -26,13 +36,16 @@ def _number(value):
         return None
 
 
-def _usage(row):
-    extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
-    metadata = (
-        row.get("trace_metadata") if isinstance(row.get("trace_metadata"), dict) else {}
-    )
+def _usage(
+    row: Dict[str, Any],
+) -> Tuple[str, Optional[int], Optional[int], int, Optional[int]]:
+    extra = row.get("extra")
+    extra = extra if isinstance(extra, dict) else {}
+    metadata = row.get("trace_metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
     data = {**extra, **metadata}
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else data
+    usage = data.get("usage")
+    usage = usage if isinstance(usage, dict) else data
     input_ = _number(usage.get("prompt_tokens", usage.get("input_tokens")))
     output = _number(usage.get("completion_tokens", usage.get("output_tokens")))
     cached = (
@@ -46,11 +59,18 @@ def _usage(row):
 
 
 class _Totals:
-    def __init__(self):
+    def __init__(self) -> None:
         self.values = UsageTotals()
         self.cost = Decimal(0)
 
-    def add(self, input_, output, cached, total, cost):
+    def add(
+        self,
+        input_: Optional[int],
+        output: Optional[int],
+        cached: int,
+        total: Optional[int],
+        cost: Optional[Decimal],
+    ) -> None:
         value = self.values
         value.calls += 1
         value.measured_calls += int(total is not None)
@@ -65,12 +85,13 @@ class _Totals:
 
 
 class BillingService:
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.rates = ModelBillingRateRepository(session)
         self.usage = TraceUsageService(session)
 
     @staticmethod
-    def _authorize(context, *, manage=False):
+    def _authorize(context: Optional[GroupContext], *, manage: bool = False) -> str:
+        """The caller's teamspace id, once it may see (or ``manage``) billing."""
         allowed = ["admin"] if manage else ["admin", "editor", "operator"]
         if (
             not context
@@ -78,22 +99,29 @@ class BillingService:
             or not check_role_in_context(context, allowed)
         ):
             raise ForbiddenError("You do not have access to billing in this teamspace.")
+        return context.primary_group_id
 
-    async def save_rate(self, context, rate):
-        self._authorize(context, manage=True)
+    async def save_rate(
+        self, context: GroupContext, rate: ModelRate
+    ) -> ModelBillingRate:
+        group_id = self._authorize(context, manage=True)
         try:
-            return await self.rates.put(context.primary_group_id, rate.model_dump())
+            return await self.rates.put(group_id, rate.model_dump())
         except IntegrityError as error:
             raise ConflictError(
                 "This model rate changed. Refresh and try again."
             ) from error
 
-    async def summary(self, context, query):
-        self._authorize(context)
-        rates = await self.rates.for_group(context.primary_group_id)
+    async def summary(
+        self, context: GroupContext, query: BillingQuery
+    ) -> BillingSummary:
+        group_id = self._authorize(context)
+        rates = await self.rates.for_group(group_id)
         by_model = {rate.model: rate for rate in rates}
         totals = _Totals()
-        models, runs, days = (defaultdict(_Totals) for _ in range(3))
+        models: DefaultDict[str, _Totals] = defaultdict(_Totals)
+        runs: DefaultDict[str, _Totals] = defaultdict(_Totals)
+        days: DefaultDict[str, _Totals] = defaultdict(_Totals)
         names, types, seen = {}, {}, set()
         # DB timestamps are naive UTC throughout the existing trace writer.
         async for row in self.usage.iter_calls(
@@ -129,7 +157,9 @@ class BillingService:
             for item in (totals, models[model], runs[run], days[day]):
                 item.add(input_, output, cached, total, cost)
 
-        def breakdown(items, *, run=False):
+        def breakdown(
+            items: Iterable[Tuple[str, _Totals]], *, run: bool = False
+        ) -> List[UsageBreakdown]:
             return [
                 UsageBreakdown(
                     id=key,

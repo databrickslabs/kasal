@@ -25,7 +25,7 @@ row stays readable by old code until it is next written.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +261,7 @@ def ordered_units(record: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not isinstance(units, dict) or not units:
         return []
 
-    def sort_key(item):
+    def sort_key(item: Tuple[Any, Any]) -> Tuple[int, int, str]:
         key = item[0]
         try:
             return (0, int(key), "")

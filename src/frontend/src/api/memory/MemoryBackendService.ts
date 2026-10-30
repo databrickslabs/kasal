@@ -64,29 +64,6 @@ export class MemoryBackendService {
   }
 
   /**
-   * Save memory backend configuration
-   * Note: This might be saved as part of agent/crew configuration rather than separately
-   */
-  static async saveConfig(config: MemoryBackendConfig): Promise<{ success: boolean; message: string }> {
-    try {
-      const response = await apiClient.post<{ success: boolean; message: string }>(
-        '/memory-backend/config',
-        config
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error saving memory backend config:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : 'Failed to save configuration';
-      return {
-        success: false,
-        message: errorMessage || 'Failed to save configuration',
-      };
-    }
-  }
-
-  /**
    * Persist the local (DEFAULT / SQLite) memory backend as an ACTIVE config so
    * crew execution loads its memory tuning via ``get_active_config``. Saving
    * to localStorage alone never reaches the backend runtime, so the memory LLM /
@@ -201,5 +178,13 @@ export class MemoryBackendService {
     }
   }
 
-
+  /**
+   * Ask graph memory to stop recalling one fact. It is retired, not deleted.
+   */
+  static async forgetGraphFact(factId: string): Promise<boolean> {
+    const response = await apiClient.delete<{ forgotten: boolean }>(
+      `/memory-backend/graph/facts/${encodeURIComponent(factId)}`,
+    );
+    return response.data.forgotten;
+  }
 }

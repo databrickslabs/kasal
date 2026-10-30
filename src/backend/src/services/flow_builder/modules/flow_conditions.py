@@ -31,7 +31,19 @@ import logging
 import re
 from collections import deque
 from collections.abc import Mapping
-from typing import Any, Dict, Final, Iterable, List, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Final,
+    ItemsView,
+    Iterable,
+    Iterator,
+    KeysView,
+    List,
+    Tuple,
+    ValuesView,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +120,7 @@ def state_snapshot(state: Any) -> Dict[str, Any]:
         return out
 
     try:
-        dumped = type(state).model_dump(state)  # type: ignore[attr-defined]
+        dumped = type(state).model_dump(state)
         if isinstance(dumped, dict):
             out.update(dumped)
     except Exception:  # noqa: BLE001 - not a pydantic model, or a bad field
@@ -205,9 +217,9 @@ class MatchList(list):
     compared are skipped instead.
     """
 
-    __hash__ = None  # type: ignore[assignment]
+    __hash__ = None
 
-    def _any(self, op, other: Any) -> bool:
+    def _any(self, op: Callable[[Any, Any], Any], other: Any) -> bool:
         for element in self:
             # A projection through two lists — orders[].lines[].sku — gathers a
             # list of lists. Recurse so "any" keeps meaning "any, at any level"
@@ -223,26 +235,26 @@ class MatchList(list):
                 continue
         return False
 
-    def __eq__(self, other: Any) -> bool:  # type: ignore[override]
+    def __eq__(self, other: Any) -> bool:
         return self._any(lambda a, b: a == b, other)
 
-    def __ne__(self, other: Any) -> bool:  # type: ignore[override]
+    def __ne__(self, other: Any) -> bool:
         # MUST be explicit. A list subclass inherits list.__ne__, which compares
         # the list itself against the operand and is therefore always True for a
         # scalar — an always-firing route. "not equals" on a projection means
         # NO element matches.
         return not self.__eq__(other)
 
-    def __gt__(self, other: Any) -> bool:  # type: ignore[override]
+    def __gt__(self, other: Any) -> bool:
         return self._any(lambda a, b: a > b, other)
 
-    def __ge__(self, other: Any) -> bool:  # type: ignore[override]
+    def __ge__(self, other: Any) -> bool:
         return self._any(lambda a, b: a >= b, other)
 
-    def __lt__(self, other: Any) -> bool:  # type: ignore[override]
+    def __lt__(self, other: Any) -> bool:
         return self._any(lambda a, b: a < b, other)
 
-    def __le__(self, other: Any) -> bool:  # type: ignore[override]
+    def __le__(self, other: Any) -> bool:
         return self._any(lambda a, b: a <= b, other)
 
     def __contains__(self, needle: Any) -> bool:
@@ -262,7 +274,7 @@ class MatchList(list):
     def endswith(self, suffix: Any) -> bool:
         return self._any(lambda a, b: isinstance(a, str) and a.endswith(b), suffix)
 
-    def _map(self, transform) -> "MatchList":
+    def _map(self, transform: Callable[[Any], Any]) -> "MatchList":
         return MatchList(
             (
                 MatchList(e)._map(transform)
@@ -343,7 +355,7 @@ def _walk(snapshot: Mapping) -> Iterable[Tuple[str, Any, int]]:
     Yields ``(path, value, depth)``. Cycle-safe by object identity, and bounded
     on both depth and node count.
     """
-    queue = deque([("", snapshot, 0)])
+    queue: deque[Tuple[str, Any, int]] = deque([("", snapshot, 0)])
     seen = {id(snapshot)}
     visited = 0
 
@@ -443,7 +455,8 @@ class ConditionState:
         if cached is None:
             cached = state_snapshot(object.__getattribute__(self, "_base"))
             object.__setattr__(self, "_snapshot", cached)
-        return cached
+        snapshot: Dict[str, Any] = cached
+        return snapshot
 
     def _invalidate(self) -> None:
         object.__setattr__(self, "_snapshot", None)
@@ -561,19 +574,19 @@ class ConditionState:
     def __contains__(self, key: Any) -> bool:
         return key in self._snap()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._snap())
 
     def __len__(self) -> int:
         return len(self._snap())
 
-    def keys(self):  # noqa: D102 - dict surface
+    def keys(self) -> KeysView[str]:  # dict surface
         return self._snap().keys()
 
-    def values(self):  # noqa: D102 - dict surface
+    def values(self) -> ValuesView[Any]:  # dict surface
         return self._snap().values()
 
-    def items(self):  # noqa: D102 - dict surface
+    def items(self) -> ItemsView[str, Any]:  # dict surface
         return self._snap().items()
 
     def __repr__(self) -> str:
@@ -613,7 +626,7 @@ def _term(name: str) -> Tuple[str, Any]:
     return name, _WHERE_OPS[""]
 
 
-def make_where(state: "ConditionState"):
+def make_where(state: "ConditionState") -> Callable[..., MatchList]:
     """Build the ``where`` a router condition may call.
 
     Answers the one question a projection cannot: "is there a SINGLE item that

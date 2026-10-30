@@ -4,17 +4,19 @@ Seed the model_configs table with default model configuration definitions.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 
 from src.db.session import async_session_factory
 from src.models.model_config import ModelConfig
+from src.seeds.errors import SeederIncomplete
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Define default model configurations
-DEFAULT_MODELS = {
+DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
     # --- OpenAI ---
     # Verified 2026-07-25 against developers.openai.com/api/docs/models and
     # .../deprecations. The GPT-5.6 family is the current flagship line; every
@@ -24,6 +26,31 @@ DEFAULT_MODELS = {
     #   o3-deep-research / o4-mini-deep-research  shut down 2026-07-23
     #   gpt-5                                shuts down 2026-12-11
     #   gpt-5.2-chat-latest                  shuts down 2026-08-10
+    # GPT-6 direct API, verified against the OpenAI model catalog 2026-09-24.
+    "gpt-6-astra": {
+        "name": "gpt-6-astra",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-6-sol": {
+        "name": "gpt-6-sol",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-6-luna": {
+        "name": "gpt-6-luna",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
     "gpt-5.6-sol": {
         "name": "gpt-5.6-sol",
         "temperature": 1,
@@ -53,6 +80,14 @@ DEFAULT_MODELS = {
     # .../latest-model. Only STABLE ids are seeded — the previous entries pointed
     # at `-preview` suffixes (gemini-3-pro-preview, gemini-3-flash-preview) and
     # gemini-2.0-flash, all of which Google now lists as Shut down.
+    # Latest stable direct Flash model, verified 2026-09-24.
+    "gemini-3.8-flash": {
+        "name": "gemini-3.8-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
     "gemini-3.6-flash": {
         "name": "gemini-3.6-flash",
         "temperature": 1,
@@ -75,13 +110,23 @@ DEFAULT_MODELS = {
         "max_output_tokens": 65536,
     },
     # --- Anthropic ---
-    # Verified 2026-07-25 against the anthropics/skills model reference. The
-    # previous entries were the Claude 4.0 dated snapshots
-    # (claude-opus-4-20250514 / claude-sonnet-4-20250514), both now deprecated.
-    # Claude 5 is the current generation; Haiku 4.5 stays as the small/fast tier
-    # (there is no Haiku 5). Mythos is deliberately not seeded here (limited
-    # access). Fable is not seeded on this DIRECT-Anthropic path either — it is
-    # served via Databricks instead, see "databricks-claude-fable-5" below.
+    # Current direct Claude API models, verified 2026-09-24:
+    # https://platform.claude.com/docs/en/models/overview
+    # Preserve older model keys for saved workflows; new versions are separate.
+    "claude-opus-5-5": {
+        "name": "claude-opus-5-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "claude-fable-5-1": {
+        "name": "claude-fable-5-1",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
     "claude-opus-5": {
         "name": "claude-opus-5",
         "temperature": 0.7,
@@ -285,6 +330,21 @@ DEFAULT_MODELS = {
         "context_window": 1048576,
         "max_output_tokens": 131072,
     },
+    # --- OpenRouter (OpenAI-compatible; key = OPENROUTER_API_KEY) ---
+    "jev-router": {
+        # TypeSafe's Jev Router: picks a model from OpenRouter's whole catalogue
+        # per request and answers with it. Only by hand: Auto never offers a
+        # router (model_selection.is_router_model), since its pick could be a
+        # model the workspace never enabled. OpenRouter lists a 1M context,
+        # router pricing and `supported_parameters: []`, so model_capabilities
+        # marks every sampling knob refused. The output cap is conservative: the
+        # model the router picks decides the real one.
+        "name": "typesafe/jev-router",
+        "temperature": 1,
+        "provider": "openrouter",
+        "context_window": 1000000,
+        "max_output_tokens": 32768,
+    },
     # --- Databricks (sorted alphabetically) ---
     "databricks-claude-fable-5": {
         # Re-seeded 2026-08-05: Anthropic's 2026-06-12 export-control suspension
@@ -355,6 +415,17 @@ DEFAULT_MODELS = {
         "provider": "databricks",
         "context_window": 1000000,
         "max_output_tokens": 64000,
+    },
+    "databricks-claude-opus-5-5": {
+        # Pay-per-token since 2026-09-22 (Databricks release notes). Databricks
+        # states Anthropic models keep the provider's limits: 1M context, 128K
+        # output. Reasoning cannot be disabled and `temperature` is refused; the
+        # capability registry (core/llm/model_capabilities) keeps it off the wire.
+        "name": "databricks-claude-opus-5-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
     },
     "databricks-claude-sonnet-4-5": {
         "name": "databricks-claude-sonnet-4-5",
@@ -436,6 +507,17 @@ DEFAULT_MODELS = {
     "databricks-gemini-3-8-flash": {
         # Global endpoint: the workspace must have cross-geography routing enabled.
         "name": "databricks-gemini-3-8-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-4-argon": {
+        # GA per Databricks' supported-models page (2026-10-19); cross-geography
+        # routing required. Limits are Google's gemini-4-argon values (1,048,576
+        # shared context, 65,536 synchronous output), which Databricks matches.
+        # Reasoning-only: model_capabilities withholds temperature.
+        "name": "databricks-gemini-4-argon",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 1048576,
@@ -572,8 +654,26 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 32000,
     },
+    # GPT-6 family. Endpoint names from Databricks' supported-models page (Sol
+    # and Luna pay-per-token since 2026-09-22). Databricks publishes no limits
+    # for them, so context/output mirror the direct-OpenAI gpt-6-* seeds above.
+    # All three are Responses API models (services/llm/manager.py).
     "databricks-gpt-6-astra": {
         "name": "databricks-gpt-6-astra",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-6-luna": {
+        "name": "databricks-gpt-6-luna",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-6-sol": {
+        "name": "databricks-gpt-6-sol",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 1050000,
@@ -712,7 +812,7 @@ REMOVED_MODEL_KEYS = [
     # verified 2026-08-05: the endpoint reports READY and serves completions — so
     # it is back in DEFAULT_MODELS and must NOT be listed here, or the seeder
     # would delete it again on every startup.)
-    # Audited 2026-06-20 against the fevm-serverless-stable workspace with a
+    # Audited 2026-06-20 against a serverless test workspace with a
     # hello-world run through Kasal's own LLM path: these Databricks endpoints no
     # longer work — removed/renamed in the workspace, or only support the
     # Responses API (which Kasal's chat-completions path can't use). Pruned so
@@ -734,7 +834,17 @@ REMOVED_MODEL_KEYS = [
 ]
 
 
-async def seed_async():
+def _global_row(key: str) -> Select[Tuple[ModelConfig]]:
+    """SELECT the global (``group_id IS NULL``) row for ``key``, deterministically."""
+    return (
+        select(ModelConfig)
+        .where(ModelConfig.key == key, ModelConfig.group_id.is_(None))
+        .order_by(ModelConfig.id)
+        .limit(1)
+    )
+
+
+async def seed_async() -> None:
     """Seed model configurations into the database using async session."""
     logger.info("Seeding model_configs table (async)...")
 
@@ -805,17 +915,24 @@ async def seed_async():
                         models_error += 1
                         continue
 
-                    # Use upsert approach: try to find existing model first
-                    result = await session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == model_key)
-                    )
+                    # Upsert the GLOBAL row only. A key-only lookup could land on
+                    # a workspace's override and rewrite it instead.
+                    result = await session.execute(_global_row(model_key))
                     existing_model = result.scalars().first()
 
                     if existing_model and model_key not in DEFAULT_MODELS:
                         # Preserve administrator-tuned limits for a custom endpoint.
                         continue
                     if existing_model:
-                        # Update existing model config
+                        # A catalog model's definition ships with each release:
+                        # a corrected limit (27ff4315 cut an output cap to stop
+                        # 400s) must reach existing installs. So an admin's edit
+                        # to these fields is reset on boot; that is accepted.
+                        # `enabled` stays the admin's (forcing it switched off
+                        # every self-hosted model), as do the endpoint keys in
+                        # params (merge_seed_params) and the thinking settings.
+                        from src.services.llm.endpoints import merge_seed_params
+
                         existing_model.name = model_data["name"]
                         existing_model.provider = model_data["provider"]
                         existing_model.temperature = model_data["temperature"]
@@ -826,20 +943,12 @@ async def seed_async():
                         existing_model.extended_thinking = model_data.get(
                             "extended_thinking", False
                         )
-                        # Sampling parameters and endpoint refusals. Seeded like
-                        # every other field, so a corrected value ships with a
-                        # release rather than needing a hand-edited row — and a
-                        # model that declares neither keeps sending exactly what
-                        # it sent before these columns existed.
-                        existing_model.params = model_data.get("params")
+                        existing_model.params = merge_seed_params(
+                            model_data.get("params"), existing_model.params
+                        )
                         existing_model.unsupported_params = model_data.get(
                             "unsupported_params"
                         )
-                        # Preserve the operator's enable/disable choice across reseeds.
-                        # Forcing enabled=(provider=="databricks") here disabled any
-                        # self-hosted vllm/ollama model on EVERY restart (they aren't
-                        # "databricks"), silently breaking local setups. New installs
-                        # still get the databricks default via the insert branch below.
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
@@ -875,16 +984,20 @@ async def seed_async():
 
             # Prune retired models (e.g. Claude 3) from existing installations —
             # the upsert loop above never deletes, so removed keys would linger.
+            # Every row of the key goes, workspace overrides included (as
+            # delete_by_key does): an override of a retired model would still
+            # resolve, with no catalog row left to delete it through.
             # Resilient per-key: a prune failure must never break seeding.
             models_removed = 0
             for removed_key in REMOVED_MODEL_KEYS:
                 try:
                     result = await session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == removed_key)
+                        select(ModelConfig).where(ModelConfig.key == removed_key)
                     )
-                    stale = result.scalars().first()
-                    if stale is not None:
+                    stale_rows = list(result.scalars().all())
+                    for stale in stale_rows:
                         await session.delete(stale)
+                    if stale_rows:
                         models_removed += 1
                         logger.debug(f"Removed retired model: {removed_key}")
                 except Exception as prune_error:
@@ -903,8 +1016,13 @@ async def seed_async():
             await session.rollback()
             raise
 
+    # Raised after the commit: the valid models are kept, the run still fails.
+    # A retired-model prune failure above is NOT counted — it is best-effort.
+    if models_error:
+        raise SeederIncomplete("model_configs", models_error, len(models))
 
-async def seed():
+
+async def seed() -> None:
     """Main entry point for seeding model configurations."""
     logger.info("Starting model configs seeding process...")
     try:
@@ -915,7 +1033,8 @@ async def seed():
         import traceback
 
         logger.error(f"Model configs seeding traceback: {traceback.format_exc()}")
-        # Don't re-raise - allow other seeds to run
+        # Re-raise: the runner still runs the other seeders, then reports this.
+        raise
 
 
 # For backwards compatibility or direct command-line usage

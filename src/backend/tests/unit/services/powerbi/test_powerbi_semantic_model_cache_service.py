@@ -197,33 +197,6 @@ class TestSaveMetadata:
 # ---------------------------------------------------------------------------
 
 
-class TestCleanupOldCaches:
-    @pytest.mark.asyncio
-    async def test_delegates_to_repository(self, service, mock_repo):
-        mock_repo.delete_old_caches.return_value = 5
-
-        result = await service.cleanup_old_caches(days_to_keep=7)
-
-        assert result == 5
-        mock_repo.delete_old_caches.assert_called_once_with(7)
-
-    @pytest.mark.asyncio
-    async def test_default_days_to_keep(self, service, mock_repo):
-        mock_repo.delete_old_caches.return_value = 0
-
-        await service.cleanup_old_caches()
-
-        mock_repo.delete_old_caches.assert_called_once_with(7)
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_when_nothing_deleted(self, service, mock_repo):
-        mock_repo.delete_old_caches.return_value = 0
-
-        result = await service.cleanup_old_caches()
-
-        assert result == 0
-
-
 # ---------------------------------------------------------------------------
 # build_metadata_dict  (synchronous helper method)
 # ---------------------------------------------------------------------------

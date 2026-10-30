@@ -11,7 +11,7 @@ Tests for LakebasePermissionService methods:
 - grant_all_permissions_sync
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -64,48 +64,6 @@ def test_init():
 # ---- grant_schema_permissions_async ----
 
 
-@pytest.mark.asyncio
-async def test_grant_schema_permissions_async_success():
-    """Test successful async schema permission grant."""
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock()
-    # Set up async context manager
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-
-    await svc.grant_schema_permissions_async(mock_engine, "admin@example.com")
-
-    assert mock_conn.execute.call_count == 2  # kasal and public schemas
-
-
-@pytest.mark.asyncio
-async def test_grant_schema_permissions_async_exception_logged_not_raised():
-    """Test that permission errors are caught and logged, not raised."""
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(side_effect=Exception("Permission denied"))
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-
-    # Should not raise
-    await svc.grant_schema_permissions_async(mock_engine, "admin@example.com")
-
-
-@pytest.mark.asyncio
-async def test_grant_schema_permissions_async_invalid_email_logs():
-    """Test that invalid email is caught and logged, not raised."""
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    # The ValueError from _quote_pg_role is caught internally and logged
-    # Should not raise
-    await svc.grant_schema_permissions_async(mock_engine, "invalid!!!")
-
-
 # ---- grant_schema_permissions_sync ----
 
 
@@ -142,37 +100,6 @@ def test_grant_schema_permissions_sync_invalid_email():
 # ---- grant_default_privileges_async ----
 
 
-@pytest.mark.asyncio
-async def test_grant_default_privileges_async_success():
-    """Test successful async default privileges grant."""
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-
-    await svc.grant_default_privileges_async(mock_engine, "admin@example.com")
-
-    assert mock_conn.execute.call_count == 2  # tables and sequences
-
-
-@pytest.mark.asyncio
-async def test_grant_default_privileges_async_exception_logged():
-    """Test that privilege errors are caught and logged."""
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(side_effect=Exception("Privilege denied"))
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-
-    # Should not raise
-    await svc.grant_default_privileges_async(mock_engine, "admin@example.com")
-
-
 # ---- grant_default_privileges_sync ----
 
 
@@ -198,24 +125,6 @@ def test_grant_default_privileges_sync_exception_logged():
 
 
 # ---- grant_all_permissions_async ----
-
-
-@pytest.mark.asyncio
-async def test_grant_all_permissions_async():
-    """Test grant_all_permissions_async calls both sub-methods."""
-    svc = LakebasePermissionService()
-    svc.grant_schema_permissions_async = AsyncMock()
-    svc.grant_default_privileges_async = AsyncMock()
-
-    mock_engine = MagicMock()
-    await svc.grant_all_permissions_async(mock_engine, "admin@example.com")
-
-    svc.grant_schema_permissions_async.assert_awaited_once_with(
-        mock_engine, "admin@example.com"
-    )
-    svc.grant_default_privileges_async.assert_awaited_once_with(
-        mock_engine, "admin@example.com"
-    )
 
 
 # ---- grant_all_permissions_sync ----

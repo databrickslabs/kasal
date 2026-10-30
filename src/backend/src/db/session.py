@@ -3,12 +3,12 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
-from typing import AsyncGenerator, Optional
+from contextvars import ContextVar, Token
+from typing import Any, AsyncGenerator, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from sqlalchemy import event, text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -63,14 +63,14 @@ if SQL_DEBUG:
 
 # Create a SQLAlchemy logger using the LoggerManager
 class SQLAlchemyLogger:
-    def __init__(self):
+    def __init__(self) -> None:
         self.formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-        self.log_dir = logger_manager._log_dir
+        self.log_dir = logger_manager.log_dir
         self.setup_logger()
 
-    def setup_logger(self):
+    def setup_logger(self) -> None:
         # Create sqlalchemy.log file handler
         sqlalchemy_log_file = self.log_dir / "sqlalchemy.log"
 
@@ -137,10 +137,10 @@ from sqlalchemy.pool import (  # noqa: E402 - import follows module initializati
 use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
 
 # Track the main event loop for intelligent engine selection
-main_event_loop = None
+main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-def set_main_event_loop():
+def set_main_event_loop() -> None:
     """
     Capture the main event loop when the FastAPI app starts.
     This should be called from the lifespan/startup event.
@@ -163,7 +163,7 @@ except RuntimeError:
 
 
 # Determine isolation level based on database type
-def get_isolation_level(database_uri: str) -> str:
+def get_isolation_level(database_uri: str) -> Optional[str]:
     """Get appropriate isolation level based on database type."""
     if database_uri.startswith("sqlite"):
         # SQLite with SQLAlchemy: Use None for autocommit behavior with async
@@ -174,7 +174,7 @@ def get_isolation_level(database_uri: str) -> str:
         return "READ COMMITTED"
 
 
-def get_sqlite_connect_args(database_uri: str) -> dict:
+def get_sqlite_connect_args(database_uri: str) -> Dict[str, Any]:
     """Get SQLite-specific connection arguments for better concurrent access."""
     if database_uri.startswith("sqlite"):
         return {
@@ -185,7 +185,7 @@ def get_sqlite_connect_args(database_uri: str) -> dict:
     return {}
 
 
-def get_sqlite_poolclass():
+def get_sqlite_poolclass() -> type[StaticPool]:
     """Pool class for the SQLite engine: StaticPool.
 
     NullPool opens a FRESH aiosqlite connection per checkout, so every
@@ -280,7 +280,6 @@ else:
 
     # Default engine selection
     # When USE_NULLPOOL=true, default to NullPool to avoid cross-loop issues under reload
-    # get_db() still routes to pooled sessions where safe (main app loop) when USE_NULLPOOL=false
     if use_nullpool:
         logger.info(
             "USE_NULLPOOL=true - Event loop isolation mode enabled (defaulting to NullPool engine)"
@@ -298,7 +297,7 @@ else:
 _sqlite_configured_logged = False
 
 
-def configure_sqlite(dbapi_connection, connection_record):
+def configure_sqlite(dbapi_connection: Any, connection_record: Any) -> None:
     """Configure SQLite connection for better performance and concurrency."""
     global _sqlite_configured_logged
     if str(settings.DATABASE_URI).startswith("sqlite"):
@@ -359,6 +358,10 @@ _local_session_factory = async_sessionmaker(
 )
 
 
+# Anything that, called with no arguments, returns a new AsyncSession.
+_SessionFactory = Callable[[], AsyncSession]
+
+
 class _SwappableSessionFactory:
     """Wrapper around async_sessionmaker that can be hot-swapped to Lakebase.
 
@@ -369,20 +372,20 @@ class _SwappableSessionFactory:
     producing Lakebase sessions — zero call-site changes required.
     """
 
-    def __init__(self, default_factory):
+    def __init__(self, default_factory: _SessionFactory) -> None:
         self._factory = default_factory
         self._is_lakebase = False
-        self._on_swap_callbacks = []
+        self._on_swap_callbacks: list[Callable[[], object]] = []
 
     # --- async_sessionmaker-compatible interface ---
 
-    def __call__(self):
+    def __call__(self) -> AsyncSession:
         """Return a new AsyncSession (same as async_sessionmaker.__call__)."""
         return self._factory()
 
     # --- swap-invalidation hooks ---
 
-    def register_on_swap(self, callback):
+    def register_on_swap(self, callback: Callable[[], object]) -> None:
         """Register a zero-arg callback fired whenever the active DB is swapped
         (Lakebase activate/deactivate). Use it to flush in-memory caches keyed to
         the OLD database — e.g. ExecutionService's execution registry — so a
@@ -390,7 +393,7 @@ class _SwappableSessionFactory:
         the previous DB (the 'Execution not found' 404 storm)."""
         self._on_swap_callbacks.append(callback)
 
-    def _fire_swap_callbacks(self):
+    def _fire_swap_callbacks(self) -> None:
         for cb in self._on_swap_callbacks:
             try:
                 cb()
@@ -399,7 +402,7 @@ class _SwappableSessionFactory:
 
     # --- hot-swap API ---
 
-    def activate_lakebase(self, lakebase_factory):
+    def activate_lakebase(self, lakebase_factory: _SessionFactory) -> None:
         """Replace the underlying factory with a Lakebase-backed one."""
         changed = not self._is_lakebase
         self._factory = lakebase_factory
@@ -411,7 +414,7 @@ class _SwappableSessionFactory:
         if changed:
             self._fire_swap_callbacks()
 
-    def deactivate_lakebase(self):
+    def deactivate_lakebase(self) -> None:
         """Revert to the local (SQLite / PG) factory."""
         changed = self._is_lakebase
         self._factory = _local_session_factory
@@ -444,12 +447,17 @@ _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
 # reuse the session only for code running in the request's OWN task and route a
 # fresh connection for everything spawned off it. Callers can no longer forget to
 # detach — the primitive is safe by default.
-_request_session_owner: ContextVar[Optional["asyncio.Task"]] = ContextVar(
+_request_session_owner: ContextVar[Optional["asyncio.Task[Any]"]] = ContextVar(
     "_request_session_owner", default=None
 )
 
 
-def _enter_request_session(session: AsyncSession):
+_RequestSessionTokens = Tuple[
+    Token[Optional[AsyncSession]], Optional[Token[Optional["asyncio.Task[Any]"]]]
+]
+
+
+def _enter_request_session(session: AsyncSession) -> _RequestSessionTokens:
     """Publish ``session`` as the request-scoped session, owned by the CURRENT task.
 
     Returns opaque tokens to hand back to :func:`_exit_request_session`. Every
@@ -457,17 +465,15 @@ def _enter_request_session(session: AsyncSession):
     owner can never drift apart. Recording the owner is what makes reuse
     task-scoped (see ``_request_session_owner``)."""
     session_token = _request_session.set(session)
-    owner_token = None
+    owner_token: Optional[Token[Optional["asyncio.Task[Any]"]]] = None
     try:
         owner_token = _request_session_owner.set(asyncio.current_task())
-    except (
-        Exception
-    ):  # noqa: BLE001 — no running loop is not fatal; reuse just won't match
+    except Exception:  # no running loop is not fatal; reuse just won't match
         pass
     return session_token, owner_token
 
 
-def _exit_request_session(tokens) -> None:
+def _exit_request_session(tokens: _RequestSessionTokens) -> None:
     """Undo :func:`_enter_request_session`. Tolerates a token created in a
     different async context (generator GC'd or cancelled across tasks)."""
     session_token, owner_token = tokens
@@ -522,7 +528,7 @@ def _usable_for_more_sql(session: AsyncSession) -> bool:
 
 
 @asynccontextmanager
-async def routed_scoped_session():
+async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
     """The one way to get a session outside an HTTP request.
 
     Three branches, in order:
@@ -557,6 +563,10 @@ async def routed_scoped_session():
     straight to the snapshot — unconditionally, whether or not auth was involved.
     That looked safe (the name says "request-scoped") and was the same silent split
     as the raw factory in 33 of its 37 call sites.
+
+    Branches 2 and 3 OWN their session: a clean exit commits, an exception rolls
+    back, and both happen in the caller's task before the block returns. Branch 1
+    does neither, because the transaction belongs to the request.
     """
     existing = _request_session.get(None)
     # Reuse the request session ONLY for code running in the task that owns it.
@@ -578,14 +588,23 @@ async def routed_scoped_session():
 
     if _RESOLVING_AUTH.get():
         async with async_session_factory() as session:
-            yield session
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            await session.commit()
         return
 
     from src.db.database_router import get_smart_db_session
 
-    async for session in get_smart_db_session():
+    # Drive the router as a context manager, NOT `async for ...: yield; break`.
+    # The break left the router suspended at its yield, so its commit never ran
+    # and its rollback, close and _request_session reset happened later, in a
+    # finaliser task. The reset then failed (wrong Context), and the next block
+    # in this task reused the finished session through branch 1.
+    async with asynccontextmanager(get_smart_db_session)() as session:
         yield session
-        break
 
 
 # NOTE: detach_request_session() / background_task_context() were removed once
@@ -596,27 +615,6 @@ async def routed_scoped_session():
 # get a session outside a request — routed_scoped_session — and nothing to
 # remember at the spawn site. A task that genuinely needs its own private
 # connection uses get_isolated_db_session().
-
-
-# Create separate session factories for pooled and nullpool engines
-pooled_session_factory = None
-nullpool_session_factory = None
-
-if not str(settings.DATABASE_URI).startswith("sqlite"):
-    # For PostgreSQL, create session factories for both engines
-    pooled_session_factory = async_sessionmaker(
-        pooled_engine,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
-
-    nullpool_session_factory = async_sessionmaker(
-        nullpool_engine,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
 
 
 # (was: ``safe_async_session`` — a third session helper, now DELETED.)
@@ -646,11 +644,11 @@ if not str(settings.DATABASE_URI).startswith("sqlite"):
 # connection (its own aiosqlite queue) is immune to that interference.
 # PostgreSQL/Lakebase already give each pooled checkout a private connection, so
 # this only needs special handling for SQLite.
-_isolated_sqlite_engine = None
-_isolated_sqlite_session_factory = None
+_isolated_sqlite_engine: Optional[AsyncEngine] = None
+_isolated_sqlite_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
 
-def _get_isolated_sqlite_session_factory():
+def _get_isolated_sqlite_session_factory() -> async_sessionmaker[AsyncSession]:
     """Lazily build a NullPool engine + sessionmaker on a private connection.
 
     NullPool hands out a FRESH aiosqlite connection per checkout (closed on
@@ -682,7 +680,7 @@ def _get_isolated_sqlite_session_factory():
 
 
 @asynccontextmanager
-async def get_isolated_db_session():
+async def get_isolated_db_session() -> AsyncIterator[AsyncSession]:
     """Yield a session whose connection is NOT shared with any other session.
 
     Use for a multi-step unit of work that interleaves DB writes with long
@@ -756,10 +754,10 @@ async def init_db() -> None:
 
         await initialize_resource_database()
         return
-    if is_databricks_app() and os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true":
-        raise RuntimeError(
-            "Attach the 'lakebase' database resource before deploying Kasal"
-        )
+    if is_databricks_app():
+        from src.db.app_resource import check_sqlite_fallback
+
+        check_sqlite_fallback(os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true")
     try:
         # Import all models to ensure they're registered
         import importlib
@@ -769,6 +767,7 @@ async def init_db() -> None:
         importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
         from src.db.all_models import Base
 
+        sqlite_db_path: str = settings.SQLITE_DB_PATH or ""  # has a default
         # For PostgreSQL, check if database exists and create if not
         if str(settings.DATABASE_URI).startswith("postgresql"):
             import asyncpg
@@ -818,7 +817,7 @@ async def init_db() -> None:
 
         # For SQLite, ensure database file exists
         if str(settings.DATABASE_URI).startswith("sqlite"):
-            db_path = settings.SQLITE_DB_PATH
+            db_path = sqlite_db_path
 
             # Get absolute path if relative
             if not os.path.isabs(db_path):
@@ -843,8 +842,8 @@ async def init_db() -> None:
                 # Initialize it as a sqlite database
                 import sqlite3
 
-                conn = sqlite3.connect(db_path)
-                conn.close()
+                sqlite_conn = sqlite3.connect(db_path)
+                sqlite_conn.close()
                 logger.info(f"Empty database file created at {db_path}")
 
         # Create all tables in a completely separate, isolated transaction
@@ -856,11 +855,11 @@ async def init_db() -> None:
             try:
                 import sqlite3
 
-                conn = sqlite3.connect(os.path.abspath(settings.SQLITE_DB_PATH))
-                cursor = conn.cursor()
+                sqlite_conn = sqlite3.connect(os.path.abspath(sqlite_db_path))
+                cursor = sqlite_conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = cursor.fetchall()
-                conn.close()
+                sqlite_conn.close()
 
                 if len(tables) > 1:  # SQLite has a sqlite_master table by default
                     logger.info(
@@ -873,7 +872,7 @@ async def init_db() -> None:
         # Only create tables if they don't already exist
         if not tables_exist:
             # Use a fresh engine for initialization with settings optimized for table creation
-            init_engine_opts = {
+            init_engine_opts: Dict[str, Any] = {
                 "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
                 "future": True,
             }
@@ -892,7 +891,6 @@ async def init_db() -> None:
                 str(settings.DATABASE_URI), **init_engine_opts
             )
 
-            # First ensure connection works
             async with engine_for_init.connect() as conn:
                 logger.info("Database connection established")
 
@@ -932,7 +930,6 @@ async def init_db() -> None:
                 logger.error(traceback.format_exc())
                 raise
 
-            # Close the engine after use
             await engine_for_init.dispose()
 
             logger.info("Database tables initialized successfully")
@@ -958,18 +955,18 @@ async def init_db() -> None:
             import sqlite3
 
             try:
-                db_path_to_check = os.path.abspath(settings.SQLITE_DB_PATH)
+                db_path_to_check = os.path.abspath(sqlite_db_path)
                 logger.info(f"Verifying tables in: {db_path_to_check}")
 
                 if (
                     os.path.exists(db_path_to_check)
                     and os.path.getsize(db_path_to_check) > 0
                 ):
-                    conn = sqlite3.connect(db_path_to_check)
-                    cursor = conn.cursor()
+                    sqlite_conn = sqlite3.connect(db_path_to_check)
+                    cursor = sqlite_conn.cursor()
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                     tables = cursor.fetchall()
-                    conn.close()
+                    sqlite_conn.close()
 
                     table_count = len(tables)
                     logger.info(
@@ -995,104 +992,13 @@ async def init_db() -> None:
         raise
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency function that yields db sessions with smart engine selection.
-
-    Uses the appropriate session factory based on context:
-    - Pooled session for FastAPI requests (best performance)
-    - NullPool session for background tasks (event loop isolation)
-
-    Yields:
-        AsyncSession: SQLAlchemy async session
-    """
-    # Default to async_session_factory; in tests (pytest), this allows monkeypatching
-    smart_session_factory = async_session_factory
-
-    # In normal runtime (not under pytest), select appropriate factory by context
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
-        if str(settings.DATABASE_URI).startswith("sqlite"):
-            # SQLite always uses the same session factory
-            smart_session_factory = async_session_factory
-        else:
-            # PostgreSQL: ALWAYS use smart selection regardless of USE_NULLPOOL setting
-            try:
-                current_loop = asyncio.get_running_loop()
-
-                # Check if we're in a background task (different event loop)
-                if main_event_loop and current_loop != main_event_loop:
-                    logger.debug(
-                        f"Background context (loop {id(current_loop)}) - using NullPool session"
-                    )
-                    smart_session_factory = nullpool_session_factory
-                else:
-                    # We're in the main event loop - ALWAYS use pooled sessions for performance!
-                    logger.debug(
-                        f"Main app context (loop {id(current_loop)}) - using POOLED session"
-                    )
-                    # CRITICAL: Always use pooled_session_factory for main app, not async_session_factory
-                    smart_session_factory = pooled_session_factory
-            except RuntimeError:
-                # No event loop running - use NullPool for safety
-                logger.debug("No event loop - using NullPool session")
-                smart_session_factory = nullpool_session_factory
-            except Exception as e:
-                logger.warning(
-                    f"Error detecting context: {e} - using NullPool for safety"
-                )
-                # Fallback to NullPool for safety (not the default factory which might be wrong)
-                smart_session_factory = nullpool_session_factory
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            # Use the selected session factory
-            async with smart_session_factory() as session:
-                # Publish session into ContextVar so that
-                # request_scoped_session() returns the same session
-                tokens = _enter_request_session(session)
-                try:
-                    yield session
-                    # Commit the transaction if no exception occurred
-                    await session.commit()
-                    return  # Success, exit retry loop
-                except OperationalError as e:
-                    # Rollback on any exception
-                    await session.rollback()
-                    if (
-                        "database is locked" in str(e).lower()
-                        and attempt < max_retries - 1
-                    ):
-                        wait_time = 0.1 * (2.0**attempt)
-                        logger.warning(
-                            f"Database locked in session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                        )
-                        await asyncio.sleep(wait_time)
-                        continue
-                    raise
-                except Exception:
-                    # Rollback on any exception
-                    await session.rollback()
-                    raise
-                finally:
-                    _exit_request_session(tokens)
-                    # Ensure session is properly closed
-                    await session.close()
-        except OperationalError as e:
-            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                wait_time = 0.1 * (2.0**attempt)
-                logger.warning(
-                    f"Database locked creating session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                )
-                await asyncio.sleep(wait_time)
-                continue
-            raise
-
-
 async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield a session connected to the LOCAL database (SQLite/PG),
     bypassing the Lakebase swap.  Used for bootstrap config tables
-    like database_configs that are never migrated to Lakebase."""
+    like database_configs that are never migrated to Lakebase.
+
+    Routes take it through ``LocalSessionDep``, which commits before the
+    response is sent; this request-scoped teardown runs after it."""
     async with _local_session_factory() as session:
         tokens = _enter_request_session(session)
         try:
@@ -1106,8 +1012,8 @@ async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-# get_sync_db removed - use get_db() instead
-# All database operations must be async
+# get_db (the old request dependency) and get_sync_db are gone: inside a
+# request use SessionDep, outside one routed_scoped_session().
 
 
 # Graceful engine disposal to avoid event-loop mismatch on shutdown

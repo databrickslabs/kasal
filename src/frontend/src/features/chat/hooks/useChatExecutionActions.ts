@@ -30,6 +30,8 @@ import { registerResultTransform } from '../utils/resultTransforms';
 import { latestDeck, parseSlideEdit, planSlideEdit, refinerAgent } from '../utils/slideRefine';
 import { ensureDeckFence, fenceDeck, isDeck, splitSlides } from '../utils/htmlDeck';
 import { DeckService } from '../../../api/chat/DeckService';
+import { concreteModel } from '../utils/autoModel';
+import { postModelSelection } from '../utils/modelSelectionStep';
 
 /**
  * What the user still has to be asked for.
@@ -173,6 +175,7 @@ export function useChatExecutionActions({
           useExecutionStore.getState().selectedAgentBricksEndpoints,
         );
         const execution = await createExecution(crewConfig);
+        postModelSelection(execution.model_selection, originSessionId);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
           handleStartExecutionStream(jobId, originSessionId || undefined);
@@ -302,6 +305,7 @@ export function useChatExecutionActions({
         );
         crewConfig.inputs = { ...crewConfig.inputs, execution_effort: useChatEffortStore.getState().settings };
         const execution = await createExecution(crewConfig);
+        postModelSelection(execution.model_selection, originSessionId);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
           if (opts?.resultTransform) registerResultTransform(jobId, opts.resultTransform);
@@ -379,7 +383,8 @@ export function useChatExecutionActions({
           owner
             ? sessionStore.addMessageToTargetSession(owner, 'assistant', content, extra)
             : sessionStore.addMessage('assistant', content, extra);
-        const model = selectedModel || undefined;
+        // A slide edit is one direct model call that does not resolve Auto.
+        const model = concreteModel(selectedModel);
         const startedAt = Date.now();
         useExecutionStore.getState().startGeneration(owner);
         const stepId = post('', {
@@ -531,6 +536,7 @@ export function useChatExecutionActions({
           userMessage,
         );
         const execution = await createExecution(flowConfig);
+        postModelSelection(execution.model_selection, originSessionId);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
           handleStartExecutionStream(jobId, originSessionId || undefined);

@@ -47,7 +47,7 @@ class LakebaseConnectionService(BaseService):
         # Don't call super().__init__ since we don't have a session
         self.user_token = user_token
         self.user_email = user_email
-        self._workspace_client = None
+        self._workspace_client: Optional[WorkspaceClient] = None
 
     async def get_workspace_client(self) -> WorkspaceClient:
         """
@@ -67,7 +67,7 @@ class LakebaseConnectionService(BaseService):
         Raises:
             ValueError: If no authentication method is available
         """
-        if not self._workspace_client:
+        if self._workspace_client is None:
             client_id = os.getenv("DATABRICKS_CLIENT_ID")
             client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
             host = os.getenv("DATABRICKS_HOST")
@@ -86,14 +86,15 @@ class LakebaseConnectionService(BaseService):
                 # auth_type names the credentials passed, so a PAT in the env
                 # cannot conflict — nothing is popped from the process env
                 # (that pop raced every other thread; issue #8).
-                self._workspace_client = WorkspaceClient(
+                spn_client = WorkspaceClient(
                     host=host,
                     client_id=client_id,
                     client_secret=client_secret,
                     auth_type="oauth-m2m",
                 )
+                self._workspace_client = spn_client
                 logger.info("[LAKEBASE AUTH] SPN WorkspaceClient created successfully")
-                return self._workspace_client
+                return spn_client
 
             # Local dev fallback — PAT/OBO via generic auth chain
             logger.info(
@@ -201,7 +202,7 @@ class LakebaseConnectionService(BaseService):
                 request_id=str(uuid.uuid4()), instance_names=[instance_name]
             )
             logger.info(
-                f"Generated provisioned credential, token length: {len(cred.token)}"
+                f"Generated provisioned credential, token length: {len(cred.token or '')}"
             )
             return cred
         except Exception as e:
@@ -227,11 +228,12 @@ class LakebaseConnectionService(BaseService):
             if not endpoint_name:
                 raise ValueError(f"No endpoints found for project {instance_name}")
 
-            cred = w.postgres.generate_database_credential(endpoint=endpoint_name)
+            pg_cred = w.postgres.generate_database_credential(endpoint=endpoint_name)
             logger.info(
-                f"Generated autoscaling credential, token length: {len(cred.token)}"
+                "Generated autoscaling credential, token length: "
+                f"{len(pg_cred.token or '')}"
             )
-            return cred
+            return pg_cred
         except Exception as e:
             logger.error(f"Failed to generate credentials for {instance_name}: {e}")
             raise
@@ -268,7 +270,10 @@ class LakebaseConnectionService(BaseService):
         try:
             async with test_engine.connect() as conn:
                 result = await conn.execute(text("SELECT current_user, version()"))
-                current_user, version = result.fetchone()
+                row = result.fetchone()
+                if row is None:
+                    raise RuntimeError("Lakebase test query returned no row")
+                current_user, version = row
                 logger.info(
                     f"Connected to Lakebase as: {current_user}, version: {version}"
                 )
@@ -349,7 +354,7 @@ class LakebaseConnectionService(BaseService):
         if statement_timeout_ms > 0:
 
             @event.listens_for(engine, "connect")
-            def _set_statement_timeout(dbapi_conn, connection_record):
+            def _set_statement_timeout(dbapi_conn: Any, connection_record: Any) -> None:
                 cursor = dbapi_conn.cursor()
                 cursor.execute(f"SET statement_timeout = '{statement_timeout_ms}'")
                 cursor.close()

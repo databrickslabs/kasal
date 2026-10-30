@@ -1,9 +1,11 @@
 """Authorize external resume references before state reads or writes."""
 
+from typing import Any, List, Optional
+
 from src.core.exceptions import NotFoundError
 
 
-def require_run_owner(execution, group_ids):
+def require_run_owner(execution: Any, group_ids: Optional[List[str]]) -> Any:
     if (
         execution is None
         or not group_ids
@@ -14,7 +16,9 @@ def require_run_owner(execution, group_ids):
     return execution
 
 
-async def get_owned_resume_source(service, source_id, group_ids):
+async def get_owned_resume_source(
+    service: Any, source_id: Any, group_ids: Optional[List[str]]
+) -> Any:
     if not group_ids:
         raise NotFoundError(detail="Resume execution not found")
     source = await service.get_run_by_job_id(str(source_id), group_ids=group_ids)

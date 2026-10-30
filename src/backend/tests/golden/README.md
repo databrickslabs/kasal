@@ -35,8 +35,13 @@ See `src/docs/powerbi/ucmv-pipeline-architecture.md` for the end-to-end stage ma
 
 **Sanitization applied at capture:** workspace URLs → `example.databricks.com` /
 `example.azuredatabricks.net`, warehouse IDs → `WAREHOUSE_ID_REDACTED`, customer names →
-`CUSTOMER`, any PAT-shaped strings → `TOKEN_REDACTED`. Apply the same scrubbing to new
-captures before diffing (see `tests/unit/golden/test_golden_baselines.py::SCRUB`).
+`CUSTOMER`, customer catalogs and schema prefixes → `acme_*`, personal catalogs → `main`,
+Power BI and other GUIDs → `00000000-0000-0000-0000-00000000000N`, user IDs → `10000000000001`,
+any PAT-shaped strings → `TOKEN_REDACTED`. Apply the same scrubbing to new captures before
+diffing. `tests/unit/golden/test_golden_baselines.py::SCRUB` automates only the workspace-URL
+and token rules; the rest are manual, and
+`tests/unit/architecture/test_no_customer_identifiers.py` fails if a removed identifier
+comes back.
 
 ## Refreshing baselines
 

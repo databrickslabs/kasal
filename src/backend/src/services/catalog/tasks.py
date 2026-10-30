@@ -6,12 +6,17 @@ from src.core.base_service import BaseService
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
 from src.schemas.task import TaskCreate, TaskUpdate
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
 
 class TaskService(BaseService[Task, TaskCreate]):
     """
     Service for Task model with business logic.
+
+    Security: ``tasks.tool_configs`` and ``tasks.callback_config`` are
+    ``SensitiveJSON`` columns, so the credentials in them are encrypted on every
+    write and decrypted on load. This service works with plaintext.
     """
 
     def __init__(
@@ -46,7 +51,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         return await self.repository.get(id)
 
     async def get_with_group_check(
-        self, id: str, group_context: GroupContext
+        self, id: str, group_context: Optional[GroupContext]
     ) -> Optional[Task]:
         """
         Get a task by ID with group verification.
@@ -134,7 +139,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         logger = logging.getLogger(__name__)
         if hasattr(obj_in, "tool_configs") and obj_in.tool_configs is not None:
             logger.info(
-                f"TaskService: Updating task {id} with tool_configs: {obj_in.tool_configs}"
+                f"TaskService: Updating task {id} with tool_configs: {mask_sensitive_fields(obj_in.tool_configs)}"
             )
 
         # Exclude unset fields (None) from update
@@ -151,16 +156,15 @@ class TaskService(BaseService[Task, TaskCreate]):
         # Log if tool_configs is in update_data
         if "tool_configs" in update_data:
             logger.info(
-                f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}"
+                f"TaskService: update_data contains tool_configs: {sorted(update_data.get('tool_configs') or {})}"
             )
 
         if not update_data:
             # No fields to update
             return await self.get(id)
 
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in update_data and update_data["agent_id"] == "":
-            update_data["agent_id"] = None
+        # agent_id "" is dropped by TaskRepository.update, not nulled here: it
+        # means "not provided", and NULL would unassign the task.
 
         return await self.repository.update(id, update_data)
 
@@ -172,7 +176,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         self,
         id: str,
         fields: Dict[str, str],
-        group_context: GroupContext,
+        group_context: Optional[GroupContext],
     ) -> bool:
         """Rewrite a task's prompt TEXT, verifying it belongs to the caller's group.
 
@@ -226,7 +230,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         logger = logging.getLogger(__name__)
         if hasattr(obj_in, "tool_configs") and obj_in.tool_configs is not None:
             logger.info(
-                f"TaskService: Updating task {id} with tool_configs: {obj_in.tool_configs}"
+                f"TaskService: Updating task {id} with tool_configs: {mask_sensitive_fields(obj_in.tool_configs)}"
             )
 
         # Exclude unset fields (None) from update
@@ -243,35 +247,17 @@ class TaskService(BaseService[Task, TaskCreate]):
         # Log if tool_configs is in update_data
         if "tool_configs" in update_data:
             logger.info(
-                f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}"
+                f"TaskService: update_data contains tool_configs: {sorted(update_data.get('tool_configs') or {})}"
             )
 
         if not update_data:
             # No fields to update
             return task
 
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in update_data and update_data["agent_id"] == "":
-            update_data["agent_id"] = None
+        # agent_id "" is dropped by TaskRepository.update, not nulled here: it
+        # means "not provided", and NULL would unassign the task.
 
         return await self.repository.update(id, update_data)
-
-    async def update_full(self, id: str, obj_in: Dict[str, Any]) -> Optional[Task]:
-        """
-        Update all fields of a task.
-
-        Args:
-            id: ID of the task to update
-            obj_in: Dictionary with all fields to update
-
-        Returns:
-            Updated task if found, else None
-        """
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in obj_in and obj_in["agent_id"] == "":
-            obj_in["agent_id"] = None
-
-        return await self.repository.update(id, obj_in)
 
     async def update_full_with_group_check(
         self, id: str, obj_in: Dict[str, Any], group_context: GroupContext
@@ -292,9 +278,8 @@ class TaskService(BaseService[Task, TaskCreate]):
         if not task:
             return None
 
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in obj_in and obj_in["agent_id"] == "":
-            obj_in["agent_id"] = None
+        # agent_id "" is dropped by TaskRepository.update, not nulled here: it
+        # means "not provided", and NULL would unassign the task.
 
         return await self.repository.update(id, obj_in)
 

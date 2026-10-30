@@ -26,6 +26,7 @@ All functions are pure/stateless — no I/O, no LLM calls, no database access.
 Call sites (pipeline_config_generator_tool._run) are fail-open: if any function
 raises, the caller catches and logs; the rest of config-gen proceeds unchanged.
 """
+
 from __future__ import annotations
 
 import base64
@@ -33,10 +34,10 @@ import re
 from collections import defaultdict
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # S6 — DAX calculated columns
 # ---------------------------------------------------------------------------
+
 
 def extract_calculated_columns_from_tmdl(
     tmdl_parts: list[dict],
@@ -129,7 +130,7 @@ def _parse_calculated_columns(content: str) -> list[dict]:
                 j += 1
                 continue
             aindent = len(aline) - len(aline.lstrip())
-            aindent_exp = len((aline[: aindent]).expandtabs(4))
+            aindent_exp = len((aline[:aindent]).expandtabs(4))
             if aindent_exp <= base_indent:
                 break  # end of column attribute block
 
@@ -158,14 +159,18 @@ def _parse_calculated_columns(content: str) -> list[dict]:
 
             j += 1
 
-        expression = inline_expr or ("\n".join(attr_expr_lines).strip() if attr_expr_lines else None)
+        expression = inline_expr or (
+            "\n".join(attr_expr_lines).strip() if attr_expr_lines else None
+        )
 
         if expression:
-            result.append({
-                "name": name,
-                "expression": expression,
-                "data_type": data_type,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "expression": expression,
+                    "data_type": data_type,
+                }
+            )
 
         i = j
 
@@ -178,7 +183,7 @@ def _parse_calculated_columns(content: str) -> list[dict]:
 
 # Table-name patterns that strongly suggest a 4-4-5 fiscal calendar.
 _FISCAL_TABLE_NAME_PATS = [
-    re.compile(r"4.?4.?5", re.IGNORECASE),        # "445", "4-4-5", "4_4_5"
+    re.compile(r"4.?4.?5", re.IGNORECASE),  # "445", "4-4-5", "4_4_5"
     re.compile(r"fiscal", re.IGNORECASE),
     re.compile(r"fiscper", re.IGNORECASE),
     re.compile(r"fiscyear", re.IGNORECASE),
@@ -273,6 +278,7 @@ def detect_fiscal_calendar_tables(
 # ---------------------------------------------------------------------------
 # rec#9 — Measure metadata harvest from TMDL
 # ---------------------------------------------------------------------------
+
 
 def harvest_measure_metadata_from_tmdl(
     tmdl_parts: list[dict],
@@ -405,6 +411,7 @@ def enrich_ucmv_measures_with_metadata(
 # rec#10 — Reconciliation mapping scaffolds
 # ---------------------------------------------------------------------------
 
+
 def build_reconciliation_mapping_scaffolds(
     ucmv_measures: list[dict],
     config: dict,
@@ -441,14 +448,13 @@ def build_reconciliation_mapping_scaffolds(
     """
     fiscal = fiscal_calendars or {}
     join_key_map: dict[str, dict] = config.get("join_key_map") or {}
-    fact_join_map: dict[str, dict] = config.get("fact_join_map") or {}
     time_info: dict = config.get("time_dimension") or {}
 
     # Period column heuristic: use the first entry from period_dim_priority,
     # fall back to 'fiscper' (the most common OTC/FMCG fiscal period column).
     period_dims: list[str] = config.get("period_dim_priority") or []
-    period_col = period_dims[0] if period_dims else (
-        time_info.get("ucmv_column") or "fiscper"
+    period_col = (
+        period_dims[0] if period_dims else (time_info.get("ucmv_column") or "fiscper")
     )
     pbi_period_col = time_info.get("pbi_column") or period_col
 
@@ -484,33 +490,29 @@ def build_reconciliation_mapping_scaffolds(
             time_dim["pbi_period_format"] = "date_to_fiscper"
 
         # Default dimension: first join dim in join_key_map (alphabetically stable).
-        dim_keys = [
-            k for k in join_key_map
-            if k.lower() not in (fact_table.lower(),)
-        ]
+        dim_keys = [k for k in join_key_map if k.lower() not in (fact_table.lower(),)]
         default_dim_col = "country"  # sensible default for OTC-style models
         if dim_keys:
             # Prefer a dim whose name contains "country"
-            country_dim = next(
-                (k for k in dim_keys if "country" in k.lower()), None
-            )
-            default_dim_col = (
-                join_key_map.get(country_dim or dim_keys[0], {}).get("dim_column")
-                or _to_snake(country_dim or dim_keys[0])
-            )
+            country_dim = next((k for k in dim_keys if "country" in k.lower()), None)
+            default_dim_col = join_key_map.get(country_dim or dim_keys[0], {}).get(
+                "dim_column"
+            ) or _to_snake(country_dim or dim_keys[0])
 
         # Build the measures list.
         rec_measures: list[dict] = []
         for m in measures:
             orig = m.get("original_name") or m.get("measure_name") or ""
             snake = _to_snake(orig)
-            rec_measures.append({
-                "ucmv_measure": snake,
-                "pbi_kind": "direct",
-                "pbi_measure": orig,
-                "value_format": "raw_number",
-                "tolerance": {"kind": "absolute", "value": 0.001},
-            })
+            rec_measures.append(
+                {
+                    "ucmv_measure": snake,
+                    "pbi_kind": "direct",
+                    "pbi_measure": orig,
+                    "value_format": "raw_number",
+                    "tolerance": {"kind": "absolute", "value": 0.001},
+                }
+            )
 
         scaffold: dict = {
             "ucmv_table": f"TODO: {view_name}",
@@ -531,14 +533,15 @@ def build_reconciliation_mapping_scaffolds(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _decode_payload(payload: str) -> str:
     """Decode a base64-encoded TMDL part payload to UTF-8 text."""
     if not payload:
         return ""
     try:
         return base64.b64decode(payload).decode("utf-8")
-    except Exception:
-        return payload  # not base64 — assume already decoded (unit tests)
+    except ValueError:  # binascii.Error / UnicodeDecodeError — not base64 text
+        return payload  # assume already decoded (unit tests)
 
 
 def _parse_table_name(content: str) -> str:

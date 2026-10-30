@@ -425,3 +425,17 @@ async def test_select_volume_file_default_group_id():
         )
 
     assert result["group_id"] == "default"
+
+
+def test_browse_route_response_model_matches_the_service_dict():
+    """The service returns a dict ({"success", "files", ...}). The route used to
+    be annotated List[...], which FastAPI adopted as its response model, so every
+    real response failed validation with a 500."""
+    from typing import Any, Dict
+
+    from src.api.databricks_knowledge_router import router
+
+    route = next(
+        r for r in router.routes if r.path.endswith("/browse/{volume_path:path}")
+    )
+    assert route.response_model == Dict[str, Any]

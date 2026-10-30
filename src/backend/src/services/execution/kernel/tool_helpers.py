@@ -6,7 +6,7 @@ in the CrewAI engine service.
 """
 
 import logging
-from typing import List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 # Import services
 from src.services.tools.tool_service import ToolService
@@ -66,9 +66,11 @@ async def resolve_tool_ids_to_names(
     return tool_names
 
 
-async def resolve_tools_for_agent(tool_ids, tool_service: ToolService):
+async def resolve_tools_for_agent(
+    tool_ids: List[Any], tool_service: ToolService
+) -> List[Tuple[str, Dict[str, Any]]]:
     """Fetch selected names and configs together, preserving input order/repeats."""
-    selected = []
+    selected: List[Any] = []
     for tool_id in tool_ids:
         if tool_id == "DatabricksKnowledgeSearchTool":
             selected.append(tool_id)
@@ -79,13 +81,13 @@ async def resolve_tools_for_agent(tool_ids, tool_service: ToolService):
                 selected.append(None)
     numeric = [value for value in selected if isinstance(value, int)]
     records = await tool_service.get_tools_by_ids(numeric) if numeric else {}
-    custom_config = {}
+    custom_config: Dict[str, Any] = {}
     if "DatabricksKnowledgeSearchTool" in selected:
         custom_config = (
             await tool_service.get_tool_config_by_name("DatabricksKnowledgeSearchTool")
             or {}
         )
-    resolved = []
+    resolved: List[Tuple[str, Dict[str, Any]]] = []
     for value in selected:
         if value == "DatabricksKnowledgeSearchTool":
             resolved.append((value, custom_config))

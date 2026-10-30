@@ -65,7 +65,10 @@ reference generator uses for exactly the same reason.
 
 from __future__ import annotations
 
-from src.services.tools.metric_view_utils.data_classes import MetricViewSpec
+from src.services.tools.metric_view_utils.data_classes import (
+    MetricViewSpec,
+    TranslationResult,
+)
 
 _VALID_PBI_KINDS = {
     "direct",
@@ -119,7 +122,7 @@ def _emit_filter_block(lines: list[str], filters: list, indent: str = "    ") ->
             lines.append(f"{indent}  - {_yaml_str(str(v))}")
 
 
-def _measure_pbi_kind(m) -> dict:
+def _measure_pbi_kind(m: TranslationResult) -> dict:
     """Classify one TranslationResult's PBI provenance.
 
     Returns a dict ready to splice into the YAML entry — always has ``kind``;
@@ -271,7 +274,7 @@ def _measure_pbi_kind(m) -> dict:
     return {"kind": "direct", "pbi_measure": m.original_name}
 
 
-def _emit_measure_entry(m) -> list[str]:
+def _emit_measure_entry(m: TranslationResult) -> list[str]:
     lines: list[str] = []
     lines.append(f"  - ucmv_measure: {_yaml_str(m.measure_name)}")
     info = _measure_pbi_kind(m)

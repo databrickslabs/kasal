@@ -30,8 +30,9 @@ sweep treats an embedder as required rather than silently doing half the job.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
+
+from src.services.settings import engine_settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,21 +45,8 @@ _DEFAULT_BATCH = 5
 
 
 def sweep_enabled() -> bool:
-    return os.environ.get("KASAL_MEMORY_SWEEP", "true").lower() != "false"
-
-
-def _float_env(name: str, default: float) -> float:
-    try:
-        return float(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _int_env(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
+    """Configuration → Engines → Advanced (was KASAL_MEMORY_SWEEP)."""
+    return bool(engine_settings.setting(engine_settings.MEMORY_SWEEP_ENABLED))
 
 
 async def build_group_memory(group_id: str) -> Any:
@@ -140,10 +128,10 @@ async def sweep_memory_maintenance() -> dict[str, int]:
     if not sweep_enabled():
         return result
 
-    interval_hours = _float_env(
-        "KASAL_MEMORY_SWEEP_INTERVAL_HOURS", _DEFAULT_INTERVAL_HOURS
+    interval_hours = float(
+        engine_settings.setting(engine_settings.MEMORY_SWEEP_INTERVAL_HOURS)
     )
-    batch = _int_env("KASAL_MEMORY_SWEEP_BATCH", _DEFAULT_BATCH)
+    batch = int(engine_settings.setting(engine_settings.MEMORY_SWEEP_BATCH))
 
     try:
         from src.db.session import get_isolated_db_session

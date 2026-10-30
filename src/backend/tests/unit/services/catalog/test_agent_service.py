@@ -342,46 +342,6 @@ class TestAgentServiceUpdateWithPartialData:
         mock_repository.update.assert_called_once()
 
 
-class TestAgentServiceUpdateLimitedFields:
-    """Test cases for update_limited_fields method."""
-
-    @pytest.mark.asyncio
-    async def test_update_limited_fields_success(
-        self, agent_service, mock_repository, sample_agent_limited_update
-    ):
-        """Test successful limited fields update."""
-        updated_agent = MockAgent(
-            name=sample_agent_limited_update.name, goal=sample_agent_limited_update.goal
-        )
-        mock_repository.update.return_value = updated_agent
-
-        result = await agent_service.update_limited_fields(
-            "agent-123", sample_agent_limited_update
-        )
-
-        assert result == updated_agent
-        mock_repository.update.assert_called_once()
-        call_args = mock_repository.update.call_args[0]
-        assert call_args[0] == "agent-123"
-        assert call_args[1]["name"] == "Limited Update Agent"
-        assert call_args[1]["goal"] == "Updated goal only"
-
-    @pytest.mark.asyncio
-    async def test_update_limited_fields_no_fields(
-        self, agent_service, mock_repository
-    ):
-        """Test limited update with no fields set."""
-        empty_update = AgentLimitedUpdate()
-        existing_agent = MockAgent()
-        mock_repository.get.return_value = existing_agent
-
-        result = await agent_service.update_limited_fields("agent-123", empty_update)
-
-        assert result == existing_agent
-        mock_repository.update.assert_not_called()
-        mock_repository.get.assert_called_once_with("agent-123")
-
-
 class TestAgentServiceDelete:
     """Test cases for delete method."""
 
@@ -597,72 +557,11 @@ def make_agent(id="a1", tool_configs=None):
     return agent
 
 
-# ---- _decrypt_agent_tool_configs ----
-
-
-def test_decrypt_agent_tool_configs_with_tool_configs():
-    svc = make_service()
-    agent = make_agent(tool_configs={"key": "encrypted"})
-    with patch(
-        "src.services.catalog.agents.decrypt_sensitive_fields",
-        return_value={"key": "decrypted"},
-    ):
-        result = svc._decrypt_agent_tool_configs(agent)
-    assert result is agent
-    assert agent.tool_configs == {"key": "decrypted"}
-
-
-def test_decrypt_agent_tool_configs_decrypt_exception():
-    svc = make_service()
-    agent = make_agent(tool_configs={"key": "bad_encrypted"})
-    with patch(
-        "src.services.catalog.agents.decrypt_sensitive_fields",
-        side_effect=Exception("decrypt error"),
-    ):
-        result = svc._decrypt_agent_tool_configs(agent)
-    assert result is agent  # Should still return agent
-
-
-def test_decrypt_agent_tool_configs_no_tool_configs():
-    svc = make_service()
-    agent = make_agent(tool_configs=None)
-    result = svc._decrypt_agent_tool_configs(agent)
-    assert result is agent
-
-
-# ---- _encrypt_tool_configs_in_data ----
-
-
-def test_encrypt_tool_configs_in_data_success():
-    svc = make_service()
-    data = {"tool_configs": {"api_key": "plaintext"}, "name": "test"}
-    with patch(
-        "src.services.catalog.agents.encrypt_sensitive_fields",
-        return_value={"api_key": "encrypted"},
-    ):
-        with patch(
-            "src.services.catalog.agents.safe_log_tool_configs", return_value="safe log"
-        ):
-            result = svc._encrypt_tool_configs_in_data(data)
-    assert result["tool_configs"]["api_key"] == "encrypted"
-
-
-def test_encrypt_tool_configs_in_data_exception_raises():
-    svc = make_service()
-    data = {"tool_configs": {"api_key": "plaintext"}}
-    with patch(
-        "src.services.catalog.agents.encrypt_sensitive_fields",
-        side_effect=Exception("encrypt failed"),
-    ):
-        with pytest.raises(Exception, match="encrypt failed"):
-            svc._encrypt_tool_configs_in_data(data)
-
-
-def test_encrypt_tool_configs_no_tool_configs():
-    svc = make_service()
-    data = {"name": "test"}
-    result = svc._encrypt_tool_configs_in_data(data)
-    assert result == {"name": "test"}
+# ---- tool_configs are handed over as plaintext ----
+#
+# agents.tool_configs is a SensitiveJSON column: it encrypts on write and
+# decrypts on load. The service must pass plaintext through untouched; doing
+# either itself is what used to write decrypted values back to the row.
 
 
 # ---- create (class method) ----
@@ -696,16 +595,11 @@ async def test_update_with_partial_data_with_tool_configs():
     obj_in = MagicMock()
     obj_in.model_dump.return_value = {"tool_configs": {"api_key": "plain"}}
 
-    with patch(
-        "src.services.catalog.agents.encrypt_sensitive_fields",
-        return_value={"api_key": "enc"},
-    ):
-        with patch(
-            "src.services.catalog.agents.safe_log_tool_configs", return_value="safe"
-        ):
-            with patch.object(svc, "_decrypt_agent_tool_configs", return_value=agent):
-                result = await svc.update_with_partial_data("a1", obj_in)
+    result = await svc.update_with_partial_data("a1", obj_in)
     assert result is agent
+    svc.repository.update.assert_awaited_once_with(
+        "a1", {"tool_configs": {"api_key": "plain"}}
+    )
 
 
 # ---- update_with_group_check ----
@@ -750,42 +644,14 @@ async def test_update_with_group_check_with_tool_configs():
     ):
         obj_in = MagicMock()
         obj_in.model_dump.return_value = {"tool_configs": {"key": "plain"}}
-        with patch(
-            "src.services.catalog.agents.encrypt_sensitive_fields",
-            return_value={"key": "enc"},
-        ):
-            with patch(
-                "src.services.catalog.agents.safe_log_tool_configs", return_value="safe"
-            ):
-                with patch.object(
-                    svc, "_decrypt_agent_tool_configs", return_value=agent
-                ):
-                    result = await svc.update_with_group_check("a1", obj_in, group_ctx)
+        result = await svc.update_with_group_check("a1", obj_in, group_ctx)
     assert result is agent
+    svc.repository.update.assert_awaited_once_with(
+        "a1", {"tool_configs": {"key": "plain"}}
+    )
 
 
 # ---- update_limited_fields ----
-
-
-@pytest.mark.asyncio
-async def test_update_limited_fields_with_tool_configs():
-    svc = make_service()
-    agent = make_agent()
-    svc.repository.update = AsyncMock(return_value=agent)
-
-    obj_in = MagicMock()
-    obj_in.model_dump.return_value = {"tool_configs": {"key": "plain"}}
-
-    with patch(
-        "src.services.catalog.agents.encrypt_sensitive_fields",
-        return_value={"key": "enc"},
-    ):
-        with patch(
-            "src.services.catalog.agents.safe_log_tool_configs", return_value="safe"
-        ):
-            with patch.object(svc, "_decrypt_agent_tool_configs", return_value=agent):
-                result = await svc.update_limited_fields("a1", obj_in)
-    assert result is agent
 
 
 # ---- update_limited_with_group_check ----
@@ -830,20 +696,11 @@ async def test_update_limited_with_group_check_with_tool_configs():
     ):
         obj_in = MagicMock()
         obj_in.model_dump.return_value = {"tool_configs": {"key": "plain"}}
-        with patch(
-            "src.services.catalog.agents.encrypt_sensitive_fields",
-            return_value={"key": "enc"},
-        ):
-            with patch(
-                "src.services.catalog.agents.safe_log_tool_configs", return_value="safe"
-            ):
-                with patch.object(
-                    svc, "_decrypt_agent_tool_configs", return_value=agent
-                ):
-                    result = await svc.update_limited_with_group_check(
-                        "a1", obj_in, group_ctx
-                    )
+        result = await svc.update_limited_with_group_check("a1", obj_in, group_ctx)
     assert result is agent
+    svc.repository.update.assert_awaited_once_with(
+        "a1", {"tool_configs": {"key": "plain"}}
+    )
 
 
 # ---- delete_with_group_check ----

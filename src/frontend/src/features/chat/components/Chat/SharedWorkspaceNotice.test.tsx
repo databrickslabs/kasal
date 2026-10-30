@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useGroupStore } from '../../../../store/groups';
+import { useUserStore } from '../../../../store/user';
 import type { GroupWithRole } from '../../../../api/groups/GroupService';
 
 const SHARED: GroupWithRole = {
@@ -25,6 +26,10 @@ const setWorkspace = (groupId: string | null, groups: GroupWithRole[]) =>
 beforeEach(() => {
   localStorage.clear();
   setWorkspace(null, []);
+  // The personal workspace is the id stored on the user, not a name prefix.
+  useUserStore.setState({
+    currentUser: { id: 'u1', email: 'alice@example.com', username: 'alice', personal_group_id: PERSONAL.id },
+  });
 });
 
 describe('SharedWorkspaceNotice', () => {
@@ -32,6 +37,13 @@ describe('SharedWorkspaceNotice', () => {
     setWorkspace(PERSONAL.id, [PERSONAL]);
     render(<SharedWorkspaceNotice />);
     expect(screen.queryByTestId('shared-workspace-notice')).toBeNull();
+  });
+
+  it('renders in a team named "User …", whose id also starts with user_', () => {
+    const team = { id: 'user_marketing_1a2b3c4d', name: 'User Marketing', status: 'active', user_count: 3 } as GroupWithRole;
+    setWorkspace(team.id, [team]);
+    render(<SharedWorkspaceNotice />);
+    expect(screen.getByTestId('shared-workspace-notice')).toHaveTextContent('all 3 members');
   });
 
   it('does not render when no workspace is selected', () => {

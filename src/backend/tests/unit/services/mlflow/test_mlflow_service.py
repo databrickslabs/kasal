@@ -51,6 +51,8 @@ def make_service(group_id="g1"):
     ):
         svc = MLflowService(session=session, group_id=group_id)
     svc.repo = AsyncMock()
+    # No judge configured unless a test says so (a bare AsyncMock is truthy).
+    svc.repo.get_evaluation_judge_model = AsyncMock(return_value=None)
     svc.execution_service = AsyncMock()
     svc.model_config_service = AsyncMock()
     return svc
@@ -534,6 +536,39 @@ class TestTriggerEvaluation:
             with self._trigger_context():
                 result = await svc.trigger_evaluation("job-1")
         assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_runner_gets_the_kasal_judge_key_and_the_callers_route(self):
+        """Evaluation judges use the configured judge's Kasal key through the
+        LLMManager bridge, under the caller's group, on this event loop."""
+        import asyncio
+
+        from src.utils.user_context import GroupContext
+
+        svc = make_service()
+        svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
+        svc.repo.get_evaluation_judge_model = AsyncMock(
+            return_value="databricks/judge-a"
+        )
+        svc.model_config_service.find_by_key = AsyncMock(
+            side_effect=lambda key: SimpleNamespace() if key == "judge-a" else None
+        )
+        svc.execution_service.get_run_by_job_id = AsyncMock(
+            return_value=SimpleNamespace(
+                inputs={"question": "q"}, result="a", mlflow_trace_id=None
+            )
+        )
+        group = GroupContext(group_ids=["g1"], access_token="obo")
+        with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
+            with self._trigger_context():
+                from src.services.mlflow import evaluation_runner
+
+                await svc.trigger_evaluation("job-1", group_context=group)
+                kwargs = evaluation_runner.MLflowEvaluationRunner.call_args.kwargs
+        assert kwargs["judge_model"] == "judge-a"
+        route = kwargs["judge_route"]
+        assert route.group_context is group and route.user_token == "obo"
+        assert route.loop is asyncio.get_running_loop()
 
     @pytest.mark.asyncio
     async def test_inputs_fallback_to_json_dump(self):

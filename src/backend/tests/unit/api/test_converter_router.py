@@ -179,15 +179,17 @@ def test_service_errors_reach_http_boundary(
 ):
     service = ConverterService(
         AsyncMock(),
-        group_context=SimpleNamespace(primary_group_id="group-1", group_email=None),
+        group_context=SimpleNamespace(
+            primary_group_id="group-1", group_ids=["group-1"], group_email=None
+        ),
     )
     service.history_repo = AsyncMock()
-    service.history_repo.get.return_value = None
+    service.history_repo.get_for_groups.return_value = None
     service.job_repo = AsyncMock()
     service.job_repo.cancel_job.return_value = None
     service.config_repo = AsyncMock()
-    service.config_repo.get.return_value = SimpleNamespace(
-        created_by_email="another@example.com"
+    service.config_repo.get_visible_to_groups.return_value = SimpleNamespace(
+        created_by_email="another@example.com", is_template=False, is_public=True
     )
     app.dependency_overrides[get_converter_service] = lambda: service
 

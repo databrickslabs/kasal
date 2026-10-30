@@ -31,6 +31,7 @@ import {
   useMemoryTuningConfig,
   useMemoryBackendStore,
 } from '../../../store/memoryBackend';
+import MemoryHygieneFields from './MemoryHygieneFields';
 
 interface SliderSpec {
   key: keyof MemoryTuningConfig;
@@ -92,10 +93,11 @@ const TUNING_SLIDERS: SliderSpec[] = [
     max: 1,
     step: 0.01,
     help:
-      'Blended score (similarity + keyword + recency + importance) below which a recall ' +
-      'returns nothing. Left untouched it follows the embedder in use: 0.75 with the ' +
-      'Databricks embedder, 0.62 with the local Ollama fallback. Lower it if reads come ' +
-      'back empty for memories you know are there.',
+      'Similarity (cosine) below which a memory is not recalled. Recency and importance ' +
+      'only rank what passes it, so an old memory is never dropped for its age. Left ' +
+      'untouched it follows the embedder in use: 0.60 with the Databricks embedder, 0.64 ' +
+      'with the local Ollama fallback. Lower it if reads come back empty for memories you ' +
+      'know are there.',
   },
   {
     key: 'confidence_threshold_high',
@@ -199,7 +201,8 @@ export const MemoryTuningPanel: React.FC = () => {
           <Typography variant="subtitle1">Memory Tuning</Typography>
           <Typography variant="caption" color="text.secondary">
             Advanced — composite-score weights and floor, recall depth (query
-            distillation, exploration rounds), save-time consolidation, memory LLM.
+            distillation, exploration rounds), save-time consolidation, memory LLM,
+            write screening and retention.
           </Typography>
         </Box>
       </AccordionSummary>
@@ -338,6 +341,7 @@ export const MemoryTuningPanel: React.FC = () => {
             </TextField>
           </Grid>
         </Grid>
+        <MemoryHygieneFields tuning={tuning} update={updateCognitiveConfig} />
       </AccordionDetails>
     </Accordion>
   );

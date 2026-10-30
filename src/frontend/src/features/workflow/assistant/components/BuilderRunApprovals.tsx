@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } 
 import { HITLService, type HITLApprovalResponse } from '../../../../api/execution/HITLService';
 import ApprovalCard, { type ApprovalData } from '../../../chat/components/Cards/ApprovalCard';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 // Lazy so the heavy result-viewer chain (ConverterService/apiClient) isn't pulled
 // into this module at import time — it broke the approvals test suite's load.
@@ -34,13 +35,13 @@ export default function BuilderRunApprovals({ jobId, running }: { jobId: string;
   const [reviewing, setReviewing] = useState<number | null>(null);
   const request = useRef(0);
   const invalidate = useCallback(() => { request.current++; }, []);
-  const groupId = localStorage.getItem('selectedGroupId');
+  const groupId = getTabGroupId();
   const alive = useRef(false);
   const refresh = useCallback(async () => {
     const version = ++request.current;
     try {
       const status = await HITLService.getExecutionHITLStatus(jobId);
-      if (!alive.current || version !== request.current || localStorage.getItem('selectedGroupId') !== groupId) return;
+      if (!alive.current || version !== request.current || getTabGroupId() !== groupId) return;
       const byId = new Map((status.approval_history || []).map(item => [item.id, item]));
       if (status.pending_approval) byId.set(status.pending_approval.id, status.pending_approval);
       setApprovals([...byId.values()]);
@@ -78,7 +79,7 @@ export default function BuilderRunApprovals({ jobId, running }: { jobId: string;
     setReviewing(approval.id);
     try {
       const full = await HITLService.getApproval(approval.id, 'ui');
-      if (alive.current && localStorage.getItem('selectedGroupId') === groupId) preview?.openResult?.({
+      if (alive.current && getTabGroupId() === groupId) preview?.openResult?.({
         type: 'text', title: `Review · ${approval.previous_crew_name || 'Run output'}`,
         data: full.previous_crew_output || 'No output was recorded for this approval.', sourceMessageId: jobId,
       });

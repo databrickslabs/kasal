@@ -31,16 +31,16 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
-from uuid import UUID
 
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
-from src.services.external.identity import ExternalCaller
+from src.services.external.identity import ExternalCaller, narrow_to_group
 from src.services.external.state import (
     ExternalTaskState,
     is_terminal,
     to_external_state,
 )
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ async def ask(
             "job_id": execution_id,
             "status": ExecutionStatus.PENDING.value,
             "run_name": f"ask via {caller.protocol}",
-            "created_at": datetime.now(),
+            "created_at": datetime.utcnow(),
             # The origin tag. One field, written at the only point every
             # external invocation passes through.
             "inputs": {"external_origin": caller.origin, "question": question},
@@ -191,14 +191,19 @@ async def ask(
     )
 
     try:
+        from src.services.execution.config import run_freeze
+
+        config = _build_ask_config(question, model, capabilities)
+        auto = await run_freeze.resolve(config, session, group_context)
+        run_freeze.record(auto, execution_id, group_context)
         result = await ExecutionService.run_crew_execution(
             execution_id=execution_id,
-            config=_build_ask_config(question, model, capabilities),
+            config=config,
             execution_type="agent",
             group_context=group_context,
             session=session,
         )
-    except Exception as exc:  # noqa: BLE001 — an external caller gets an answer
+    except Exception as exc:  # an external caller gets an answer
         # The caller is another agent, not a browser: an unhandled exception
         # crossing the protocol boundary becomes an opaque transport error with
         # no run id to follow up on. Report the failure as a result instead.
@@ -292,6 +297,9 @@ async def start_run(
     # in production they always have. Without one the Databricks auth chain
     # applies, exactly as for a UI-initiated run.
     caller.obo_token()
+    # The run belongs to the publication's teamspace, not to whichever group
+    # an unpinned (multi-teamspace) caller's context happens to list first.
+    caller = await narrow_to_group(caller, getattr(publication, "group_id", None))
 
     entity_type = getattr(publication, "entity_type", "crew") or "crew"
     # entity_id on the model; crew_id only on the older schema objects. Reading
@@ -313,21 +321,18 @@ async def start_run(
         return await _start_flow(caller, publication, entity_id, inputs, session)
 
     from src.services.catalog.crews import CrewService
+    from src.services.catalog.run_lookup import crew_for_run
     from src.services.execution.service import ExecutionService
 
-    crew_service = CrewService(session)
-    # entity_id is persisted as a string on the publication (it is an external
-    # identifier there), but Crew.id is a UUID column — asyncpg rejects a str
-    # with "'str' object has no attribute 'hex'".
-    try:
-        crew_key = UUID(entity_id)
-    except (ValueError, AttributeError, TypeError):
-        crew_key = entity_id
-    crew = await crew_service.get(crew_key)
+    # Read in the publication's workspace (the caller is narrowed to it above),
+    # like the agents and tasks the crew lists. crew_for_run coerces the string
+    # entity_id to the UUID the column binds; another workspace's crew, or an
+    # id that is not a UUID, reads as gone.
+    crew = await crew_for_run(CrewService(session), entity_id, caller.group_context)
     if crew is None:
         raise ValueError(f"Published crew {entity_id} no longer exists")
 
-    agents_yaml, tasks_yaml = await _crew_to_yaml(crew, session)
+    agents_yaml, tasks_yaml = await _crew_to_yaml(crew, session, caller.group_context)
     if not agents_yaml or not tasks_yaml:
         raise ValueError(
             f"Published crew {publication.external_name!r} has no agents or tasks"
@@ -416,17 +421,23 @@ async def cancel_run(
     return InvocationResult(run_id=run_id, state=ExternalTaskState.CANCELED)
 
 
-async def _crew_to_yaml(crew: Any, session: Any) -> tuple:
+async def _crew_to_yaml(
+    crew: Any, session: Any, group_context: Optional[GroupContext]
+) -> tuple:
     """A saved crew -> the agents_yaml/tasks_yaml the engine takes.
 
     Delegates to ``catalog/crew_config.py``, which owns the projection because
     the crews domain owns the data. Resume needs the same one — it rebuilds a
     run from the crew as it is now — and two copies is two ways for an
     externally-started run to differ from a resumed or a UI one.
+
+    ``group_context`` is the caller's, narrowed to the publication's workspace:
+    an imported crew can still list another workspace's agent and task ids, and
+    those must project as missing rows, not as that workspace's definitions.
     """
     from src.services.catalog.crew_config import build_crew_execution_config
 
-    return await build_crew_execution_config(session, crew)
+    return await build_crew_execution_config(session, crew, group_context)
 
 
 async def _start_flow(
@@ -444,14 +455,22 @@ async def _start_flow(
     must be indistinguishable from a UI-started one everywhere except its origin
     tag, or the traces, logs and history stop lining up.
     """
-    from src.services.flow_builder.execution_service import KasalFlowService
+    from src.services.external.flow_inputs import flow_run_config
+    from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
+    # Built, and checked against the publication's input_schema, before any
+    # run exists: a refusal is a 422, not a run that fails at kickoff.
+    config = flow_run_config(
+        publication.external_name,
+        getattr(publication, "input_schema", None),
+        inputs,
+    )
     run_id = str(uuid.uuid4())
     result = await KasalFlowService(session).run_flow(
         flow_id=flow_id,
         job_id=run_id,
         run_name=f"{publication.external_name} via {caller.protocol}",
-        config={**(inputs or {}), "external_origin": caller.origin},
+        config=config,
         group_context=caller.group_context,
         user_token=caller.obo_token(),
     )

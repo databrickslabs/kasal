@@ -232,11 +232,3 @@ class MetricExpressionValidatorPipeline:
             return {"error": f"Direct validation failed: {exc}"}
 
     # ── convenience serializer ────────────────────────────────────────────
-
-    def run_as_json(self, **kwargs: Any) -> str:
-        """Like :meth:`run`, but returns the result serialised as a JSON string.
-
-        Useful when the pipeline is called from a CrewAI tool that expects a
-        string response.
-        """
-        return json.dumps(self.run(**kwargs), indent=2, default=str)

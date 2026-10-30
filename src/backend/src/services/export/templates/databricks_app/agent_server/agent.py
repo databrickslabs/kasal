@@ -185,7 +185,7 @@ if _experiment_name and _trace_catalog and _trace_schema and _trace_warehouse:
         print(
             f"Could not create UC-backed experiment ({e}). The app's service "
             f"principal likely needs USE CATALOG/SCHEMA + CREATE TABLE + MODIFY + "
-            f"SELECT on {_trace_catalog}.{_trace_schema}."
+            f"SELECT on {_trace_catalog}.{_trace_schema}."  # printed diagnostic text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-select
         )
 if not _traces_configured and _experiment_name:
     try:
@@ -459,9 +459,9 @@ def _mcp_param(name: str, url: str, transport: str, host: str, db_headers: dict)
 
     Transport MATTERS: Databricks-managed MCP is streamable-HTTP; without it the
     adapter falls back to SSE and times out. Databricks-managed servers (relative
-    ``/api/2.0/mcp/...`` URLs) use the app's Databricks identity; third-party
-    servers (absolute URLs) use their own ``<NAME>_MCP_TOKEN`` so the Databricks
-    token is never sent off-platform.
+    ``/api/2.0/mcp/...`` and ``/ai-gateway/mcp-services/...`` URLs) use the
+    app's Databricks identity; third-party servers (absolute URLs) use their own
+    ``<NAME>_MCP_TOKEN`` so the Databricks token is never sent off-platform.
     """
     if url.startswith("/"):
         return {"url": f"{host}{url}", "transport": transport, "headers": dict(db_headers)}

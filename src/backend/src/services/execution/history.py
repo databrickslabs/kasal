@@ -5,11 +5,11 @@ This module provides functions for retrieving and managing execution history
 from the database.
 """
 
-import copy
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
@@ -22,17 +22,46 @@ from src.schemas.execution_history import (
     ExecutionOutputDebugList,
     ExecutionOutputList,
 )
-from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.services.execution.listing import result_preview
+from src.services.execution.stored_inputs import mask_run_inputs
 
 logger = logging.getLogger(__name__)
+
+
+def _summary_item(row: Any) -> ExecutionHistoryItem:
+    """A list item from an ``execution_summary_columns`` projection row."""
+    return ExecutionHistoryItem.model_validate(
+        {
+            "id": row.id,
+            "job_id": row.job_id,
+            "run_name": row.run_name,
+            "status": row.status,
+            "error": row.error,
+            "created_at": row.created_at,
+            "execution_type": row.execution_type or row.input_execution_type,
+            "harness": row.harness,
+            "model": row.model,
+            "group_email": row.group_email,
+            "mlflow_trace_id": row.mlflow_trace_id,
+            "mlflow_experiment_name": row.mlflow_experiment_name,
+            "mlflow_evaluation_run_id": row.mlflow_evaluation_run_id,
+            "flow_uuid": str(row.flow_uuid) if row.flow_uuid else None,
+            "checkpoint_status": row.checkpoint_status,
+            "checkpoint_method": row.checkpoint_method,
+            "result_preview": result_preview(row.result_preview),
+        }
+    )
 
 
 class ExecutionHistoryService:
     """Service for accessing and managing execution history."""
 
     def __init__(
-        self, session, execution_history_repository=None, execution_logs_repository=None
-    ):
+        self,
+        session: AsyncSession,
+        execution_history_repository: Optional[ExecutionHistoryRepository] = None,
+        execution_logs_repository: Optional[ExecutionLogsRepository] = None,
+    ) -> None:
         """
         Initialize the service with session and optionally a repository.
 
@@ -48,49 +77,19 @@ class ExecutionHistoryService:
         self.logs_repo = execution_logs_repository or ExecutionLogsRepository(session)
 
     def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Execution inputs as the history API returns them.
+
+        The same rule as when they are stored, so rows written before a field
+        was masked come back masked too: ``stored_inputs.mask_run_inputs``.
         """
-        Mask sensitive fields in execution inputs before returning to API.
-
-        This method processes the inputs dictionary which may contain:
-        - agents_yaml: Dict of agent configs with tool_configs containing secrets
-        - tasks_yaml: Dict of task configs with tool_configs containing secrets
-
-        Args:
-            inputs: The raw inputs dictionary from execution history
-
-        Returns:
-            A copy of inputs with sensitive fields masked
-        """
-        if not inputs:
-            return inputs
-
-        # Create a deep copy to avoid modifying the original
-        masked_inputs = copy.deepcopy(inputs)
-
-        # Mask tool_configs in agents_yaml
-        if "agents_yaml" in masked_inputs and isinstance(
-            masked_inputs["agents_yaml"], dict
-        ):
-            for agent_key, agent_config in masked_inputs["agents_yaml"].items():
-                if isinstance(agent_config, dict) and "tool_configs" in agent_config:
-                    agent_config["tool_configs"] = mask_sensitive_fields(
-                        agent_config["tool_configs"]
-                    )
-
-        # Mask tool_configs in tasks_yaml
-        if "tasks_yaml" in masked_inputs and isinstance(
-            masked_inputs["tasks_yaml"], dict
-        ):
-            for task_key, task_config in masked_inputs["tasks_yaml"].items():
-                if isinstance(task_config, dict) and "tool_configs" in task_config:
-                    task_config["tool_configs"] = mask_sensitive_fields(
-                        task_config["tool_configs"]
-                    )
-
-        return masked_inputs
+        return mask_run_inputs(inputs)
 
     async def get_execution_history(
-        self, limit: int = 50, offset: int = 0, group_ids: List[str] = None
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: Optional[List[str]] = None,
+        include_payload: bool = False,
     ) -> ExecutionHistoryList:
         """
         Get paginated execution history with group-based filtering.
@@ -99,6 +98,9 @@ class ExecutionHistoryService:
             limit: Maximum number of items to return
             offset: Number of items to skip
             group_ids: List of group IDs for group-based filtering
+            include_payload: Return each run's full ``result``, masked ``input``
+                and ``agents_yaml``/``tasks_yaml``. Off by default: rows are
+                summaries carrying a ``result_preview``.
 
         Returns:
             ExecutionHistoryList with paginated execution history items and metadata
@@ -106,8 +108,15 @@ class ExecutionHistoryService:
         try:
             # Use the repository to get the paginated data and total count
             runs, total_count = await self.history_repo.get_execution_history(
-                limit=limit, offset=offset, group_ids=group_ids
+                limit=limit, offset=offset, group_ids=group_ids, full=include_payload
             )
+            if not include_payload:
+                return ExecutionHistoryList(
+                    executions=[_summary_item(row) for row in runs],
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                )
 
             # Convert each run to a pydantic model, handling string results properly
             import json
@@ -160,7 +169,7 @@ class ExecutionHistoryService:
             raise
 
     async def get_execution_by_id(
-        self, execution_id: int, tenant_ids: List[str] = None
+        self, execution_id: int, tenant_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistoryItem]:
         """
         Get a specific execution by ID with group-based tenant filtering.
@@ -175,7 +184,7 @@ class ExecutionHistoryService:
         try:
             # Use the repository to get the data
             run = await self.history_repo.get_execution_by_id(
-                execution_id, tenant_ids=tenant_ids
+                execution_id, group_ids=tenant_ids
             )
 
             if not run:
@@ -227,7 +236,7 @@ class ExecutionHistoryService:
             raise
 
     async def check_execution_exists(
-        self, execution_id: int, group_ids: List[str] = None
+        self, execution_id: int, group_ids: Optional[List[str]] = None
     ) -> bool:
         """
         Check if an execution exists within the caller's groups.
@@ -261,7 +270,7 @@ class ExecutionHistoryService:
         execution_id: str,
         limit: int = 1000,
         offset: int = 0,
-        tenant_ids: List[str] = None,
+        tenant_ids: Optional[List[str]] = None,
     ) -> ExecutionOutputList:
         """
         Get outputs for an execution with tenant filtering.
@@ -279,7 +288,7 @@ class ExecutionHistoryService:
             # First verify the execution belongs to the user's tenant
             if tenant_ids:
                 execution = await self.history_repo.get_execution_by_job_id(
-                    execution_id, tenant_ids=tenant_ids
+                    execution_id, group_ids=tenant_ids
                 )
                 if not execution:
                     # Execution doesn't exist or doesn't belong to user's tenants
@@ -298,7 +307,7 @@ class ExecutionHistoryService:
 
             # Get total count
             total_count = await self.logs_repo.count_by_execution_id(
-                self.session, execution_id=execution_id
+                execution_id=execution_id
             )
 
             # Convert to schema objects
@@ -332,8 +341,8 @@ class ExecutionHistoryService:
             raise
 
     async def get_debug_outputs(
-        self, execution_id: str, tenant_ids: List[str] = None
-    ) -> ExecutionOutputDebugList:
+        self, execution_id: str, tenant_ids: Optional[List[str]] = None
+    ) -> Optional[ExecutionOutputDebugList]:
         """
         Get debug information about outputs for an execution with tenant filtering.
 
@@ -347,7 +356,7 @@ class ExecutionHistoryService:
         try:
             # Check if the run exists and belongs to user's tenant
             run = await self.history_repo.get_execution_by_job_id(
-                execution_id, tenant_ids=tenant_ids
+                execution_id, group_ids=tenant_ids
             )
 
             if not run:
@@ -390,7 +399,7 @@ class ExecutionHistoryService:
             raise
 
     async def delete_all_executions(
-        self, group_ids: List[str] = None
+        self, group_ids: Optional[List[str]] = None
     ) -> DeleteResponse:
         """
         Delete all executions and their associated data for specified groups.
@@ -516,8 +525,8 @@ class ExecutionHistoryService:
             raise
 
     async def delete_execution(
-        self, execution_id: int, group_ids: List[str] = None
-    ) -> DeleteResponse:
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Optional[DeleteResponse]:
         """
         Delete a specific execution and its associated data.
 
@@ -562,7 +571,8 @@ class ExecutionHistoryService:
             output_count = await logs_service.delete_by_execution_id(job_id)
 
             # Delete execution using repository (after dependent records are gone)
-            result = await self.history_repo.delete_execution(execution_id)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution(execution_id) or {}
 
             # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution.kasal_service import (
@@ -598,8 +608,8 @@ class ExecutionHistoryService:
             raise
 
     async def delete_execution_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
-    ) -> DeleteResponse:
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[DeleteResponse]:
         """
         Delete a specific execution and its associated data by job_id (UUID).
 
@@ -644,7 +654,8 @@ class ExecutionHistoryService:
             output_count = await logs_service.delete_by_execution_id(job_id)
 
             # Delete execution using repository (after dependent records are gone)
-            result = await self.history_repo.delete_execution_by_job_id(job_id)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution_by_job_id(job_id) or {}
 
             # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution.kasal_service import (
@@ -748,7 +759,7 @@ class ExecutionHistoryService:
 
     async def get_checkpoints_for_flow(
         self,
-        flow_id,
+        flow_id: Any,
         group_id: Optional[str] = None,
         status_filter: Optional[str] = "active",
     ) -> List:
@@ -836,58 +847,56 @@ class ExecutionHistoryService:
             )
             raise
 
-    async def mark_checkpoint_resumed(
-        self, execution_id: int, new_execution_id: int
-    ) -> bool:
-        """
-        Mark a checkpoint as resumed when a new execution resumes from it.
+    async def saved_ucmv_edits(
+        self, job_id: str, *, group_ids: Sequence[str]
+    ) -> Optional[dict]:
+        """The UCMV edits saved on run ``job_id``, if that run is in ``group_ids``.
 
-        Args:
-            execution_id: ID of the original execution being resumed from
-            new_execution_id: ID of the new execution that's resuming
-
-        Returns:
-            True if successfully updated
+        For the UCMV validator, which applies only its own run's edits, never
+        another run's. No job id or no groups, no result.
         """
-        try:
-            return await self.history_repo.update_checkpoint_status(
-                execution_id=execution_id, status="resumed"
-            )
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Database error marking checkpoint {execution_id} as resumed: {str(e)}"
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                f"Error marking checkpoint {execution_id} as resumed: {str(e)}"
-            )
-            raise
+        if not job_id or not group_ids:
+            return None
+        data = await self.history_repo.get_checkpoint_data(job_id, list(group_ids))
+        edits = data.get("ucmv_yaml_edits") if isinstance(data, dict) else None
+        return edits if isinstance(edits, dict) else None
+
+    async def latest_result_with_keys(
+        self, keys: List[str], *, group_ids: Sequence[str], job_id: Optional[str] = None
+    ) -> Optional[dict]:
+        """Most recent run in ``group_ids`` (or run ``job_id``) whose ``result``
+        dict holds ALL ``keys``."""
+        found: Optional[dict] = await self.history_repo.latest_result_with_keys(
+            keys, group_ids=group_ids, job_id=job_id
+        )
+        return found
 
     async def find_recent_results_with_key(
-        self, key: str, limit: int = 20
+        self, key: str, *, group_ids: Sequence[str], limit: int = 20
     ) -> list[dict]:
-        """Recent runs whose stored ``result`` contains ``key``, as plain dicts.
+        """Recent runs in ``group_ids`` whose stored ``result`` contains ``key``.
 
         Serves the UCMV re-evaluation tool: it scans prior runs for those that
         recorded non-transpiled measures (``untranslatable_items``). Returns
-        ``[{job_id, run_name, created_at, result}]`` — the tool decodes the result
-        blob itself. Query construction stays in the repository (this service only
-        orchestrates), keeping the tool free of any direct DB access.
+        ``[{job_id, run_name, created_at, result}]``. No groups, no rows.
         """
-        runs = await self.history_repo.find_recent_results_containing(key, limit=limit)
+        runs = await self.history_repo.find_recent_results_containing(
+            key, group_ids=group_ids, limit=limit
+        )
         out: list[dict] = []
         for run in runs:
-            out.append({
-                "job_id": getattr(run, "job_id", None),
-                "run_name": getattr(run, "run_name", None),
-                "created_at": getattr(run, "created_at", None),
-                "result": getattr(run, "result", None),
-            })
+            out.append(
+                {
+                    "job_id": getattr(run, "job_id", None),
+                    "run_name": getattr(run, "run_name", None),
+                    "created_at": getattr(run, "created_at", None),
+                    "result": getattr(run, "result", None),
+                }
+            )
         return out
 
     async def update_result(
-        self, job_id: str, result_data: dict, group_ids: list[str] = None
+        self, job_id: str, result_data: dict, group_ids: Optional[list[str]] = None
     ) -> dict:
         """
         Update the result field for an execution.
@@ -907,6 +916,7 @@ class ExecutionHistoryService:
                 job_id=job_id,
                 result_data=result_data,
                 group_ids=group_ids,
+                gate_stamp=await self._waiting_gate(job_id, group_ids),
             )
 
             if not success:
@@ -927,7 +937,39 @@ class ExecutionHistoryService:
             logger.error(f"Error updating result for job_id {job_id}: {str(e)}")
             raise
 
-    async def get_execution_groups_with_counts(self) -> list[tuple[str, int]]:
+    async def _waiting_gate(
+        self, job_id: str, group_ids: Optional[list[str]]
+    ) -> Optional[Dict[str, object]]:
+        """The approval the run is waiting at, as ``{approval_id, gate_node_id}``.
+
+        An edit saved now belongs to that gate alone, so only that gate hands it
+        on when the flow resumes. Resolved here, from the run's own approvals,
+        rather than taken from the client. None unless exactly one is pending.
+
+        The run is found in the caller's ``group_ids``, and its approvals are
+        read for the run's own group only: an approval belongs to the group of
+        the run that raised it.
+        """
+        from src.models.hitl_approval import HITLApprovalStatus
+        from src.services.hitl.service import HITLService
+
+        run = await self.history_repo.get_execution_by_job_id(
+            job_id, group_ids=group_ids
+        )
+        run_group_id = getattr(run, "group_id", None)
+        if not run_group_id:
+            return None
+        approvals = await HITLService(self.session).get_approvals_for_execution(
+            job_id, run_group_id
+        )
+        pending = [a for a in approvals if a.status == HITLApprovalStatus.PENDING]
+        if len(pending) != 1:
+            return None
+        return {"approval_id": pending[0].id, "gate_node_id": pending[0].gate_node_id}
+
+    async def get_execution_groups_with_counts(
+        self,
+    ) -> list[tuple[Optional[str], int]]:
         """
         Get all unique group_ids from execution_history with their execution counts.
 

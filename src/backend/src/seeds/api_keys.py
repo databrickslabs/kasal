@@ -27,7 +27,7 @@ PLACEHOLDER_API_KEYS: List[Dict[str, str]] = [
 ]
 
 
-async def seed():
+async def seed() -> None:
     logger.info("Seeding placeholder API keys (no secret values)...")
     async with async_session_factory() as session:
         repo = ApiKeyRepository(session)

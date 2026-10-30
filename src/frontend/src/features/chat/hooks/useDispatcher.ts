@@ -1,8 +1,9 @@
 import { useChatEffortStore } from '../../../store/chatEffort';
 import type { ImageRef } from '../types/chat';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import {
   DispatchResult,
   GeneratedCrew,
@@ -19,6 +20,7 @@ import {
 } from '../types/dispatcher';
 import { ChatMessage } from '../types/chat';
 import { generateId } from '../utils/markdown';
+import { postModelSelection } from '../utils/modelSelectionStep';
 import { reconcileSelectedSkills } from '../store/skillSelection';
 import { GenerationCompleteData } from '../types/dispatcher';
 
@@ -59,6 +61,8 @@ interface UseDispatcherOptions {
    *  turn doesn't register the run under an empty owner (the "first prompt
    *  renders empty" bug, which only surfaces under remote-DB latency). */
   ensureSession: () => Promise<string>;
+  /** Put typed text back in the composer (a send cancelled before it went out). */
+  restoreDraft?: (text: string) => void;
 }
 
 /**
@@ -266,8 +270,29 @@ function crewToGenerationData(result: unknown): GenerationCompleteData {
   return { agents, tasks };
 }
 
+/** Typed text quoted back, so a message that could not be sent can be copied. */
+const quoteBack = (text: string) => text.split('\n').map((line) => `> ${line}`).join('\n');
+
 export function useDispatcher(options: UseDispatcherOptions) {
   const isDispatchingRef = useRef(false);
+  // The guard as state: the composer holds a message typed while one is in
+  // flight (ChatInput `sending`) instead of clearing it into a dropped send.
+  const [dispatching, setDispatching] = useState(false);
+  const setGuard = useCallback((on: boolean) => {
+    isDispatchingRef.current = on;
+    setDispatching(on);
+  }, []);
+  // The dispatch holding the guard. Cancel aborts its request and releases the
+  // guard at once; the cancelled dispatch, when it unwinds, must not release a
+  // guard a later dispatch now holds.
+  const inFlightRef = useRef<AbortController | null>(null);
+  const cancelDispatch = useCallback(() => {
+    const inFlight = inFlightRef.current;
+    if (!inFlight) return;
+    inFlightRef.current = null;
+    inFlight.abort();
+    setGuard(false);
+  }, [setGuard]);
   // Store last generated crew for "ec"/"execute crew" command
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
   // Hold options in a ref (updated each render) so sendMessage can be a STABLE
@@ -293,8 +318,22 @@ export function useDispatcher(options: UseDispatcherOptions) {
       images?: ImageRef[],
     ) => {
       const options = optionsRef.current;
-      if (isDispatchingRef.current) return;
-      isDispatchingRef.current = true;
+      if (isDispatchingRef.current) {
+        // The composer waits for the dispatch; a send that gets here anyway
+        // (Build instead, a library load) is shown back, never dropped.
+        useSessionStore.getState().addNotice(
+          `Your message was not sent because the previous one is still being sent. Please send it again when it has gone:\n\n${quoteBack(displayAs || message)}`,
+        );
+        return;
+      }
+      setGuard(true);
+      const inFlight = new AbortController();
+      inFlightRef.current = inFlight;
+      const release = () => {
+        if (inFlightRef.current !== inFlight) return; // cancelled: already released
+        inFlightRef.current = null;
+        setGuard(false);
+      };
 
       // Capture the session ID NOW, before any async work, so all operations
       // target the correct session even if the user switches sessions during the
@@ -305,7 +344,31 @@ export function useDispatcher(options: UseDispatcherOptions) {
       // run under an empty owner, so its completed result never rendered ("first
       // prompt empty, second works"). Await the (deduped) session-ensure so we
       // hold the REAL id before dispatch + onStartGenerationStream.
-      const originSessionId = await options.ensureSession();
+      //
+      // This await sits outside the try/finally below, so a failed create (a
+      // 5xx, an expired token) used to leave the guard set: every later send
+      // returned at the guard with no message until the page was reloaded.
+      let originSessionId: string;
+      try {
+        originSessionId = await options.ensureSession();
+      } catch (error) {
+        release();
+        const reason = error instanceof Error ? error.message : 'Unknown error';
+        // The composer already cleared, so the text is quoted back to copy.
+        // Shown, never stored: addMessage would create a session just to hold it.
+        useSessionStore.getState().addNotice(
+          `Your message could not be sent because the conversation could not be created (${reason}). Please send it again:\n\n${quoteBack(displayAs || message)}`,
+        );
+        return;
+      }
+
+      // Cancelled while the conversation was being created: nothing was saved
+      // or sent, so the text goes back where it was typed.
+      if (inFlight.signal.aborted) {
+        if (!displayAs && options.restoreDraft) options.restoreDraft(message);
+        else useSessionStore.getState().addNotice(`Not sent:\n\n${quoteBack(displayAs || message)}`);
+        return;
+      }
 
       // Intercept "ec" / "execute crew" locally
       const lower = message.toLowerCase().trim();
@@ -316,7 +379,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       ) {
         options.addMessage('user', message);
         options.onExecuteGenerated(lastGeneratedRef.current);
-        isDispatchingRef.current = false;
+        release();
         return;
       }
 
@@ -349,6 +412,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
       });
 
       let dispatchMessage = message;
+      // Whether the request went out: a cancel after it may still start a run.
+      let sent = false;
       const { skipContinuation } = useExecutionStore.getState();
       if (skipContinuation) useExecutionStore.getState().setSkipContinuation(false);
       // Hidden steering text (e.g. attached-knowledge note): sent to the crew
@@ -370,6 +435,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
         // drops unknown names with only a server-side warning). No request is
         // made when nothing is selected.
         const selectedSkills = await reconcileSelectedSkills();
+        if (inFlight.signal.aborted) throw new Error('Cancelled before it was sent');
+        sent = true;
         const result = await dispatch(dispatchMessage, model, tools, {
           // ChatMode runs the generated crew on the backend (the crew canvas
           // doesn't — it runs via Play, so it omits this and defaults false).
@@ -397,8 +464,10 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // backend default is true, so carrying it on every request would put
           // a field in the payload that never says anything.
           ...(skipContinuation ? { allow_continuation: false } : {}),
-        }, message);
+        }, message, inFlight.signal);
 
+        // Auto's pick joins the run activity before the answer streams in.
+        postModelSelection(result.model_selection, originSessionId);
         const content = getAssistantResponse(result);
         const resultType = getResultType(result);
 
@@ -539,32 +608,37 @@ export function useDispatcher(options: UseDispatcherOptions) {
       } catch (error) {
         const errMsg =
           error instanceof Error ? error.message : 'Unknown error';
+        // Aborting the request does not stop the server, which may still
+        // build and run the crew.
+        const content = !inFlight.signal.aborted
+          ? `Failed to process your request: ${errMsg}`
+          : sent
+            ? 'Cancelled here. The request may already have reached the server, so a run it started can still finish; it would appear under Activity > Executions.'
+            : 'Cancelled before it was sent.';
         if (originSessionId) {
           options.updateMessageInTargetSession(originSessionId, assistantId, {
-            content: `Failed to process your request: ${errMsg}`,
+            content,
             isStreaming: false,
           });
         } else {
-          options.updateMessage(assistantId, {
-            content: `Failed to process your request: ${errMsg}`,
-            isStreaming: false,
-          });
+          options.updateMessage(assistantId, { content, isStreaming: false });
         }
       } finally {
-        isDispatchingRef.current = false;
+        release();
       }
     },
-    []
+    [setGuard]
   );
 
   const setLastGenerated = useCallback((data: GenerationCompleteData) => {
     lastGeneratedRef.current = data;
   }, []);
 
-  // Stable object identity (all members are stable): keeps ChatWorkspace's
-  // handleSend — which depends on the whole dispatcher — from churning per render.
+  // Stable object identity between dispatches (the callbacks are stable, and
+  // `dispatching` flips once at each end): ChatWorkspace re-renders on it, but
+  // not on every render.
   return useMemo(
-    () => ({ sendMessage, isDispatching: isDispatchingRef, setLastGenerated }),
-    [sendMessage, setLastGenerated],
+    () => ({ sendMessage, isDispatching: isDispatchingRef, dispatching, cancelDispatch, setLastGenerated }),
+    [sendMessage, dispatching, cancelDispatch, setLastGenerated],
   );
 }

@@ -9,12 +9,13 @@ Two layers:
     ``limits`` package) and skips cleanly in a venv that hasn't synced it yet.
 """
 
+import importlib.util
 import os
 from unittest.mock import patch
 
 import pytest
 
-from src.core.rate_limit import RateLimitMiddleware, _rate_limit_enabled
+from src.core.rate_limit import DEFAULT_LIMIT, RateLimitMiddleware
 
 
 # --------------------------------------------------------------------------- #
@@ -117,37 +118,29 @@ class TestIdentity:
 
     def test_two_users_get_distinct_keys(self):
         a = RateLimitMiddleware._identity(
-            _scope("/api/x", [(b"x-forwarded-email", b"a@x.com")])
+            _scope("/api/x", [(b"x-forwarded-email", b"a@example.com")])
         )
         b = RateLimitMiddleware._identity(
-            _scope("/api/x", [(b"x-forwarded-email", b"b@x.com")])
+            _scope("/api/x", [(b"x-forwarded-email", b"b@example.com")])
         )
         assert a != b
 
 
-class TestEnabledToggle:
-    def test_default_enabled(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("RATE_LIMIT_ENABLED", None)
-            assert _rate_limit_enabled() is True
-
-    @pytest.mark.parametrize("val", ["false", "0", "no", "off", "OFF", "False"])
-    def test_disabled_values(self, val):
-        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": val}):
-            assert _rate_limit_enabled() is False
-
-    @pytest.mark.parametrize("val", ["true", "1", "yes", "on"])
-    def test_enabled_values(self, val):
-        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": val}):
-            assert _rate_limit_enabled() is True
+class TestConfiguration:
+    def test_defaults_are_constants_not_environment(self):
+        """RATE_LIMIT_* env vars (never set in Databricks Apps) are gone."""
+        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": "false"}):
+            mw = RateLimitMiddleware(RecordingApp())
+        assert DEFAULT_LIMIT == "600/minute"
+        # Enabled regardless of the env var (when the limits package exists).
+        assert mw._active is (importlib.util.find_spec("limits") is not None)
 
 
 class TestDisabledPassThrough:
     @pytest.mark.asyncio
-    async def test_disabled_via_env_passes_through(self):
+    async def test_disabled_passes_through(self):
         app = RecordingApp()
-        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": "false"}):
-            mw = RateLimitMiddleware(app)
+        mw = RateLimitMiddleware(app, enabled=False)
         assert mw._active is False
         # Even a limited API path is forwarded untouched.
         status, _ = await _invoke(mw, _scope("/api/v1/agents"))
@@ -157,8 +150,7 @@ class TestDisabledPassThrough:
     @pytest.mark.asyncio
     async def test_non_http_scope_passes_through(self):
         app = RecordingApp()
-        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": "false"}):
-            mw = RateLimitMiddleware(app)
+        mw = RateLimitMiddleware(app, enabled=False)
 
         async def send(msg):
             pass
@@ -175,15 +167,7 @@ class TestDisabledPassThrough:
 # --------------------------------------------------------------------------- #
 def _active_mw(app, limit="3/minute"):
     """Construct an ACTIVE middleware with a tiny in-memory limit."""
-    with patch.dict(
-        os.environ,
-        {
-            "RATE_LIMIT_ENABLED": "true",
-            "RATE_LIMIT_DEFAULT": limit,
-            "RATE_LIMIT_STORAGE_URI": "memory://",
-        },
-    ):
-        return RateLimitMiddleware(app)
+    return RateLimitMiddleware(app, limit=limit, storage_uri="memory://")
 
 
 class TestActiveEnforcement:
@@ -196,7 +180,7 @@ class TestActiveEnforcement:
         mw = _active_mw(app, "3/minute")
         assert mw._active is True
 
-        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@x.com")])
+        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@example.com")])
         statuses = [(await _invoke(mw, scope))[0] for _ in range(5)]
         assert statuses == [200, 200, 200, 429, 429]
         assert app.calls == 3  # blocked requests never reach the app
@@ -206,8 +190,8 @@ class TestActiveEnforcement:
         app = RecordingApp()
         mw = _active_mw(app, "2/minute")
 
-        a = _scope("/api/v1/agents", [(b"x-forwarded-email", b"a@x.com")])
-        b = _scope("/api/v1/agents", [(b"x-forwarded-email", b"b@x.com")])
+        a = _scope("/api/v1/agents", [(b"x-forwarded-email", b"a@example.com")])
+        b = _scope("/api/v1/agents", [(b"x-forwarded-email", b"b@example.com")])
         # Exhaust user A
         assert (await _invoke(mw, a))[0] == 200
         assert (await _invoke(mw, a))[0] == 200
@@ -219,7 +203,7 @@ class TestActiveEnforcement:
     async def test_sse_never_limited(self):
         app = RecordingApp()
         mw = _active_mw(app, "2/minute")
-        sse = _scope("/api/v1/sse/x/stream", [(b"x-forwarded-email", b"u@x.com")])
+        sse = _scope("/api/v1/sse/x/stream", [(b"x-forwarded-email", b"u@example.com")])
         statuses = [(await _invoke(mw, sse))[0] for _ in range(6)]
         assert statuses == [200] * 6  # exempt path is never throttled
 
@@ -227,7 +211,7 @@ class TestActiveEnforcement:
     async def test_429_response_shape(self):
         app = RecordingApp()
         mw = _active_mw(app, "1/minute")
-        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@x.com")])
+        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@example.com")])
         await _invoke(mw, scope)  # consume the single token
         status, sent = await _invoke(mw, scope)  # this one is blocked
 

@@ -9,11 +9,9 @@ Targets additional uncovered lines:
   547-559  async UserContext re-init paths
   1279     get_metrics after actual execution
   1304-1360 terminate_execution edge cases
-  1377-1403 _terminate_orphaned_process matching/non-matching
   1541-1574 shutdown with child processes
   2015-2127 run_crew_isolated finally cleanup (process tracking, psutil cleanup)
   2133,2136 cleanup tracking for futures/executors
-  2469-2501 _terminate_orphaned_process matching process found and killed
   2575-2614 shutdown psutil child processes
 """
 
@@ -24,14 +22,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _make_executor(max_concurrent=4):
+def _make_executor():
     with patch(
         "src.services.agent_builder.process_executor.mp.get_context"
     ) as mock_ctx:
         mock_ctx.return_value = MagicMock()
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
-        executor = ProcessCrewExecutor(max_concurrent=max_concurrent)
+        executor = ProcessCrewExecutor()
     executor._ctx = MagicMock()
     return executor
 
@@ -190,30 +188,6 @@ class TestRunCrewIsolatedErrorPaths:
 class TestTerminateExecutionEdgeCases:
 
     @pytest.mark.asyncio
-    async def test_psutil_fallback_on_terminate_error(self):
-        """When terminate() raises OSError, psutil kills the process."""
-        executor = _make_executor()
-        mock_process = MagicMock()
-        mock_process.is_alive.side_effect = [True, True]
-        mock_process.terminate = MagicMock(side_effect=OSError("no permission"))
-        mock_process.join = MagicMock()
-        mock_process.pid = 555
-
-        executor._running_processes["exec-oserr"] = mock_process
-
-        mock_psutil_proc = MagicMock()
-        mock_psutil_proc.kill = MagicMock()
-
-        with (
-            patch("psutil.Process", return_value=mock_psutil_proc),
-            patch.object(executor, "_terminate_orphaned_process", return_value=False),
-        ):
-            result = await executor.terminate_execution("exec-oserr")
-
-        mock_psutil_proc.kill.assert_called_once()
-        assert result is True
-
-    @pytest.mark.asyncio
     async def test_psutil_not_have_pid_skips_kill(self):
         """If process.pid is None, psutil kill is skipped."""
         executor = _make_executor()
@@ -225,109 +199,13 @@ class TestTerminateExecutionEdgeCases:
 
         executor._running_processes["exec-nopid"] = mock_process
 
-        with patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await executor.terminate_execution("exec-nopid")
 
         assert isinstance(result, bool)
-
-
-# ---------------------------------------------------------------------------
-# _terminate_orphaned_process — matching/non-matching process
-# ---------------------------------------------------------------------------
-
-
-class TestTerminateOrphanedProcessExtended:
-
-    def test_matching_by_cmdline_when_no_env(self):
-        """Process matching by cmdline (no KASAL_EXECUTION_ID env) is killed."""
-        executor = _make_executor()
-        exec_id = "cmdline-match-1234"
-        import psutil as _psutil
-
-        mock_child = MagicMock()
-        mock_parent_proc = MagicMock()
-        mock_parent_proc.children = MagicMock(return_value=[mock_child])
-        mock_parent_proc.kill = MagicMock()
-
-        mock_proc = MagicMock()
-        mock_proc.info = {
-            "pid": 8888,
-            "name": "python",
-            "cmdline": ["python", f"--exec-id={exec_id}"],
-        }
-        # No KASAL_EXECUTION_ID in env but execution_id in cmdline
-        mock_proc.environ = MagicMock(side_effect=_psutil.AccessDenied(8888))
-
-        with (
-            patch("psutil.process_iter", return_value=[mock_proc]),
-            patch("psutil.Process", return_value=mock_parent_proc),
-            patch("psutil.wait_procs", return_value=([], [])),
-        ):
-            result = executor._terminate_orphaned_process(exec_id)
-
-        # Process matched by cmdline but env read failed — should still match by cmdline
-        assert result is True
-
-    def test_access_denied_exception_continues(self):
-        """AccessDenied exception on individual process is skipped."""
-        executor = _make_executor()
-        import psutil
-
-        mock_proc = MagicMock()
-        mock_proc.info = {"pid": 9999, "name": "python", "cmdline": []}
-        mock_proc.environ = MagicMock(side_effect=psutil.AccessDenied(9999))
-
-        with patch("psutil.process_iter", return_value=[mock_proc]):
-            result = executor._terminate_orphaned_process("exec-denied-9999")
-
-        assert result is False
-
-    def test_no_such_process_exception_continues(self):
-        """NoSuchProcess exception on individual process is skipped."""
-        executor = _make_executor()
-        import psutil
-
-        mock_proc = MagicMock()
-        mock_proc.info = {"pid": 1111, "name": "python", "cmdline": ["python"]}
-        mock_proc.environ = MagicMock(side_effect=psutil.NoSuchProcess(1111))
-
-        with patch("psutil.process_iter", return_value=[mock_proc]):
-            result = executor._terminate_orphaned_process("exec-nosuch-1111")
-
-        assert result is False
-
-    def test_child_kill_no_such_process_handled(self):
-        """NoSuchProcess during child kill is silently caught."""
-        executor = _make_executor()
-        import psutil
-
-        exec_id = "child-kill-test-1234"
-        mock_child = MagicMock()
-        mock_child.kill = MagicMock(side_effect=psutil.NoSuchProcess(mock_child))
-        mock_child.pid = 7777
-
-        mock_parent_proc = MagicMock()
-        mock_parent_proc.children = MagicMock(return_value=[mock_child])
-        mock_parent_proc.kill = MagicMock()
-
-        mock_proc = MagicMock()
-        mock_proc.info = {
-            "pid": 6666,
-            "name": "python",
-            "cmdline": [f"--exec={exec_id}"],
-        }
-        mock_proc.environ = MagicMock(return_value={"KASAL_EXECUTION_ID": exec_id})
-
-        with (
-            patch("psutil.process_iter", return_value=[mock_proc]),
-            patch("psutil.Process", return_value=mock_parent_proc),
-            patch("psutil.wait_procs", return_value=([], [])),
-        ):
-            result = executor._terminate_orphaned_process(exec_id)
-
-        # Should still kill the parent
-        mock_parent_proc.kill.assert_called_once()
-        assert result is True
 
 
 # ---------------------------------------------------------------------------
@@ -336,27 +214,6 @@ class TestTerminateOrphanedProcessExtended:
 
 
 class TestShutdownExtended:
-
-    def test_shutdown_kills_child_processes_via_psutil(self):
-        """Shutdown uses psutil to clean up child processes."""
-        executor = _make_executor()
-
-        mock_child = MagicMock()
-        mock_child.pid = 3333
-        mock_child.terminate = MagicMock()
-        mock_child.kill = MagicMock()
-
-        mock_current_proc = MagicMock()
-        mock_current_proc.children = MagicMock(return_value=[mock_child])
-
-        with (
-            patch("psutil.Process", return_value=mock_current_proc),
-            patch("psutil.wait_procs", return_value=([], [mock_child])),
-        ):
-            executor.shutdown(wait=True)
-
-        # Force kill was called on alive processes
-        mock_child.kill.assert_called()
 
     def test_shutdown_handles_no_such_process_on_terminate(self):
         """NoSuchProcess during process terminate is swallowed."""
@@ -432,32 +289,26 @@ class TestRunCrewWrapperError:
 
 
 class TestRunCrewIsolatedFinallyCleanup:
+    """The finally block stops the tracked tree and releases what the run held."""
+
+    @staticmethod
+    def _executor_with_exited_process(pid):
+        executor = _make_executor()
+        mock_process = MagicMock()
+        mock_process.pid = pid
+        mock_process.is_alive = MagicMock(return_value=False)
+        mock_process.exitcode = 0
+        mock_q = MagicMock()
+        mock_q.get = MagicMock(return_value={"status": "COMPLETED"})
+        executor._ctx.Queue = MagicMock(side_effect=[mock_q, MagicMock()])
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+        return executor, mock_process
 
     @pytest.mark.asyncio
-    async def test_alive_process_in_finally_is_terminated(self):
-        """In the finally block, alive processes are terminated."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 111
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        # is_alive: False when checking result, True in finally block
-        is_alive_calls = [False, True, False]
-        mock_process.is_alive = MagicMock(side_effect=is_alive_calls + [False] * 10)
-        mock_process.exitcode = 0
-        mock_process.terminate = MagicMock()
-        mock_process.kill = MagicMock()
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
+    async def test_tracked_process_is_stopped_through_process_tree(self):
+        """Cleanup goes through terminate_process_tree with the tracked handle."""
+        executor, mock_process = self._executor_with_exited_process(111)
+        group_ctx = MagicMock(primary_group_id="grp", access_token=None)
 
         with (
             patch(
@@ -466,38 +317,21 @@ class TestRunCrewIsolatedFinallyCleanup:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", return_value=[]),
+            patch(
+                "src.services.agent_builder.process_executor.terminate_process_tree",
+                return_value=True,
+            ) as stop_tree,
         ):
             result = await executor.run_crew_isolated("exec-alive", {}, group_ctx)
 
-        # Execution completed successfully
-        assert result is not None
+        assert result["status"] == "COMPLETED"
+        stop_tree.assert_called_once_with(mock_process)
 
     @pytest.mark.asyncio
-    async def test_futures_and_executors_cleaned_up(self):
-        """In the finally block, _running_futures and _running_executors are cleaned."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 222
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.is_alive = MagicMock(return_value=False)
-        mock_process.exitcode = 0
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        # Add stale entries that should be cleaned up
-        executor._running_futures["exec-clean"] = MagicMock()
-        executor._running_executors["exec-clean"] = MagicMock()
+    async def test_tracking_and_run_slot_released(self, isolated_run_gate):
+        """After the run, the process is untracked and its run slot is free."""
+        executor, _ = self._executor_with_exited_process(222)
+        group_ctx = MagicMock(primary_group_id="grp", access_token=None)
 
         with (
             patch(
@@ -506,12 +340,11 @@ class TestRunCrewIsolatedFinallyCleanup:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", return_value=[]),
         ):
             await executor.run_crew_isolated("exec-clean", {}, group_ctx)
 
-        assert "exec-clean" not in executor._running_futures
-        assert "exec-clean" not in executor._running_executors
+        assert "exec-clean" not in executor._running_processes
+        assert isolated_run_gate.active_count == 0
 
 
 # ---------------------------------------------------------------------------

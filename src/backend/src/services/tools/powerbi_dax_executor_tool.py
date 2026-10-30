@@ -9,11 +9,8 @@ Author: Kasal Team
 Date: 2026
 """
 
-import asyncio
-import contextvars
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional, Type
+from typing import Any, Coroutine, Dict, Optional, Type, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -22,28 +19,20 @@ from src.services.tools.base import BaseTool
 from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
-_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
 
-def _run_async_in_sync_context(coro):
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
-    Safely run an async coroutine from a synchronous context.
-    Handles nested event loop scenarios (e.g., FastAPI).
-    Propagates contextvars (like execution_id) to worker threads.
-    """
-    try:
-        asyncio.get_running_loop()
-        ctx = contextvars.copy_context()
-        future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
-        return future.result()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+    from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
+
+    return run_async_with_context(coro, timeout=DEFAULT_TIMEOUT)
 
 
 class PowerBIDaxExecutorSchema(BaseModel):
@@ -89,7 +78,7 @@ class PowerBIDaxExecutorTool(BaseTool):
 
     _default_config: Dict[str, Any] = PrivateAttr(default_factory=dict)
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         config_keys = [
             "workspace_id",
             "dataset_id",
@@ -110,7 +99,7 @@ class PowerBIDaxExecutorTool(BaseTool):
             k: v for k, v in default_config.items() if v is not None
         }
 
-    def _run(self, **kwargs) -> str:
+    def _run(self, **kwargs: Any) -> str:
         """Synchronous entry point — delegates to async _execute."""
         return _run_async_in_sync_context(self._execute(kwargs))
 

@@ -1,8 +1,7 @@
-import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +15,7 @@ from src.core.exceptions import (
 from src.models.flow import Flow
 from src.repositories.flow_repository import FlowRepository
 from src.schemas.flow import FlowCreate, FlowUpdate
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,9 @@ class FlowService:
         """
         self.session = session
 
-    async def create_flow_with_group(self, flow_in: FlowCreate, group_context) -> Flow:
+    async def create_flow_with_group(
+        self, flow_in: FlowCreate, group_context: Optional[GroupContext]
+    ) -> Flow:
         """
         Create a new flow with group isolation.
 
@@ -69,8 +71,12 @@ class FlowService:
             # Generate a new UUID for the flow
             flow_uuid = str(uuid.uuid4())
 
-            # Ensure required fields exist in flow_config
+            # Ensure required fields exist in flow_config. Spread first: this
+            # used to list the keys to keep and dropped every other one the
+            # builder writes (routers, state, persistence, outcomes), so runs
+            # started from the stored flow (triggers, MCP, A2A) lost them.
             flow_config = {
+                **flow_config,
                 "id": flow_uuid,
                 "name": flow_config.get("name", flow_in.name),
                 "type": flow_config.get("type", "default"),
@@ -89,20 +95,24 @@ class FlowService:
                 if not isinstance(action, dict):
                     raise ValueError(f"Invalid action format: {action}")
 
-            # Validate crew_id if provided - for multi-crew flows, crew_id may not exist
-            # Set to None if the crew doesn't exist to avoid FK constraint violations
+            # Keep crew_id only for a crew of the workspace the flow is saved
+            # into (the current one, where group_id below puts it). A crew that
+            # does not exist, or is another workspace's, is dropped (multi-crew
+            # flows may name none), which also avoids an FK violation.
             validated_crew_id = None
             if flow_in.crew_id:
                 # Crews are CrewService's domain.
                 from src.services.catalog.crews import CrewService
 
-                existing_crew = await CrewService(self.session).get(flow_in.crew_id)
+                existing_crew = await CrewService(self.session).get_by_group(
+                    flow_in.crew_id, group_context
+                )
                 if existing_crew:
                     validated_crew_id = flow_in.crew_id
                     logger.info(f"Validated crew_id: {validated_crew_id}")
                 else:
                     logger.warning(
-                        f"crew_id {flow_in.crew_id} not found in database, setting to None for multi-crew flow"
+                        f"crew_id {flow_in.crew_id} not found in this workspace, setting to None for multi-crew flow"
                     )
 
             # Create flow dictionary with validated data and group info
@@ -159,7 +169,7 @@ class FlowService:
         return flow
 
     async def get_flow_with_group_check(
-        self, flow_id: uuid.UUID, group_context
+        self, flow_id: uuid.UUID, group_context: Optional[GroupContext]
     ) -> Flow:
         """
         Get a flow by ID with group authorization check.
@@ -188,7 +198,9 @@ class FlowService:
         return flow
 
     @staticmethod
-    def require_execution_access(flow: Flow, group_context) -> None:
+    def require_execution_access(
+        flow: Flow, group_context: Optional[GroupContext]
+    ) -> None:
         """Saved definitions require a resolved owner and caller workspace."""
         group_ids = getattr(group_context, "group_ids", None) or []
         if not flow.group_id or flow.group_id not in group_ids:
@@ -197,7 +209,7 @@ class FlowService:
     async def get_flow_for_execution(
         self,
         flow_id: Union[uuid.UUID, str],
-        group_context,
+        group_context: Optional[GroupContext],
         *,
         allow_unsaved: bool = False,
     ) -> Optional[Flow]:
@@ -213,7 +225,9 @@ class FlowService:
         self.require_execution_access(flow, group_context)
         return flow
 
-    async def get_all_flows_for_group(self, group_context) -> List[Flow]:
+    async def get_all_flows_for_group(
+        self, group_context: Optional[GroupContext]
+    ) -> List[Flow]:
         """
         Get all flows for the user's groups.
 
@@ -230,7 +244,10 @@ class FlowService:
         )
 
     async def update_flow_with_group_check(
-        self, flow_id: uuid.UUID, flow_in: FlowUpdate, group_context
+        self,
+        flow_id: uuid.UUID,
+        flow_in: FlowUpdate,
+        group_context: Optional[GroupContext],
     ) -> Flow:
         """
         Update a flow with group authorization check and name uniqueness validation.
@@ -277,7 +294,9 @@ class FlowService:
         # Delegate to the existing update_flow method
         return await self.update_flow(flow_id, flow_in)
 
-    async def delete_all_flows_for_group(self, group_context) -> None:
+    async def delete_all_flows_for_group(
+        self, group_context: Optional[GroupContext]
+    ) -> None:
         """
         Delete all flows for the user's groups.
 
@@ -295,15 +314,6 @@ class FlowService:
             except Exception as e:
                 logger.error(f"Error deleting flow {flow.id}: {e}")
 
-    async def find_flow(self, flow_id: uuid.UUID) -> Optional[Flow]:
-        """One flow by id, or None.
-
-        Distinct from :meth:`get_flow`, which RAISES when missing. The crew/flow
-        runner needs the None so it can return a clean error payload to a caller
-        that is not an HTTP request — it used to build ``FlowRepository`` for that.
-        """
-        return await FlowRepository(self.session).get(flow_id)
-
     async def get_flows_by_ids(
         self, flow_ids: List[Union[uuid.UUID, str]]
     ) -> List[Flow]:
@@ -313,36 +323,6 @@ class FlowService:
         ``FlowRepository`` itself to resolve the flows it advertises.
         """
         return await FlowRepository(self.session).find_by_ids(flow_ids)
-
-    async def get_most_recent_flow(self) -> Optional[Flow]:
-        """The most recently authored flow, or None.
-
-        A fallback for a run that arrived without a flow id. Unscoped by design —
-        it exists for a single-tenant/dev path — so do NOT use it to resolve a
-        flow on behalf of a tenant.
-        """
-        return await FlowRepository(self.session).get_most_recent()
-
-    async def get_flows_by_crew(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
-        """
-        Get all flows for a specific crew.
-
-        Args:
-            crew_id: ID of the crew (UUID)
-
-        Returns:
-            List of flows for the crew
-        """
-        # Convert string to UUID if needed
-        if isinstance(crew_id, str):
-            try:
-                crew_id = uuid.UUID(crew_id)
-            except ValueError:
-                # Return empty list if the UUID is invalid
-                return []
-
-        repository = FlowRepository(self.session)
-        return await repository.find_by_crew_id(crew_id)
 
     async def update_flow(self, flow_id: uuid.UUID, flow_in: FlowUpdate) -> Flow:
         """
@@ -392,20 +372,12 @@ class FlowService:
 
             # Update the flow
             updated_flow = await repository.update(flow_id, update_data)
-            return updated_flow
+            return cast(Flow, updated_flow)  # existence checked above
         except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error updating flow: {str(e)}")
             raise KasalError(detail=f"Error updating flow: {str(e)}")
-
-    async def _delete_execution_children(
-        self, execution_ids: list, job_ids: list
-    ) -> None:
-        """Delegates to the repository, which owns the cascade order."""
-        await FlowRepository(self.session).delete_execution_children(
-            execution_ids, job_ids
-        )
 
     async def force_delete_flow_with_executions(self, flow_id: uuid.UUID) -> bool:
         """
@@ -459,7 +431,7 @@ class FlowService:
             )
 
     async def _withdraw_publication(
-        self, flow_id: uuid.UUID, group_context=None
+        self, flow_id: uuid.UUID, group_context: Optional[GroupContext] = None
     ) -> None:
         """Unpublish a flow that is about to be deleted.
 
@@ -481,7 +453,7 @@ class FlowService:
             logger.warning(f"Could not unpublish deleted flow {flow_id}: {exc}")
 
     async def force_delete_flow_with_executions_with_group_check(
-        self, flow_id: uuid.UUID, group_context
+        self, flow_id: uuid.UUID, group_context: Optional[GroupContext]
     ) -> bool:
         """
         Force delete a flow with group authorization check.
@@ -586,8 +558,10 @@ class FlowService:
             # Generate a new UUID for the flow
             flow_uuid = str(uuid.uuid4())
 
-            # Ensure required fields exist in flow_config
+            # Ensure required fields exist in flow_config (spread first, as in
+            # create_flow_with_group)
             flow_config = {
+                **flow_config,
                 "id": flow_uuid,
                 "name": flow_config.get("name", flow_in.name),
                 "type": flow_config.get("type", "default"),
@@ -703,7 +677,7 @@ class FlowService:
 
             if data_dict.get("flow_config"):
                 logger.info(
-                    f"Flow config details: {json.dumps(data_dict['flow_config'], indent=2)}"
+                    f"Flow config keys: {sorted(data_dict['flow_config'] or {})}"
                 )
 
             return {

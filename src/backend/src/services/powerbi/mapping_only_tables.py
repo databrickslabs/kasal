@@ -15,7 +15,6 @@ context. Keeping this module a self-contained leaf avoids the cycle entirely.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 # Kept identical to (and independently of, for the same CLI-standalone-loading
 # reason above) the "external" branch of
@@ -95,7 +94,7 @@ def derive_mapping_only_tables(
         tbl_measures = [
             m["measure_name"] for m in measures if m.get("table_name") == tbl
         ]
-        entry: dict[str, Any] = {
+        entry: dict[str, object] = {
             "source_table": "{catalog}.{schema}." + _to_snake_case(tbl),
             "dimensions": [],
             "aggregate_columns": [],

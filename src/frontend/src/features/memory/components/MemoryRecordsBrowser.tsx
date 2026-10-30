@@ -52,9 +52,11 @@ import StarIcon from '@mui/icons-material/Star';
 import ViewAgendaIcon from '@mui/icons-material/ViewAgenda';
 import BubbleChartIcon from '@mui/icons-material/BubbleChart';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import HubIcon from '@mui/icons-material/Hub';
 
 import { apiClient } from '../../../shared/api/client';
 import { ConceptForceGraph } from './ConceptForceGraph';
+import { MemoryOntologyView } from './MemoryOntologyView';
 import { MemoryRecordMarkdown } from './MemoryRecordMarkdown';
 import { runService } from '../../../api/execution/ExecutionHistoryService';
 import { Run } from '../../../types/execution/run';
@@ -93,7 +95,7 @@ interface MemoryRecordsBrowserProps {
   /** Open scoped to a specific run (job_id) instead of defaulting to latest. */
   initialRunId?: string;
   /** Open directly on a given view (e.g. 'graph' from a ChatMode run). */
-  initialView?: 'cards' | 'concepts' | 'graph';
+  initialView?: 'cards' | 'concepts' | 'graph' | 'ontology';
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +499,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [importanceRange, setImportanceRange] = useState<[number, number]>([0, 1]);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<'cards' | 'concepts' | 'graph'>(
+  const [viewMode, setViewMode] = useState<'cards' | 'concepts' | 'graph' | 'ontology'>(
     initialView || 'cards',
   );
 
@@ -992,6 +994,10 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
                   <AccountTreeIcon fontSize="small" sx={{ mr: 0.5 }} />
                   Graph
                 </ToggleButton>
+                <ToggleButton value="ontology" aria-label="ontology">
+                  <HubIcon fontSize="small" sx={{ mr: 0.5 }} />
+                  Ontology
+                </ToggleButton>
               </ToggleButtonGroup>
 
               <TextField
@@ -1123,6 +1129,16 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
                   </Stack>
                 </Collapse>
               </Box>
+            )}
+
+            {viewMode === 'ontology' && (
+              <MemoryOntologyView
+                run={
+                  selectedRunId && selectedRunId !== ALL_RUNS
+                    ? { id: selectedRunId, mode: memoryMode, trace: traceFacts }
+                    : undefined
+                }
+              />
             )}
 
             {viewMode === 'graph' && (

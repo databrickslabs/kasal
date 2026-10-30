@@ -8,8 +8,10 @@ from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 from src.core.logger import LoggerManager
 from src.repositories.mlflow_repository import MLflowRepository
 from src.services.execution.service import ExecutionService
+from src.services.prompt_optimization.gepa.reflection import DEFAULT_JUDGE_SAMPLES
 from src.services.settings.models import ModelConfigService
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+from src.utils.user_context import GroupContext
 
 # Register User-Agent for Databricks SDK / MLflow calls (module-level)
 with_product(
@@ -19,13 +21,17 @@ with_product(
 # Route MLflowService logs to system.log for user visibility
 logger = LoggerManager.get_instance().system
 
+#: Built-in defaults for the Advanced MLflow settings (Configuration → MLflow).
+DEFAULT_EVALUATION_MAX_ROWS = 200
+DEFAULT_OPTIMIZATION_JUDGE_SAMPLES = DEFAULT_JUDGE_SAMPLES
+
 
 class MLflowService:
     """
     Service layer for MLflow enable/disable and status queries, plus evaluation triggers.
     """
 
-    def __init__(self, session: AsyncSession, group_id: str):
+    def __init__(self, session: AsyncSession, group_id: Optional[str]) -> None:
         """
         Initialize MLflow service.
 
@@ -56,14 +62,20 @@ class MLflowService:
     async def set_enabled(self, enabled: bool) -> bool:
         ok = await self.repo.set_enabled(enabled=enabled, group_id=self.group_id)
         if ok:
-            # Drop the memoized parent-process setup so the toggle takes effect
-            # on the next dispatch instead of after the cache TTL.
-            from src.services.otel_tracing.mlflow_parent_setup import (
-                invalidate_parent_mlflow_cache,
-            )
-
-            invalidate_parent_mlflow_cache()
+            await self.session.commit()
+            self._invalidate_parent_setup()
         return ok
+
+    @staticmethod
+    def _invalidate_parent_setup() -> None:
+        """Drop the memoized parent-process setup so an enable toggle takes
+        effect on the next dispatch instead of after the cache TTL. Called
+        AFTER the commit, so the next dispatch reads the new value."""
+        from src.services.otel_tracing.mlflow_parent_setup import (
+            invalidate_parent_mlflow_cache,
+        )
+
+        invalidate_parent_mlflow_cache()
 
     # Evaluation toggle
     async def is_evaluation_enabled(self) -> bool:
@@ -73,6 +85,8 @@ class MLflowService:
         ok = await self.repo.set_evaluation_enabled(
             enabled=enabled, group_id=self.group_id
         )
+        if ok:
+            await self.session.commit()
         return ok
 
     async def get_settings(self) -> Dict[str, Any]:
@@ -126,8 +140,8 @@ class MLflowService:
             installed = await DatabricksService(
                 self.session, group_id=self.group_id
             ).get_databricks_config()
-            resource_error = installed.resource_error
-        local_uri = None if is_databricks_app() else local.local_tracking_uri()
+            resource_error = installed.resource_error if installed else None
+        local_uri = await self.configured_local_uri()
         local_available = bool(local_uri)
         local_backend = {
             "kind": "local",
@@ -163,6 +177,13 @@ class MLflowService:
             "enabled": enabled,
             "evaluation_enabled": evaluation_enabled,
             "experiment_name": experiment_name,
+            "evaluation_judge_model": await self.repo.get_evaluation_judge_model(
+                group_id=self.group_id
+            ),
+            **await self.advanced_settings(),
+            "local_tracking_uri": await self.repo.get_local_tracking_uri(
+                group_id=self.group_id
+            ),
             "backend": backend,
             "available": available,
         }
@@ -172,25 +193,61 @@ class MLflowService:
         enabled: Optional[bool] = None,
         evaluation_enabled: Optional[bool] = None,
         experiment_name: Optional[str] = None,
+        evaluation_judge_model: Optional[str] = None,
+        advanced: Optional[Dict[str, Optional[int]]] = None,
+        local_tracking_uri: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Apply a partial update; an omitted field is left alone."""
+        """Apply a partial update; an omitted field is left alone.
+
+        ``advanced`` holds only the Advanced fields the caller sent; a None value
+        resets that field to its built-in default.
+
+        All-or-nothing: every field is validated BEFORE anything is written, and
+        the writes are committed together. A rejected field therefore leaves the
+        stored settings exactly as they were — previously each setter committed
+        on its own, so a bad local server URL still saved the fields before it.
+        """
         if is_databricks_app() and experiment_name is not None:
             raise ValueError(
                 "Hosted trace destinations are managed by the installation"
             )
+        local_uri = (
+            self._validated_local_tracking_uri(local_tracking_uri)
+            if local_tracking_uri is not None
+            else None
+        )
+
         if enabled is not None:
-            await self.set_enabled(enabled)
+            await self.repo.set_enabled(enabled=enabled, group_id=self.group_id)
         if evaluation_enabled is not None:
             await self.repo.set_evaluation_enabled(
                 enabled=evaluation_enabled, group_id=self.group_id
             )
         if experiment_name is not None:
             await self.repo.set_experiment_name(experiment_name, group_id=self.group_id)
+        if evaluation_judge_model is not None:
+            await self.repo.set_evaluation_judge_model(
+                evaluation_judge_model, group_id=self.group_id
+            )
+        if advanced:
+            await self.repo.set_advanced(advanced, group_id=self.group_id)
+        if local_uri is not None:
+            await self.repo.set_local_tracking_uri(
+                local_uri or None, group_id=self.group_id
+            )
+        # The service is the transaction boundary. Commit HERE, before the
+        # provisioning below: it makes network calls (Databricks / the local
+        # server) that can take seconds, and on SQLite's shared connection an
+        # uncommitted write held across them blocks every other writer and can
+        # be discarded by another request's rollback (services/CLAUDE.md).
+        await self.session.commit()
+        if enabled is not None:
+            self._invalidate_parent_setup()
 
         # Provision the destination when tracing is enabled or renamed, so the
         # first run can use it. Hosted apps use their volume's namespace and
         # existing schema permissions; no experiment resource is required.
-        if experiment_name is not None or enabled is True:
+        if experiment_name is not None or enabled is True or local_uri:
             await self._ensure_experiment_created()
         return await self.get_settings()
 
@@ -205,7 +262,8 @@ class MLflowService:
 
         workspace_url = await self._configured_workspace_url()
         if not workspace_url:
-            return  # local/OSS backend — nothing to pre-create
+            await self._ensure_local_experiment()
+            return
 
         auth = await self._setup_mlflow_auth()
         if not auth:
@@ -244,6 +302,80 @@ class MLflowService:
                 f"[MLflowService] Could not create experiment {exp_path}: {exc}"
             )
 
+    async def _ensure_local_experiment(self) -> None:
+        """Create (or restore, if it was deleted) the local server's experiment,
+        so it shows up in the MLflow UI as soon as tracing is enabled."""
+        import asyncio
+
+        from src.services.mlflow import local
+
+        uri = await self.configured_local_uri()
+        if not uri:
+            return
+        name = await self.configured_crew_traces_experiment()
+        try:
+            if await asyncio.to_thread(local.is_reachable, uri):
+                await asyncio.to_thread(local.ensure_experiment, uri, name)
+        except Exception as exc:  # noqa: BLE001 — saving settings must succeed
+            logger.warning(
+                "[MLflowService] Could not ensure local experiment %s: %s", name, exc
+            )
+
+    async def configured_local_uri(self) -> Optional[str]:
+        """The local MLflow server this workspace traces to, or None.
+
+        Configuration → MLflow (it replaced MCP_SERVER_ENABLED +
+        MLFLOW_TRACKING_URI at launch). Never inside Databricks Apps, where the
+        app's own container is not a place to look for an MLflow server.
+        """
+        from src.services.mlflow import local
+
+        if is_databricks_app():
+            return None
+        return local.local_tracking_uri(
+            await self.repo.get_local_tracking_uri(group_id=self.group_id)
+        )
+
+    @staticmethod
+    def _validated_local_tracking_uri(uri: str) -> str:
+        """``uri`` normalized for storage ("" clears it), or ValueError.
+
+        Validation only — nothing is written — so :meth:`update_settings` can
+        reject a bad value before touching any other field.
+        """
+        from src.services.mlflow import local
+
+        value = uri.strip()
+        if not value:
+            return ""
+        if is_databricks_app():
+            raise ValueError("A local MLflow server cannot be used in Databricks Apps")
+        return local.validate_local_tracking_uri(value)
+
+    async def configured_judge_model(self) -> Optional[str]:
+        """The workspace's judge model key, or None when there is none.
+
+        Configuration → MLflow's judge first; inside Databricks Apps the
+        installed default model (the serving endpoint the app is granted) next,
+        so a judge never falls back to an endpoint the app cannot query. Also the
+        default judge for prompt optimization (the Optimize dialog can override).
+        """
+        configured = await self.repo.get_evaluation_judge_model(group_id=self.group_id)
+        if configured:
+            return configured
+        installed = DatabricksAppInstallation.from_env()
+        return installed.default_model or None if installed.hosted else None
+
+    async def advanced_settings(self) -> Dict[str, int]:
+        """Advanced MLflow settings with the built-in defaults filled in."""
+        stored = await self.repo.get_advanced(group_id=self.group_id)
+        return {
+            "evaluation_max_rows": stored.get("evaluation_max_rows")
+            or DEFAULT_EVALUATION_MAX_ROWS,
+            "optimization_judge_samples": stored.get("optimization_judge_samples")
+            or DEFAULT_OPTIMIZATION_JUDGE_SAMPLES,
+        }
+
     async def configured_crew_traces_experiment(self) -> str:
         """The experiment crew traces, judges, GEPA runs, and eval all pin.
 
@@ -268,14 +400,17 @@ class MLflowService:
 
         experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
         teamspace = await self._teamspace_name()
-        base = f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
-        # On Databricks the tracer writes to the dedicated -uc experiment; match
-        # it so judges/GEPA/eval see the same traces. Local/OSS uses base as-is.
+        name = local.local_experiment_name(experiment_name, teamspace)
+        # On Databricks the tracer writes to the dedicated -uc experiment under
+        # /Shared/; match it so judges/GEPA/eval see the same traces. A local
+        # server uses the plain name the tracer uses — "/Shared/" is a
+        # Databricks workspace path, and on a local server it made judges and
+        # GEPA watch a different experiment from the one traces land in.
         if await self._configured_workspace_url():
             from src.services.otel_tracing.mlflow_setup import uc_experiment_name
 
-            return uc_experiment_name(base)
-        return base
+            return uc_experiment_name(f"/Shared/{name}")
+        return name
 
     async def _get_uc_trace_config(self) -> tuple:
         """(catalog, schema, warehouse_id) from the Databricks config, for
@@ -303,7 +438,7 @@ class MLflowService:
                 getattr(db_config, "db_schema", None),
                 getattr(db_config, "warehouse_id", None),
             )
-        except Exception as cfg_err:  # noqa: BLE001 — plain experiment is the fallback
+        except Exception as cfg_err:  # plain experiment is the fallback
             if is_databricks_app():
                 raise
             logger.debug(
@@ -328,12 +463,14 @@ class MLflowService:
         return str(value) if value else None
 
     def _local_deeplink(
-        self, trace_id: Optional[str], teamspace: Optional[str] = None
+        self,
+        trace_id: Optional[str],
+        teamspace: Optional[str] = None,
+        uri: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Deep link into the local MLflow UI. Runs in a thread — it does I/O."""
         from src.services.mlflow import local
 
-        uri = local.local_tracking_uri()
         if not uri:
             return {
                 "url": None,
@@ -343,8 +480,7 @@ class MLflowService:
                 "workspace_id": None,
                 "message": (
                     "No MLflow backend is configured. Set a Databricks workspace, "
-                    "or start a local MLflow server and launch Kasal with "
-                    "MLFLOW_TRACKING_URI pointing at it."
+                    "or a local MLflow server in Configuration → MLflow."
                 ),
             }
 
@@ -543,7 +679,12 @@ class MLflowService:
         if not await self._configured_workspace_url():
             trace_id = await self._trace_id_for(job_id)
             teamspace = await self._teamspace_name()
-            return await asyncio.to_thread(self._local_deeplink, trace_id, teamspace)
+            return await asyncio.to_thread(
+                self._local_deeplink,
+                trace_id,
+                teamspace,
+                await self.configured_local_uri(),
+            )
 
         # Get workspace URL and ID from unified auth
         workspace_url = ""
@@ -604,14 +745,14 @@ class MLflowService:
                 else await self.configured_crew_traces_experiment()
             )
 
-            def _get_experiment_id(auth_context, experiment_name: str) -> str:
+            def _get_experiment_id(auth_context: Any, experiment_name: str) -> str:
                 import mlflow
 
                 from src.services.mlflow.sp_auth import single_auth_env
 
                 try:
-                    # Single-method auth (removes OAuth vars, pins auth_type=pat)
-                    # so MLflow's SDK client doesn't hit "oauth and pat".
+                    # Scoped single-method auth (sp_auth; no env writes) so
+                    # MLflow's SDK client doesn't hit "oauth and pat".
                     with single_auth_env(
                         host=auth_context.workspace_url, token=auth_context.token
                     ):
@@ -677,17 +818,9 @@ class MLflowService:
         Returns:
             Properly formatted model name for LiteLLM (e.g., "databricks/databricks-claude-sonnet-4-5")
         """
-        import os
-
-        # Get configured judge model from database if not provided
+        # Configuration → MLflow judge, else the installed default model
         if not configured_judge_model:
-            configured_judge_model = await self.repo.get_evaluation_judge_model(
-                group_id=self.group_id
-            )
-
-        # Fall back to environment variable
-        if not configured_judge_model:
-            configured_judge_model = os.getenv("MLFLOW_EVAL_JUDGE_MODEL")
+            configured_judge_model = await self.configured_judge_model()
 
         # Default to databricks-claude-sonnet-4-5 if nothing configured
         if not configured_judge_model:
@@ -747,11 +880,14 @@ class MLflowService:
             )
             return fallback_model
 
-    async def trigger_evaluation(self, job_id: str) -> Dict[str, Any]:
+    async def trigger_evaluation(
+        self, job_id: str, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
         """
         MLflow 3.x-style evaluation for agent runs leveraging existing traces where possible.
         - Builds a minimal evaluation dataset from the recorded execution (and traces if available)
-        - Runs mlflow.genai.evaluate (or mlflow.evaluate fallback) with LLM-judge scorers when configured
+        - Runs mlflow.genai.evaluate with the built-in judges, called through
+          LLMManager under ``group_context`` (see ``evaluation_judges``)
         - Returns the evaluation run metadata for deep-linking in the UI
         """
         logger.info(
@@ -814,7 +950,16 @@ class MLflowService:
 
         # Run blocking MLflow 3.x evaluation code in a thread to keep API async/non-blocking
         # Resolve judge model using the model configuration system
-        judge_model_route = await self._resolve_judge_model()
+        configured_judge = await self.configured_judge_model()
+        judge_model_route = await self._resolve_judge_model(configured_judge)
+        from src.services.mlflow.evaluation_judges import (
+            current_judge_route,
+            resolve_judge_model,
+        )
+
+        judge_model = await resolve_judge_model(
+            configured_judge, self.model_config_service
+        )
         judge_model_defaulted = judge_model_route.endswith(
             "databricks-claude-sonnet-4-5"
         )
@@ -825,7 +970,7 @@ class MLflowService:
         auth_context = None
         if judge_model_route.startswith("databricks/"):
             from src.utils.databricks_auth import get_auth_context
-            from src.utils.user_context import GroupContext, UserContext
+            from src.utils.user_context import UserContext
 
             # CRITICAL: Set UserContext with group_id before calling get_auth_context()
             # UserContext is thread-local (contextvars), so we must set it explicitly
@@ -861,6 +1006,9 @@ class MLflowService:
             # Evaluate against the SAME experiment tracing/GEPA use — the
             # configured name (Configuration.tsx), not a hardcoded default.
             experiment_name=await self.configured_crew_traces_experiment(),
+            max_rows=(await self.advanced_settings())["evaluation_max_rows"],
+            judge_model=judge_model,
+            judge_route=current_judge_route(group_context, self.group_id),
         )
 
         # Create evaluation run in background thread

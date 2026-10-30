@@ -6,7 +6,7 @@ what one serving setup needs — and it was only in the facade for historical
 reasons.
 """
 
-import os
+from typing import Any, Dict, List, Optional
 
 from src.core.llm.transport import LLM
 
@@ -59,14 +59,21 @@ class VLLMFunctionCallingLLM(LLM):
     model has a far smaller decision to get wrong. Until that exists, prefer a
     tool-following model for tool-heavy work.
 
-    Set ``VLLM_TOOL_CHOICE`` to override the value sent (e.g. ``required`` to
-    restore the old behaviour for one deployment, or ``none`` to suppress tool
-    use). Anything falsy or ``default`` sends nothing and lets the server decide.
+    ``tool_choice`` comes from the model's settings in Configuration → Models
+    (``params["tool_choice"]``, formerly the VLLM_TOOL_CHOICE env var): e.g.
+    ``required`` to restore the old behaviour for one model, or ``none`` to
+    suppress tool use. Empty or ``default`` sends nothing and lets the server
+    decide.
     """
 
+    tool_choice: str = "auto"
+
     def _prepare_completion_params(
-        self, messages, tools=None, skip_file_processing=False
-    ):
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        skip_file_processing: bool = False,
+    ) -> Dict[str, Any]:
         """Declare the tool policy explicitly rather than inheriting a default.
 
         ``auto`` is what an OpenAI-compatible server already applies when tools
@@ -83,7 +90,7 @@ class VLLMFunctionCallingLLM(LLM):
         params = super()._prepare_completion_params(
             messages, tools=tools, skip_file_processing=skip_file_processing
         )
-        choice = os.getenv("VLLM_TOOL_CHOICE", "auto").strip().lower()
+        choice = (self.tool_choice or "").strip().lower()
         if not choice or choice == "default":
             return params
         if params.get("tools") and "tool_choice" not in params:

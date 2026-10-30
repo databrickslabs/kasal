@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GroupToolBase(BaseModel):
@@ -12,15 +12,6 @@ class GroupToolBase(BaseModel):
     )
 
 
-class GroupToolCreate(GroupToolBase):
-    pass
-
-
-class GroupToolUpdate(BaseModel):
-    enabled: Optional[bool] = Field(default=None)
-    config: Optional[Dict[str, Any]] = Field(default=None)
-
-
 class GroupToolResponse(GroupToolBase):
     id: int = Field(...)
     group_id: str = Field(..., description="Group ID")
@@ -28,7 +19,7 @@ class GroupToolResponse(GroupToolBase):
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupToolListResponse(BaseModel):

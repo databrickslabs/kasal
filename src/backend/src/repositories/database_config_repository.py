@@ -2,7 +2,7 @@
 Repository for database configuration operations.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Type
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +11,10 @@ from src.core.base_repository import BaseRepository
 from src.models.database_config import LakebaseConfig
 
 
-class DatabaseConfigRepository(BaseRepository):
+class DatabaseConfigRepository(BaseRepository[LakebaseConfig, str]):
     """Repository for database configuration operations."""
 
-    def __init__(self, model_class, session: AsyncSession):
+    def __init__(self, model_class: Type[LakebaseConfig], session: AsyncSession):
         """Initialize repository with model class and session."""
         super().__init__(model_class, session)
 

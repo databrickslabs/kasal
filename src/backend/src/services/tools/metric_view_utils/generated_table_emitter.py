@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from .dax_condition_sql import _sql_str_literal
+
 _LIST_DATES = re.compile(r"\bList\.Dates\b")
 # #date(Y, M, D)
 _DATE_LIT = re.compile(r"#date\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)")
@@ -71,7 +73,7 @@ def _m_scalar_to_sql(expr: str) -> str | None:
     # Date.ToText(d, "fmt")  → date_format(d, 'fmt')
     s = re.sub(
         r'Date\.ToText\(\s*d\s*,\s*"([^"]*)"\s*\)',
-        lambda m: f"date_format(d, '{_map_fmt(m.group(1))}')",
+        lambda m: f"date_format(d, {_sql_str_literal(_map_fmt(m.group(1)))})",
         s,
     )
     # Date.Year / Month / Day / QuarterOfYear / WeekOfYear
@@ -89,11 +91,11 @@ def _m_scalar_to_sql(expr: str) -> str | None:
     # Text.PadStart(x, n, "c") → lpad(x, n, 'c')
     s = re.sub(
         r'Text\.PadStart\(\s*(.*?)\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)',
-        r"lpad(\1, \2, '\3')",
+        lambda m: f"lpad({m.group(1)}, {m.group(2)}, {_sql_str_literal(m.group(3))})",
         s,
     )
-    # bare double-quoted string literals → single-quoted
-    s = re.sub(r'"([^"]*)"', r"'\1'", s)
+    # bare double-quoted M strings → escaped SQL literals (M text may hold ' or \)
+    s = re.sub(r'"([^"]*)"', lambda m: _sql_str_literal(m.group(1)), s)
 
     # If anything M-specific survived, we can't safely translate it.
     if re.search(r"\b(Date|Time|Text|Number|List|Table)\.", s) or "#" in s:
@@ -123,21 +125,22 @@ def emit_view_sql(m_expr: str, fqn: str) -> str | None:
     todo = 0
     for name, body in _find_addcols(m_expr):
         sql = _m_scalar_to_sql(body)
-        col = f"`{name}`"
+        col = "`" + name.replace("`", "``") + "`"
         if sql is None:
-            cols.append(f"/* TODO translate M: {body.strip()[:80]} */ NULL AS {col}")
+            note = body.strip()[:80].replace("*/", "* /")
+            cols.append(f"/* TODO translate M: {note} */ NULL AS {col}")
             todo += 1
         else:
             cols.append(f"{sql} AS {col}")
 
     select = ",\n    ".join(cols)
     header = (
-        f"-- Auto-generated from a Power Query List.Dates calendar (no physical source).\n"
-        f"-- Reproduces the M-computed date dimension so metric views can join it.\n"
+        "-- Auto-generated from a Power Query List.Dates calendar (no physical source).\n"
+        "-- Reproduces the M-computed date dimension so metric views can join it.\n"
     )
     if todo:
         header += f"-- NOTE: {todo} column(s) need manual translation (see /* TODO */ below).\n"
     return (
-        f"{header}CREATE OR REPLACE VIEW {fqn} AS\nSELECT\n    {select}\n"
-        f"FROM (SELECT explode(sequence(DATE'{start}', DATE'{end}', INTERVAL 1 DAY)) AS d);"
+        f"{header}CREATE OR REPLACE VIEW {fqn} AS\nSELECT\n    {select}\n"  # draft for review; fqn quoted by caller, columns quoted — nosemgrep: tmp.databricks.sql-injection.fstring-select
+        f"FROM (SELECT explode(sequence(DATE'{start}', DATE'{end}', INTERVAL 1 DAY)) AS d);"  # dates are int-formatted — nosemgrep: tmp.databricks.sql-injection.fstring-select
     )

@@ -24,7 +24,7 @@ session-level timeouts don't apply here because the session is shared.
 import asyncio
 import contextlib
 import logging
-from typing import Dict, Tuple
+from typing import AsyncIterator, Dict, Tuple
 
 import aiohttp
 
@@ -65,7 +65,7 @@ async def get_shared_session() -> aiohttp.ClientSession:
 
 
 @contextlib.asynccontextmanager
-async def shared_client_session():
+async def shared_client_session() -> AsyncIterator[aiohttp.ClientSession]:
     """Async context manager yielding the shared session WITHOUT closing it.
 
     Drop-in replacement for ``async with aiohttp.ClientSession() as s:`` at

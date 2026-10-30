@@ -61,6 +61,27 @@ describe('themeToDeck', () => {
   });
 });
 
+describe('palette colours that are not hex', () => {
+  const remote = 'url(https://images.example.org/x.png?d=1)';
+  const hostile = { ...LIGHT, background: remote, surface: `#fff ${remote}`, accent: 'red', muted: '#abcd' } as Palette;
+
+  it('never reach the deck theme: each falls back to a neutral hex colour', () => {
+    const d = themeToDeck(hostile);
+    const values = Object.values(d).filter((v): v is string => typeof v === 'string');
+    for (const v of values) expect(v).not.toMatch(/url\(|example\.org/);
+    expect(d.bg).toBe('#ffffff');
+    expect(d.panel).toBe('#f8fafc');
+    expect(d.accent).toBe('#2272B4');
+    // Hex colours in any accepted form still pass through.
+    expect(themeToDeck({ ...LIGHT, accent: '#abc' }).accent).toBe('#abc');
+    expect(themeToDeck({ ...LIGHT, background: '#11223344' }).bg).toBe('#11223344');
+  });
+
+  it('never reach the CSS tokens', () => {
+    for (const v of Object.values(themeToTokens(hostile))) expect(v).not.toMatch(/url\(|example\.org/);
+  });
+});
+
 describe('themeToTokens', () => {
   it('emits the full --a2-* token set as channel strings', () => {
     const t = themeToTokens(LIGHT);

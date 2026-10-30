@@ -14,9 +14,11 @@ from typing import Any
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
 from .dependency_graph import build_dependency_graph
 from .implicit_column_builder import build_implicit_measures
+from .join_detector import _sanitize_alias
 from .m_transform_folder import MTransformFolder
 from .pbi_parameter_resolver import PbiParameterResolver
 from .sql_post_processor import SqlPostProcessor
+from .table_structure import build_table_structure
 from .utils import col_to_readable, run_async, spark_sql_compat, to_snake_case
 
 logger = logging.getLogger(__name__)
@@ -78,7 +80,7 @@ def _detect_common_exclusions(dax_measures: list[dict], source_cols: set) -> lis
     return [predicate_sql[k] for k, c in counts.items() if c >= threshold]
 
 
-def _is_real_switch_decomp(entry) -> bool:
+def _is_real_switch_decomp(entry: Any) -> bool:
     """True when a config switch_decomposition entry carries REAL SQL.
 
     `derive_switch_decompositions` emits skeleton entries whose ``raw_expr`` is a
@@ -194,162 +196,24 @@ def process_table(
     """
     source_table = table_info.source_table
 
-    # ── Step 1: Auto-generate base measures from MQuery SUM columns ───
-    # Build a DAX-column → source-output-column map so BOTH base and derived
-    # measures reference the column the emitted `source:` SELECT actually exposes.
-    # A pre-aggregating source (SELECT ..., SUM(kbi_value) AS value ...) outputs
-    # the column under its ALIAS (`name`='value'), not the inner physical name
-    # (`source_col`='kbi_value'). Referencing source_col then fails (column not
-    # found). We normalize measures to the alias the source emits.
-    _src_alias_map: dict[str, str] = {}
-    for _c in table_info.aggregate_columns:
-        _sc = _c.get("source_col")
-        _nm = _c.get("name")
-        if _sc and _nm and _sc != _nm:
-            _src_alias_map[_sc] = _nm  # kbi_value -> value (source output col)
-    ctx.translator.set_source_col_map(_src_alias_map)
-
-    base_measures: list[TranslationResult] = []
-    base_names: set[str] = set()
-    for col in table_info.aggregate_columns:
-        name = col["name"]
-        if "expr" in col:
-            expr = col["expr"]
-        else:
-            # Reference the source's OUTPUT column (`name`), which is what the
-            # emitted source SELECT exposes — not the inner `source_col`.
-            expr = f"SUM(source.{name})"
-        base_measures.append(
-            TranslationResult(
-                measure_name=name,
-                original_name=name,
-                sql_expr=expr,
-                is_translatable=True,
-                skip_reason=col_to_readable(name),
-                dax_expression="",
-                confidence="high",
-                category="base",
-            )
-        )
-        base_names.add(name)
-
-    # ── Step 2: Auto-generate dimensions from GROUP BY + calculated columns
-    dimensions: list[dict] = []
-    for col in table_info.group_by_columns:
-        dimensions.append(
-            {
-                "name": col,
-                "expr": f"source.{col}",
-                "comment": col_to_readable(col),
-            }
-        )
-    for calc in table_info.calculated_columns:
-        expr = calc["expr"]
-        for gb_col in table_info.group_by_columns:
-            expr = re.sub(
-                rf"(?<![.\w])\b{re.escape(gb_col)}\b(?!\s*\()",
-                f"source.{gb_col}",
-                expr,
-            )
-        # Normalize DATE() -> MAKE_DATE() for Databricks UC Metric Views
-        expr = re.sub(r"\bDATE\s*\(", "MAKE_DATE(", expr)
-        dimensions.append(
-            {
-                "name": calc["name"],
-                "expr": expr,
-                "comment": f"Calculated: {col_to_readable(calc['name'])}",
-            }
-        )
-
-    # ── Step 3: Auto-detect joins from DAX dimension refs ─────────────
-    joins = ctx.join_detector.detect(
-        table_key, dax_measures, table_info, inner_dim_joins=ctx.inner_dim_joins
+    # ── Steps 1-4: base measures, dimensions, joins (table_structure.py) ──
+    structure = build_table_structure(
+        table_key,
+        table_info,
+        dax_measures,
+        translator=ctx.translator,
+        join_detector=ctx.join_detector,
+        enrichment_joins=ctx.enrichment_joins,
+        inactive_rels=ctx.inactive_rels,
+        mquery_tables=ctx.mquery_tables,
+        inner_dim_joins=ctx.inner_dim_joins,
+        dimension_exclusions=ctx.dimension_exclusions,
     )
-
-    # 3b. Auto-detect fact-to-fact joins for cross-table DIVIDEs
-    fact_joins = ctx.join_detector.detect_fact_joins(
-        table_key, dax_measures, table_info
-    )
-    joins.extend(fact_joins)
-
-    # 3c. Add enrichment joins (domain-specific lookups not in DAX).
-    enrichment_cfg = ctx.enrichment_joins.get(table_key, [])
-    detected_aliases = {j["name"] for j in joins}
-    for ej in enrichment_cfg:
-        if ej["name"] in detected_aliases:
-            continue  # DAX detector already added this join
-        joins.append(
-            {
-                "name": ej["name"],
-                "source": ej["source"],
-                "join_on": ej["join_on"],
-            }
-        )
-        detected_aliases.add(ej["name"])
-        for col in ej.get("dim_columns", []):
-            if isinstance(col, dict):
-                dim_name = col["name"]
-                dim_expr = f"{ej['name']}.{col['expr']}"
-            else:
-                dim_name = col
-                dim_expr = f"{ej['name']}.{col}"
-            dimensions.append(
-                {
-                    "name": dim_name,
-                    "expr": dim_expr,
-                    "comment": f"{col_to_readable(dim_name)} from {ej['name']}",
-                }
-            )
-
-    # 3d. Detect USERELATIONSHIP measures and generate alternate join aliases
-    userel_pattern = re.compile(
-        r"USERELATIONSHIP\s*\(\s*(\w+)\[(\w+)\]\s*,\s*(\w+)\[(\w+)\]\s*\)",
-        re.IGNORECASE,
-    )
-    inactive_rels = ctx.inactive_rels
-    for m in dax_measures:
-        dax = m.get("dax_expression", "")
-        for match in userel_pattern.finditer(dax):
-            fact_col = match.group(2)  # e.g. ShipDate
-            dim_table = match.group(3)  # e.g. Calendar
-            dim_col = match.group(4)  # e.g. Date
-            # Find matching inactive relationship
-            for irel in inactive_rels:
-                if (
-                    irel["from_column"].lower() == fact_col.lower()
-                    and irel["to_table"].lower() == dim_table.lower()
-                ):
-                    # Generate alternate join alias
-                    base_alias = dim_table.lower()
-                    alt_alias = f"{base_alias}_{fact_col.lower()}"
-                    # Check if this join already exists
-                    if not any(j["name"] == alt_alias for j in joins):
-                        dim_info = ctx.mquery_tables.get(irel["to_table"])
-                        if dim_info and dim_info.source_table:
-                            joins.append(
-                                {
-                                    "name": alt_alias,
-                                    "source": dim_info.source_table,
-                                    "join_on": f"source.{fact_col.lower()} = {alt_alias}.{dim_col.lower()}",
-                                    "_userelationship": True,
-                                }
-                            )
-
-    # ── Step 4: Add dimension columns from joined tables ──────────────
-    dim_dims = ctx.join_detector.get_dim_dimensions(joins, table_info)
-    dimensions.extend(dim_dims)
-
-    # 4b. Normalize dimension names to lowercase
-    for d in dimensions:
-        if d["name"] != d["name"].lower():
-            old_name = d["name"]
-            d["name"] = old_name.lower()
-            d["expr"] = d["expr"].replace(old_name, old_name.lower())
-
-    # 4c. Remove excluded dimensions (join/filter-only columns, not user-facing)
-    excluded = ctx.dimension_exclusions.get(table_key, set())
-    if excluded:
-        dimensions = [d for d in dimensions if d["name"] not in excluded]
+    base_measures = structure.base_measures
+    base_names = structure.base_names
+    dimensions = structure.dimensions
+    joins = structure.joins
+    fact_joins = structure.fact_joins
 
     # ── Step 5: Translate DAX measures (pass fact_joins for cross-table resolution)
     translated: list[TranslationResult] = []
@@ -366,8 +230,8 @@ def process_table(
     _llm_enabled = bool(ctx.llm_config and ctx.llm_config.get("use_llm_fallback"))
     _trivial_only = _llm_enabled and _mode == "llm_first"
 
-    for m in dax_measures:
-        result = ctx.translator.translate(m, table_key, trivial_only=_trivial_only)
+    for dm in dax_measures:
+        result = ctx.translator.translate(dm, table_key, trivial_only=_trivial_only)
         if result.is_translatable:
             result.sql_expr = clean_unresolved_vars_fn(result.sql_expr)
             if result.measure_name not in base_names:
@@ -380,8 +244,7 @@ def process_table(
             if result.category == "cross_table":
                 ctx.cross_table_measures.append(result)
 
-    # 5a-fix. Resolve window.order: replace hardcoded 'date_key' with actual
-    # period dimension from the table's GROUP BY columns.
+    # 5a-fix. window.order: hardcoded 'date_key' -> the table's GROUP BY period dim.
     _PERIOD_DIM_PRIORITY = ctx.config.get(
         "period_dim_priority", ["fiscper", "fiscal_year_period", "date_key"]
     )
@@ -565,7 +428,7 @@ def process_table(
                 )
 
                 # Convert CALCULATE(SUM(Table[col]))*N -> SUM(source.col) * N
-                def _repl_calc_sum(cm):
+                def _repl_calc_sum(cm: re.Match[str]) -> str:
                     s = f"SUM(source.{cm.group(1)})"
                     if cm.group(2):
                         s += f" * {cm.group(2)}"
@@ -655,11 +518,11 @@ def process_table(
         # measures) so the LLM emits real source columns / join aliases instead
         # of guessing. Goes in the per-measure user prompt (not the cached prefix).
         _ctx_lines = [f"- source table: {source_table or '(unknown)'}"]
-        _agg_cols = [
+        _agg_cols_raw = [
             c.get("source_col") or c.get("name")
             for c in (table_info.aggregate_columns or [])
         ]
-        _agg_cols = [c for c in _agg_cols if c]
+        _agg_cols: list[str] = [c for c in _agg_cols_raw if c]
         if _agg_cols:
             _ctx_lines.append(
                 f"- fact source columns (use as source.<col>): {', '.join(sorted(set(_agg_cols))[:60])}"
@@ -992,14 +855,17 @@ def process_table(
         kbi_col = fj_cfg.get("pivot_col", "kbi_col")
 
         _filter_start = re.compile(
-            rf"SUM\({re.escape(alias)}\.{re.escape(val_col)}\)\s*FILTER\s*\(WHERE\s+"
+            rf"SUM\({re.escape(alias)}\.{re.escape(val_col)}\)\s*FILTER\s*\(WHERE\s+"  # a regex over generated SQL, every part re.escape'd — nosemgrep: tmp.databricks.sql-injection.fstring-where
             rf"{re.escape(alias)}\.{re.escape(kbi_col)}\s*"
             rf"(?:=\s*\'(\w+)\'|IN\s*\(([^)]+)\))",
             re.IGNORECASE,
         )
 
         def _rewrite(
-            expr: str | None, _fs=_filter_start, _alias=alias, _pkm=pivot_kbi_map
+            expr: str | None,
+            _fs: re.Pattern[str] = _filter_start,
+            _alias: str = alias,
+            _pkm: Any = pivot_kbi_map,
         ) -> str | None:
             if not expr:
                 return expr
@@ -1244,7 +1110,7 @@ def process_table(
         final_sql = post_processor.process(final_sql)
 
         # Normalize mixed-case column aliases to lowercase
-        def _lc_alias(m_alias):
+        def _lc_alias(m_alias: re.Match[str]) -> str:
             a = m_alias.group(1)
             return (
                 f"AS {a.lower()}"
@@ -1311,17 +1177,15 @@ def process_table(
             excl_filter = ua.get("_primary_exclude_filter", "")
             pivot_map = ua.get("_pivot_kbi_map", {})
 
-            wrapped = (
-                f"SELECT *, {null_cols}\n" f"FROM (\n{source_sql}\n) _primary_source"
-            )
+            wrapped = f"SELECT *, {null_cols}\nFROM (\n{source_sql}\n) _primary_source"  # pivot aliases from validated KBI codes — nosemgrep: tmp.databricks.sql-injection.fstring-select
             if excl_filter:
                 wrapped += f"\nWHERE {excl_filter}"
 
             agg_nulls = ", ".join(
-                f"CAST(NULL AS DOUBLE) AS {c['name']}"
+                f"CAST(NULL AS DOUBLE) AS {_sanitize_alias(c['name'])}"
                 for c in table_info.aggregate_columns
             )
-            union_arm = f"SELECT *, {agg_nulls}\n" f"FROM (\n{arm_sql}\n) _union_arm"
+            union_arm = f"SELECT *, {agg_nulls}\nFROM (\n{arm_sql}\n) _union_arm"  # aggregate names validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
             source_sql = f"{wrapped}\nUNION ALL\n{union_arm}"
 
             existing_dim_names = {d["name"] for d in dimensions}
@@ -1349,14 +1213,14 @@ def process_table(
             co012_alias = f"_co012_{ej_embed['name']}"
 
             max_selects = ", ".join(
-                f"MAX({co012_alias}.{src_col}) AS {tgt_col}"
+                f"MAX({co012_alias}.{_sanitize_alias(src_col)}) AS {_sanitize_alias(tgt_col)}"
                 for src_col, tgt_col in embed_cols.items()
             )
             on_clause = " AND ".join(
-                f"_inner.{k} = {co012_alias}.{k}" for k in join_keys
+                f"_inner.{_sanitize_alias(k)} = {co012_alias}.{k}" for k in join_keys
             )
             source_sql = (
-                f"SELECT _inner.*, {max_selects}\n"
+                f"SELECT _inner.*, {max_selects}\n"  # embed columns and join keys validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 f"FROM (\n{source_sql}\n) _inner\n"
                 f"LEFT JOIN (\n{inline_sql}\n) {co012_alias}\n"
                 f"  ON {on_clause}\n"
@@ -1384,7 +1248,7 @@ def process_table(
         fj_cfg = ej_emb.get("_fact_join_config", {})
         col_map = fj_cfg.get("column_map", {})
         _embed_filter_pat = re.compile(
-            rf"\s*FILTER\s*\(WHERE\s+{re.escape(alias_e)}\.[^)]+\)",
+            rf"\s*FILTER\s*\(WHERE\s+{re.escape(alias_e)}\.[^)]+\)",  # a regex over generated SQL, alias re.escape'd — nosemgrep: tmp.databricks.sql-injection.fstring-where
             re.IGNORECASE,
         )
         for src_col, tgt_col in embed_cols.items():

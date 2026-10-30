@@ -30,15 +30,33 @@ import concurrent.futures
 import contextvars
 import json
 import logging
-from typing import Any, Optional, Type
+import math
+from collections.abc import Coroutine, Mapping
+from typing import TYPE_CHECKING, Optional, Type, TypeVar
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils import reconciliation as recon
+from src.services.tools.metric_view_utils.raw_fields import (
+    DimensionValue,
+    RawMap,
+    as_int,
+    as_list,
+    as_map,
+    opt_scalar_list,
+    opt_str,
+    opt_str_list,
+)
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 # Cap the number of mismatching cells reported per measure — enough to see the
 # pattern, not the whole failing set.
@@ -118,7 +136,7 @@ class UCMVReconciliationSchema(BaseModel):
 # ── Executors: thin adapters over the reused I/O helpers ─────────────────────
 
 
-def _run_coro_sync(coro):
+def _run_coro_sync(coro: Coroutine[object, object, _T]) -> _T:
     """Run a coroutine to completion from a sync context, propagating contextvars
     (execution_id, group_id, OBO token) into any worker thread."""
     try:
@@ -133,39 +151,43 @@ def _run_coro_sync(coro):
             asyncio.set_event_loop(None)
     ctx = contextvars.copy_context()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(ctx.run, asyncio.run, coro).result()
+        value: _T = ex.submit(ctx.run, asyncio.run, coro).result()
+    return value
 
 
 class _PBIExecutor:
     """``execute(semantic_model_id, dax) -> (DataFrame, err)`` over the reused
     ``PowerBIDaxExecutorTool._execute_dax_query``."""
 
-    def __init__(self, workspace_id: str, access_token: str):
+    def __init__(self, workspace_id: str, access_token: str) -> None:
         from src.services.tools.powerbi_dax_executor_tool import PowerBIDaxExecutorTool
 
         self.workspace_id = workspace_id
         self.access_token = access_token
         self._tool = PowerBIDaxExecutorTool()
 
-    def execute(self, semantic_model_id: str, dax_query: str):
-        result = _run_coro_sync(
-            self._tool._execute_dax_query(
-                self.workspace_id, semantic_model_id, self.access_token, dax_query
+    def execute(
+        self, semantic_model_id: str, dax_query: str
+    ) -> tuple[Optional[pd.DataFrame], object]:
+        result = as_map(
+            _run_coro_sync(
+                self._tool._execute_dax_query(
+                    self.workspace_id, semantic_model_id, self.access_token, dax_query
+                )
             )
         )
         if not result.get("success"):
             return pd.DataFrame(), result.get("error")
-        return pd.DataFrame(result.get("data") or []), None
+        return pd.DataFrame(as_list(result.get("data"))), None
 
 
-def _sql_result_to_df(payload: dict) -> pd.DataFrame:
+def _sql_result_to_df(payload: RawMap) -> pd.DataFrame:
     """Turn a Databricks SQL Statement API SUCCEEDED payload into a DataFrame,
     using the manifest column names for the (inline) data_array rows."""
-    manifest = (payload or {}).get("manifest", {}) or {}
-    columns = [
-        c.get("name") for c in manifest.get("schema", {}).get("columns", []) or []
-    ]
-    rows = (payload or {}).get("result", {}).get("data_array") or []
+    manifest = as_map(payload.get("manifest"))
+    schema = as_map(manifest.get("schema"))
+    columns = [as_map(c).get("name") for c in as_list(schema.get("columns"))]
+    rows = as_list(as_map(payload.get("result")).get("data_array"))
     if not columns:
         return pd.DataFrame(rows)
     return pd.DataFrame(rows, columns=columns)
@@ -175,7 +197,7 @@ class _SQLExecutor:
     """``execute(sql) -> (DataFrame, err)`` over the reused
     ``MetricViewDeployerTool._execute_sql_sync``."""
 
-    def __init__(self, workspace_url: str, warehouse_id: str, headers: dict):
+    def __init__(self, workspace_url: str, warehouse_id: str, headers: dict) -> None:
         from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
 
         self.workspace_url = workspace_url
@@ -183,11 +205,13 @@ class _SQLExecutor:
         self.headers = headers
         self._exec = MetricViewDeployerTool._execute_sql_sync
 
-    def execute(self, sql: str):
-        result = self._exec(sql, self.workspace_url, self.warehouse_id, self.headers)
+    def execute(self, sql: str) -> tuple[pd.DataFrame, object]:
+        result = as_map(
+            self._exec(sql, self.workspace_url, self.warehouse_id, self.headers)
+        )
         if not result.get("success"):
             return pd.DataFrame(), result.get("error")
-        return _sql_result_to_df(result.get("data", {})), None
+        return _sql_result_to_df(as_map(result.get("data"))), None
 
 
 class UCMVReconciliationTool(BaseTool):
@@ -207,7 +231,7 @@ class UCMVReconciliationTool(BaseTool):
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, **kwargs: object) -> None:
         default_config = {k: kwargs.pop(k, None) for k in _CONFIG_KEYS}
         super().__init__(**kwargs)
         self._default_config = {
@@ -216,17 +240,17 @@ class UCMVReconciliationTool(BaseTool):
 
     # ── config + mapping parsing ────────────────────────────────────────────
 
-    def _cfg(self, kwargs: dict, key: str):
+    def _cfg(self, kwargs: Mapping[str, object], key: str) -> object:
         val = kwargs.get(key)
         return val if val is not None else self._default_config.get(key)
 
     @staticmethod
     def _parse_mappings(
         mapping_text: Optional[str], mappings_json: Optional[str]
-    ) -> dict:
+    ) -> dict[str, recon.UCMVMapping]:
         """Return {view_name: UCMVMapping}. Accepts a single mapping (keyed by its
         UCMV table) or a JSON dict of many."""
-        out: dict = {}
+        out: dict[str, recon.UCMVMapping] = {}
         if mappings_json:
             parsed = (
                 json.loads(mappings_json)
@@ -238,10 +262,10 @@ class UCMVReconciliationTool(BaseTool):
                     "mappings_json must be a JSON object of {view_name: mapping}."
                 )
             for name, m in parsed.items():
-                out[name] = (
+                out[str(name)] = (
                     recon.load_mapping(m)
                     if isinstance(m, str)
-                    else recon.load_mapping_dict(m)
+                    else recon.load_mapping_dict(as_map(m))
                 )
         if mapping_text:
             mp = recon.load_mapping(mapping_text)
@@ -251,11 +275,13 @@ class UCMVReconciliationTool(BaseTool):
     # ── auth ────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _authenticate_databricks(host_override: Optional[str] = None):
+    def _authenticate_databricks(
+        host_override: Optional[str] = None,
+    ) -> Optional[AuthContext]:
         """Resolve a Databricks AuthContext (OBO -> PAT -> SPN), off the event loop."""
         from src.utils.databricks_auth import get_auth_context
 
-        def _run_in_thread():
+        def _run_in_thread() -> Optional[AuthContext]:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -265,7 +291,9 @@ class UCMVReconciliationTool(BaseTool):
                 asyncio.set_event_loop(None)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
+            auth: Optional[AuthContext] = executor.submit(_run_in_thread).result(
+                timeout=30
+            )
         if auth is not None and host_override:
             url = host_override.strip().rstrip("/")
             if not url.startswith("https://"):
@@ -292,19 +320,21 @@ class UCMVReconciliationTool(BaseTool):
             from src.utils.url_security import is_trusted_databricks_host
 
             trusted = is_trusted_databricks_host(workspace_url)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — any check failure must fail closed
             trusted = False
         if not trusted:
             raise RuntimeError(f"Untrusted Databricks host: {workspace_url}")
         return _SQLExecutor(workspace_url, warehouse_id, headers)
 
     def _build_pbi_executor(
-        self, kwargs: dict, mapping: recon.UCMVMapping
+        self, kwargs: Mapping[str, object], mapping: recon.UCMVMapping
     ) -> _PBIExecutor:
         from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
-        workspace_id = (
-            self._cfg(kwargs, "pbi_workspace_id") or mapping.binding.pbi_workspace_id
+        workspace_id = str(
+            self._cfg(kwargs, "pbi_workspace_id")
+            or mapping.binding.pbi_workspace_id
+            or ""
         )
         if not workspace_id:
             raise RuntimeError(
@@ -312,13 +342,13 @@ class UCMVReconciliationTool(BaseTool):
             )
         token = _run_coro_sync(
             get_powerbi_access_token(
-                tenant_id=self._cfg(kwargs, "pbi_tenant_id"),
-                client_id=self._cfg(kwargs, "pbi_client_id"),
-                client_secret=self._cfg(kwargs, "pbi_client_secret"),
-                access_token=self._cfg(kwargs, "pbi_access_token"),
-                username=self._cfg(kwargs, "pbi_username"),
-                password=self._cfg(kwargs, "pbi_password"),
-                auth_method=self._cfg(kwargs, "pbi_auth_method"),
+                tenant_id=opt_str(self._cfg(kwargs, "pbi_tenant_id")),
+                client_id=opt_str(self._cfg(kwargs, "pbi_client_id")),
+                client_secret=opt_str(self._cfg(kwargs, "pbi_client_secret")),
+                access_token=opt_str(self._cfg(kwargs, "pbi_access_token")),
+                username=opt_str(self._cfg(kwargs, "pbi_username")),
+                password=opt_str(self._cfg(kwargs, "pbi_password")),
+                auth_method=opt_str(self._cfg(kwargs, "pbi_auth_method")),
             )
         )
         return _PBIExecutor(workspace_id, token)
@@ -331,26 +361,35 @@ class UCMVReconciliationTool(BaseTool):
         model_id: str,
         mapping: recon.UCMVMapping,
         dimension_name: str,
-    ) -> list:
+    ) -> list[DimensionValue]:
         dax = recon.build_dimension_scope_query(mapping, dimension_name)
         df, err = pbi_executor.execute(model_id, dax)
         if df is None or df.empty:
             raise RuntimeError(f"Could not discover dimension values from PBI: {err}")
-        return [v for v in df.iloc[:, 0].tolist() if v is not None]
+        discovered: list[DimensionValue] = [
+            v for v in df.iloc[:, 0].tolist() if v is not None
+        ]
+        return discovered
 
     # ── per-view reconciliation ──────────────────────────────────────────────
 
     def _reconcile_view(
-        self, view_name: str, mapping: recon.UCMVMapping, kwargs: dict, dry_run: bool
-    ) -> dict:
+        self,
+        view_name: str,
+        mapping: recon.UCMVMapping,
+        kwargs: Mapping[str, object],
+        dry_run: bool,
+    ) -> dict[str, object]:
         dimension_name = mapping.binding.default_dimension
         # reference_years is OPTIONAL: empty means "all years" (no year filter).
         # The query builder and comparator both treat an empty list that way.
-        reference_years = self._cfg(kwargs, "reference_years") or []
-        dimension_values = self._cfg(kwargs, "dimension_values")
-        periods = self._cfg(kwargs, "periods")
-        model_id = (
-            self._cfg(kwargs, "pbi_dataset_id") or mapping.binding.pbi_semantic_model_id
+        reference_years = as_list(self._cfg(kwargs, "reference_years"))
+        dimension_values = opt_scalar_list(self._cfg(kwargs, "dimension_values"))
+        periods = opt_str_list(self._cfg(kwargs, "periods"))
+        model_id = str(
+            self._cfg(kwargs, "pbi_dataset_id")
+            or mapping.binding.pbi_semantic_model_id
+            or ""
         )
 
         if dry_run:
@@ -359,7 +398,7 @@ class UCMVReconciliationTool(BaseTool):
             )
             measures = mapping.resolved_measures()
             direct, direct_ctx, switch = recon.partition_measures_by_shape(measures)
-            pbi_dax: dict = {}
+            pbi_dax: dict[str, list[str]] = {}
             # One query PER extra_filter group — mirrors the live runner, so the
             # preview does not misleadingly collapse differently-filtered measures
             # (e.g. actual '0000' vs budget 'B000') into one filterless query.
@@ -383,10 +422,10 @@ class UCMVReconciliationTool(BaseTool):
                 "pbi_dax": pbi_dax,
             }
 
-        warehouse_id = self._cfg(kwargs, "warehouse_id")
+        warehouse_id = str(self._cfg(kwargs, "warehouse_id") or "")
         if not warehouse_id:
             return {"error": "warehouse_id is required"}
-        host_override = self._cfg(kwargs, "databricks_host")
+        host_override = opt_str(self._cfg(kwargs, "databricks_host"))
 
         pbi_executor = self._build_pbi_executor(kwargs, mapping)
         sql_executor = self._build_sql_executor(warehouse_id, host_override)
@@ -409,7 +448,7 @@ class UCMVReconciliationTool(BaseTool):
 
         # PBI side — context periods cover snapshot dates + monthly extra_group_by
         context_periods = periods or sorted(
-            ucmv_df["period"].astype(str).unique().tolist()
+            str(p) for p in ucmv_df["period"].astype(str).unique().tolist()
         )
         pbi_df = recon.run_pbi_queries(
             pbi_executor,
@@ -426,14 +465,14 @@ class UCMVReconciliationTool(BaseTool):
 
     def _compare_and_summarize(
         self,
-        view_name,
-        mapping,
-        dimension_name,
-        reference_years,
-        ucmv_df,
-        pbi_df,
-        kwargs,
-    ) -> dict:
+        view_name: str,
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        reference_years: list[object],
+        ucmv_df: pd.DataFrame,
+        pbi_df: pd.DataFrame,
+        kwargs: Mapping[str, object],
+    ) -> dict[str, object]:
         wide = recon.compare(ucmv_df, pbi_df, mapping, dimension_name, reference_years)
         long_df = recon.to_long_format(wide, mapping, dimension_name)
         summary = recon.summarize(long_df)
@@ -441,7 +480,8 @@ class UCMVReconciliationTool(BaseTool):
         pbi_refresh = self._cfg(kwargs, "pbi_refresh_period")
         mv_refresh = self._cfg(kwargs, "mv_refresh_period")
 
-        measures_out: dict = {}
+        measures_out: dict[str, dict[str, object]] = {}
+        measures_at_100 = 0
         for _, row in summary.iterrows():
             name = row["ucmv_kbi_name"]
             measure = mapping.measure(name)
@@ -459,7 +499,9 @@ class UCMVReconciliationTool(BaseTool):
                 value_format=measure.value_format,
             )
             classification = recon.classify(
-                stats, pbi_refresh_period=pbi_refresh, mv_refresh_period=mv_refresh
+                stats,
+                pbi_refresh_period=opt_str(pbi_refresh),
+                mv_refresh_period=opt_str(mv_refresh),
             )
             samples = [
                 {
@@ -471,8 +513,11 @@ class UCMVReconciliationTool(BaseTool):
                 }
                 for _, s in failing.head(_MAX_SAMPLE_MISMATCHES).iterrows()
             ]
+            pct_aligned = float(row["pct_aligned"])
+            if pct_aligned >= 100:
+                measures_at_100 += 1
             measures_out[name] = {
-                "pct_aligned": float(row["pct_aligned"]),
+                "pct_aligned": pct_aligned,
                 "cells_total": int(row["total"]),
                 "cells_aligned": int(row["aligned"]),
                 "classification": classification,
@@ -481,9 +526,6 @@ class UCMVReconciliationTool(BaseTool):
 
         total_cells = int(long_df.shape[0])
         aligned_cells = int(long_df["within_tolerance"].astype(bool).sum())
-        measures_at_100 = sum(
-            1 for v in measures_out.values() if v["pct_aligned"] >= 100
-        )
         return {
             "dimension": dimension_name,
             "measures": measures_out,
@@ -500,11 +542,12 @@ class UCMVReconciliationTool(BaseTool):
 
     # ── entry point ───────────────────────────────────────────────────────────
 
-    def _run(self, **kwargs: Any) -> str:
-        dry_run = self._cfg(kwargs, "dry_run") or False
+    def _run(self, **kwargs: object) -> str:
+        dry_run = bool(self._cfg(kwargs, "dry_run") or False)
         try:
             mappings = self._parse_mappings(
-                self._cfg(kwargs, "mapping"), self._cfg(kwargs, "mappings_json")
+                opt_str(self._cfg(kwargs, "mapping")),
+                opt_str(self._cfg(kwargs, "mappings_json")),
             )
         except Exception as e:  # noqa: BLE001
             return json.dumps({"error": f"Could not parse mapping(s): {e}"})
@@ -513,7 +556,7 @@ class UCMVReconciliationTool(BaseTool):
                 {"error": "No mapping provided (mapping or mappings_json required)."}
             )
 
-        views: dict = {}
+        views: dict[str, dict[str, object]] = {}
         for view_name, mapping in mappings.items():
             try:
                 views[view_name] = self._reconcile_view(
@@ -528,27 +571,27 @@ class UCMVReconciliationTool(BaseTool):
         )
 
 
-def _num(value):
+def _num(value: object) -> object:
     """Coerce a pandas/NumPy cell into a JSON-friendly number or None."""
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    if value is None or value is pd.NA or value is pd.NaT:
         return None
-    try:
-        if pd.isna(value):
-            return None
-    except (TypeError, ValueError):
-        pass
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return value
+    if isinstance(value, (float, np.floating)) and math.isnan(float(value)):
+        return None
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
 
 
-def _overall(views: dict) -> dict:
-    scored = [v for v in views.values() if "summary" in v]
-    measures_at_100 = sum(v["summary"]["measures_at_100"] for v in scored)
-    total_measures = sum(v["summary"]["total_measures"] for v in scored)
-    cells_total = sum(v["summary"]["cells_total"] for v in scored)
-    cells_aligned = sum(v["summary"]["cells_aligned"] for v in scored)
+def _overall(views: dict[str, dict[str, object]]) -> dict[str, object]:
+    summaries = [as_map(v["summary"]) for v in views.values() if "summary" in v]
+    measures_at_100 = sum(as_int(s.get("measures_at_100")) for s in summaries)
+    total_measures = sum(as_int(s.get("total_measures")) for s in summaries)
+    cells_total = sum(as_int(s.get("cells_total")) for s in summaries)
+    cells_aligned = sum(as_int(s.get("cells_aligned")) for s in summaries)
+    scored = summaries
     return {
         "views": len(views),
         "views_scored": len(scored),

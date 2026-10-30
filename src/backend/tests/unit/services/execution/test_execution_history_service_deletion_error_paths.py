@@ -656,37 +656,18 @@ async def test_set_checkpoint_active_generic_error():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_mark_checkpoint_resumed_success():
-    svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(return_value=True)
-    result = await svc.mark_checkpoint_resumed(1, new_execution_id=2)
-    assert result is True
-
-
-@pytest.mark.asyncio
-async def test_mark_checkpoint_resumed_db_error():
-    svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(
-        side_effect=SQLAlchemyError("err")
-    )
-    with pytest.raises(SQLAlchemyError):
-        await svc.mark_checkpoint_resumed(1, new_execution_id=2)
-
-
-@pytest.mark.asyncio
-async def test_mark_checkpoint_resumed_generic_error():
-    svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(
-        side_effect=RuntimeError("err")
-    )
-    with pytest.raises(RuntimeError):
-        await svc.mark_checkpoint_resumed(1, new_execution_id=2)
-
-
 # ---------------------------------------------------------------------------
-# update_result
+# update_result (the gate lookup is covered by test_gate_edits.py)
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_waiting_gate(monkeypatch):
+    from src.services.execution.history import ExecutionHistoryService
+
+    monkeypatch.setattr(
+        ExecutionHistoryService, "_waiting_gate", AsyncMock(return_value=None)
+    )
 
 
 @pytest.mark.asyncio

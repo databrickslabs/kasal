@@ -58,14 +58,19 @@ with its domain rather than being copied into each adapter.
 Selected execution and integration entry points:
 
 - `services/execution/service.py`: execution lifecycle facade.
-- `services/execution/engine_service.py`: engine dispatch.
+- `services/execution/engine_service.py`: `KasalEngineService`, the hub that resolves the Chat, Agent Builder or Flow Builder path and delegates.
 - `services/execution/finalization.py`: terminal outcomes and persistence retries.
 - `services/execution/serialization.py`, `flow_name_inputs.py`: payload serialization and flow naming inputs behind the execution facade.
 - `services/execution/logs/file_ingestion.py`: shared crew/flow file-log persistence; each executor retains its own failure policy.
 - `services/groups/forwarded_identity.py`: fallback identity provisioning through the user repository, with transaction scope owned by the service.
-- `services/execution/runtime/`: Kasal agent runtime.
-- `services/execution/harnesses/`: runtime bindings, including CrewAI.
-- `services/execution/kernel/`: shared agent/task construction and tooling.
+- `services/execution/runtime/`: Kasal agent runtime (agent, task, crew and the tool-call loop).
+- `services/execution/harnesses/`: runtime bindings (`binding.py`, `selection.py`), with `kasal/` and `crewai/` implementations.
+- `services/execution/kernel/`: shared agent/task construction and tooling, used by both subprocess paths.
+- `services/execution/checkpointing/`: crash-resume shared by the crew and flow paths.
+- `services/execution/process_tree.py`: terminates only the process trees this server spawned.
+- `services/execution/blocking_pools.py`: bounded thread pools for the subprocess paths' blocking waits and event relay.
+- `core/llm/transport/`: the OpenAI-compatible LLM transport and tool-round loop; `core/events/`: the run event bus.
+- `services/chat/`: the in-process Chat path.
 - `services/agent_builder/`: crew preparation, execution and subprocess entry point.
 - `services/flow_builder/`: flow assembly, execution, checkpoints and subprocess entry point.
 - `services/execution/history.py`, `services/execution/logs/`: history and execution logs.
@@ -135,12 +140,13 @@ Paths in this section are relative to `src/frontend/src/`.
 | `features/executions/trace/components/` | Trace event icons |
 | `features/workflow/canvas/lib/` | Canvas layout calculations and graph indexing |
 | `features/workflow/canvas/components/` | Crew/flow canvases, node/edge registry and controls |
-| `features/workflow/{agents,tasks,crews,flows,planning,scheduling,export}/` | Workflow editing, selection and export views |
+| `features/workflow/{agents,tasks,crews,flows,scheduling,export}/` | Workflow editing, selection and export views |
 | `features/workflow/assistant/` | Workflow conversation views, contracts, hooks and message state |
 | `features/executions/`, `features/approvals/`, `features/triggers/` | Run history/results, approvals and event triggers |
 | `features/configuration/`, `features/tools/`, `features/memory/`, `features/groups/` | Domain settings, tool configuration selectors, memory and workspace selection |
 | `features/conversion/`, `features/help/` | Conversion tools, documentation, tutorials and best practices |
 | `shared/api/` | Single Axios transport, workspace-header recovery and error publication |
+| `shared/errors/` | `ErrorBoundary` and lazy-chunk failure detection (`chunkErrors.ts`) |
 | `shared/ui/` | Domain-independent presentation shared across features |
 | `shared/lib/collections.ts` | Generic first-occurrence indexing and deduplication |
 | `types/ui/layout.ts` | Application-wide workspace panel/layout state contract |
@@ -157,9 +163,17 @@ API clients, contracts and pure processing libraries must not import UI views.
 The flat ESLint configuration enforces the boundaries already established.
 
 `shared/api/client.ts` reads `VITE_API_URL`, defaulting to
-`http://localhost:8000/api/v1` in development and `/api/v1` in production.
-`config/api/ApiConfig.ts` is a compatibility re-export. App startup registers the
+`http://localhost:<port>/api/v1` in development (the port comes from
+`shared/api/backendOrigin.ts`, which follows `KASAL_PORT`) and `/api/v1` in production.
+App startup registers the
 deduplicated database-outage toast; the transport does not import UI libraries.
+
+Every `Suspense` that wraps `lazy()` components sits inside a
+`ErrorBoundary` (`shared/errors/ErrorBoundary.tsx`), so one failed render does not blank the whole
+app. A lazy chunk that fails to load, usually because a redeploy changed the
+chunk names while the tab was open, shows a prompt to reload the page instead
+of a generic error. The boundary has `page`, `section` and `dialog` variants and
+clears itself when one of its `resetKeys` (a route or a tab) changes.
 
 Crew representations are separate: `types/workflow/crew.ts` holds API contracts,
 `crewPayload.ts` serialized inputs and

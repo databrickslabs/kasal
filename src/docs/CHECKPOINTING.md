@@ -55,8 +55,9 @@ active ──resume──> resumed
   └──expire────> expired
 ```
 
-- **active** — set when the first unit is written. A **crew** clears it on
-  success; a **flow** keeps it (see below).
+- **active** — set when the first unit is written. Success does not clear it,
+  for a crew or a flow: a checkpoint is a re-run point, not only crash
+  recovery (see below).
 - **resumed** — this checkpoint has been used as the source of another run.
 - **expired** — someone dismissed it.
 

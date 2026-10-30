@@ -10,12 +10,13 @@ is computed from.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
 
-from .mapping import UCMVMapping
+from .mapping import Measure, UCMVMapping
 from .periods import is_closed_period, matches_reference_years, normalize_snapshot_date
 
 LONG_FORMAT_COLUMNS = [
@@ -42,7 +43,7 @@ def compare(
     pbi_df: pd.DataFrame,
     mapping: UCMVMapping,
     dimension_name: str,
-    reference_years: list,
+    reference_years: Sequence[object],
 ) -> pd.DataFrame:
     """Wide comparison: one row per (dimension, period), one
     ``<measure>_ucmv``/``_pbi``/``_delta`` triple per measure."""
@@ -112,15 +113,18 @@ def compare(
     return merged[cols].sort_values([dimension_name, "period"]).reset_index(drop=True)
 
 
-def _within_tolerance(sub: pd.DataFrame, m) -> pd.Series:
+def _within_tolerance(sub: pd.DataFrame, m: Measure) -> pd.Series:
     if m.tolerance_kind == "absolute":
-        return sub["delta"].abs() <= m.tolerance_value
-    denom = pd.to_numeric(sub["ucmv_value"], errors="coerce").abs()
-    rel_ok = (sub["delta"].abs() / denom.replace(0, pd.NA)) <= m.tolerance_value
+        absolute: pd.Series = sub["delta"].abs() <= m.tolerance_value
+        return absolute
+    denom: pd.Series = pd.to_numeric(sub["ucmv_value"], errors="coerce").abs()
+    rel_ratio: pd.Series = sub["delta"].abs() / denom.replace(0, pd.NA)
+    rel_ok: pd.Series = rel_ratio <= m.tolerance_value
     # A zero/blank ucmv_value with an exactly-zero delta means PBI is blank too —
     # an exact match, not an undefined ratio.
-    zero_exact = (denom.isna() | (denom == 0)) & (sub["delta"].abs() <= 1e-9)
-    return rel_ok.fillna(False) | zero_exact
+    zero_exact: pd.Series = (denom.isna() | (denom == 0)) & (sub["delta"].abs() <= 1e-9)
+    within: pd.Series = rel_ok.fillna(False) | zero_exact
+    return within
 
 
 def to_long_format(

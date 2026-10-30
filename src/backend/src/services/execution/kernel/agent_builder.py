@@ -18,7 +18,6 @@ The security preamble is injected by the CALLER
 returns, so each path keeps its own ``[SECURITY]`` log line while the injection
 itself stays shared (Phase 1).
 """
-import os  # noqa: E402 - import follows module initialization
 import re  # noqa: E402 - import follows module initialization
 from typing import (  # noqa: E402 - import follows module initialization
     Any,
@@ -32,6 +31,9 @@ from src.core.llm.output_cap import (  # noqa: E402 - import follows module init
 )
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
+)
+from src.core.process_role import (  # noqa: E402 - import follows module initialization
+    in_run_subprocess,
 )
 from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
     active_harness,
@@ -50,6 +52,9 @@ from src.services.execution.kernel.agent_skills import (  # noqa: E402 - import 
 )
 from src.services.execution.kernel.skill_tool_context import (  # noqa: E402 - import follows module initialization
     AGENT_ATTR as SKILL_TOOL_CONTEXT_ATTR,
+)
+from src.services.settings import (  # noqa: E402 - import follows module initialization
+    engine_settings,
 )
 
 logger = LoggerManager.get_instance().crew
@@ -98,9 +103,10 @@ DEFAULT_REASONING_EFFORT = "low"
 #:
 #: Generous on purpose: a legitimate research turn with slow tools must not be
 #: cut off. An explicit ``max_execution_time`` on the agent always wins.
-DEFAULT_AGENT_MAX_EXECUTION_TIME = int(
-    os.getenv("KASAL_AGENT_MAX_EXECUTION_TIME", "900") or 0
-)
+#: The value comes from Configuration → Engines (``engine_settings``; it replaced
+#: the KASAL_AGENT_MAX_EXECUTION_TIME env var) and is read per build, so a
+#: change applies to the next run. This name is the built-in default.
+DEFAULT_AGENT_MAX_EXECUTION_TIME = engine_settings.DEFAULT_AGENT_MAX_EXECUTION_TIME
 
 
 def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> None:
@@ -122,9 +128,7 @@ def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> 
         return
     try:
         _apply_reasoning_effort_unsafe(llm, spec, label)
-    except (
-        Exception
-    ) as e:  # noqa: BLE001 — a reasoning preference must never fail a run
+    except Exception as e:  # a reasoning preference must never fail a run
         logger.debug(f"Could not apply reasoning effort for agent {label}: {e}")
 
 
@@ -354,17 +358,22 @@ async def build_agent_llm(
         # Fallback to simple string if configuration fails
         logger.error(f"Error configuring LLM: {e}")
         llm = spec.get("llm", default_model)
+        from src.services.decisions.model_selection import is_auto
+
+        if is_auto(llm):
+            # A bare "auto" is not a model: CrewAI would build a native OpenAI
+            # client from it. configure_kasal_llm resolves it, so this failed.
+            raise
         logger.warning(f"Using string model name as fallback for agent {label}: {llm}")
 
     # In an execution subprocess, opt the LLM into streamed completions so the
     # engine emits LLMStreamChunkEvent per delta — the event pipe forwards
     # coalesced chunks to the parent's SSE for live typing in the UI. Both the
     # Chat Completions and Responses API adapters honor this flag. Kill-switch:
-    # CREW_TOKEN_STREAMING=false.
+    # Configuration → Engines → Advanced → Chat.
     if (
-        os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true"
-        and os.environ.get("CREW_TOKEN_STREAMING", "true").strip().lower()
-        not in ("0", "false", "no")
+        in_run_subprocess()
+        and engine_settings.setting("crew_token_streaming")
         and llm is not None
         and not isinstance(llm, str)
     ):
@@ -448,12 +457,11 @@ def build_agent_kwargs(
     # DEFAULT_AGENT_MAX_EXECUTION_TIME. Only when the spec did not set one.
     if (
         "max_execution_time" not in agent_kwargs
-        and DEFAULT_AGENT_MAX_EXECUTION_TIME > 0
+        and (default_time := engine_settings.agent_max_execution_time()) > 0
     ):
-        agent_kwargs["max_execution_time"] = DEFAULT_AGENT_MAX_EXECUTION_TIME
+        agent_kwargs["max_execution_time"] = default_time
         logger.info(
-            f"Applying default max_execution_time="
-            f"{DEFAULT_AGENT_MAX_EXECUTION_TIME}s for agent {label}"
+            f"Applying default max_execution_time=" f"{default_time}s for agent {label}"
         )
 
     # Log settings that came from a DEFAULT rather than the spec. The loop above

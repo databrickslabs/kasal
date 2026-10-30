@@ -1,12 +1,17 @@
 """Decks — editing the HTML slide decks the chat renders, one slide at a time."""
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter
 
 from src.core.exceptions import BadRequestError
 from src.dependencies.providers import GroupContextDep, SessionDep
-from src.schemas.deck import SlideRefineRequest, SlideRefineResponse, SlideRefineRunResponse
+from src.schemas.deck import (
+    SlideRefineRequest,
+    SlideRefineResponse,
+    SlideRefineRunResponse,
+)
 from src.services.decks.slide_refine import SlideRefineService
 
 router = APIRouter(
@@ -21,7 +26,7 @@ logger = logging.getLogger(__name__)
 @router.post("/slides/refine/start", response_model=SlideRefineRunResponse)
 async def start_refine_slide(
     body: SlideRefineRequest, session: SessionDep, group_context: GroupContextDep
-):
+) -> dict[str, Any]:
     """Start a tool-enabled light-agent run; read progress/result via executions."""
     from src.services.decks.agent_refine import start_slide_refinement
 
@@ -34,7 +39,7 @@ async def start_refine_slide(
 @router.post("/slides/refine", response_model=SlideRefineResponse)
 async def refine_slide(
     body: SlideRefineRequest, session: SessionDep, group_context: GroupContextDep
-):
+) -> dict[str, Any]:
     """Revise one slide of a deck, or write a new one between two.
 
     One focused generation call: the model sees the slide (or its neighbours)

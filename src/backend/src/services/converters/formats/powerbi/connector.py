@@ -4,7 +4,7 @@ Extracts measures from Power BI datasets via REST API
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import requests
 
@@ -16,6 +16,17 @@ from ...base.connectors import (
 from ...base.models import KPI
 from .authentication import AadService
 from .dax_parser import DAXExpressionParser
+
+# A Power BI workspace / dataset id as it may appear in a REST path segment.
+# Real ids are GUIDs; what matters is that no "/", "?", "#", "." or "%" gets
+# through, since any of them re-targets the request that carries the token.
+_PATH_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+def _path_id(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _PATH_ID.fullmatch(value):
+        raise ValueError(f"{name} is not a valid Power BI id: {value!r}")
+    return value
 
 
 class PowerBIConnector(BaseInboundConnector):
@@ -75,8 +86,8 @@ class PowerBIConnector(BaseInboundConnector):
         use_database: bool = False,
         use_system_schema: bool = True,
         info_table_name: str = "Info Measures",
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize Power BI connector.
 
@@ -195,7 +206,9 @@ class PowerBIConnector(BaseInboundConnector):
         if not self._connected:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        url = f"{self.API_BASE}/groups/{self.group_id}/datasets/{self.semantic_model_id}/executeQueries"
+        group = _path_id(self.group_id, "group_id")
+        dataset = _path_id(self.semantic_model_id, "semantic_model_id")
+        url = f"{self.API_BASE}/groups/{group}/datasets/{dataset}/executeQueries"
 
         headers = {
             "Authorization": f"Bearer {self._access_token}",
@@ -210,13 +223,13 @@ class PowerBIConnector(BaseInboundConnector):
         self.logger.info(
             f"Executing DAX query against dataset {self.semantic_model_id}"
         )
-        response = requests.post(url, headers=headers, json=body, timeout=60)
+        response = requests.post(url, headers=headers, json=body, timeout=60)  # fmt: skip # constant API_BASE host; ids pass _path_id — nosemgrep: tmp.databricks.ssrf.requests-user-url
 
         if response.status_code == 200:
             results = response.json().get("results", [])
 
             if results and results[0].get("tables"):
-                rows = results[0]["tables"][0].get("rows", [])
+                rows: List[Dict[str, Any]] = results[0]["tables"][0].get("rows", [])
                 self.logger.info(f"Query returned {len(rows)} rows")
                 return rows
             else:
@@ -296,6 +309,7 @@ class PowerBIConnector(BaseInboundConnector):
         self,
         include_hidden: bool = False,
         filter_pattern: Optional[str] = None,
+        **kwargs: Any,
     ) -> List[KPI]:
         """
         Extract measures from Power BI dataset.
@@ -378,7 +392,7 @@ class PowerBIConnector(BaseInboundConnector):
 
             # PowerBI measures don't have separate filters - they're embedded in the DAX expression
             # Filters would only come from YAML-based definitions
-            filters = []
+            filters: List[Union[str, Dict[str, Any]]] = []
 
             # Determine source table
             source_table = parsed["source_table"] or get_value(
@@ -405,6 +419,7 @@ class PowerBIConnector(BaseInboundConnector):
             kpi._advanced_parsing = {
                 "transpiled_sql": parsed["transpiled_sql"],
                 "is_transpilable": parsed["is_transpilable"],
+                "transpilability_reason": parsed["transpilability_reason"],
                 "signature": parsed["generic_signature"],
                 "tokens_count": len(parsed["tokens"]),
                 "functions_used": [f.value for f in parsed["functions"]],

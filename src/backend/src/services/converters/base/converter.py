@@ -33,7 +33,7 @@ class BaseConverter(ABC):
         self.config = config or {}
 
     @abstractmethod
-    def convert(self, input_data: Any, **kwargs) -> Any:
+    def convert(self, input_data: Any, **kwargs: Any) -> Any:
         """
         Convert input data to target format.
 

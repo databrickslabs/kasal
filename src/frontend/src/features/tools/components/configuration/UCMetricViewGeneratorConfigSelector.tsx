@@ -23,62 +23,16 @@ import {
   Button
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import LoginIcon from '@mui/icons-material/Login';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import SecurityIcon from '@mui/icons-material/Security';
-import PersonIcon from '@mui/icons-material/Person';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ClearIcon from '@mui/icons-material/Clear';
 import { usePowerBIOAuth } from '../../../../hooks/usePowerBIOAuth';
-import { PowerBIReconConnectionFields } from './PowerBIReconConnectionFields';
 import { UCMVDomainContextHint } from './UCMVDomainContextHint';
+import { UCMVGeneratorAuthFields } from './UCMVGeneratorAuthFields';
+import { UCMVGeneratorReconciliationSection } from './UCMVGeneratorReconciliationSection';
+import type { PowerBIAuthMethod, UCMetricViewGeneratorConfig } from './ucmvGeneratorConfigTypes';
 
-// Authentication method type
-export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
-
-export interface UCMetricViewGeneratorConfig {
-  // Input mode
-  mode?: 'api' | 'json';
-  // PBI API config (API mode)
-  workspace_id?: string;
-  dataset_id?: string;
-  auth_method?: PowerBIAuthMethod;
-  tenant_id?: string;
-  client_id?: string;
-  client_secret?: string;
-  username?: string;
-  password?: string;
-  oauth_client_id?: string;
-  access_token?: string;
-  pbi_api_base_url?: string;
-  // JSON mode (paste JSONs directly)
-  measures_json?: string;
-  mquery_json?: string;
-  relationships_json?: string;
-  scan_data_json?: string;
-  config_json?: string;
-  // Target
-  catalog?: string;
-  schema_name?: string;
-  // Behavior
-  inner_dim_joins?: boolean;
-  unflatten_tables?: boolean;
-  use_llm_fallback?: boolean;
-  llm_model?: string;
-  llm_workspace_url?: string;
-  llm_token?: string;
-  // Reconciliation & quality
-  warehouse_id?: string;
-  reference_years?: string;
-  enable_reconciliation?: boolean;
-  max_reconciliation_cycles?: number;
-  reconciliation_target_pct?: number;
-  prune_non_visual_measures?: boolean;
-  naming_config?: string;
-  domain_context?: string;
-  // Index signature for compatibility
-  [key: string]: string | boolean | number | undefined;
-}
+// Public types stay importable from this module.
+export type { PowerBIAuthMethod, UCMetricViewGeneratorConfig } from './ucmvGeneratorConfigTypes';
 
 interface UCMetricViewGeneratorConfigSelectorProps {
   value: UCMetricViewGeneratorConfig;
@@ -99,12 +53,11 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
   agentName
 }) => {
   // OAuth hook for User OAuth authentication
-  const { accessToken, isAuthenticated, signIn, signOut, userEmail, isLoading: oauthLoading, error: oauthError } = usePowerBIOAuth({
+  const oauth = usePowerBIOAuth({
     clientId: value.oauth_client_id || ''
   });
+  const { accessToken } = oauth;
 
-  // Local validation state for naming_config JSON field
-  const [namingConfigError, setNamingConfigError] = React.useState<string>('');
 
   const handleFieldChange = (field: keyof UCMetricViewGeneratorConfig, fieldValue: string | boolean | number) => {
     onChange({
@@ -250,255 +203,14 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
 
       {/* API Mode: PBI Authentication */}
       {mode === 'api' && (
-        <>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(156, 39, 176)' }}>
-            Power BI Workspace Configuration
-          </Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Workspace ID"
-              value={value.workspace_id || ''}
-              onChange={(e) => handleFieldChange('workspace_id', e.target.value)}
-              disabled={disabled}
-              required
-              fullWidth
-              helperText="Power BI workspace ID"
-              size="small"
-            />
-            <TextField
-              label="Dataset ID (Optional)"
-              value={value.dataset_id || ''}
-              onChange={(e) => handleFieldChange('dataset_id', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              helperText="Specific dataset to extract (leave empty to scan all)"
-              size="small"
-            />
-          </Box>
-
-          <Divider sx={{ my: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              Authentication Method
-            </Typography>
-          </Divider>
-
-          {/* Auth Method Toggle */}
-          <ToggleButtonGroup
-            value={authMethod}
-            exclusive
-            onChange={handleAuthMethodChange}
-            disabled={disabled}
-            fullWidth
-            size="small"
-          >
-            <ToggleButton value="service_principal">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
-                <SecurityIcon sx={{ fontSize: 18, mb: 0.5 }} />
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  Service Principal
-                </Typography>
-              </Box>
-            </ToggleButton>
-            <ToggleButton value="service_account">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
-                <PersonIcon sx={{ fontSize: 18, mb: 0.5 }} />
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  Service Account
-                </Typography>
-              </Box>
-            </ToggleButton>
-            <ToggleButton value="user_oauth">
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
-                <LoginIcon sx={{ fontSize: 18, mb: 0.5 }} />
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  User OAuth
-                </Typography>
-              </Box>
-            </ToggleButton>
-          </ToggleButtonGroup>
-
-          {/* Service Principal Authentication Fields */}
-          {authMethod === 'service_principal' && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                label="Tenant ID"
-                value={value.tenant_id || ''}
-                onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
-                disabled={disabled}
-                required
-                fullWidth
-                helperText="Azure AD tenant ID"
-                size="small"
-              />
-              <TextField
-                label="Client ID"
-                value={value.client_id || ''}
-                onChange={(e) => handleFieldChange('client_id', e.target.value)}
-                disabled={disabled}
-                required
-                fullWidth
-                helperText="Application/Client ID"
-                size="small"
-              />
-              <TextField
-                label="Client Secret"
-                value={value.client_secret || ''}
-                onChange={(e) => handleFieldChange('client_secret', e.target.value)}
-                disabled={disabled}
-                required
-                type="password"
-                fullWidth
-                helperText="Client secret for service principal"
-                size="small"
-              />
-            </Box>
-          )}
-
-          {/* Service Account Authentication Fields */}
-          {authMethod === 'service_account' && (
-            <>
-              <Alert severity="info" variant="outlined" sx={{ mb: 1 }}>
-                <Typography variant="caption">
-                  <strong>Service Account:</strong> Use a user account (username + password) instead of Service Principal.
-                  Useful when Service Principal doesn't have sufficient permissions.
-                </Typography>
-              </Alert>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TextField
-                  label="Tenant ID"
-                  value={value.tenant_id || ''}
-                  onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Azure AD tenant ID"
-                  size="small"
-                />
-                <TextField
-                  label="Client ID"
-                  value={value.client_id || ''}
-                  onChange={(e) => handleFieldChange('client_id', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Azure AD application Client ID (with delegated permissions)"
-                  size="small"
-                />
-                <TextField
-                  label="Username (UPN)"
-                  value={value.username || ''}
-                  onChange={(e) => handleFieldChange('username', e.target.value)}
-                  disabled={disabled}
-                  required
-                  fullWidth
-                  helperText="Service account email/UPN (e.g., user@domain.com)"
-                  size="small"
-                />
-                <TextField
-                  label="Password"
-                  value={value.password || ''}
-                  onChange={(e) => handleFieldChange('password', e.target.value)}
-                  disabled={disabled}
-                  required
-                  type="password"
-                  fullWidth
-                  helperText="Service account password"
-                  size="small"
-                />
-              </Box>
-            </>
-          )}
-
-          {/* User OAuth Authentication */}
-          {authMethod === 'user_oauth' && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Alert severity="info" variant="outlined">
-                <Typography variant="caption" component="div">
-                  <strong>Option 1:</strong> If you have an Azure AD app, enter its Client ID and sign in.
-                  <br />
-                  <strong>Option 2:</strong> Get a token from{' '}
-                  <a
-                    href="https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-get-scan-result?tryIt=true"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Microsoft's API docs (Try It)
-                  </a>
-                  {' '}and paste it below.
-                </Typography>
-              </Alert>
-
-              <TextField
-                label="OAuth Client ID (Optional)"
-                value={value.oauth_client_id || ''}
-                onChange={(e) => handleFieldChange('oauth_client_id', e.target.value)}
-                disabled={disabled || isAuthenticated}
-                fullWidth
-                helperText="Your Azure AD app Client ID for OAuth sign-in"
-                size="small"
-              />
-
-              <TextField
-                label="Access Token (Alternative)"
-                value={value.access_token || ''}
-                onChange={(e) => handleFieldChange('access_token', e.target.value)}
-                disabled={disabled || isAuthenticated}
-                fullWidth
-                type="password"
-                helperText="Paste a token from Microsoft's Try It page"
-                size="small"
-              />
-
-              {oauthError && (
-                <Alert severity="error" variant="outlined">
-                  <Typography variant="caption">{oauthError}</Typography>
-                </Alert>
-              )}
-
-              {!isAuthenticated && !value.access_token ? (
-                <Button
-                  variant="contained"
-                  onClick={signIn}
-                  disabled={disabled || oauthLoading || !value.oauth_client_id}
-                  startIcon={<LoginIcon />}
-                  fullWidth
-                >
-                  {oauthLoading ? 'Signing in...' : 'Sign in with Microsoft'}
-                </Button>
-              ) : value.access_token && !isAuthenticated ? (
-                <Alert severity="success" icon={<CheckCircleIcon />}>
-                  <Typography variant="body2">Access token provided</Typography>
-                </Alert>
-              ) : (
-                <>
-                  <Alert severity="success" icon={<CheckCircleIcon />}>
-                    <Typography variant="body2">
-                      Signed in as <strong>{userEmail || 'User'}</strong>
-                    </Typography>
-                  </Alert>
-                  <Button
-                    variant="outlined"
-                    onClick={signOut}
-                    disabled={disabled}
-                    size="small"
-                  >
-                    Sign Out
-                  </Button>
-                </>
-              )}
-            </Box>
-          )}
-
-          <TextField
-            label="PBI API Base URL (Optional)"
-            value={value.pbi_api_base_url || ''}
-            onChange={(e) => handleFieldChange('pbi_api_base_url', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            helperText="Custom Power BI API base URL (leave empty for default)"
-            size="small"
-          />
-        </>
+        <UCMVGeneratorAuthFields
+          value={value}
+          disabled={disabled}
+          authMethod={authMethod}
+          onFieldChange={handleFieldChange}
+          onAuthMethodChange={handleAuthMethodChange}
+          oauth={oauth}
+        />
       )}
 
       {/* JSON Mode: Paste JSON Inputs */}
@@ -653,7 +365,7 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
               disabled={disabled}
               fullWidth
               size="small"
-              helperText="Unity Catalog name (e.g., david_test_metrics)"
+              helperText="Unity Catalog name (e.g., main)"
             />
             <TextField
               label="Target Schema"
@@ -773,174 +485,13 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
         </AccordionDetails>
       </Accordion>
 
-      {/* Reconciliation & Metadata Lint */}
-      <Accordion sx={{ mt: 1 }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="subtitle2">
-            Reconciliation &amp; Metadata Lint
-            {value.enable_reconciliation ? ' (enabled)' : ''}
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Databricks SQL warehouse ID"
-              value={value.warehouse_id || ''}
-              onChange={(e) => handleFieldChange('warehouse_id', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              size="small"
-              helperText="Required for reconciliation (queries the deployed metric view)."
-            />
-
-            <TextField
-              label="Reference years"
-              value={value.reference_years || ''}
-              onChange={(e) => handleFieldChange('reference_years', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              size="small"
-              placeholder="[2025, 2026]"
-              helperText="Optional — the fiscal year(s) to compare cell-by-cell, e.g. [2025, 2026]. Leave blank to compare across all years."
-            />
-
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={value.enable_reconciliation || false}
-                  onChange={(e) => handleFieldChange('enable_reconciliation', e.target.checked)}
-                  disabled={disabled}
-                  size="small"
-                />
-              }
-              label={
-                <Box>
-                  <Typography variant="body2">Reconcile against Power BI (iterative)</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    After each generation cycle, deploy the metric view and compare it cell-by-cell against
-                    the live Power BI model; feed mismatches back to the model to refine. Requires a
-                    Databricks SQL warehouse and Power BI credentials (workspace&nbsp;ID, dataset&nbsp;ID,
-                    and authentication — entered below in JSON mode). Reference years are optional.
-                  </Typography>
-                </Box>
-              }
-            />
-
-            {value.enable_reconciliation && (
-              <Box sx={{ pl: 3, display: 'flex', flexDirection: 'column', gap: 2, borderLeft: '2px solid', borderColor: 'divider' }}>
-                {mode === 'json' ? (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(156, 39, 176)' }}>
-                      Power BI connection (reconciliation ground truth)
-                    </Typography>
-                    <PowerBIReconConnectionFields value={value} onChange={onChange} disabled={disabled} />
-                  </Box>
-                ) : (
-                  <Alert severity="info" variant="outlined">
-                    <Typography variant="caption">
-                      Reconciliation uses the Power BI credentials from the <strong>Power BI Workspace
-                      Configuration</strong> above (workspace&nbsp;ID, dataset&nbsp;ID, and authentication).
-                    </Typography>
-                  </Alert>
-                )}
-                <TextField
-                  label="Max reconciliation cycles"
-                  type="number"
-                  value={value.max_reconciliation_cycles ?? 5}
-                  onChange={(e) => {
-                    const parsed = parseInt(e.target.value, 10);
-                    if (!isNaN(parsed)) handleFieldChange('max_reconciliation_cycles', Math.min(10, Math.max(1, parsed)));
-                  }}
-                  disabled={disabled}
-                  fullWidth
-                  size="small"
-                  inputProps={{ min: 1, max: 10 }}
-                />
-                <TextField
-                  label="Target cell-alignment %"
-                  type="number"
-                  value={value.reconciliation_target_pct ?? 100}
-                  onChange={(e) => {
-                    const parsed = parseFloat(e.target.value);
-                    if (!isNaN(parsed)) handleFieldChange('reconciliation_target_pct', Math.min(100, Math.max(0, parsed)));
-                  }}
-                  disabled={disabled}
-                  fullWidth
-                  size="small"
-                  inputProps={{ min: 0, max: 100, step: 1 }}
-                  helperText="Stop early once overall cell alignment reaches this percentage."
-                />
-              </Box>
-            )}
-
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={value.prune_non_visual_measures || false}
-                  onChange={(e) => handleFieldChange('prune_non_visual_measures', e.target.checked)}
-                  disabled={disabled}
-                  size="small"
-                />
-              }
-              label={
-                <Box>
-                  <Typography variant="body2">Only translate measures shown in a visual (triage)</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Skip measures not drawn or filtered in any report visual — directly or through a
-                    dependency chain — so legacy/unused measures don&apos;t clutter the output. Base
-                    column aggregates are always kept. No effect unless the report&apos;s visual-usage
-                    data is available.
-                  </Typography>
-                </Box>
-              }
-            />
-
-            <TextField
-              label="Naming / period config (JSON, optional)"
-              value={value.naming_config || ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (raw.trim() === '') {
-                  setNamingConfigError('');
-                } else {
-                  try {
-                    JSON.parse(raw);
-                    setNamingConfigError('');
-                  } catch {
-                    setNamingConfigError('Invalid JSON — fix before saving.');
-                  }
-                }
-                handleFieldChange('naming_config', raw);
-              }}
-              disabled={disabled}
-              fullWidth
-              multiline
-              rows={9}
-              size="small"
-              error={!!namingConfigError}
-              placeholder={`{
-  "lint": {
-    "scenario_suffixes": ["actual", "budget", "forecast", "py"],
-    "unit_suffixes": ["hours", "cases", "hl"],
-    "dimension_alias_groups": [["comp_code", "company_code"]]
-  },
-  "period": {
-    "column_overrides": { "latest_month_label": "IsCurrentMonth" }
-  }
-}`}
-              helperText={
-                namingConfigError ||
-                'Optional — leave blank to use the built-in defaults. Per-model vocabulary for ' +
-                'the metadata lint (scenario/unit suffixes, dimension alias groups) and the calendar ' +
-                'period-folding (column_overrides). The greyed example shows the exact shape; type over it.'
-              }
-              InputProps={{
-                sx: { fontFamily: 'monospace', fontSize: '0.75rem' }
-              }}
-            />
-          </Box>
-        </AccordionDetails>
-      </Accordion>
+      <UCMVGeneratorReconciliationSection
+        value={value}
+        onChange={onChange}
+        onFieldChange={handleFieldChange}
+        disabled={disabled}
+        mode={mode}
+      />
 
       {/* Info about what the tool does */}
       <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>

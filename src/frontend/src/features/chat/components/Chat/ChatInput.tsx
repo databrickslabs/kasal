@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { AssetService } from '../../../../api/chat/AssetService';
 import AssetThumb from './AssetThumb';
 import { isImageFile, measureImage } from '../../utils/imageFiles';
@@ -11,6 +11,7 @@ import ComposerMenu from './ComposerMenu';
 import TrifectaNotice from './TrifectaNotice';
 import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useExecutionStore } from '../../store/executionStore';
+import { concreteModel } from '../../utils/autoModel';
 
 // The crew tool that searches uploaded knowledge. Passed to the dispatcher so a
 // generated crew can read files attached in chat.
@@ -75,6 +76,18 @@ const SLASH_COMMANDS: { command: string; arg?: string; description: string }[] =
 interface ChatInputProps {
   onSend: (message: string, meta?: SendMeta) => void;
   disabled?: boolean;
+  /** The previous message is still being sent: Send waits, and what is typed stays. */
+  sending?: boolean;
+  /** Stop waiting for the message that is still being sent. */
+  onCancelSending?: () => void;
+  /**
+   * The typed text, when the parent keeps it. ChatContainer swaps the landing
+   * composer for the conversation one when the first message appears; text
+   * typed meanwhile has to reach the second composer.
+   */
+  draftRef?: React.MutableRefObject<string>;
+  /** Changes when the parent rewrote `draftRef` itself: the composer shows it. */
+  draftVersion?: number;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -147,6 +160,10 @@ const prefersReducedMotion = () =>
 const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   disabled = false,
+  sending = false,
+  onCancelSending,
+  draftRef,
+  draftVersion,
   models,
   selectedModel,
   onModelChange,
@@ -178,7 +195,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // slide-in motion, not the placement.
   const menuAnimClass =
     menuPlacement === 'down' ? 'animate-slide-down' : 'animate-slide-up';
-  const [value, setValue] = useState('');
+  const [value, setValueState] = useState(() => draftRef?.current ?? '');
+  // Written as it is set, not after the commit: a send that also posts a
+  // message swaps composers in the same render, and the new one must read ''.
+  const setValue = useCallback((next: string) => {
+    if (draftRef) draftRef.current = next;
+    setValueState(next);
+  }, [draftRef]);
+  useEffect(() => {
+    if (draftRef && draftVersion !== undefined) setValueState(draftRef.current);
+  }, [draftRef, draftVersion]);
   // Rotating landing placeholder: advance a hint index while idle (empty + blurred)
   // on the landing composer; freeze on focus/typing; honor reduced-motion.
   const [focused, setFocused] = useState(false);
@@ -359,7 +385,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       el.style.height = Math.min(el.scrollHeight, 160) + 'px';
       el.setSelectionRange(el.value.length, el.value.length);
     });
-  }, [prefill]);
+  }, [prefill, setValue]);
 
   // Rotate the landing placeholder through the deliverable hints while the composer
   // is idle (empty + blurred). Frozen on focus/typing and when reduced-motion is on.
@@ -385,7 +411,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleSend = () => {
     const trimmed = value.trim();
-    if (!trimmed || disabled || isUploading) return;
+    // While `sending`, the text stays in the composer (see the status line).
+    if (!trimmed || disabled || isUploading || sending) return;
 
     setCommandHistory((prev) => [...prev.slice(-50), trimmed]);
     setHistoryIndex(-1);
@@ -473,7 +500,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (!canImprove) return;
     setIsImproving(true);
     try {
-      const improved = await improveChatPrompt(value.trim(), selectedModel);
+      const improved = await improveChatPrompt(value.trim(), concreteModel(selectedModel));
       // Only apply if the user hasn't kept typing while the rewrite ran.
       if (improved && inputRef.current) {
         setValue(improved);
@@ -725,6 +752,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
             }}
           />
         </div>
+        {sending && (
+          <div role="status" className="flex items-center gap-2 px-5 pb-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            {value.trim()
+              ? 'Still sending your last message. This one stays here until it has gone.'
+              : 'Sending your last message…'}
+            {onCancelSending && (
+              <button type="button" onClick={onCancelSending} className="underline hover:opacity-80"
+                title="Stop waiting for an answer to your last message">
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Attachment chips */}
         {attachments.length > 0 && (
@@ -828,11 +868,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
               return (
             <button
               onClick={stopMode ? handleStop : runMode ? onRunPending : handleSend}
-              disabled={stopMode ? isStopping : disabled || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
+              disabled={stopMode ? isStopping : disabled || sending || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
               title={
                 stopMode ? (isStopping ? 'Stopping execution…' : 'Stop execution') : isUploading
                   ? 'Waiting for attachments to finish uploading…'
-                  : runMode
+                  : sending
+                    ? 'Still sending your last message…'
+                    : runMode
                     ? `Run “${pendingRunLabel}”`
                     : undefined
               }
@@ -851,7 +893,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             >
               {stopMode && !isStopping ? (
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-              ) : isStopping || disabled || isUploading || isGenerating ? (
+              ) : isStopping || disabled || sending || isUploading || isGenerating ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />

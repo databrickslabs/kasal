@@ -19,7 +19,8 @@ import copy
 import logging
 import re
 from collections import Counter
-from typing import Optional
+from collections.abc import Mapping
+from typing import Optional, TypedDict
 
 from src.services.tools.metric_view_utils.drift import diff as D
 from src.services.tools.metric_view_utils.drift.baseline import (
@@ -28,6 +29,7 @@ from src.services.tools.metric_view_utils.drift.baseline import (
     fetch_baseline,
 )
 from src.services.tools.metric_view_utils.drift.candidates import (
+    CandidateSet,
     GenerateFn,
     build_candidates,
     pick_candidate,
@@ -46,6 +48,7 @@ from src.services.tools.metric_view_utils.drift.semantic_check import (
     CompleteFn,
     judge_legacy_measures,
 )
+from src.services.tools.metric_view_utils.raw_fields import as_list, as_map
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +56,51 @@ _TRANSLATE = (D.NEW, D.CHANGED, D.POSSIBLY_CHANGED)
 _MEASURE_CALL_RE = re.compile(r"\bMEASURE\(\s*`?([A-Za-z_]\w*)`?\s*\)", re.IGNORECASE)
 
 
-def _join_names(joins: list) -> set[str]:
+class _Counts(TypedDict):
+    measures_added: int
+    measures_updated: int
+    joins_added: int
+    untranslated: int
+
+
+class _ViewPatch(TypedDict):
+    """One baseline view after the drift patch was applied (or not)."""
+
+    full_name: str
+    catalog: str
+    schema: str
+    name: str
+    error: Optional[str]
+    source: object
+    baseline_yaml: str
+    proposed_yaml: str
+    changes: list[dict[str, object]]
+    invariant_problems: list[str]
+    measures: list[dict[str, object]]
+    counts: _Counts
+
+
+# (drift, new entry | Replacement, joins it needs) — pruned, then applied.
+_Planned = tuple[D.MeasureDrift, dict[str, object] | Replacement, list[dict]]
+
+
+def _join_names(joins: object) -> set[str]:
     """Every join alias, nested snowflake joins included."""
     out: set[str] = set()
-    for j in joins or []:
-        if isinstance(j, dict) and j.get("name"):
+    for j in as_list(joins):
+        if isinstance(j, Mapping) and j.get("name"):
             out.add(str(j["name"]))
-            out |= _join_names(j.get("joins") or [])
+            out |= _join_names(j.get("joins"))
     return out
+
+
+def _entry_names(section: object) -> set[str]:
+    """The ``name`` of every mapping entry in a measures/dimensions section."""
+    return {
+        str(as_map(item).get("name"))
+        for item in as_list(section)
+        if isinstance(item, Mapping)
+    }
 
 
 def _ddl(full_name: str, yaml_text: str) -> str:
@@ -73,8 +113,8 @@ def _translation_origin(entry: dict) -> str:
 
 
 def _drop_dangling_measure_refs(
-    planned: list[tuple], baseline_measures: set
-) -> list[tuple]:
+    planned: list[_Planned], baseline_measures: set[str]
+) -> list[_Planned]:
     """Hold back a patch whose SQL uses MEASURE(x) when x will not exist in the view.
 
     x may be a baseline measure or another measure added in the same proposal; a
@@ -89,10 +129,8 @@ def _drop_dangling_measure_refs(
         dropped = False
         for item in list(kept):
             d, payload, _ = item
-            expr = str(
-                (payload if isinstance(payload, dict) else payload.entry).get("expr")
-                or ""
-            )
+            entry = payload.entry if isinstance(payload, Replacement) else payload
+            expr = str(entry.get("expr") or "")
             dangling = sorted(set(_MEASURE_CALL_RE.findall(expr)) - available)
             if dangling:
                 d.note = f"references measure(s) {dangling} that this view does not have — apply manually"
@@ -118,7 +156,7 @@ def run_drift_check(
     drifts = D.classify(match, pbi)
     warnings: list[str] = []
 
-    semantic: dict = {"enabled": complete_fn is not None}
+    semantic: dict[str, object] = {"enabled": complete_fn is not None}
     if complete_fn is not None:
         semantic.update(
             judge_legacy_measures(
@@ -199,9 +237,14 @@ def run_drift_check(
     return report
 
 
-def _patch_view(view: BaselineView, drifts: list, cands, apply_suspected: bool) -> dict:
+def _patch_view(
+    view: BaselineView,
+    drifts: list[D.MeasureDrift],
+    cands: Optional[CandidateSet],
+    apply_suspected: bool,
+) -> _ViewPatch:
     mine = [d for d in drifts if d.view == view.full_name]
-    out = {
+    out: _ViewPatch = {
         "full_name": view.full_name,
         "catalog": view.catalog,
         "schema": view.schema,
@@ -223,24 +266,10 @@ def _patch_view(view: BaselineView, drifts: list, cands, apply_suspected: bool) 
     if not view.ok:
         return out
 
-    taken = {
-        str(m.get("name"))
-        for m in view.spec.get("measures") or []
-        if isinstance(m, dict)
-    }
-    taken |= {
-        str(d.get("name"))
-        for d in view.spec.get("dimensions") or []
-        if isinstance(d, dict)
-    }
-    measure_names = {
-        str(m.get("name"))
-        for m in view.spec.get("measures") or []
-        if isinstance(m, dict)
-    }
-    aliases = _join_names(view.spec.get("joins") or [])
-    # (drift, new entry | Replacement, joins it needs) — pruned below, then applied.
-    planned: list[tuple] = []
+    measure_names = _entry_names(view.spec.get("measures"))
+    taken = measure_names | _entry_names(view.spec.get("dimensions"))
+    aliases = _join_names(view.spec.get("joins"))
+    planned: list[_Planned] = []
 
     for d in mine:
         if d.status not in _TRANSLATE:
@@ -254,7 +283,7 @@ def _patch_view(view: BaselineView, drifts: list, cands, apply_suspected: bool) 
             d.note = cands.untranslated.get(d.original_name, "not translated")
             out["counts"]["untranslated"] += 1
             continue
-        entry = copy.deepcopy(cand.entry)
+        entry: dict[str, object] = copy.deepcopy(cand.entry)
         d.proposed_expr = str(entry.get("expr") or "")
         d.translation = _translation_origin(entry)
 
@@ -295,7 +324,7 @@ def _patch_view(view: BaselineView, drifts: list, cands, apply_suspected: bool) 
     planned = _drop_dangling_measure_refs(planned, measure_names)
     adds = [p for _, p, _ in planned if isinstance(p, dict)]
     replaces = [p for _, p, _ in planned if isinstance(p, Replacement)]
-    joins: list[dict] = []
+    joins: list[dict[str, object]] = []
     for _, _, needed in planned:
         for j in needed:
             if j["name"] not in {x["name"] for x in joins}:
@@ -304,8 +333,9 @@ def _patch_view(view: BaselineView, drifts: list, cands, apply_suspected: bool) 
 
     if adds or replaces or joins:
         patch = apply_patch(view.yaml_text, adds, replaces, joins)
-        if patch.ok:
-            out["proposed_yaml"] = patch.yaml_text
+        patched_yaml = patch.yaml_text
+        if patch.ok and patched_yaml is not None:
+            out["proposed_yaml"] = patched_yaml
             out["changes"] = patch.changes
             for d in applied:
                 d.applied = True

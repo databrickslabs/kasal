@@ -214,7 +214,8 @@ class TestCalculateNextRunFromLast:
         mock_now_utc = datetime(2023, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
         mock_datetime.now.side_effect = [mock_now, mock_now_utc]
 
-        last_run = datetime(2023, 1, 1, 12, 0, 0)  # Future time
+        # A day ahead, naive UTC: in the future on any server clock.
+        last_run = datetime(2023, 1, 2, 12, 0, 0)
 
         with patch("src.utils.cron_utils.calculate_next_run") as mock_calc:
             mock_calc.return_value = datetime(2023, 1, 1, 13, 0, 0)
@@ -223,7 +224,13 @@ class TestCalculateNextRunFromLast:
 
             assert isinstance(result, datetime)
             assert result.tzinfo is None
-            mock_calc.assert_called_once_with("0 13 * * *", last_run)
+            # A naive last run is UTC; it reaches croniter on the server clock.
+            local = (
+                last_run.replace(tzinfo=timezone.utc)
+                .astimezone(mock_now.astimezone().tzinfo)
+                .replace(tzinfo=None)
+            )
+            mock_calc.assert_called_once_with("0 13 * * *", local)
 
     @patch("src.utils.cron_utils.datetime")
     def test_calculate_next_run_from_last_timezone_aware_last_run(self, mock_datetime):

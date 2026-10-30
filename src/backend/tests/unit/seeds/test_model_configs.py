@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.seeds.errors import SeederIncomplete
 from src.seeds.model_configs import (
     DEFAULT_MODELS,
     MODEL_CONFIGS,
@@ -31,6 +32,27 @@ class TestDefaultModelsDataStructure:
     def test_model_configs_alias(self):
         """Test that MODEL_CONFIGS is an alias for DEFAULT_MODELS."""
         assert MODEL_CONFIGS is DEFAULT_MODELS
+
+    @pytest.mark.parametrize(
+        "key,provider",
+        [
+            ("gpt-6-astra", "openai"),
+            ("gpt-6-sol", "openai"),
+            ("gpt-6-luna", "openai"),
+            ("gpt-5.6-sol", "openai"),
+            ("gpt-5.6-terra", "openai"),
+            ("gpt-5.6-luna", "openai"),
+            ("claude-opus-5-5", "anthropic"),
+            ("claude-fable-5-1", "anthropic"),
+            ("claude-sonnet-5", "anthropic"),
+            ("gemini-3.8-flash", "gemini"),
+            ("gemini-3.5-flash-lite", "gemini"),
+        ],
+    )
+    def test_current_direct_models_preserve_existing_choices(self, key, provider):
+        assert DEFAULT_MODELS[key]["provider"] == provider
+        assert DEFAULT_MODELS[key]["name"] == key
+        assert key not in REMOVED_MODEL_KEYS
 
     def test_specific_models_exist(self):
         """Test that the current model keys are present.
@@ -289,12 +311,52 @@ class TestSeedAsyncFunction:
         mock_session.add.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_seed_async_prunes_removed_models(self):
-        """Retired models found in the DB are deleted (one delete per removed key)."""
+    async def test_reseeding_keeps_the_endpoint_an_admin_saved(self):
+        """The seeder replaced ``params`` wholesale on every startup, erasing the
+        endpoint entered in Configuration → Models (a KAT model then called
+        127.0.0.1 and failed with "Connection error")."""
+        existing_model = MagicMock()
+        existing_model.params = {
+            "api_base": "https://kat.example.com/v1",
+            "tool_choice": "required",
+            "stale_seed_key": 1,
+        }
+
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        # Every lookup returns a row, so each removed key gets deleted.
+        mock_result.scalars.return_value.first.return_value = existing_model
+        mock_session.execute.return_value = mock_result
+        mock_context = AsyncMock()
+        mock_context.__aenter__.return_value = mock_session
+        mock_context.__aexit__.return_value = None
+
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
+            await seed_async()
+
+        assert existing_model.params == {
+            "api_base": "https://kat.example.com/v1",
+            "tool_choice": "required",
+        }
+
+    def test_merge_seed_params(self):
+        from src.services.llm.endpoints import merge_seed_params
+
+        assert merge_seed_params(None, None) is None
+        assert merge_seed_params({"top_p": 0.9}, {"top_p": 0.5}) == {"top_p": 0.9}
+        assert merge_seed_params(
+            {"top_p": 0.9}, {"api_base": "https://x.example.com/v1"}
+        ) == {"top_p": 0.9, "api_base": "https://x.example.com/v1"}
+
+    @pytest.mark.asyncio
+    async def test_seed_async_prunes_removed_models(self):
+        """Every row of a retired key is deleted, workspace overrides included."""
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        # Every lookup returns a row: the global one plus one override per key.
         mock_result.scalars.return_value.first.return_value = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [MagicMock(), MagicMock()]
         mock_session.execute.return_value = mock_result
 
         mock_context = AsyncMock()
@@ -306,7 +368,7 @@ class TestSeedAsyncFunction:
         ):
             await seed_async()
 
-        assert mock_session.delete.await_count == len(REMOVED_MODEL_KEYS)
+        assert mock_session.delete.await_count == 2 * len(REMOVED_MODEL_KEYS)
         mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -344,14 +406,15 @@ class TestSeedEntryPoint:
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_seed_does_not_raise_on_error(self):
-        """Test that seed() suppresses exceptions and logs them."""
+    async def test_seed_reraises_on_error(self):
+        """seed() logs the failure and re-raises it."""
         with patch(
             "src.seeds.model_configs.seed_async", new_callable=AsyncMock
         ) as mock:
             mock.side_effect = Exception("Seed failure")
-            # Should not raise
-            await seed()
+            # Re-raised so the runner reports it (it still runs the others)
+            with pytest.raises(Exception, match="Seed failure"):
+                await seed()
             mock.assert_awaited_once()
 
 
@@ -384,7 +447,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
         mock_session.commit.assert_awaited_once()
@@ -411,7 +475,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
 
@@ -437,7 +502,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
 
@@ -463,7 +529,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
 
@@ -492,9 +559,10 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", single_model),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
-        # Should still commit (with error count incremented)
+        # The valid rows are still committed; the run then fails loudly.
         mock_session.commit.assert_awaited_once()
 
 
@@ -515,7 +583,7 @@ class TestMainBlock:
 
 class TestAuditedDatabricksModels:
     """Regression test for the 2026-06-20 Databricks model audit (hello-world run
-    through Kasal's own LLM path against the fevm-serverless-stable workspace).
+    through Kasal's own LLM path against a serverless test workspace).
     Locks in which endpoints were removed and which working ones were added."""
 
     # Endpoints that no longer work and were pruned (removed from DEFAULT_MODELS
@@ -543,15 +611,19 @@ class TestAuditedDatabricksModels:
     )
     CURRENT_ADDED = (
         "databricks-claude-fable-5-1",
+        "databricks-claude-opus-5-5",
         "databricks-deepseek-v4-flash-0731",
         "databricks-deepseek-v4-pro-0813",
         "databricks-gemini-3-7-flash",
         "databricks-gemini-3-8-flash",
+        "databricks-gemini-4-argon",
         "databricks-glm-5-3",
         "databricks-glm-5-3-flash",
         "databricks-gpt-5-5",
         "databricks-gpt-5-5-pro",
         "databricks-gpt-6-astra",
+        "databricks-gpt-6-luna",
+        "databricks-gpt-6-sol",
         "databricks-grok-4-6",
         "databricks-kimi-k3",
     )
@@ -579,6 +651,12 @@ class TestAuditedDatabricksModels:
             assert config["max_output_tokens"] > 0
             assert key not in REMOVED_MODEL_KEYS
 
+    def test_gemini_4_argon_seeded_with_provider_limits(self):
+        """Google's gemini-4-argon limits, which Databricks matches."""
+        config = DEFAULT_MODELS["databricks-gemini-4-argon"]
+        assert config["context_window"] == 1048576
+        assert config["max_output_tokens"] == 65536
+
     def test_gemini_3_1_flash_lite_no_longer_pruned(self):
         """It used to be (wrongly) in REMOVED_MODEL_KEYS; the workspace now serves
         it, so it must be seeded and NOT pruned."""
@@ -604,6 +682,24 @@ class TestAuditedDatabricksModels:
 
         assert model_rejects_temperature("databricks-claude-fable-5") is True
         assert model_rejects_temperature("global.anthropic.claude-fable-5") is True
+
+    def test_claude_opus_5_5_on_databricks_matches_its_direct_api_limits(self):
+        """Databricks keeps the provider's limits for Anthropic models, so the
+        Databricks row and the direct-API row must agree: 1M in, 128K out."""
+        databricks = DEFAULT_MODELS["databricks-claude-opus-5-5"]
+        direct = DEFAULT_MODELS["claude-opus-5-5"]
+        assert databricks["context_window"] == direct["context_window"] == 1000000
+        assert databricks["max_output_tokens"] == direct["max_output_tokens"] == 128000
+
+    @pytest.mark.parametrize("variant", ["astra", "sol", "luna"])
+    def test_databricks_gpt6_matches_its_direct_api_limits(self, variant):
+        """Databricks publishes no GPT-6 limits, so each Databricks row mirrors
+        the direct-OpenAI row — and all three stay consistent with each other."""
+        databricks = DEFAULT_MODELS[f"databricks-gpt-6-{variant}"]
+        direct = DEFAULT_MODELS[f"gpt-6-{variant}"]
+        assert databricks["provider"] == "databricks"
+        assert databricks["context_window"] == direct["context_window"] == 1050000
+        assert databricks["max_output_tokens"] == direct["max_output_tokens"] == 128000
 
     def test_codex_model_that_works_via_kasal_kept(self):
         """gpt-5-3-codex 400s on raw /invocations but works through Kasal's

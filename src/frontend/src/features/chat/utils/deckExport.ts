@@ -17,9 +17,52 @@
  * imported dynamically so they only load when a download is triggered.
  */
 import DOMPurify from 'dompurify';
+import { classifyImageSource } from '../../../shared/a2ui/lib/imagePolicy';
 import { SLIDE_H, SLIDE_W } from './htmlDeck';
 
 const ACTIVE_CONTENT_TAGS = ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form'];
+
+// The PDF/PPTX render sits in the app document, where (unlike the preview
+// frame, which allows only data:/blob: images) a remote URL would be fetched.
+// So the shared image policy applies: a remote <img> becomes its alt text, a
+// CSS-bearing attribute (style, fill, ...) that could fetch from another host is
+// dropped whole, and other remote src/href/poster/background attributes are
+// removed. srcset always goes. Links keep their href. A dedicated instance keeps
+// this hook off every other DOMPurify call in the app.
+const renderPurifier = DOMPurify(window);
+const URL_FUNCTION = /url\(\s*(['"]?)(.*?)\1\s*\)/gi;
+const FETCHING_ATTRS = ['src', 'poster', 'background', 'href', 'xlink:href'];
+// Attributes the browser parses as CSS, so they can name a resource.
+const CSS_ATTRS = new Set(['style', 'fill', 'stroke', 'filter', 'clip-path', 'mask', 'cursor', 'marker-start', 'marker-mid', 'marker-end']);
+const loadsInline = (url: string) => classifyImageSource(url).kind === 'inline';
+
+/** True only when every url() in a CSS value is fully parsed and local. CSS is
+ *  not parsed here: an escape (`u\72l(`), image-set() or a url( the matcher
+ *  cannot close makes the value unsafe, and the attribute is dropped. */
+function cssIsLocal(value: string): boolean {
+  if (value.includes('\\') || /image-set/i.test(value)) return false;
+  const targets = [...value.matchAll(URL_FUNCTION)].map((m) => m[2]);
+  if (targets.length !== (value.match(/url\(/gi) ?? []).length) return false;
+  return targets.every(loadsInline);
+}
+
+renderPurifier.addHook('afterSanitizeAttributes', (node) => {
+  if (!(node instanceof Element)) return;
+  if (node.localName === 'img' && !loadsInline(node.getAttribute('src') ?? '')) {
+    node.replaceWith(node.ownerDocument.createTextNode(node.getAttribute('alt') ?? ''));
+    return;
+  }
+  node.removeAttribute('srcset');
+  for (const attr of Array.from(node.attributes)) {
+    const checked = CSS_ATTRS.has(attr.name.toLowerCase()) || /url\(|image-set/i.test(attr.value);
+    if (checked && !cssIsLocal(attr.value)) node.removeAttribute(attr.name);
+  }
+  for (const name of FETCHING_ATTRS) {
+    if (node.localName === 'a' && name.endsWith('href')) continue;
+    const value = node.getAttribute(name);
+    if (value !== null && !loadsInline(value)) node.removeAttribute(name);
+  }
+});
 
 /** Keep deck markup and shared CSS while removing executable/embedded content. */
 export function sanitizeDeckDocument(html: string): string {
@@ -29,9 +72,10 @@ export function sanitizeDeckDocument(html: string): string {
   });
 }
 
-// Keep slide layout and SVG diagrams while removing active HTML before export.
+// Keep slide layout and SVG diagrams while removing active HTML and anything
+// that would fetch from another host before export.
 export function sanitizeForRender(html: string): string {
-  return DOMPurify.sanitize(html, {
+  return renderPurifier.sanitize(html, {
     USE_PROFILES: { html: true, svg: true, svgFilters: true },
     FORBID_TAGS: [...ACTIVE_CONTENT_TAGS, 'style'],
   });

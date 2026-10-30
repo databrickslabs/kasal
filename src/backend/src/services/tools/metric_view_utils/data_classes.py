@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
+
+# A DaxTranslator pattern handler: (match, dax, table_key) -> (sql | None, skip_reason)
+TranslateFn = Callable[..., tuple["str | None", str]]
 
 
 @dataclass
@@ -98,6 +102,8 @@ class TableInfo:
     # translated deterministically to SQL. Surfaced as `-- TODO:` notes in the
     # emitted source so a step is never silently dropped.
     transform_todos: list[str] = field(default_factory=list)
+    # Power Query type conversions the view does not apply (``mquery_handoff``)
+    type_changes: list[str] = field(default_factory=list)
 
 
 @dataclass

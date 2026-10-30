@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from typing import Any
 
 
 def _to_snake_case(name: str) -> str:
@@ -46,9 +45,7 @@ def _to_snake_case(name: str) -> str:
 _DAX_TABLE_REF = re.compile(r"(?:'([^']+)'|(\w+))\s*\[")
 
 
-def _real_fact_table(
-    dax: str, home_table: str, fact_tables: "set[str] | None"
-) -> str:
+def _real_fact_table(dax: str, home_table: str, fact_tables: "set[str] | None") -> str:
     """The real fact table a measure's DAX draws from, falling back to its
     PBI home table.
 
@@ -190,7 +187,7 @@ def derive_geo_switch_decompositions(
             filters = resolved["base_filters"]
             sql = base_expr
             if filters:
-                sql = f"{base_expr} FILTER (WHERE {' AND '.join(filters)})"
+                sql = f"{base_expr} FILTER (WHERE {' AND '.join(filters)})"  # joins predicates built with escaped literals — nosemgrep: tmp.databricks.sql-injection.fstring-where
             emitted.append(
                 {
                     "name": f"{label}_{base_snake}",
@@ -320,7 +317,7 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     col = _to_snake_case(agg.group(2))
     base_expr = f"{spark_func}(source.{col})"
 
-    # Extract equality filters  T[a] = "x"  →  a = 'x'
+    # Equality filters T[a] = "x" → a = 'x', the value escaped as a SQL literal
     filters: list[str] = []
     for fm in re.finditer(
         r"""(?:'[^']+'|\w+)\[(\w+)\]\s*=\s*("[^"]*"|'[^']*'|-?\d+(?:\.\d+)?)""",
@@ -328,8 +325,8 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     ):
         fcol = _to_snake_case(fm.group(1))
         val = fm.group(2)
-        if val[0] == '"':
-            val = "'" + val[1:-1] + "'"
+        if val[0] in "\"'":
+            val = "'" + val[1:-1].replace("\\", "\\\\").replace("'", "''") + "'"
         filters.append(f"{fcol} = {val}")
 
     return {"base_expr": base_expr, "base_filters": filters}
@@ -444,16 +441,18 @@ def _resolve_switch_branch(
         return _resolve_referenced_measure_dax(mrow.get("expression", "") or "")
 
     def _sql_with_filters(resolved: dict) -> str:
-        sql = resolved["base_expr"]
+        sql: str = resolved["base_expr"]
         if resolved["base_filters"]:
-            sql = f"{sql} FILTER (WHERE {' AND '.join(resolved['base_filters'])})"
+            sql = f"{sql} FILTER (WHERE {' AND '.join(resolved['base_filters'])})"  # joins predicates built with escaped literals — nosemgrep: tmp.databricks.sql-injection.fstring-where
         return sql
 
     stripped = expanded_expr.strip()
     single = re.fullmatch(r"\(*\[([^\]]+)\]\)*", stripped)
     if single:
         mrow = measure_by_name.get(single.group(1))
-        resolved = _resolve_one(mrow) if mrow else None
+        if not mrow:
+            return None
+        resolved = _resolve_one(mrow)
         if not resolved:
             return None
         return {
@@ -474,8 +473,10 @@ def _resolve_switch_branch(
     if op_match:
         a_name, op, b_name = op_match.group(1), op_match.group(2), op_match.group(3)
         a_row, b_row = measure_by_name.get(a_name), measure_by_name.get(b_name)
-        a_res = _resolve_one(a_row) if a_row else None
-        b_res = _resolve_one(b_row) if b_row else None
+        if not a_row or not b_row:
+            return None
+        a_res = _resolve_one(a_row)
+        b_res = _resolve_one(b_row)
         if not a_res or not b_res:
             return None
         sql = f"({_sql_with_filters(a_res)}) {op} ({_sql_with_filters(b_res)})"
@@ -571,7 +572,7 @@ def derive_switch_decompositions(
             # generator (`pbi_ucmv_mapping.py`) both join on the real PBI
             # name, so omitting this silently breaks both for every
             # switch-resolved measure.
-            entry: dict[str, Any] = {
+            entry: dict[str, object] = {
                 "name": _to_snake_case(name),
                 "original_name": name,
             }

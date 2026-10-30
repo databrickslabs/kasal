@@ -149,7 +149,7 @@ class MCPAdapter:
     Uses the official MCP client library with proper authentication fallback.
     """
 
-    def __init__(self, server_params: Dict[str, Any]):
+    def __init__(self, server_params: Dict[str, Any]) -> None:
         """
         Initialize the MCP adapter.
 
@@ -162,8 +162,10 @@ class MCPAdapter:
         self.max_retries = server_params.get("max_retries", 3)
         self.rate_limit = server_params.get("rate_limit", 60)
 
-        self._tools = []
-        self._tool_schemas = {}  # Store schemas for parameter type conversion
+        self._tools: List[Dict[str, Any]] = []
+        self._tool_schemas: Dict[str, Any] = (
+            {}
+        )  # Store schemas for parameter type conversion
         self._initialized = False
         self._call_timestamps: deque = deque()
         self._transport: str = "streamable_http"  # Track which transport works
@@ -174,7 +176,7 @@ class MCPAdapter:
             None  # SPN headers that worked during discovery
         )
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the adapter and discover tools using the working MCP client approach."""
         try:
             logger.info(f"Initializing MCPAdapter for {self.server_url}")
@@ -383,7 +385,7 @@ class MCPAdapter:
         return await asyncio.wait_for(_attempt(), timeout=self.timeout_seconds)
 
     async def _list_tools_from_session(
-        self, read_stream, write_stream
+        self, read_stream: Any, write_stream: Any
     ) -> List[Dict[str, Any]]:
         """List tools from an established MCP session."""
         from mcp import ClientSession
@@ -778,7 +780,8 @@ class MCPAdapter:
                 logger.info(
                     f"Using provided authentication headers (auth_type={auth_type}, has_obo_token={has_obo})"
                 )
-                return provided_headers
+                provided: Dict[str, str] = provided_headers
+                return provided
 
             # If no provided headers, try to get them using our auth mechanism
             from src.utils.databricks_auth import get_mcp_auth_headers
@@ -807,14 +810,14 @@ class MCPAdapter:
         """Get the tools from the adapter."""
         return self._tools if self._tools is not None else []
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the adapter and clean up resources."""
         try:
             logger.info("MCPAdapter stopped")
         except Exception as e:
             logger.error(f"Error stopping MCPAdapter: {e}")
 
-    async def close(self):
+    async def close(self) -> None:
         """Alias for stop() for compatibility."""
         await self.stop()
 
@@ -847,7 +850,7 @@ class _PollSession:
         try:
             # Same hard deadline shape as _execute_with_transport: the SDK's
             # connect timeout does not cover initialize.
-            async def _open():
+            async def _open() -> ClientSession:
                 if adapter._transport == "sse":
                     from mcp.client.sse import sse_client
 
@@ -891,7 +894,7 @@ class _PollSession:
         self._stack = stack
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         stack, self._stack, self._session = self._stack, None, None
         if stack is not None:
             try:
@@ -940,5 +943,5 @@ class MCPTool:
             logger.error(f"Error executing MCP tool {self.name}: {e}")
             raise
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"MCPTool(name={self.name}, description={self.description})"

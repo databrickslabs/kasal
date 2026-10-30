@@ -4,9 +4,10 @@ Repository pattern implementations for converter models
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, desc, func, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -32,19 +33,37 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         """
         super().__init__(ConversionHistory, session)
 
-    async def find_by_execution_id(self, execution_id: str) -> List[ConversionHistory]:
+    async def get_for_groups(
+        self, history_id: int, group_ids: List[str]
+    ) -> Optional[ConversionHistory]:
+        """Get a history entry by ID only if it belongs to one of ``group_ids``."""
+        if not group_ids:
+            return None
+        query = select(self.model).where(
+            self.model.id == history_id, self.model.group_id.in_(group_ids)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def find_by_execution_id(
+        self, execution_id: str, group_id: Optional[str] = None
+    ) -> List[ConversionHistory]:
         """
         Find all conversion history entries for a specific execution.
 
         Args:
             execution_id: Execution ID to filter by
+            group_id: Optional group ID to filter by
 
         Returns:
             List of conversion history entries
         """
+        conditions = [self.model.execution_id == execution_id]
+        if group_id:
+            conditions.append(self.model.group_id == group_id)
         query = (
             select(self.model)
-            .where(self.model.execution_id == execution_id)
+            .where(and_(*conditions))
             .order_by(desc(self.model.created_at))
         )
         result = await self.session.execute(query)
@@ -175,14 +194,14 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
             Dictionary with statistics
         """
         since = datetime.utcnow() - timedelta(days=days)
-        conditions = [self.model.created_at >= since]
+        conditions: List[ColumnElement[bool]] = [self.model.created_at >= since]
         if group_id:
             conditions.append(self.model.group_id == group_id)
 
         # Total conversions
         total_query = select(func.count(self.model.id)).where(and_(*conditions))
         total_result = await self.session.execute(total_query)
-        total = total_result.scalar()
+        total = total_result.scalar() or 0
 
         # Success count
         success_conditions = conditions + [self.model.status == "success"]
@@ -190,13 +209,13 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
             and_(*success_conditions)
         )
         success_result = await self.session.execute(success_query)
-        success_count = success_result.scalar()
+        success_count = success_result.scalar() or 0
 
         # Failed count
         failed_conditions = conditions + [self.model.status == "failed"]
         failed_query = select(func.count(self.model.id)).where(and_(*failed_conditions))
         failed_result = await self.session.execute(failed_query)
-        failed_count = failed_result.scalar()
+        failed_count = failed_result.scalar() or 0
 
         # Average execution time
         avg_time_query = select(func.avg(self.model.execution_time_ms)).where(
@@ -253,6 +272,18 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         """
         super().__init__(ConversionJob, session)
 
+    async def get_for_groups(
+        self, job_id: str, group_ids: List[str]
+    ) -> Optional[ConversionJob]:
+        """Get a job by ID only if it belongs to one of ``group_ids``."""
+        if not group_ids:
+            return None
+        query = select(self.model).where(
+            self.model.id == job_id, self.model.group_id.in_(group_ids)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
     async def find_by_status(
         self, status: str, group_id: Optional[str] = None, limit: int = 50
     ) -> List[ConversionJob]:
@@ -292,7 +323,9 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         Returns:
             List of active conversion jobs
         """
-        conditions = [self.model.status.in_(["pending", "running"])]
+        conditions: List[ColumnElement[bool]] = [
+            self.model.status.in_(["pending", "running"])
+        ]
         if group_id:
             conditions.append(self.model.group_id == group_id)
 
@@ -390,7 +423,7 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
             )
         )
         result = await self.session.execute(query)
-        if result.rowcount > 0:
+        if cast("CursorResult[Any]", result).rowcount > 0:
             return await self.get(job_id)
         return None
 
@@ -411,6 +444,20 @@ class SavedConverterConfigurationRepository(
             session: SQLAlchemy async session
         """
         super().__init__(SavedConverterConfiguration, session)
+
+    async def get_visible_to_groups(
+        self, config_id: int, group_ids: List[str]
+    ) -> Optional[SavedConverterConfiguration]:
+        """Get a configuration by ID if it is a system template or in ``group_ids``.
+
+        Ownership and ``is_public`` within the group are the service's rule.
+        """
+        conditions = [self.model.is_template == True]
+        if group_ids:
+            conditions.append(self.model.group_id.in_(group_ids))
+        query = select(self.model).where(self.model.id == config_id, or_(*conditions))
+        result = await self.session.execute(query)
+        return result.scalars().first()
 
     async def find_by_user(
         self, created_by_email: str, group_id: Optional[str] = None
@@ -558,7 +605,9 @@ class SavedConverterConfigurationRepository(
         Returns:
             List of matching configurations
         """
-        conditions = [self.model.name.ilike(f"%{search_term}%")]
+        conditions: List[ColumnElement[bool]] = [
+            self.model.name.ilike(f"%{search_term}%")
+        ]
         if group_id:
             conditions.append(self.model.group_id == group_id)
         if user_email:

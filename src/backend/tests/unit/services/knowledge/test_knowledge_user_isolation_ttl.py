@@ -195,8 +195,8 @@ class TestSearchIsolationAndTtl:
                 AsyncMock(return_value=[1.0, 0.0, 0.0]),
             ),
             patch(
-                "src.services.knowledge.embedding_service.KNOWLEDGE_TTL_DAYS",
-                ttl_days,
+                "src.services.knowledge.embedding_service.knowledge_ttl_days",
+                return_value=ttl_days,
             ),
         ):
             return await svc.search("query", limit=10, created_by=created_by)
@@ -343,7 +343,10 @@ class TestEmbedStampingAndPurge:
         from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
         svc = KnowledgeEmbeddingService(AsyncMock(), GROUP)
-        with patch("src.services.knowledge.embedding_service.KNOWLEDGE_TTL_DAYS", 0):
+        with patch(
+            "src.services.knowledge.embedding_service.knowledge_ttl_days",
+            return_value=0,
+        ):
             assert await svc.purge_expired() == 0
 
 

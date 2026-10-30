@@ -1118,7 +1118,7 @@ class TestConfigureMlflowFullSPNPath:
         # Config with catalog/db_schema/warehouse_id -> UC trace location is built.
         uc_cfg = MagicMock()
         uc_cfg.mlflow_enabled = True
-        uc_cfg.catalog = "nemotemo_catalog"
+        uc_cfg.catalog = "example_catalog"
         uc_cfg.db_schema = "kasal"
         uc_cfg.warehouse_id = "wh-1"
         uc_cfg.mlflow_experiment_name = "kasal-crew-execution-traces"
@@ -1204,7 +1204,7 @@ class TestConfigureMlflowFullSPNPath:
 
         uc_cfg = MagicMock()
         uc_cfg.mlflow_enabled = True
-        uc_cfg.catalog = "nemotemo_catalog"
+        uc_cfg.catalog = "example_catalog"
         uc_cfg.db_schema = "kasal"
         uc_cfg.warehouse_id = "wh-1"
         mock_service_instance = MagicMock()

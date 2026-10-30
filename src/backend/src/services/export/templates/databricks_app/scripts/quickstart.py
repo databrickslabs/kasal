@@ -61,7 +61,7 @@ def _load_yml(path: Path):
     yaml.preserve_quotes = True
     yaml.indent(sequence=4, offset=2)
     with open(path) as f:
-        return yaml, yaml.load(f)
+        return yaml, yaml.load(f)  # fmt: skip # ruamel round-trip loader, project file — nosemgrep: tmp.databricks.deserialization.yaml-unsafe-load
 
 
 def _save_yml(yaml: YAML, data, path: Path) -> None:

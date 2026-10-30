@@ -188,6 +188,7 @@ async def test_get_recent_async():
 @pytest.mark.asyncio
 async def test_get_database_type_from_settings():
     async_session = make_async_session()
+    async_session.get_bind = MagicMock(return_value=None)
     repo = DocumentationEmbeddingRepository(db=async_session)
     with patch("src.config.settings.settings") as mock_settings:
         mock_settings.DATABASE_TYPE = "sqlite"
@@ -200,10 +201,22 @@ async def test_get_database_type_from_settings():
 @pytest.mark.asyncio
 async def test_get_database_type_exception_fallback():
     async_session = make_async_session()
+    async_session.get_bind = MagicMock(side_effect=RuntimeError("no bind"))
     repo = DocumentationEmbeddingRepository(db=async_session)
-    # Exercise the function without mocking — will use settings fallback
     result = await repo._get_database_type()
-    assert isinstance(result, str)
+    assert result == "postgresql"
+
+
+@pytest.mark.asyncio
+async def test_get_database_type_reads_dialect_from_sync_get_bind():
+    """AsyncSession.get_bind() is synchronous; awaiting it raised TypeError and
+    silently reported "postgresql" for a SQLite session."""
+    async_session = make_async_session()
+    bind = MagicMock()
+    bind.dialect.name = "SQLite"
+    async_session.get_bind = MagicMock(return_value=bind)
+    repo = DocumentationEmbeddingRepository(db=async_session)
+    assert await repo._get_database_type() == "sqlite"
 
 
 # ---- Tests for search_similar ----

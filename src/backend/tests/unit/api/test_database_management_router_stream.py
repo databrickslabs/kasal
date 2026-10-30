@@ -44,14 +44,14 @@ from src.schemas.database_management import (
 
 class SysAdminCtx:
     primary_group_id = "g1"
-    group_email = "admin@x.com"
+    group_email = "admin@example.com"
     access_token = "tok"
     current_user = type("U", (), {"is_system_admin": True})()
 
 
 class RegularCtx:
     primary_group_id = "g1"
-    group_email = "user@x.com"
+    group_email = "user@example.com"
     access_token = "tok"
     current_user = type("U", (), {"is_system_admin": False})()
 

@@ -108,6 +108,22 @@ class LakebaseInstanceUnavailableError(LakebaseUnavailableError):
     detail = "Lakebase instance not found"
 
 
+class LakebaseNotConfiguredError(LakebaseInstanceUnavailableError):
+    """Lakebase is needed but no instance is named anywhere (503).
+
+    There is no invented default instance: the name comes from the database
+    setting (Configuration -> Database / the memory backend's Lakebase config)
+    or the Databricks Apps Lakebase resource binding (``KASAL_LAKEBASE_RESOURCE``
+    / the bound ``PGHOST``). Connecting to a made-up name only produced a
+    misleading "instance not found" much later.
+    """
+
+    detail = (
+        "No Lakebase instance is configured: set one in Configuration -> Database "
+        "or bind a Lakebase resource to the app (KASAL_LAKEBASE_RESOURCE)"
+    )
+
+
 class MCPConnectionError(KasalError):
     """MCP server connection failed (e.g. 403 Forbidden, timeout)."""
 

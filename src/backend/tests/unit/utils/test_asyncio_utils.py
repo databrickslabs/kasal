@@ -559,7 +559,7 @@ class TestExecuteDbOperationSmartClosedConnection:
             ),
             patch(
                 "src.db.database_router.get_lakebase_config_from_db",
-                new=AsyncMock(return_value={}),
+                new=AsyncMock(return_value={"instance_name": "test-instance"}),
             ),
             patch(
                 "src.db.lakebase_session.get_lakebase_session",
@@ -605,7 +605,7 @@ class TestExecuteDbOperationSmartClosedConnection:
             ),
             patch(
                 "src.db.database_router.get_lakebase_config_from_db",
-                new=AsyncMock(return_value={}),
+                new=AsyncMock(return_value={"instance_name": "test-instance"}),
             ),
             patch(
                 "src.db.lakebase_session.get_lakebase_session",

@@ -18,9 +18,11 @@ interval or, after a rolling restart, immediately again.
 """
 
 from datetime import datetime
+from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, String
+from sqlalchemy import JSON, DateTime, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -34,29 +36,39 @@ class MemoryMaintenanceWatermark(Base):
 
     __tablename__ = "memory_maintenance_watermarks"
 
-    id = Column(String, primary_key=True, default=generate_uuid)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
 
     # One row per tenant. The memory root scope is always ``/<group_id>``
     # (see CrewMemoryService._build_memory_kwargs), so the group IS the scope.
-    group_id = Column(String(100), nullable=False, unique=True, index=True)
+    group_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, index=True
+    )
 
     # Null means "never maintained" — which sorts first, so a newly configured
     # workspace is picked up on the next sweep rather than after one interval.
-    last_maintained_at = Column(DateTime, nullable=True, index=True)
+    last_maintained_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
 
     # Kept so a sweep that keeps failing is visible without reading logs: a
     # scope stuck at "error" for days is the signal that its backend, embedder
     # or credentials are broken.
-    last_status = Column(String(32), nullable=False, default="pending")
-    last_error = Column(String(500), nullable=True)
+    last_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending"
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Pass-by-pass counts from the last run (deleted, merged, superseded,
     # forgotten). This is the only place memory maintenance is observable as
     # data rather than as log lines.
-    last_stats = Column(JSON, nullable=True)
+    last_stats: Mapped[Any] = mapped_column(JSON, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     def to_dict(self) -> dict:
         return {

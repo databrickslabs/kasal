@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useCallback } from 'react';
 import { Node, Edge } from 'reactflow';
 import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
@@ -68,7 +69,13 @@ export const useBuilderCanvasSync = ({ nodes, edges, setNodes, setEdges }: UseBu
     updateCanvasNodes,
     updateCanvasEdges,
     updateCanvasCrewInfo
-  } = useBuilderCanvasStore();
+  } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    getActiveCanvas: state.getActiveCanvas,
+    updateCanvasNodes: state.updateCanvasNodes,
+    updateCanvasEdges: state.updateCanvasEdges,
+    updateCanvasCrewInfo: state.updateCanvasCrewInfo,
+  })));
 
   // Keep track of whether we're currently loading crew data or switching tabs
   const isLoadingCrewRef = useRef(false);

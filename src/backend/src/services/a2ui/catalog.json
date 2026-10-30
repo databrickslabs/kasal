@@ -112,7 +112,7 @@
       }
     },
     "Table": {
-      "summary": "A data table. columns is a list of header strings; rows is a list of row arrays (cell values aligned to columns).",
+      "summary": "A data table. columns is a list of header strings; rows is a list of row arrays (cell values aligned to columns). To bind the rows, use rows: {\"path\":\"/k\"} — Table has no 'data' prop.",
       "props": {
         "columns": {
           "type": "array"

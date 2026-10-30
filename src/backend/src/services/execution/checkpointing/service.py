@@ -8,7 +8,7 @@ either way.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,7 +58,12 @@ class CheckpointService:
             execution.status, execution.checkpoint_status
         )
 
-        current_keys = await self._current_content_keys(execution, group_context)
+        # Compared against the run's saved definition in its own workspace.
+        from src.services.catalog.run_lookup import scope_to_run
+
+        current_keys = await self._current_content_keys(
+            execution, scope_to_run(group_context, execution)
+        )
         changed_at = self._first_changed(units, current_keys)
 
         return {
@@ -91,7 +96,7 @@ class CheckpointService:
 
     async def _current_content_keys(
         self, execution: Any, group_context: Optional[GroupContext]
-    ) -> Optional[List[str]]:
+    ) -> Optional[Union[List[str], Dict[str, str]]]:
         """Content keys of the saved definition, IN ORDER.
 
         A list, not a mapping by name: crew units record ``name=None`` (the
@@ -196,7 +201,7 @@ class CheckpointService:
         keys: Dict[str, str] = {}
         try:
             for name, task_ids in crews:
-                stand_ins = []
+                stand_ins: List[SimpleNamespace] = []
                 for task_id in task_ids:
                     row = (
                         await service.get_with_group_check(str(task_id), group_context)
@@ -289,7 +294,7 @@ class CheckpointService:
 
     async def list_for_flow(
         self,
-        flow_id,
+        flow_id: Any,
         group_context: Optional[GroupContext] = None,
         status_filter: Optional[str] = "active",
     ) -> List[Dict[str, Any]]:
@@ -315,7 +320,7 @@ class CheckpointService:
     @staticmethod
     def _summarise(
         unit: Dict[str, Any],
-        current_keys: Optional[Dict[str, str]] = None,
+        current_keys: Optional[Union[List[str], Dict[str, str]]] = None,
         changed_at: Optional[int] = None,
         index: Optional[int] = None,
     ) -> Dict[str, Any]:

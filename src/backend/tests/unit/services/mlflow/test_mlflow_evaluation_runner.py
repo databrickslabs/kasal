@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
+from src.services.prompt_optimization.builtin_judges.bridge import JudgeRoute
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -60,6 +61,8 @@ def _make_runner(**overrides):
         "prediction_text": "Paris is the capital of France.",
         "judge_model_route": "databricks/databricks-claude-sonnet-4",
         "judge_model_defaulted": False,
+        "judge_model": "judge-key",
+        "judge_route": JudgeRoute(loop=MagicMock(name="main-loop")),
     }
     defaults.update(overrides)
     return MLflowEvaluationRunner(**defaults)
@@ -109,13 +112,13 @@ class TestInit:
 
 
 class TestSaveEnvironmentVars:
-    """Tests for _save_environment_vars."""
+    """Tests for _save_environment_vars: only the non-secret endpoint URLs."""
 
-    def test_saves_existing_vars(self):
-        """Captures current DATABRICKS_* env vars."""
+    _URLS = ("DATABRICKS_BASE_URL", "DATABRICKS_API_BASE", "DATABRICKS_ENDPOINT")
+
+    def test_saves_existing_url_vars_and_never_the_token(self):
         runner = _make_runner()
         env_patch = {
-            "DATABRICKS_HOST": "https://host.example.com",
             "DATABRICKS_TOKEN": "tok-123",
             "DATABRICKS_BASE_URL": "https://base.example.com",
             "DATABRICKS_API_BASE": "https://apibase.example.com",
@@ -124,113 +127,71 @@ class TestSaveEnvironmentVars:
         with patch.dict(os.environ, env_patch, clear=False):
             result = runner._save_environment_vars()
 
-        assert result["DATABRICKS_HOST"] == "https://host.example.com"
-        assert result["DATABRICKS_TOKEN"] == "tok-123"
+        assert set(result) == set(self._URLS)
         assert result["DATABRICKS_BASE_URL"] == "https://base.example.com"
         assert result["DATABRICKS_API_BASE"] == "https://apibase.example.com"
         assert result["DATABRICKS_ENDPOINT"] == "https://endpoint.example.com"
 
     def test_returns_none_for_missing_vars(self):
-        """Returns None for env vars that are not set."""
         runner = _make_runner()
-        clean = {
-            k: None
-            for k in [
-                "DATABRICKS_HOST",
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_BASE_URL",
-                "DATABRICKS_API_BASE",
-                "DATABRICKS_ENDPOINT",
-            ]
-        }
-        # Remove the keys so they are absent
-        env_copy = os.environ.copy()
-        for k in clean:
-            env_copy.pop(k, None)
+        env_copy = {k: v for k, v in os.environ.items() if k not in self._URLS}
         with patch.dict(os.environ, env_copy, clear=True):
             result = runner._save_environment_vars()
 
-        for key in clean:
-            assert result[key] is None
+        assert all(result[key] is None for key in self._URLS)
 
 
 # ===========================================================================
-# TestSetEnvironmentVars
+# TestSetEnvironmentVars / TestRestoreEnvironmentVars
 # ===========================================================================
 
 
 class TestSetEnvironmentVars:
-    """Tests for _set_environment_vars."""
+    """_set_environment_vars opens the sp_auth credential scope; restore closes it."""
 
     @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
-    def test_sets_all_vars(self, mock_construct):
-        """Sets DATABRICKS_HOST, TOKEN, and API base vars from auth context."""
+    def test_window_presents_the_credential_then_restores(self, mock_construct):
         mock_construct.return_value = "https://example.databricks.com/serving-endpoints"
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
+        from src.services.mlflow.sp_auth import current_credentials
 
         with patch.dict(os.environ, {}, clear=True):
+            old = runner._save_environment_vars()
             runner._set_environment_vars(auth_ctx)
-
-            assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
-            assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
-            assert (
-                os.environ["DATABRICKS_BASE_URL"]
-                == "https://example.databricks.com/serving-endpoints"
-            )
-            assert (
-                os.environ["DATABRICKS_API_BASE"]
-                == "https://example.databricks.com/serving-endpoints"
-            )
-            assert (
-                os.environ["DATABRICKS_ENDPOINT"]
-                == "https://example.databricks.com/serving-endpoints"
-            )
+            try:
+                assert current_credentials().token == auth_ctx.token
+                assert not {"DATABRICKS_TOKEN", "DATABRICKS_HOST"} & set(os.environ)
+                for key in TestSaveEnvironmentVars._URLS:
+                    assert os.environ[key] == mock_construct.return_value
+            finally:
+                runner._restore_environment_vars(old, auth_ctx)
+            assert current_credentials() is None  # nothing outlives the call
+            for key in TestSaveEnvironmentVars._URLS:
+                assert key not in os.environ
 
     @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_skips_api_base_when_empty(self, mock_construct):
-        """Does not set API base vars when construct_llm_base_url returns empty."""
         mock_construct.return_value = ""
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
 
         with patch.dict(os.environ, {}, clear=True):
+            old = runner._save_environment_vars()
             runner._set_environment_vars(auth_ctx)
-
-            assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
-            assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
-            assert "DATABRICKS_BASE_URL" not in os.environ
-            assert "DATABRICKS_API_BASE" not in os.environ
-            assert "DATABRICKS_ENDPOINT" not in os.environ
-
-    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
-    def test_skips_api_base_when_none(self, mock_construct):
-        """Does not set API base vars when construct_llm_base_url returns None."""
-        mock_construct.return_value = None
-        runner = _make_runner()
-        auth_ctx = _make_auth_ctx()
-
-        with patch.dict(os.environ, {}, clear=True):
-            runner._set_environment_vars(auth_ctx)
-
-            assert "DATABRICKS_BASE_URL" not in os.environ
-
-
-# ===========================================================================
-# TestRestoreEnvironmentVars
-# ===========================================================================
+            try:
+                assert "DATABRICKS_BASE_URL" not in os.environ
+            finally:
+                runner._restore_environment_vars(old, auth_ctx)
 
 
 class TestRestoreEnvironmentVars:
     """Tests for _restore_environment_vars."""
 
-    def test_restores_previously_set_vars(self):
-        """Restores vars that existed before the run."""
+    def test_restores_previously_set_url_vars(self):
         runner = _make_runner()
         old_env = {
-            "DATABRICKS_HOST": "https://original.example.com",
-            "DATABRICKS_TOKEN": "orig-token",
-            "DATABRICKS_BASE_URL": None,
+            "DATABRICKS_BASE_URL": "https://original.example.com",
             "DATABRICKS_API_BASE": None,
             "DATABRICKS_ENDPOINT": None,
         }
@@ -238,35 +199,13 @@ class TestRestoreEnvironmentVars:
 
         with patch.dict(
             os.environ,
-            {"DATABRICKS_HOST": "changed", "DATABRICKS_TOKEN": "changed"},
+            {"DATABRICKS_BASE_URL": "changed", "DATABRICKS_API_BASE": "changed"},
             clear=True,
         ):
             runner._restore_environment_vars(old_env, auth_ctx)
 
-            assert os.environ["DATABRICKS_HOST"] == "https://original.example.com"
-            assert os.environ["DATABRICKS_TOKEN"] == "orig-token"
-
-    def test_deletes_vars_that_were_unset(self):
-        """Removes env vars that were not set before the run."""
-        runner = _make_runner()
-        old_env = {
-            "DATABRICKS_HOST": None,
-            "DATABRICKS_TOKEN": None,
-            "DATABRICKS_BASE_URL": None,
-            "DATABRICKS_API_BASE": None,
-            "DATABRICKS_ENDPOINT": None,
-        }
-        auth_ctx = _make_auth_ctx()
-
-        env_during = {
-            "DATABRICKS_HOST": "temp-host",
-            "DATABRICKS_TOKEN": "temp-token",
-        }
-        with patch.dict(os.environ, env_during, clear=True):
-            runner._restore_environment_vars(old_env, auth_ctx)
-
-            assert "DATABRICKS_HOST" not in os.environ
-            assert "DATABRICKS_TOKEN" not in os.environ
+            assert os.environ["DATABRICKS_BASE_URL"] == "https://original.example.com"
+            assert "DATABRICKS_API_BASE" not in os.environ
 
     def test_noop_when_no_auth_ctx(self):
         """Does nothing when auth_ctx is None."""
@@ -546,9 +485,10 @@ class TestExtractRecordsFromTraces:
         assert len(records) == 1
         assert records[0]["messages"] == "question"
 
-    def test_respects_max_rows_env_var(self):
-        """Limits rows to MLFLOW_EVAL_MAX_ROWS environment variable."""
+    def test_respects_max_rows_setting(self):
+        """Limits rows to the runner's max_rows (Configuration → MLflow → Advanced)."""
         runner = _make_runner()
+        runner.max_rows = 3
         rows = [
             {"execution_id": "exec-123", "prompt": f"q{i}", "output": f"a{i}"}
             for i in range(10)
@@ -560,8 +500,7 @@ class TestExtractRecordsFromTraces:
             }
         )
 
-        with patch.dict(os.environ, {"MLFLOW_EVAL_MAX_ROWS": "3"}):
-            _, records = runner._extract_records_from_traces(df)
+        _, records = runner._extract_records_from_traces(df)
 
         assert len(records) == 3
 
@@ -743,7 +682,11 @@ class TestCreateRun:
             result = runner.create_run(auth_ctx)
 
             assert result["run_id"] == "run-abc"
-            assert result["experiment_name"] == "/Shared/kasal-crew-execution-traces"
+            # No experiment configured: the private per-environment fallback, never /Shared.
+            assert (
+                result["experiment_name"]
+                == "/Users/tests@example.com/kasal-crew-traces"
+            )
             assert "experiment_id" in result
 
     def test_create_run_sets_and_restores_env_vars(self):
@@ -1001,7 +944,7 @@ class TestCompleteEvaluation:
             mock_mlflow.genai.evaluate.assert_called_once()
 
     def test_complete_evaluation_adds_extra_scorers_with_contexts(self):
-        """Adds Groundedness and Relevance scorers when contexts are present."""
+        """Contexts present: no retrieval judge is built (they need trace spans)."""
         import sys
 
         mock_mlflow = MagicMock()
@@ -1055,8 +998,8 @@ class TestCompleteEvaluation:
 
             runner.complete_evaluation("run-abc", _make_auth_ctx())
 
-            # Groundedness should be instantiated when contexts detected
-            mock_scorers.Groundedness.assert_called()
+            # Neither the stale name nor the real class: rows carry no spans
+            assert not mock_scorers.RetrievalGroundedness.called, "retrieval judge"
 
     def test_complete_evaluation_adds_correctness_scorer_with_references(self):
         """Adds Correctness scorer when references are present."""
@@ -1292,41 +1235,6 @@ class TestCompleteEvaluation:
 
 
 # ===========================================================================
-# TestJudgeModelUriConversion
-# ===========================================================================
-
-
-class TestJudgeModelUriConversion:
-    """Tests for the _to_scorer_model_uri logic inside complete_evaluation."""
-
-    def test_route_with_slash_converted(self):
-        """'provider/model' becomes 'provider:/model'."""
-        runner = _make_runner(judge_model_route="databricks/my-model")
-        # Directly test the conversion logic inline
-        route = runner.judge_model_route
-        if "/" in route and ":/" not in route:
-            provider, model = route.split("/", 1)
-            uri = f"{provider}:/" + model
-        else:
-            uri = route
-        assert uri == "databricks:/my-model"
-
-    def test_route_already_uri_format(self):
-        """'provider:/model' stays unchanged."""
-        route = "databricks:/already-uri"
-        if ":/" in route:
-            uri = route
-        else:
-            uri = route
-        assert uri == "databricks:/already-uri"
-
-    def test_route_none(self):
-        """None route returns None."""
-        runner = _make_runner(judge_model_route=None)
-        assert runner.judge_model_route is None
-
-
-# ===========================================================================
 # Additional coverage tests for complete_evaluation and missing lines
 # ===========================================================================
 
@@ -1485,7 +1393,7 @@ class TestCompleteEvaluationPaths:
         assert mock_mlflow.log_metric.call_count >= 2
 
     def test_complete_evaluation_with_contexts(self):
-        """complete_evaluation adds Groundedness/Relevance scorers when has_ctx_col=True."""
+        """has_ctx_col=True: the retrieval judges are skipped, core ones kept."""
         import sys
 
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
@@ -1512,8 +1420,8 @@ class TestCompleteEvaluationPaths:
 
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
 
-        # Groundedness and Relevance scorers should have been tried
-        mock_mlflow.genai.scorers.Groundedness.assert_called()
+        assert not mock_mlflow.genai.scorers.Groundedness.called  # stale name gone
+        mock_mlflow.genai.scorers.RelevanceToQuery.assert_called()
 
     def test_complete_evaluation_with_references(self):
         """complete_evaluation adds Correctness scorer when has_ref_col=True."""
@@ -2380,13 +2288,11 @@ class TestCompleteEvaluationScorerRoutePaths:
             # Should not raise
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
 
-    def test_no_judge_model_route_scorer_has_no_model(self):
-        """When judge_model_route is None, scorer is instantiated without model arg."""
+    def _run(self, **runner_kwargs):
         import sys
 
         mock_mlflow, mock_tracking = self._setup_mocks()
         mock_mlflow.genai.scorers.Safety = MagicMock(return_value=MagicMock())
-
         with patch.dict(
             sys.modules,
             {
@@ -2395,18 +2301,42 @@ class TestCompleteEvaluationScorerRoutePaths:
                 "mlflow.genai": mock_mlflow.genai,
             },
         ):
-            runner = _make_runner(judge_model_route=None)  # no route → line 584
-            auth_ctx = _make_auth_ctx()
-
+            runner = _make_runner(**runner_kwargs)
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
             runner._discover_traces_and_build_dataset = MagicMock(return_value=([], []))
+            runner.complete_evaluation(run_id="run-1", auth_ctx=_make_auth_ctx())
+        return mock_mlflow
 
-            runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
+    def test_scorers_get_the_bridge_placeholder_and_run_under_the_route(self):
+        """Judges are built on ``openai:/kasal-judge--<key>`` and evaluate runs
+        inside ``judging(route)``, so their calls reach LLMManager."""
+        route = JudgeRoute(loop=MagicMock(name="main-loop"))
+        seen = []
+        with patch(
+            "src.services.mlflow.evaluation_judges.judging",
+            side_effect=lambda r: _recording(seen, r),
+        ):
+            mock_mlflow = self._run(judge_model="judge-key", judge_route=route)
+        mock_mlflow.genai.scorers.RelevanceToQuery.assert_called_with(
+            model="openai:/kasal-judge--judge-key"
+        )
+        assert seen == [route]
+        mock_mlflow.genai.evaluate.assert_called_once()
 
-        # Scorer should be instantiated without model kwarg
-        mock_mlflow.genai.scorers.RelevanceToQuery.assert_called_with()
+    def test_no_judge_model_evaluates_without_judges(self):
+        """No resolvable judge model: evaluate still runs, with no scorers."""
+        mock_mlflow = self._run(judge_model=None, judge_route=None)
+        mock_mlflow.genai.scorers.RelevanceToQuery.assert_not_called()
+        assert mock_mlflow.genai.evaluate.call_args.kwargs["scorers"] == []
+
+
+def _recording(seen, route):
+    from contextlib import nullcontext
+
+    seen.append(route)
+    return nullcontext()
 
 
 class TestCompleteEvaluationRemainingPaths:

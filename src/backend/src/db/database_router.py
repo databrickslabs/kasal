@@ -11,7 +11,10 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.databricks_app import LakebaseAppResource
+from src.core.databricks_app import (
+    LakebaseAppResource,
+    lakebase_instance_from_config,
+)
 from src.core.exceptions import LakebaseUnavailableError
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
@@ -24,6 +27,25 @@ from src.db.session import (
 
 logger_manager = LoggerManager.get_instance()
 logger = logger_manager.database
+
+
+def effective_database_type() -> str:
+    """Where this process's data lives: ``"lakebase"`` or the base engine's type.
+
+    ``settings.DATABASE_TYPE`` names the BASE engine (the boot database; SQLite
+    inside Databricks Apps) and must keep doing so, because it builds
+    ``DATABASE_URI``. It is not the answer to "which database am I on": with the
+    Apps Lakebase resource bound, or Lakebase activated in this process (a
+    crew/flow child re-activates it itself), the data is on Lakebase Postgres.
+    Anything that reports or branches on the database kind asks this instead.
+    """
+    from src.db.lakebase_state import is_lakebase_activated
+
+    if LakebaseAppResource.from_env() is not None or is_lakebase_activated():
+        return "lakebase"
+    from src.config.settings import settings
+
+    return (settings.DATABASE_TYPE or "sqlite").lower()
 
 
 async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
@@ -64,7 +86,10 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
             )
             row = cursor.fetchone()
             if row and row[0]:
-                return json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                loaded: Dict[str, Any] = (
+                    json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                )
+                return loaded
             return None
         finally:
             conn.close()
@@ -88,7 +113,7 @@ async def is_lakebase_enabled() -> bool:
             logger.debug("🔴 Lakebase DISABLED - No configuration found in database")
             return False
 
-        is_enabled = (
+        is_enabled = bool(
             config.get("enabled", False)
             and config.get("endpoint")
             and (
@@ -136,15 +161,15 @@ async def activate_lakebase_in_subprocess() -> bool:
             return False
 
         config = await get_lakebase_config_from_db()
-        instance_name = (config or {}).get("instance_name") or os.environ.get(
-            "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-        )
+        instance_name = lakebase_instance_from_config(config)
 
         from src.db.lakebase_session import LakebaseSessionFactory
 
         lb_factory = LakebaseSessionFactory(instance_name)
         await lb_factory.create_engine()
-        async_session_factory.activate_lakebase(lb_factory._session_factory)
+        lb_session_factory = lb_factory._session_factory
+        assert lb_session_factory is not None  # create_engine() sets it or raises
+        async_session_factory.activate_lakebase(lb_session_factory)
 
         from src.db.lakebase_state import mark_lakebase_activated
 
@@ -217,7 +242,7 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     # Decide which session provider to use BEFORE yielding
     use_lakebase = False
-    instance_name = None
+    instance_name = ""
     user_token = None
     user_email = None
     config = None
@@ -226,10 +251,7 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         logger.debug("🔄 DATABASE ROUTER: Connecting to LAKEBASE")
 
         config = await get_lakebase_config_from_db()
-        if config:
-            instance_name = config.get("instance_name")
-        if not instance_name:
-            instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+        instance_name = lakebase_instance_from_config(config)
 
         # Lakebase authenticates as the APP'S SERVICE PRINCIPAL, from environment
         # variables — see LakebaseConnectionService.get_workspace_client, which

@@ -294,6 +294,8 @@ def deep_recall(
         pending = []
         best = best_score(hits)
 
-    return RecallOutcome(
-        records=rank(hits, limit), plan=plan, rounds=rounds, best_score=best
-    )
+    ranked = rank(hits, limit)
+    policy = getattr(memory, "decision_policy", None)
+    if policy is not None:
+        ranked = policy.rank(query, ranked)
+    return RecallOutcome(records=ranked, plan=plan, rounds=rounds, best_score=best)

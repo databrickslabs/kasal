@@ -5,6 +5,7 @@
  * Just enter workspace URL and click setup - everything else is automatic.
  */
 
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Autocomplete,
@@ -48,6 +49,7 @@ import {
 } from '../../../types/config/memoryBackend';
 import { MemoryBackendService } from '../../../api/memory/MemoryBackendService';
 import { MemoryRecordsBrowser } from './MemoryRecordsBrowser';
+import LakebaseRoleField from './LakebaseRoleField';
 
 export const MemoryConfiguration: React.FC = () => {
   const [mode, setMode] = useState<'disabled' | 'lakebase'>('disabled');
@@ -72,7 +74,10 @@ export const MemoryConfiguration: React.FC = () => {
   const [lakebaseTableStats, setLakebaseTableStats] = useState<Record<string, { table_name: string; exists: boolean; row_count: number }> | null>(null);
   const [memoryBrowserOpen, setMemoryBrowserOpen] = useState(false);
   
-  const { updateConfig, config } = useMemoryBackendStore();
+  const { updateConfig, config } = useMemoryBackendStore(useShallow(state => ({
+    updateConfig: state.updateConfig,
+    config: state.config,
+  })));
   
   
   // Load existing configuration and detect workspace URL on mount
@@ -974,6 +979,10 @@ export const MemoryConfiguration: React.FC = () => {
                 }));
               }}
               helperText="Must match your embedding model (1024 for databricks-gte-large-en)"
+            />
+            <LakebaseRoleField
+              value={lakebaseConfig.db_role}
+              onChange={(db_role) => setLakebaseConfig(prev => ({ ...prev, db_role }))}
             />
           </Box>
 

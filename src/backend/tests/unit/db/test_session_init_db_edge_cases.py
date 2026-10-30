@@ -13,10 +13,6 @@ Targets uncovered lines:
 - Lines 294-316: configure_sqlite function
 - Lines 321-330: SQLite event listener application
 - Lines 465-662: init_db function
-- Lines 713-737: get_db PostgreSQL branch
-- Lines 752-764: get_db OperationalError retry in session
-- Lines 768-771: get_db ValueError token reset
-- Lines 774-780: get_db outer OperationalError retry
 - Lines 797-798: get_local_db
 - Lines 819-830, 854-855: dispose_engines edge cases
 """
@@ -27,7 +23,6 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.exc import OperationalError
 
 # ---------------------------------------------------------------------------
 # retry_db_operation: exhaust retries (raise last_exception) and general exc
@@ -391,14 +386,18 @@ class TestEnsureDatabricksConfigColumns:
         await _ensure_databricks_config_columns(conn)
 
         sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
-        assert "information_schema.columns" in sql_calls[0]
+        assert "pg_attribute" in sql_calls[0]
         assert len(sql_calls) == 2
         assert "ADD COLUMN IF NOT EXISTS ai_gateway_enabled" in sql_calls[1]
         assert not any("PRAGMA" in s for s in sql_calls)
 
     @pytest.mark.asyncio
-    async def test_exception_is_swallowed(self):
-        """Driver errors are caught and logged, not propagated."""
+    async def test_exception_reaches_the_steps_savepoint(self):
+        """Driver errors propagate, so the runner's SAVEPOINT rolls the step back.
+
+        Catching them here left PostgreSQL's transaction aborted for every step
+        after this one (src/db/self_heal/report.py).
+        """
         from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
@@ -406,181 +405,8 @@ class TestEnsureDatabricksConfigColumns:
 
         with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
-            # Must not raise.
-            await _ensure_databricks_config_columns(conn)
-
-
-# ---------------------------------------------------------------------------
-# get_db: OperationalError retry paths and token reset ValueError
-# ---------------------------------------------------------------------------
-
-
-class TestGetDbEdgeCases:
-
-    @pytest.mark.asyncio
-    async def test_get_db_rollback_on_general_exception(self):
-        """get_db rolls back session on general exception."""
-        mock_session = AsyncMock()
-
-        class MockCtx:
-            async def __aenter__(self):
-                return mock_session
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_factory = MagicMock(return_value=MockCtx())
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import get_db
-
-            gen = get_db()
-            await gen.__anext__()
-            with pytest.raises(ValueError):
-                await gen.athrow(ValueError("test rollback"))
-
-        mock_session.rollback.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_get_db_operational_error_non_lock_raises(self):
-        """get_db raises OperationalError that is not a lock error."""
-        mock_session = AsyncMock()
-
-        class MockCtx:
-            async def __aenter__(self):
-                return mock_session
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_factory = MagicMock(return_value=MockCtx())
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import get_db
-
-            gen = get_db()
-            await gen.__anext__()
-            with pytest.raises(OperationalError):
-                await gen.athrow(OperationalError("connection refused", None, None))
-
-        mock_session.rollback.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_get_db_locked_error_triggers_rollback_and_retry(self):
-        """get_db rolls back on locked error and retries (ends up succeeding on retry)."""
-        mock_session = AsyncMock()
-
-        class MockCtx:
-            async def __aenter__(self):
-                return mock_session
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_factory = MagicMock(return_value=MockCtx())
-
-        with (
-            patch("src.db.session.async_session_factory", mock_factory),
-            patch("asyncio.sleep", new_callable=AsyncMock),
-        ):
-            from src.db.session import get_db
-
-            gen = get_db()
-            await gen.__anext__()
-            # Throw a lock error — triggers rollback, then retries (succeeds on retry)
-            try:
-                await gen.athrow(OperationalError("database is locked", None, None))
-            except StopAsyncIteration:
-                pass  # Retry succeeded and generator finished
-            except OperationalError:
-                pass  # Retries exhausted
-
-        # rollback must have been called due to the lock error
-        mock_session.rollback.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_get_db_token_reset_value_error_suppressed(self):
-        """get_db suppresses ValueError from _request_session.reset."""
-        mock_session = AsyncMock()
-
-        class MockCtx:
-            async def __aenter__(self):
-                return mock_session
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_factory = MagicMock(return_value=MockCtx())
-
-        with (
-            patch("src.db.session.async_session_factory", mock_factory),
-            patch("src.db.session._request_session") as mock_ctx_var,
-        ):
-            mock_token = MagicMock()
-            mock_ctx_var.set.return_value = mock_token
-            mock_ctx_var.reset.side_effect = ValueError("token mismatch")
-            mock_ctx_var.get.return_value = None
-
-            from src.db.session import get_db
-
-            gen = get_db()
-            await gen.__anext__()
-            # Should not raise even though reset raises ValueError
-            try:
-                await gen.__anext__()
-            except StopAsyncIteration:
-                pass
-
-    @pytest.mark.asyncio
-    async def test_get_db_outer_operational_error_lock_retry(self):
-        """get_db retries when outer OperationalError is 'database is locked'."""
-        call_count = 0
-
-        class MockCtxFactory:
-            def __call__(self):
-                nonlocal call_count
-                call_count += 1
-                ctx = AsyncMock()
-                ctx.__aenter__ = AsyncMock(
-                    side_effect=OperationalError("database is locked", None, None)
-                )
-                ctx.__aexit__ = AsyncMock(return_value=False)
-                return ctx
-
-        mock_factory = MockCtxFactory()
-
-        with (
-            patch("src.db.session.async_session_factory", mock_factory),
-            patch("asyncio.sleep", new_callable=AsyncMock),
-        ):
-            from src.db.session import get_db
-
-            with pytest.raises(OperationalError):
-                gen = get_db()
-                await gen.__anext__()
-
-        # Should have retried up to max_retries (3)
-        assert call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_get_db_outer_operational_error_non_lock_raises_immediately(self):
-        """get_db raises immediately when outer OperationalError is not a lock error."""
-
-        class MockCtxFactory:
-            def __call__(self):
-                ctx = AsyncMock()
-                ctx.__aenter__ = AsyncMock(
-                    side_effect=OperationalError("server gone away", None, None)
-                )
-                ctx.__aexit__ = AsyncMock(return_value=False)
-                return ctx
-
-        with patch("src.db.session.async_session_factory", MockCtxFactory()):
-            from src.db.session import get_db
-
-            with pytest.raises(OperationalError, match="server gone away"):
-                gen = get_db()
-                await gen.__anext__()
+            with pytest.raises(RuntimeError, match="driver boom"):
+                await _ensure_databricks_config_columns(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -720,11 +546,13 @@ class TestEnsureChatSessionsTable:
             create_fn(sync_conn)
 
     @pytest.mark.asyncio
-    async def test_failure_is_swallowed(self):
-        """A create failure must not break startup — logged as a warning."""
+    async def test_failure_reaches_the_steps_savepoint(self):
+        """A create failure propagates; the runner rolls the step back and
+        carries on, so startup is unaffected (see test_self_heal_step_isolation)."""
         from src.db.self_heal.tables import _ensure_chat_sessions_table
 
         conn = MagicMock()
         conn.run_sync = AsyncMock(side_effect=Exception("locked"))
 
-        await _ensure_chat_sessions_table(conn)  # must not raise
+        with pytest.raises(Exception, match="locked"):
+            await _ensure_chat_sessions_table(conn)

@@ -368,21 +368,23 @@ class TestJoinSpecsExtraction:
 
 
 class TestDimTableFiltering:
-    def test_dim_tables_filtering(self):
-        """Tables with dc_datalake_prod_001__ in name are excluded from additional_tables."""
-        # Build YAML with joins that include filtered table names
-        yaml_with_filtered = (
+    def test_every_join_source_is_an_additional_table(self):
+        """No schema or prefix is dropped: every join source table is listed."""
+        yaml_with_joins = (
             "name: fact_test\n"
             "source: main.s.t\n"
             "joins:\n"
             "  - name: dim_ok\n"
             "    source: main.raw.dim_ok\n"
             "    on: t.id = dim_ok.id\n"
-            "  - name: filtered_table\n"
-            "    source: main.dc_datalake_prod_001__something.table\n"
+            "  - name: flattened_dim\n"
+            "    source: main.test_schema.acme_prod__acme_datamart_fm__dim_x\n"
             "    on: t.id = x.id\n"
+            "  - name: subquery_dim\n"
+            "    source: SELECT * FROM main.raw.dim_y\n"
+            "    on: t.id = y.id\n"
         )
-        ucmv = json.dumps({"yaml": {"fact_test": yaml_with_filtered}, "sql": {}})
+        ucmv = json.dumps({"yaml": {"fact_test": yaml_with_joins}, "sql": {}})
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
@@ -395,11 +397,13 @@ class TestDimTableFiltering:
             result = tool._run(ucmv_output=ucmv, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
-        additional_tables = data.get("additional_tables", "")
-        # The filtered table should NOT appear in additional_tables
-        assert "dc_datalake_prod_001__" not in additional_tables
-        # The valid dim table should appear
-        assert "dim_ok" in additional_tables
+        additional_tables = data.get("additional_tables", "").split("\n")
+        # Physical join sources are listed, whatever their schema or prefix;
+        # an inline SELECT source is not a table and stays out.
+        assert additional_tables == [
+            "main.raw.dim_ok",
+            "main.test_schema.acme_prod__acme_datamart_fm__dim_x",
+        ]
 
 
 # ---------------------------------------------------------------------------

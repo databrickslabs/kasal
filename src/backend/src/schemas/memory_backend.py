@@ -9,7 +9,7 @@ schemas no longer split memory into short-term / long-term / entity tiers.
 import re as _re
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -82,11 +82,11 @@ class MemoryTuningConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Blended-score floor below which a recall returns nothing. Left "
-            "unset, the floor follows the embedder in use: 0.75 with the "
-            "Databricks embedder, 0.62 with the local Ollama fallback "
-            "(KASAL_MEMORY_RECALL_MIN_SCORE overrides that default per "
-            "deployment)."
+            "Similarity (cosine) floor below which a memory is not recalled. "
+            "Recency and importance only rank what passes it, so an old "
+            "memory is never dropped for its age. Left unset, the floor "
+            "follows the embedder in use: 0.60 with the Databricks embedder, "
+            "0.64 with the local Ollama fallback."
         ),
     )
 
@@ -142,6 +142,66 @@ class MemoryTuningConfig(BaseModel):
         description=(
             "Character count below which deep recall skips LLM query analysis "
             "(default 200). Set 0 to always run LLM analysis."
+        ),
+    )
+
+    # Hygiene and retention (were KASAL_MEMORY_* environment variables).
+    recall_max_drop: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Recall drops candidates scoring more than this below the best one "
+            "(default 0.12). Keeps 'least unrelated filler' out of the context."
+        ),
+    )
+    write_screening: Optional[Literal["quarantine", "annotate", "off"]] = Field(
+        None,
+        description=(
+            "Prompt-injection screening before a memory is saved: quarantine "
+            "(default) drops high-severity content, annotate only records it, "
+            "off screens nothing."
+        ),
+    )
+    forgetting_enabled: Optional[bool] = Field(
+        None,
+        description=(
+            "Delete memories past their retention rule (default off: it is the "
+            "only pass that removes something a user might still want)."
+        ),
+    )
+    superseded_retention_days: Optional[float] = Field(
+        None,
+        ge=1,
+        description="Days a replaced fact is kept as history (default 90).",
+    )
+    episodic_ttl_days: Optional[float] = Field(
+        None,
+        ge=1,
+        description="Days an unimportant run/chat memory is kept (default 180).",
+    )
+    importance_floor: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Memories at or above this importance are never forgotten (default 0.4).",
+    )
+    supersession_enabled: Optional[bool] = Field(
+        None,
+        description="Retire facts a newer one contradicts (default on).",
+    )
+    llm_consolidation_enabled: Optional[bool] = Field(
+        None,
+        description="Merge clusters of near-duplicate memories between runs (default on).",
+    )
+
+    graph_memory: Optional[bool] = Field(
+        None,
+        description=(
+            "Store extracted facts in an entity graph instead of whole records "
+            "(default off). A write extracts durable facts and a newer value "
+            "replaces the one it contradicts; recall is one search plus the "
+            "facts about the matched entities."
         ),
     )
 
@@ -246,11 +306,13 @@ class LakebaseMemoryConfig(BaseModel):
         None,
         description="Lakebase instance name (uses configured default if not set)",
     )
-    embedding_dimension: int = Field(1024, description="Dimension of embedding vectors")
+    embedding_dimension: int = Field(
+        default=1024, description="Dimension of embedding vectors"
+    )
 
     # Memory table — one table stores every MemoryRecord.
     memory_table: str = Field(
-        "crew_memory",
+        default="crew_memory",
         description="Table for CrewAI memory records.",
     )
 
@@ -265,6 +327,25 @@ class LakebaseMemoryConfig(BaseModel):
         False,
         description="Whether the memory table has been initialized on the Lakebase instance",
     )
+
+    #: Role knowledge sessions assume (SET ROLE); it replaced the
+    #: LAKEBASE_KNOWLEDGE_ROLE env var. None = databricks_superuser, "" = none.
+    db_role: Optional[str] = Field(
+        default=None,
+        description=(
+            "Role assumed for knowledge search on this instance "
+            "(default databricks_superuser; empty string assumes none)."
+        ),
+    )
+
+    @field_validator("db_role")
+    @classmethod
+    def _validate_db_role(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return v
+        if not _SAFE_TABLE_NAME.match(v):
+            raise ValueError(f"Invalid db_role identifier: {v!r}")
+        return v
 
     model_config = {
         "json_schema_extra": {
@@ -350,7 +431,7 @@ class MemoryBackendConfig(BaseModel):
     )
 
     databricks_config: Optional[DatabricksMemoryConfig] = Field(
-        None,
+        default=None,
         description="Configuration for Databricks backend (required if backend_type='databricks')",
     )
     lakebase_config: Optional[LakebaseMemoryConfig] = Field(
@@ -359,12 +440,12 @@ class MemoryBackendConfig(BaseModel):
     )
 
     cognitive_config: Optional[MemoryTuningConfig] = Field(
-        None,
+        default=None,
         description="Optional tuning parameters for the memory.",
     )
 
     custom_config: Optional[Dict[str, Any]] = Field(
-        None, description="Additional backend-specific configuration"
+        default=None, description="Additional backend-specific configuration"
     )
 
     model_config = {
@@ -384,3 +465,60 @@ class MemoryBackendConfig(BaseModel):
             }
         }
     }
+
+
+class MemoryGraphEntity(BaseModel):
+    """One entity in a teamspace's graph memory."""
+
+    id: str
+    name: str
+    type: str
+
+
+class MemoryGraphFact(BaseModel):
+    """One fact: ``subject --relation--> object`` and the sentence stating it.
+    ``valid_to`` set means a newer fact (``superseded_by``) replaced it."""
+
+    id: str
+    subject_id: str
+    subject: str
+    relation: str
+    object_id: Optional[str] = None
+    object: str
+    statement: str
+    source: Optional[str] = None
+    created_at: Optional[datetime] = None
+    valid_to: Optional[datetime] = None
+    superseded_by: Optional[str] = None
+    execution_id: Optional[str] = None
+    qualifiers: Dict[str, str] = Field(
+        default_factory=dict,
+        description="What qualifies the relation: a role, a period, a field.",
+    )
+    kind: str = Field(
+        "semantic",
+        description=(
+            "procedural (a standing preference, always recalled), semantic (a "
+            "fact the user stated), finding (a fact a run established) or "
+            "episodic (a run note)."
+        ),
+    )
+
+
+class MemoryGraphResponse(BaseModel):
+    """The memory browser's ontology view."""
+
+    backend: str
+    enabled: bool = Field(
+        description="Whether graph memory is switched on for this teamspace."
+    )
+    entities: List[MemoryGraphEntity] = Field(default_factory=list)
+    facts: List[MemoryGraphFact] = Field(default_factory=list)
+
+
+class MemoryGraphForgetResponse(BaseModel):
+    """Result of asking memory to stop recalling one fact."""
+
+    forgotten: bool = Field(
+        description="False when the fact was not found or was already retired."
+    )

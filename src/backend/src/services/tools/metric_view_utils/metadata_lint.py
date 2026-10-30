@@ -60,6 +60,8 @@ import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
+from .metadata_lint_fields import _extract_fields, _Field
+
 # ─── Severities ──────────────────────────────────────────────────────────────
 
 SEVERITY_ERROR = "error"
@@ -89,7 +91,7 @@ _MIN_DESCRIPTION_LEN = 15
 # by a per-unit / percentage qualifier (playbook:
 # ``<kpi>_<actual|bp|re|py>[_per_uc|_pct_nsr|_pct]``).
 #
-# These are the CCH/Total-SC vocabulary and are DEFAULTS ONLY — a different model
+# These are the reference model vocabulary and are DEFAULTS ONLY — a different model
 # uses different scenario words (budget/forecast/ly/plan). They are overridable
 # per run via LintConfig (crew input), so the rule stays general.
 _DEFAULT_SCENARIO_SUFFIXES = ("actual", "bp", "re", "py")
@@ -149,7 +151,7 @@ _DEFAULT_UNIT_SUFFIXES = (
 # MV004's PRIMARY detection is structural (two dimensions sharing a source
 # expression), which needs no vocabulary. These alias groups are a DEFAULT
 # supplement for same-concept-different-column cases (``company_code`` vs
-# ``comp_code``); they are the CCH/SAP vocabulary and overridable per run.
+# ``comp_code``); they are the reference-model vocabulary and overridable per run.
 _DEFAULT_DIMENSION_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"company_code", "comp_code", "company", "company_id", "cocd"}),
     frozenset({"fiscal_period", "fiscper", "fiscal_year_period", "period"}),
@@ -172,7 +174,9 @@ _DEFAULT_DIMENSION_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
 )
 
 
-def _build_scenario_re(suffixes, qualifiers) -> "re.Pattern":
+def _build_scenario_re(
+    suffixes: tuple[str, ...], qualifiers: tuple[str, ...]
+) -> re.Pattern[str]:
     """Compile the scenario-suffix regex from token lists (empty → matches none)."""
     if not suffixes:
         return re.compile(r"(?!)")  # never matches
@@ -182,7 +186,7 @@ def _build_scenario_re(suffixes, qualifiers) -> "re.Pattern":
     return re.compile(rf"_(?:{body}){tail}$", re.IGNORECASE)
 
 
-def _build_unit_re(units) -> "re.Pattern":
+def _build_unit_re(units: tuple[str, ...]) -> re.Pattern[str]:
     """Compile the unit-suffix regex from a token list (empty → matches none)."""
     if not units:
         return re.compile(r"(?!)")
@@ -190,38 +194,49 @@ def _build_unit_re(units) -> "re.Pattern":
     return re.compile(rf"_(?:{body})$", re.IGNORECASE)
 
 
+def _string_tokens(
+    data: dict[str, object], key: str, default: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Lower-cased, stripped string tokens from ``data[key]``, else ``default``."""
+    v = data.get(key)
+    if isinstance(v, (list, tuple)):
+        toks = tuple(str(t).strip().lower() for t in v if str(t).strip())
+        return toks or default
+    return default
+
+
 @dataclass
 class LintConfig:
     """Per-run, model-specific lint vocabulary. Every field DEFAULTS to the
-    CCH/Total-SC values, so an unconfigured run behaves exactly as before; a crew
+    the reference model values, so an unconfigured run behaves exactly as before; a crew
     supplies its own model's words via :meth:`from_dict`.
 
     Only genuinely model-specific knobs live here — the structural rules (MV001
     snake_case, MV004 shared-expr, MV005 synonym clash, MV006 UC synonym limit,
     MV007 display_name) need no vocabulary and are not configurable."""
 
-    scenario_suffixes: tuple = _DEFAULT_SCENARIO_SUFFIXES
-    scenario_qualifiers: tuple = _DEFAULT_SCENARIO_QUALIFIERS
-    unit_suffixes: tuple = _DEFAULT_UNIT_SUFFIXES
-    dimension_alias_groups: tuple = _DEFAULT_DIMENSION_ALIAS_GROUPS
+    scenario_suffixes: tuple[str, ...] = _DEFAULT_SCENARIO_SUFFIXES
+    scenario_qualifiers: tuple[str, ...] = _DEFAULT_SCENARIO_QUALIFIERS
+    unit_suffixes: tuple[str, ...] = _DEFAULT_UNIT_SUFFIXES
+    dimension_alias_groups: tuple[frozenset[str], ...] = _DEFAULT_DIMENSION_ALIAS_GROUPS
     min_description_len: int = _MIN_DESCRIPTION_LEN
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self._scenario_re = _build_scenario_re(
             self.scenario_suffixes, self.scenario_qualifiers
         )
         self._unit_re = _build_unit_re(self.unit_suffixes)
 
     @property
-    def scenario_re(self) -> "re.Pattern":
+    def scenario_re(self) -> re.Pattern[str]:
         return self._scenario_re
 
     @property
-    def unit_re(self) -> "re.Pattern":
+    def unit_re(self) -> re.Pattern[str]:
         return self._unit_re
 
     @classmethod
-    def from_dict(cls, data) -> "LintConfig":
+    def from_dict(cls, data: object) -> "LintConfig":
         """Build from a crew-supplied dict, ignoring junk and falling back to
         defaults for any missing/empty key. Keys (all optional):
         ``scenario_suffixes``, ``scenario_qualifiers``, ``unit_suffixes`` (lists
@@ -229,13 +244,6 @@ class LintConfig:
         ``min_description_len`` (int)."""
         if not isinstance(data, dict) or not data:
             return cls()
-
-        def _tokens(key, default):
-            v = data.get(key)
-            if isinstance(v, (list, tuple)):
-                toks = tuple(str(t).strip().lower() for t in v if str(t).strip())
-                return toks or default
-            return default
 
         groups = data.get("dimension_alias_groups")
         if isinstance(groups, (list, tuple)) and groups:
@@ -253,11 +261,13 @@ class LintConfig:
             min_len = _MIN_DESCRIPTION_LEN
 
         return cls(
-            scenario_suffixes=_tokens("scenario_suffixes", _DEFAULT_SCENARIO_SUFFIXES),
-            scenario_qualifiers=_tokens(
-                "scenario_qualifiers", _DEFAULT_SCENARIO_QUALIFIERS
+            scenario_suffixes=_string_tokens(
+                data, "scenario_suffixes", _DEFAULT_SCENARIO_SUFFIXES
             ),
-            unit_suffixes=_tokens("unit_suffixes", _DEFAULT_UNIT_SUFFIXES),
+            scenario_qualifiers=_string_tokens(
+                data, "scenario_qualifiers", _DEFAULT_SCENARIO_QUALIFIERS
+            ),
+            unit_suffixes=_string_tokens(data, "unit_suffixes", _DEFAULT_UNIT_SUFFIXES),
             dimension_alias_groups=alias_groups,
             min_description_len=min_len,
         )
@@ -286,87 +296,6 @@ class LintFinding:
     severity: str
     field: str
     message: str
-
-
-# ─── Internal normalized field ───────────────────────────────────────────────
-
-
-@dataclass
-class _Field:
-    """Normalized view of a measure or dimension for the rule passes."""
-
-    name: str
-    expr: str
-    display_name: str
-    synonyms: list
-    comment: str
-    kind: str  # "measure" | "dimension"
-
-
-def _as_list(value) -> list:
-    """Coerce a synonyms value into a clean list of non-empty strings."""
-    if not value:
-        return []
-    if isinstance(value, (list, tuple)):
-        return [str(v) for v in value if v is not None and str(v).strip()]
-    # A single scalar synonym.
-    return [str(value)] if str(value).strip() else []
-
-
-def _field_from_dict(entry: dict, kind: str) -> _Field:
-    """Build a :class:`_Field` from an emitted-YAML dict entry."""
-    return _Field(
-        name=str(entry.get("name") or "").strip(),
-        expr=str(entry.get("expr") or "").strip(),
-        display_name=str(entry.get("display_name") or "").strip(),
-        synonyms=_as_list(entry.get("synonyms")),
-        comment=str(entry.get("comment") or "").strip(),
-        kind=kind,
-    )
-
-
-def _field_from_object(obj, kind: str) -> _Field:
-    """Build a :class:`_Field` from an object (e.g. ``TranslationResult``).
-
-    Maps the engine dataclass field names onto the lint contract:
-    ``measure_name`` -> name, ``sql_expr`` -> expr, ``skip_reason`` -> comment
-    (only when no explicit ``comment`` attribute is present).
-    """
-    name = getattr(obj, "measure_name", None) or getattr(obj, "name", None) or ""
-    expr = getattr(obj, "sql_expr", None) or getattr(obj, "expr", None) or ""
-    comment = getattr(obj, "comment", None) or getattr(obj, "skip_reason", None) or ""
-    return _Field(
-        name=str(name).strip(),
-        expr=str(expr or "").strip(),
-        display_name=str(getattr(obj, "display_name", "") or "").strip(),
-        synonyms=_as_list(getattr(obj, "synonyms", None)),
-        comment=str(comment).strip(),
-        kind=kind,
-    )
-
-
-def _coerce_field(entry, kind: str) -> _Field:
-    """Normalize one dimension/measure entry regardless of dict-vs-object."""
-    if isinstance(entry, dict):
-        return _field_from_dict(entry, kind)
-    return _field_from_object(entry, kind)
-
-
-def _extract_fields(spec) -> tuple[list[_Field], list[_Field]]:
-    """Return ``(dimensions, measures)`` as normalized :class:`_Field` lists.
-
-    Accepts a dict (emitted-YAML shape) or any object exposing
-    ``.dimensions`` / ``.measures``.
-    """
-    if isinstance(spec, dict):
-        raw_dims = spec.get("dimensions") or []
-        raw_meas = spec.get("measures") or []
-    else:
-        raw_dims = getattr(spec, "dimensions", None) or []
-        raw_meas = getattr(spec, "measures", None) or []
-    dimensions = [_coerce_field(d, "dimension") for d in raw_dims]
-    measures = [_coerce_field(m, "measure") for m in raw_meas]
-    return dimensions, measures
 
 
 # ─── Expression analysis helpers ─────────────────────────────────────────────
@@ -417,15 +346,15 @@ def _is_absolute_building_block(f: _Field) -> bool:
     return _is_aggregate(f.expr) and not _has_division(f.expr)
 
 
-def _has_scenario_suffix(name: str, scenario_re: "re.Pattern") -> bool:
+def _has_scenario_suffix(name: str, scenario_re: re.Pattern[str]) -> bool:
     return bool(scenario_re.search(name))
 
 
-def _has_unit_suffix(name: str, unit_re: "re.Pattern") -> bool:
+def _has_unit_suffix(name: str, unit_re: re.Pattern[str]) -> bool:
     return bool(unit_re.search(name))
 
 
-def _has_percentage_format(entry) -> bool:
+def _has_percentage_format(entry: object) -> bool:
     """True if the raw entry declares a percentage format block."""
     if isinstance(entry, dict):
         fmt = entry.get("format") or {}
@@ -447,7 +376,9 @@ def _suggest_snake_case(name: str) -> str:
     return re.sub(r"_+", "_", suggestion)
 
 
-def _canonical_dim_group(name: str, alias_groups) -> frozenset[str] | None:
+def _canonical_dim_group(
+    name: str, alias_groups: tuple[frozenset[str], ...]
+) -> frozenset[str] | None:
     """Return the alias group a dimension name belongs to, or None."""
     low = name.lower()
     for group in alias_groups:
@@ -497,7 +428,7 @@ def _check_snake_case(fields: list[_Field]) -> list[LintFinding]:
 
 
 def _check_kpi_scenario_suffix(
-    measures: list[_Field], pct_format_names: set[str], scenario_re: "re.Pattern"
+    measures: list[_Field], pct_format_names: set[str], scenario_re: re.Pattern[str]
 ) -> list[LintFinding]:
     """MV002: a KPI-looking measure should end with a scenario suffix."""
     findings: list[LintFinding] = []
@@ -521,7 +452,7 @@ def _check_kpi_scenario_suffix(
 
 
 def _check_absolute_unit_suffix(
-    measures: list[_Field], unit_re: "re.Pattern", scenario_re: "re.Pattern"
+    measures: list[_Field], unit_re: re.Pattern[str], scenario_re: re.Pattern[str]
 ) -> list[LintFinding]:
     """MV003: an absolute building block must carry its unit in the name."""
     findings: list[LintFinding] = []
@@ -551,7 +482,7 @@ def _check_absolute_unit_suffix(
 
 
 def _check_duplicate_dimensions(
-    dimensions: list[_Field], alias_groups
+    dimensions: list[_Field], alias_groups: tuple[frozenset[str], ...]
 ) -> list[LintFinding]:
     """MV004: two dimensions that are the same concept under different names.
 
@@ -584,7 +515,7 @@ def _check_duplicate_dimensions(
                 )
             )
 
-    # (a) known alias groups (configurable vocabulary; default = CCH/SAP names).
+    # (a) known alias groups (configurable vocabulary; default = reference-model names).
     group_members: dict[frozenset[str], list[str]] = {}
     for d in dimensions:
         group = _canonical_dim_group(d.name, alias_groups)
@@ -726,7 +657,7 @@ def _check_description_quality(
 
 
 def lint_metric_view(
-    spec_or_dict, config: "LintConfig | None" = None
+    spec_or_dict: object, config: "LintConfig | None" = None
 ) -> list[LintFinding]:
     """Lint a generated UC metric-view spec against the naming/metadata rules.
 
@@ -738,7 +669,7 @@ def lint_metric_view(
         module docstring for the exact contract.
     config
         Model-specific vocabulary (scenario words, unit list, alias groups,
-        description length). Defaults to the CCH/Total-SC values, so an
+        description length). Defaults to the reference model values, so an
         unconfigured call is unchanged; a crew passes its own via
         ``LintConfig.from_dict``.
 

@@ -185,7 +185,7 @@ class TestJoinDetectorDimJoins:
                     "join_key": "country_id",
                     "dim_columns": ["region"],
                     # authoritative path resolved during enrichment
-                    "source_table": "dc_datalake_prod_001.udm_datamart_cust_exp.cust_exp_dim_company",
+                    "source_table": "acme_prod.acme_datamart_cust_exp.cust_exp_dim_company",
                 },
             }
         }
@@ -195,7 +195,7 @@ class TestJoinDetectorDimJoins:
         assert len(joins) == 1
         assert (
             joins[0]["source"]
-            == "dc_datalake_prod_001.udm_datamart_cust_exp.cust_exp_dim_company"
+            == "acme_prod.acme_datamart_cust_exp.cust_exp_dim_company"
         )
 
     def test_real_source_not_overridden_by_join_key_map(self):

@@ -40,7 +40,9 @@ async def test_basic_find_and_update_and_delete():
     repo.find_all = AsyncMock(
         return_value=[mk_model("a"), mk_model("b", enabled=False)]
     )
-    repo.find_enabled_models = AsyncMock(return_value=[mk_model("a")])
+    repo.find_in_scope = AsyncMock(
+        return_value=[mk_model("a"), mk_model("b", enabled=False)]
+    )
     repo.find_by_key = AsyncMock(side_effect=[mk_model("a"), None])
 
     out_all = await svc.find_all()
@@ -68,10 +70,10 @@ async def test_basic_find_and_update_and_delete():
     created = await svc.create_model_config(Dummy())
     assert created.key == "c"
 
-    # update: missing returns None; then success path updates by id
-    repo.find_by_key = AsyncMock(return_value=None)
+    # update: the global row only; missing returns None, else updates by id
+    repo.find_global_by_key = AsyncMock(return_value=None)
     assert await svc.update_model_config("nope", {}) is None
-    repo.find_by_key = AsyncMock(return_value=mk_model("d"))
+    repo.find_global_by_key = AsyncMock(return_value=mk_model("d"))
     repo.update = AsyncMock(return_value=mk_model("d", name="NN"))
     upd = await svc.update_model_config("d", {"name": "NN"})
     assert upd.name == "NN"
@@ -189,7 +191,10 @@ async def test_group_aware_listing_and_toggle_with_group():
     other = mk_model("k2", group_id=None, enabled=True)
     repo.find_all = AsyncMock(return_value=[default, override, other])
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     eff = await svc.find_all_for_group(gc)
     assert any(m.key == "k1" and m.group_id == "g1" for m in eff)
@@ -288,13 +293,17 @@ class TestLocalFallbackConfig:
     async def test_custom_endpoint_fallback_without_provider_key(
         self, monkeypatch, reachable
     ):
-        svc = self._svc([mk_model("KAT-Coder", provider="custom")])
-        monkeypatch.setenv("KAT_BASE_URL", "http://10.0.0.61:8082/v1")
+        # The endpoint is the model's own setting (Configuration → Models);
+        # KAT_BASE_URL is no longer read.
+        model = mk_model("KAT-Coder", provider="custom")
+        model.params = {"api_base": "http://kat.example.com:8082/v1"}
+        svc = self._svc([model])
+        monkeypatch.setenv("KAT_BASE_URL", "http://ignored.example.com/v1")
         probe = AsyncMock(return_value=reachable)
         monkeypatch.setattr("src.services.settings.models._endpoint_reachable", probe)
         _patch_keys(monkeypatch, None)
         out = await svc._local_fallback_config()
-        probe.assert_awaited_once_with("http://10.0.0.61:8082/v1")
+        probe.assert_awaited_once_with("http://kat.example.com:8082/v1")
         if reachable:
             assert out["key"] == "KAT-Coder"
             assert out["provider"] == "custom"
@@ -362,14 +371,14 @@ class TestLocalFallbackConfig:
         assert out["key"] == "gpt-5-nano"
 
     @pytest.mark.asyncio
-    async def test_env_pin_wins_over_ranking(self, monkeypatch):
+    async def test_env_pin_wins_over_ranking(self, engine_setting, monkeypatch):
         svc = self._svc(
             [
                 mk_model("Qwen3", provider="vllm"),
                 mk_model("gpt-5-nano", provider="openai"),
             ]
         )
-        monkeypatch.setenv("KASAL_FALLBACK_MODEL", "gpt-5-nano")
+        engine_setting("fallback_model", "gpt-5-nano")
         # Reachable self-hosted would normally win — the pin overrides it.
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
@@ -379,9 +388,9 @@ class TestLocalFallbackConfig:
         assert out["key"] == "gpt-5-nano"
 
     @pytest.mark.asyncio
-    async def test_unknown_env_pin_falls_back_to_ranking(self, monkeypatch):
+    async def test_unknown_pin_falls_back_to_ranking(self, engine_setting, monkeypatch):
         svc = self._svc([mk_model("Qwen3", provider="vllm")])
-        monkeypatch.setenv("KASAL_FALLBACK_MODEL", "does-not-exist")
+        engine_setting("fallback_model", "does-not-exist")
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
             AsyncMock(return_value=True),

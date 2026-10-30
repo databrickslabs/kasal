@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect } from 'react';
 import { usePermissionStore } from '../store/permissions';
 
@@ -6,7 +7,11 @@ import { usePermissionStore } from '../store/permissions';
  * This hook should be used at the app level to ensure permissions are always loaded
  */
 export const usePermissionLoader = () => {
-  const { loadPermissions, userRole, isLoading } = usePermissionStore();
+  const { loadPermissions, userRole, isLoading } = usePermissionStore(useShallow(state => ({
+    loadPermissions: state.loadPermissions,
+    userRole: state.userRole,
+    isLoading: state.isLoading,
+  })));
 
   useEffect(() => {
     // Load permissions on mount
@@ -18,19 +23,13 @@ export const usePermissionLoader = () => {
       loadPermissions(customEvent.detail.groupId);
     };
 
-    // Listen for storage events (when selectedGroupId changes)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'selectedGroupId' && e.newValue) {
-        loadPermissions(e.newValue);
-      }
-    };
-
+    // Only this tab's own switch counts. A switch in another tab changes the
+    // shared localStorage key (a 'storage' event here) but not this tab's
+    // teamspace, so this tab keeps its permissions.
     window.addEventListener('group-changed', handleGroupChange);
-    window.addEventListener('storage', handleStorageChange);
 
     return () => {
       window.removeEventListener('group-changed', handleGroupChange);
-      window.removeEventListener('storage', handleStorageChange);
     };
   }, [loadPermissions]);
 

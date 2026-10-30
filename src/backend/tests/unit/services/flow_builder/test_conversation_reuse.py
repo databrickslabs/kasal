@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from src.services.flow_builder.conversation.reuse import (
     IDENTITY_CHANNEL,
     crews_that_answer,
+    output_slug,
     record_identity,
     reusable_output,
     reuse_enabled,
@@ -390,3 +391,26 @@ class TestTheSelectedOutcomeAlwaysRuns:
     def test_a_flow_without_the_attribute_is_not_an_error(self):
         """A non-conversational flow never narrows and carries no selection."""
         assert crews_that_answer(FLOW_CONFIG, SimpleNamespace()) == {"compare"}
+
+
+class TestOutputSlug:
+    """flow_methods stores each crew's output under this name too, so a later
+    task can interpolate it. The function did not exist: the import failed
+    inside a try/except and no crew output was ever reachable by placeholder."""
+
+    def test_a_display_name_becomes_a_placeholder_name(self):
+        assert output_slug("Agentic AI Frameworks") == "agentic_ai_frameworks"
+        assert output_slug("  news -- summary! ") == "news_summary"
+
+    def test_never_private_or_numeric_and_empty_means_nothing(self):
+        assert output_slug("_hidden") == "hidden"
+        assert output_slug("2024 review") == "crew_2024_review"
+        assert output_slug("") == ""
+        assert output_slug("!!!") == ""
+
+    def test_the_flow_stores_the_output_under_the_slug(self):
+        from src.services.flow_builder.modules.flow_methods import _store_output_slug
+
+        flow = SimpleNamespace(state={})
+        _store_output_slug(flow, "Agentic AI Frameworks", "LangChain, AutoGen")
+        assert flow.state == {"agentic_ai_frameworks": "LangChain, AutoGen"}

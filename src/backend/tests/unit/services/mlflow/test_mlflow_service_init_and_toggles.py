@@ -52,6 +52,8 @@ class TestMLflowServiceBasicMethods:
     def setup_method(self):
         """Set up test fixtures"""
         self.mock_session = Mock()
+        # The service owns the transaction: a successful toggle commits it.
+        self.mock_session.commit = AsyncMock()
         self.group_id = "test-group-id"
         self.service = MLflowService(self.mock_session, self.group_id)
 
@@ -86,6 +88,7 @@ class TestMLflowServiceBasicMethods:
         self.service.repo.set_enabled.assert_called_once_with(
             enabled=True, group_id=self.group_id
         )
+        self.mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_set_enabled_false(self):
@@ -122,6 +125,7 @@ class TestMLflowServiceBasicMethods:
         self.service.repo.set_evaluation_enabled.assert_called_once_with(
             enabled=True, group_id=self.group_id
         )
+        self.mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_set_evaluation_enabled_false(self):

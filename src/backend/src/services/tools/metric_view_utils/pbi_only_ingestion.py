@@ -40,10 +40,9 @@ from __future__ import annotations
 
 import re
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # PBIOnlyKind enum
@@ -453,18 +452,20 @@ def _inline_values_stub(table_name: str, uc_target: str) -> str:
 # ---------------------------------------------------------------------------
 
 _APPROACH: dict = {
-    PBIOnlyKind.EXCEL_WORKBOOK:   "dax_evaluate",
-    PBIOnlyKind.SHAREPOINT:       "dax_evaluate",
-    PBIOnlyKind.WEB_CONTENTS:     "http_download",
-    PBIOnlyKind.JSON_DOCUMENT:    "http_download",
-    PBIOnlyKind.TYPED_TABLE:      "inline_values",
-    PBIOnlyKind.TMDL_EXPRESSION:  "tmdl_decode",
+    PBIOnlyKind.EXCEL_WORKBOOK: "dax_evaluate",
+    PBIOnlyKind.SHAREPOINT: "dax_evaluate",
+    PBIOnlyKind.WEB_CONTENTS: "http_download",
+    PBIOnlyKind.JSON_DOCUMENT: "http_download",
+    PBIOnlyKind.TYPED_TABLE: "inline_values",
+    PBIOnlyKind.TMDL_EXPRESSION: "tmdl_decode",
 }
 
 _STUB_BUILDERS = {
-    "dax_evaluate":  lambda t, u, src: _dax_evaluate_stub(t, u),
-    "tmdl_decode":   lambda t, u, src: _tmdl_decode_stub(t, u),
-    "http_download": lambda t, u, src: _http_download_stub(t, u, src.url if src else None),
+    "dax_evaluate": lambda t, u, src: _dax_evaluate_stub(t, u),
+    "tmdl_decode": lambda t, u, src: _tmdl_decode_stub(t, u),
+    "http_download": lambda t, u, src: _http_download_stub(
+        t, u, src.url if src else None
+    ),
     "inline_values": lambda t, u, src: _inline_values_stub(t, u),
 }
 
@@ -512,9 +513,7 @@ def build_ingestion_task(
     stub = stub_builder(table_name, uc_target, source)
 
     source_desc = (
-        source.description
-        if source
-        else f"PBI-only source of kind {kind.value}"
+        source.description if source else f"PBI-only source of kind {kind.value}"
     )
 
     return IngestionTask(

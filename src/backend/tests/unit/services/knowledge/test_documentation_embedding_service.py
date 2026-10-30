@@ -184,14 +184,40 @@ class TestCreateDocumentationEmbedding:
         mock_queue = AsyncMock()
         doc_create = _make_doc_embedding_create()
 
+        # The SESSION's dialect decides, not DATABASE_TYPE (which names the
+        # base engine: SQLite inside Databricks Apps even on Lakebase).
+        session.get_bind = MagicMock(return_value=MagicMock(dialect=MagicMock()))
+        session.get_bind.return_value.dialect.name = "sqlite"
         with (
-            patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}),
+            patch.dict(os.environ, {"DATABASE_TYPE": "postgres"}),
             patch(_EMBEDDING_QUEUE, mock_queue),
         ):
             result = await svc.create_documentation_embedding(doc_create)
 
         mock_queue.add_embedding.assert_awaited_once()
         assert str(result.id).startswith("queued-")
+
+    @pytest.mark.asyncio
+    async def test_lakebase_session_skips_the_sqlite_queue_even_if_base_is_sqlite(
+        self,
+    ):
+        """Inside Apps DATABASE_TYPE=sqlite (the boot DB) while the session is
+        Lakebase Postgres: the write must go to Postgres, not the SQLite queue."""
+        session = _make_mock_session()
+        session.get_bind = MagicMock(return_value=MagicMock(dialect=MagicMock()))
+        session.get_bind.return_value.dialect.name = "postgresql"
+        svc = _make_service(session=session)
+        mock_queue = AsyncMock()
+        with (
+            patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}),
+            patch(_EMBEDDING_QUEUE, mock_queue),
+            patch.object(svc, "repository", create=True),
+        ):
+            try:
+                await svc.create_documentation_embedding(_make_doc_embedding_create())
+            except Exception:  # noqa: BLE001 - only the routing matters here
+                pass
+        mock_queue.add_embedding.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_create_uses_postgres_repository(self):
@@ -356,50 +382,6 @@ class TestGetDocumentationEmbeddings:
 # ===================================================================
 # update_documentation_embedding
 # ===================================================================
-
-
-class TestUpdateDocumentationEmbedding:
-    """Tests for update_documentation_embedding method."""
-
-    @pytest.mark.asyncio
-    async def test_update_returns_updated_model(self):
-        """Update delegates to repository and returns updated model."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        updated_model = _make_doc_embedding_model(id=1, title="Updated Title")
-        mock_repo = MagicMock()
-        mock_repo.update = AsyncMock(return_value=updated_model)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            result = await svc.update_documentation_embedding(
-                1, {"title": "Updated Title"}
-            )
-
-        assert result.title == "Updated Title"
-        mock_repo.update.assert_awaited_once_with(1, {"title": "Updated Title"})
-
-    @pytest.mark.asyncio
-    async def test_update_returns_none_when_not_found(self):
-        """Update returns None when embedding not found."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_repo = MagicMock()
-        mock_repo.update = AsyncMock(return_value=None)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            result = await svc.update_documentation_embedding(999, {"title": "X"})
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_update_raises_without_session(self):
-        """Update raises ValueError when no session."""
-        svc = _make_service(session=None)
-
-        with pytest.raises(ValueError, match="Session is required"):
-            await svc.update_documentation_embedding(1, {"title": "X"})
 
 
 # ===================================================================

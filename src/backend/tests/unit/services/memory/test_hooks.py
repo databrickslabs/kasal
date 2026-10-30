@@ -192,10 +192,11 @@ class TestRecallRelevanceCliff:
         )
         assert "no similarity stamp" in block
 
-    def test_cliff_width_is_env_tunable(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MAX_DROP", "0.5")
+    def test_cliff_width_is_teamspace_tunable(self):
         records = [self._rec("top match", 0.90), self._rec("filler A", 0.60)]
-        block = build_memory_preamble(_memory_with(records), "the query")
+        memory = _memory_with(records)
+        memory.recall_max_drop = 0.5  # Memory Tuning recall_max_drop
+        block = build_memory_preamble(memory, "the query")
         assert "filler A" in block  # 0.6 >= 0.9 - 0.5
 
 
@@ -276,6 +277,29 @@ class TestTaskOutputPersistence:
         assert "execution_id" not in metadata
         assert metadata["task_name"] == "research"
 
+    def test_a_degraded_output_is_not_remembered(self):
+        """A truncated or unverified answer would be recalled into later runs as
+        if it were a finding; the run keeps it, memory does not."""
+        from unittest.mock import patch
+
+        _crew, task = self._crew(MagicMock())
+        sink = make_memory_output_sink(MagicMock())
+        output = SimpleNamespace(raw="partial", agent="R", degraded=True)
+        with patch("src.services.memory.run.persist.remember_async") as remember:
+            sink(task=task, output=output)
+        remember.assert_not_called()
+
+    def test_only_a_real_true_counts_as_degraded(self):
+        """``getattr`` on a test double returns a truthy mock; it is not a flag."""
+        from unittest.mock import patch
+
+        _crew, task = self._crew(MagicMock())
+        sink = make_memory_output_sink(MagicMock())
+        output = MagicMock(raw="42 facts found", agent="R")
+        with patch("src.services.memory.run.persist.remember_async") as remember:
+            sink(task=task, output=output)
+        remember.assert_called_once()
+
 
 class TestMemoryOutputSinkDisabled:
     def test_no_sink_without_memory(self):
@@ -295,14 +319,10 @@ class TestRecallDefaultFloor:
         storage.search.return_value = []
         return Memory(storage=storage), storage
 
-    def test_default_floor_is_calibrated_and_env_tunable(self, monkeypatch):
+    def test_default_floor_is_calibrated(self):
         memory, storage = self._memory()
         memory.recall("q")
-        assert storage.search.call_args.kwargs["score_threshold"] == 0.75
-
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.6")
-        memory.recall("q")
-        assert storage.search.call_args.kwargs["score_threshold"] == 0.6
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.60
 
     def test_explicit_zero_disables_the_floor(self):
         memory, storage = self._memory()

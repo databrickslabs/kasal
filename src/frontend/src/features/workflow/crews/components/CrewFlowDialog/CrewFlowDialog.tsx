@@ -2,7 +2,7 @@ import { catalogExecutionSettings } from './catalogExecutionSettings';
 import CatalogSurface from './CatalogSurface';
 import CatalogActionPane from './CatalogActionPane';
 import { CatalogNavigation } from './CatalogNavigation';
-import { getDefaultModel } from '../../../../../config/defaultModel';
+import { cloneCatalogCrew } from './cloneCatalogCrew';
 import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
 import { 
   DialogContent, 
@@ -165,7 +165,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const firstTaskCardRef = useRef<HTMLDivElement>(null);
   
   // Get flow configuration to check if CrewAI flows are enabled
-  const { kasalFlowEnabled } = useFlowConfigStore();
+  const kasalFlowEnabled = useFlowConfigStore(state => state.kasalFlowEnabled);
 
   // Operators may run what is in the catalog, not change it. The authoring
   // actions on a card (optimize, publish, edit, delete) are editor/admin only,
@@ -310,7 +310,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  const handleCrewSelect = async (crewId: string) => {
+  const handleCrewSelect = async (crewId: string, asCopy = false) => {
     setLoading(true);
 
     // Set isLoadingCrew flag to prevent useManagerNode from removing manager node
@@ -327,178 +327,16 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         throw new Error('Crew not found');
       }
 
-      console.log('Selected crew:', selectedCrew);
-      
-      // Create a mapping of old IDs to new IDs
-      const idMapping: { [key: string]: string } = {};
-
-      // Create agents first
-      for (const node of selectedCrew.nodes || []) {
-        if (node.type === 'agentNode') {
-          try {
-            const agentData = node.data;
-            // Format agent data following AgentForm pattern
-            const formattedAgentData = {
-              name: agentData.name || agentData.label || '',
-              role: agentData.role || '',
-              goal: agentData.goal || '',
-              backstory: agentData.backstory || '',
-              llm: agentData.llm || getDefaultModel(),
-              tools: agentData.tools || [],
-              function_calling_llm: agentData.function_calling_llm,
-              max_iter: agentData.max_iter || 25,
-              max_rpm: agentData.max_rpm,
-              max_execution_time: agentData.max_execution_time || 300,
-              memory: agentData.memory ?? true,
-              verbose: agentData.verbose || false,
-              allow_delegation: agentData.allow_delegation || false,
-              cache: agentData.cache ?? true,
-              system_template: agentData.system_template,
-              prompt_template: agentData.prompt_template,
-              response_template: agentData.response_template,
-              allow_code_execution: agentData.allow_code_execution || false,
-              code_execution_mode: agentData.code_execution_mode || 'safe',
-              max_retry_limit: agentData.max_retry_limit || 3,
-              use_system_prompt: agentData.use_system_prompt ?? true,
-              respect_context_window: agentData.respect_context_window ?? true,
-              embedder_config: agentData.embedder_config,
-              knowledge_sources: agentData.knowledge_sources || []
-            };
-
-            const newAgent = await AgentService.createAgent(formattedAgentData);
-            if (newAgent && newAgent.id) {
-              idMapping[node.id] = newAgent.id.toString();
-            } else {
-              throw new Error(`Failed to create agent: ${formattedAgentData.name}`);
-            }
-          } catch (err) {
-            const error = err as Error;
-            console.error('Error creating agent:', error);
-            throw new Error(`Failed to create agent: ${error.message}`);
-          }
-        }
-      }
-
-      // Create tasks
-      for (const node of selectedCrew.nodes || []) {
-        if (node.type === 'taskNode') {
-          try {
-            const taskData = node.data;
-            // Update agent_id in task data if it exists in our mapping
-            const updatedAgentId = taskData.agent_id && idMapping[taskData.agent_id] 
-              ? parseInt(idMapping[taskData.agent_id]) 
-              : 0;
-
-            // Format task data following TaskForm pattern
-            const formattedTaskData = {
-              name: String(taskData.label || ''),
-              description: String(taskData.description || ''),
-              expected_output: String(taskData.expected_output || ''),
-              tools: (taskData.tools || []).map((tool: unknown) => String(tool)),
-              agent_id: updatedAgentId ? String(updatedAgentId) : null,
-              async_execution: Boolean(taskData.async_execution),
-              context: (taskData.context || []).map((item: unknown) => String(item)),
-              config: {
-                cache_response: Boolean(taskData.config?.cache_response),
-                cache_ttl: Number(taskData.config?.cache_ttl || 3600),
-                retry_on_fail: Boolean(taskData.config?.retry_on_fail),
-                max_retries: Number(taskData.config?.max_retries || 3),
-                timeout: taskData.config?.timeout ? Number(taskData.config.timeout) : null,
-                priority: Number(taskData.config?.priority || 1),
-                error_handling: (taskData.config?.error_handling || 'default') as 'default' | 'retry' | 'ignore' | 'fail',
-                output_file: taskData.config?.output_file || null,
-                output_json: taskData.config?.output_json || null,
-                output_pydantic: taskData.config?.output_pydantic || null,
-                callback: taskData.config?.callback || null,
-                human_input: Boolean(taskData.config?.human_input),
-                condition: taskData.config?.condition === 'is_data_missing' ? 'is_data_missing' : undefined,
-                guardrail: taskData.config?.guardrail || null,
-                // Config is source of truth for user's choice (null = disabled)
-                // Only fall back to top-level if config is undefined (never set)
-                llm_guardrail: taskData.config?.llm_guardrail !== undefined
-                  ? taskData.config.llm_guardrail
-                  : (taskData.task?.config?.llm_guardrail ?? null),
-                markdown: taskData.config?.markdown === true || taskData.config?.markdown === 'true' || taskData.markdown === true || taskData.markdown === 'true'
-              }
-            };
-
-            const newTask = await TaskService.createTask(formattedTaskData);
-            if (newTask && newTask.id) {
-              idMapping[node.id] = newTask.id.toString();
-            } else {
-              throw new Error(`Failed to create task: ${formattedTaskData.name}`);
-            }
-          } catch (err) {
-            const error = err as Error;
-            console.error('Error creating task:', error);
-            throw new Error(`Failed to create task: ${error.message}`);
-          }
-        }
-      }
-
-      // Update node IDs and references
-      const updatedNodes = (selectedCrew.nodes || []).map(node => {
-        let newId: string;
-        if (node.type === 'agentNode') {
-          newId = `agent-${idMapping[node.id] || node.id}`;
-        } else if (node.type === 'managerNode') {
-          // Manager node keeps its original ID
-          newId = node.id;
-        } else {
-          newId = `task-${idMapping[node.id] || node.id}`;
-        }
-
-        const updatedNode = {
-          ...node,
-          id: newId,
-          type: node.type, // Ensure type is preserved
-          data: {
-            ...node.data,
-            id: node.type === 'managerNode' ? node.data.id : (idMapping[node.id] || node.data.id),
-            agent_id: node.data.agent_id ? idMapping[node.data.agent_id] || node.data.agent_id : node.data.agent_id,
-            agentId: node.type === 'agentNode' ? idMapping[node.id] || node.data.agentId : node.data.agentId,
-            taskId: node.type === 'taskNode' ? idMapping[node.id] || node.data.taskId : node.data.taskId,
-            type: node.type === 'agentNode' ? 'agent' : (node.type === 'managerNode' ? 'manager' : 'task') // Set the internal type field
-          }
-        };
-        console.log('Updated node:', updatedNode);
-        return updatedNode;
-      });
-
-      // Update edge source and target IDs to match the new node IDs
-      const updatedEdges = (selectedCrew.edges || []).map(edge => {
-        const sourceNode = selectedCrew?.nodes?.find(n => n.id === edge.source);
-        const targetNode = selectedCrew?.nodes?.find(n => n.id === edge.target);
-
-        // Determine new source ID based on node type
-        let newSource: string;
-        if (sourceNode?.type === 'agentNode') {
-          newSource = `agent-${idMapping[edge.source] || edge.source}`;
-        } else if (sourceNode?.type === 'managerNode') {
-          newSource = edge.source; // Manager keeps original ID
-        } else {
-          newSource = `task-${idMapping[edge.source] || edge.source}`;
-        }
-
-        // Determine new target ID based on node type
-        let newTarget: string;
-        if (targetNode?.type === 'agentNode') {
-          newTarget = `agent-${idMapping[edge.target] || edge.target}`;
-        } else if (targetNode?.type === 'managerNode') {
-          newTarget = edge.target; // Manager keeps original ID
-        } else {
-          newTarget = `task-${idMapping[edge.target] || edge.target}`;
-        }
-
-        return {
-          ...edge,
-          source: newSource,
-          target: newTarget
-        };
-      });
-      
-      // Pass the crew data to the callback - the tab creation will be handled there
-      onCrewSelect(updatedNodes, updatedEdges, selectedCrew.name, selectedCrew.id.toString());
+      // In place: the canvas edits the crew's own agent and task rows (with
+      // their per-agent overrides), and the tab is bound to the crew, so Save
+      // updates it — the shape catalogLoadCrew / openCrewInAgentBuilder use.
+      // "Open as copy" re-creates the rows and binds NO crew id, so Save
+      // creates a new crew instead of repointing this one at the copies.
+      const { nodes: updatedNodes, edges: updatedEdges } = asCopy
+        ? await cloneCatalogCrew(selectedCrew)
+        : { nodes: selectedCrew.nodes || [], edges: selectedCrew.edges || [] };
+      if (asCopy) onCrewSelect(updatedNodes, updatedEdges, `${selectedCrew.name} (copy)`);
+      else onCrewSelect(updatedNodes, updatedEdges, selectedCrew.name, selectedCrew.id.toString());
       onClose();
 
       // Check if there's a manager node in the loaded crew
@@ -664,32 +502,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       console.error('Error deleting crew:', error);
       setError('Failed to delete crew');
       loadCrews();
-    }
-  };
-
-  // Duplicate a crew as a new catalog entry. Like delete, this updates local
-  // state in place (prepending the returned crew) rather than calling loadCrews,
-  // so the panel doesn't blank to a spinner. The copy's name is derived from the
-  // source with a "(copy)" suffix, made unique against the crews already loaded
-  // so the POST doesn't 409 on a name clash.
-  const uniqueCopyName = (baseName: string): string => {
-    const taken = new Set(crews.map((c) => c.name));
-    let candidate = `${baseName} (copy)`;
-    for (let n = 2; taken.has(candidate); n += 1) {
-      candidate = `${baseName} (copy ${n})`;
-    }
-    return candidate;
-  };
-
-  const handleDuplicateCrew = async (event: React.MouseEvent, crew: CrewResponse) => {
-    event.stopPropagation();
-    try {
-      const created = await CrewService.duplicateCrew(String(crew.id), uniqueCopyName(crew.name));
-      setCrews((current) => [created, ...current]);
-      setError(null);
-    } catch (error) {
-      console.error('Error duplicating crew:', error);
-      setError('Failed to duplicate crew');
     }
   };
 
@@ -1611,7 +1423,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                               published={publishedCrewIds.has(String(crew.id))}
                               onPublished={isPublished => setPublished('crew', String(crew.id), isPublished)}
                               onOptimize={() => setOptimizeCrew(crew)}
-                              onDuplicate={event => handleDuplicateCrew(event, crew)}
+                              onOpenCopy={() => handleCrewSelect(crew.id, true)}
                               onExport={event => handleExportCrew(event, crew)}
                               onDelete={event => handleDeleteCrew(event, crew.id)}
                             />

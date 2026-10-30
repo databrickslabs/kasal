@@ -21,7 +21,9 @@ class TestImplicitColumnMeasures:
             "Fact_NPS": {"NPS_Contribution_per_Driver": "Sum"},
         }
         result = derive_implicit_column_measures(
-            visual_usage_index, measures=[], column_summarize_by=column_summarize_by,
+            visual_usage_index,
+            measures=[],
+            column_summarize_by=column_summarize_by,
             fact_tables=FACT_TABLES,
         )
         assert "Fact_NPS" in result
@@ -35,17 +37,27 @@ class TestImplicitColumnMeasures:
 
     def test_maps_every_summarize_by_to_the_right_sql_aggregate(self):
         visual_usage_index = {
-            "col_sum": _occ(), "col_avg": _occ(), "col_count": _occ(),
-            "col_min": _occ(), "col_max": _occ(), "col_distinct": _occ(),
+            "col_sum": _occ(),
+            "col_avg": _occ(),
+            "col_count": _occ(),
+            "col_min": _occ(),
+            "col_max": _occ(),
+            "col_distinct": _occ(),
         }
         column_summarize_by = {
             "Fact_OTC": {
-                "col_sum": "Sum", "col_avg": "Average", "col_count": "Count",
-                "col_min": "Min", "col_max": "Max", "col_distinct": "DistinctCount",
+                "col_sum": "Sum",
+                "col_avg": "Average",
+                "col_count": "Count",
+                "col_min": "Min",
+                "col_max": "Max",
+                "col_distinct": "DistinctCount",
             }
         }
         result = derive_implicit_column_measures(
-            visual_usage_index, measures=[], column_summarize_by=column_summarize_by,
+            visual_usage_index,
+            measures=[],
+            column_summarize_by=column_summarize_by,
             fact_tables=FACT_TABLES,
         )
         by_name = {e["original_name"]: e["raw_expr"] for e in result["Fact_OTC"]}
@@ -62,7 +74,9 @@ class TestImplicitColumnMeasures:
         visual_usage_index = {"region": _occ()}
         column_summarize_by = {"Fact_OTC": {"region": "None"}}
         result = derive_implicit_column_measures(
-            visual_usage_index, measures=[], column_summarize_by=column_summarize_by,
+            visual_usage_index,
+            measures=[],
+            column_summarize_by=column_summarize_by,
             fact_tables=FACT_TABLES,
         )
         assert result == {}
@@ -74,7 +88,9 @@ class TestImplicitColumnMeasures:
         measures = [{"measure_name": "total_revenue", "original_name": "Total Revenue"}]
         column_summarize_by = {"Fact_OTC": {"Total Revenue": "Sum"}}
         result = derive_implicit_column_measures(
-            visual_usage_index, measures=measures, column_summarize_by=column_summarize_by,
+            visual_usage_index,
+            measures=measures,
+            column_summarize_by=column_summarize_by,
             fact_tables=FACT_TABLES,
         )
         assert result == {}
@@ -90,14 +106,18 @@ class TestImplicitColumnMeasures:
         )
         assert result == {}
 
-    def test_prefers_a_fact_table_when_the_same_column_name_exists_on_several_tables(self):
+    def test_prefers_a_fact_table_when_the_same_column_name_exists_on_several_tables(
+        self,
+    ):
         visual_usage_index = {"amount": _occ()}
         column_summarize_by = {
             "Dim_Budget": {"amount": "Sum"},
             "Fact_OTC": {"amount": "Sum"},
         }
         result = derive_implicit_column_measures(
-            visual_usage_index, measures=[], column_summarize_by=column_summarize_by,
+            visual_usage_index,
+            measures=[],
+            column_summarize_by=column_summarize_by,
             fact_tables=FACT_TABLES,
         )
         assert "Fact_OTC" in result
@@ -105,9 +125,7 @@ class TestImplicitColumnMeasures:
 
     def test_empty_inputs_return_empty(self):
         assert derive_implicit_column_measures({}, [], {}, set()) == {}
-        assert derive_implicit_column_measures(
-            {"x": _occ()}, [], {}, set()
-        ) == {}
-        assert derive_implicit_column_measures(
-            None, [], {"T": {"c": "Sum"}}, set()
-        ) == {}
+        assert derive_implicit_column_measures({"x": _occ()}, [], {}, set()) == {}
+        assert (
+            derive_implicit_column_measures(None, [], {"T": {"c": "Sum"}}, set()) == {}
+        )

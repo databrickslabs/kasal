@@ -4,6 +4,8 @@ Flow configuration module for CrewAI flow execution.
 This module handles MCP requirements collection and flow configuration parsing.
 """
 
+from typing import Any, Dict, Optional
+
 from src.core.logger import LoggerManager
 
 # Initialize logger - use flow logger for flow execution
@@ -17,8 +19,10 @@ class FlowConfigManager:
 
     @staticmethod
     async def collect_agent_mcp_requirements(
-        flow_config, repositories, group_context=None
-    ):
+        flow_config: Dict[str, Any],
+        repositories: Optional[Dict[str, Any]],
+        group_context: Any = None,
+    ) -> Dict[str, Any]:
         """
         Collect MCP server requirements for each agent based on their assigned tasks in the flow.
         This follows the same pattern as MCPIntegration.collect_agent_mcp_requirements() but for flow structure.
@@ -32,7 +36,7 @@ class FlowConfigManager:
             Dict mapping agent_id -> list of required MCP server names
         """
         logger.info("Collecting agent MCP requirements from flow tasks")
-        agent_requirements = {}
+        agent_requirements: Dict[str, Any] = {}
         task_to_mcp = {}  # Map task_id -> list of MCP server names
 
         try:
@@ -220,9 +224,7 @@ class FlowConfigManager:
                 logger.info(
                     f"Agent {agent_id} requires MCP servers from tasks: {servers}"
                 )
-
             return agent_requirements
-
         except Exception as e:
             logger.error(
                 f"Error collecting agent MCP requirements from flow: {e}", exc_info=True

@@ -9,6 +9,7 @@ Handles embedder setup for:
 - Other providers
 """
 
+import functools
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.databricks_app import DatabricksAppInstallation
@@ -16,6 +17,45 @@ from src.core.logger import LoggerManager
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 logger = LoggerManager.get_instance().crew
+
+
+def _loggable_embedder(embedder: object) -> str:
+    """An embedder config for the logs: provider and key NAMES, never values.
+
+    These dicts carry the provider API key (``config.api_key``), and these log
+    lines reach crew.log and the run's execution logs.
+    """
+    if not isinstance(embedder, dict):
+        return "none"
+    config = embedder.get("config")
+    keys = sorted(config) if isinstance(config, dict) else []
+    return f"provider={embedder.get('provider')} config_keys={keys}"
+
+
+def _queue_embedding_usage(
+    usage: Dict[str, int],
+    model: str,
+    workspace_url: Optional[str],
+    token: Optional[str],
+) -> None:
+    """Hand one embedding batch's token usage to the usage-telemetry worker.
+
+    The logfood request is a separate GET to the workspace with a 5 s timeout;
+    the embedding returns its vectors without waiting for it.
+    """
+    from src.core.llm.usage_telemetry import submit_telemetry
+    from src.utils.telemetry import KasalProduct, send_logfood_telemetry_sync
+
+    submit_telemetry(
+        functools.partial(
+            send_logfood_telemetry_sync,
+            usage=usage,
+            model=model,
+            product_context=KasalProduct.EMBEDDING,
+            workspace_url=workspace_url,
+            token=token,
+        )
+    )
 
 
 class EmbedderConfigBuilder:
@@ -50,12 +90,14 @@ class EmbedderConfigBuilder:
                 if isinstance(ec, dict) and "provider" in ec:
                     embedder_config = ec
                     logger.info(
-                        f"Found valid embedder configuration: {embedder_config}"
+                        "Found valid embedder configuration: %s",
+                        _loggable_embedder(embedder_config),
                     )
                     break
                 else:
                     logger.warning(
-                        f"Found invalid embedder config (missing provider): {ec}"
+                        "Found invalid embedder config (missing provider): keys=%s",
+                        sorted(ec) if isinstance(ec, dict) else type(ec).__name__,
                     )
 
         # Default to Databricks if no valid config found
@@ -98,21 +140,25 @@ class EmbedderConfigBuilder:
             # Databricks auth unavailable — fall back to a local Ollama embedder.
             # (The previous FastEmbed fallback is unusable: this CrewAI build does not
             # register a "fastembed" provider, so memory init crashed with
-            # "Unknown provider: fastembed".) The Ollama host comes from
-            # OLLAMA_API_BASE — the same env the Ollama LLM path uses — and the model
-            # from OLLAMA_EMBED_MODEL; no URL is hardcoded.
+            # "Unknown provider: fastembed".) The Ollama host
+            # and model come from services/llm/endpoints (localhost only outside
+            # Databricks Apps); no env var, no URL hardcoded here.
             if custom_embedder is None and not crew_kwargs.get("embedder"):
-                import os
+                from src.services.llm.endpoints import (
+                    DEFAULT_OLLAMA_EMBED_MODEL,
+                    ollama_base_url,
+                )
 
                 crew_kwargs["embedder"] = {
                     "provider": "ollama",
                     "config": {
-                        "model": os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
-                        "url": os.getenv("OLLAMA_API_BASE", "http://localhost:11434"),
+                        "model": DEFAULT_OLLAMA_EMBED_MODEL,
+                        "url": ollama_base_url(),
                     },
                 }
                 logger.info(
-                    f"Databricks embedder unavailable, falling back to Ollama: {crew_kwargs['embedder']}"
+                    "Databricks embedder unavailable, falling back to Ollama: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
                 )
                 self.embedder_config = crew_kwargs["embedder"]
         elif provider == "openai":
@@ -128,12 +174,15 @@ class EmbedderConfigBuilder:
             # Other providers - pass through config as-is
             crew_kwargs["embedder"] = embedder_config
             logger.info(
-                f"Configured CrewAI embedder for {provider}: {crew_kwargs['embedder']}"
+                "Configured CrewAI embedder for %s: %s",
+                provider,
+                _loggable_embedder(crew_kwargs["embedder"]),
             )
             self.embedder_config = crew_kwargs.get("embedder")
 
         logger.info(
-            f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}"
+            "Final embedder configuration: %s",
+            _loggable_embedder(crew_kwargs.get("embedder")),
         )
 
         return crew_kwargs, self.custom_embedder, self.embedder_config
@@ -161,7 +210,7 @@ class EmbedderConfigBuilder:
             class EmbeddingFunction:
                 """Callable that turns documents into embeddings."""
 
-                def __call__(self, input: Documents) -> Embeddings:  # noqa: A002
+                def __call__(self, input: Documents) -> Embeddings:
                     raise NotImplementedError
 
             databricks_key = None
@@ -181,7 +230,10 @@ class EmbedderConfigBuilder:
             installed_model = is_installed_model(model_name)
             if installed_model:
                 auth = await get_model_auth_context(model_name, group_id=self.group_id)
-                auth_headers, error = auth.get_headers(), None
+                if auth is None:
+                    auth_headers, error = None, "App authentication is unavailable"
+                else:
+                    auth_headers, error = auth.get_headers(), None
             else:
                 auth_headers, error = await get_databricks_auth_headers(
                     user_token=self.user_token
@@ -217,15 +269,15 @@ class EmbedderConfigBuilder:
             class DatabricksEmbeddingFunction(EmbeddingFunction):
                 def __init__(
                     self,
-                    api_key: str = None,
-                    api_base: str = None,
-                    model: str = None,
-                    auth_headers: dict = None,
-                    user_token: str = None,
+                    api_key: Optional[str] = None,
+                    api_base: Optional[str] = None,
+                    model: Optional[str] = None,
+                    auth_headers: Optional[dict] = None,
+                    user_token: Optional[str] = None,
                 ):
                     self.api_key = api_key
-                    self.api_base = api_base
-                    self.model = model
+                    self.api_base = cast(str, api_base)  # always passed below
+                    self.model = cast(str, model)  # always passed below
                     self.auth_headers = auth_headers
                     self.user_token = user_token
 
@@ -286,12 +338,11 @@ class EmbedderConfigBuilder:
                         from src.utils.telemetry import (
                             KasalProduct,
                             get_user_agent_header,
-                            send_logfood_telemetry_sync,
                         )
 
                         headers.update(get_user_agent_header(KasalProduct.EMBEDDING))
 
-                        response = requests.post(
+                        response = requests.post(  # host from the auth context or a write-validated workspace URL — nosemgrep: tmp.databricks.ssrf.requests-user-url
                             endpoint_url, headers=headers, json=payload, timeout=30
                         )
                         if response.status_code == 200:
@@ -302,16 +353,12 @@ class EmbedderConfigBuilder:
                                     for item in result["data"]
                                 ]
 
-                                # Send token usage to Databricks logfood
-                                usage = result.get("usage", {})
-                                if usage:
-                                    auth_token = self.user_token or self.api_key
-                                    send_logfood_telemetry_sync(
-                                        usage=usage,
-                                        model=self.model,
-                                        product_context=KasalProduct.EMBEDDING,
-                                        workspace_url=workspace_url,
-                                        token=auth_token,
+                                if result.get("usage"):
+                                    _queue_embedding_usage(
+                                        result["usage"],
+                                        self.model,
+                                        workspace_url,
+                                        self.user_token or self.api_key,
                                     )
 
                                 return cast(Embeddings, embeddings)
@@ -368,7 +415,7 @@ class EmbedderConfigBuilder:
         """Get Databricks endpoint from unified auth, database, or environment"""
         import os
 
-        databricks_endpoint = ""
+        databricks_endpoint: Optional[str] = ""
 
         # Try unified auth first (pass user_token for OBO auth)
         try:
@@ -443,7 +490,8 @@ class EmbedderConfigBuilder:
                     },
                 }
                 logger.info(
-                    f"Configured CrewAI embedder for OpenAI: {crew_kwargs['embedder']}"
+                    "Configured CrewAI embedder for OpenAI: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
                 )
         except Exception as e:
             logger.error(f"Error configuring OpenAI embedder: {e}")
@@ -454,23 +502,25 @@ class EmbedderConfigBuilder:
         self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Configure Ollama embedder"""
-        import os
+        from src.services.llm.endpoints import (
+            DEFAULT_OLLAMA_EMBED_MODEL,
+            ollama_base_url,
+        )
 
         crew_kwargs["embedder"] = {
             "provider": "ollama",
             "config": {
-                "model": config.get(
-                    "model", os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-                ),
-                # Point at the Ollama host (OLLAMA_API_BASE, the same env the LLM
-                # path uses). chromadb's OllamaEmbeddingFunction normalizes a trailing
-                # /api/embeddings to the base, so either form is accepted.
-                "url": config.get(
-                    "url", os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
-                ),
+                "model": config.get("model", DEFAULT_OLLAMA_EMBED_MODEL),
+                # The embedder's own url, else the Ollama host from
+                # services/llm/endpoints. chromadb's OllamaEmbeddingFunction
+                # normalizes a trailing /api/embeddings, so either form works.
+                "url": config.get("url") or ollama_base_url(),
             },
         }
-        logger.info(f"Configured CrewAI embedder for Ollama: {crew_kwargs['embedder']}")
+        logger.info(
+            "Configured CrewAI embedder for Ollama: %s",
+            _loggable_embedder(crew_kwargs["embedder"]),
+        )
         return crew_kwargs
 
     async def _configure_google_embedder(
@@ -494,7 +544,8 @@ class EmbedderConfigBuilder:
                     },
                 }
                 logger.info(
-                    f"Configured CrewAI embedder for Google: {crew_kwargs['embedder']}"
+                    "Configured CrewAI embedder for Google: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
                 )
         except Exception as e:
             logger.error(f"Error configuring Google embedder: {e}")

@@ -70,7 +70,7 @@ class OutcomeChoice:
     answer_from_state: bool = False
 
 
-def crew_entries(flow_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+def crew_entries(flow_config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Every crew in the flow, as the config describes it."""
     if not isinstance(flow_config, dict):
         return []
@@ -80,7 +80,7 @@ def crew_entries(flow_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [e for e in entries if isinstance(e, dict) and e.get("crewName")]
 
 
-def terminal_crews(flow_config: Dict[str, Any]) -> Set[str]:
+def terminal_crews(flow_config: Optional[Dict[str, Any]]) -> Set[str]:
     """Crews nothing else listens to.
 
     The single definition of "this crew's output is the end of a branch". Both
@@ -314,6 +314,8 @@ async def select_outcome(
     try:
         from src.services.llm.manager import LLMManager
 
+        if not model:  # reported as "model unavailable" by the handler below
+            raise ValueError("no model to select the outcome with")
         response = await LLMManager.completion(
             messages=build_outcome_messages(
                 question,
@@ -374,15 +376,3 @@ def trigger_for(registry: Dict[str, Dict[str, Any]], outcome: str) -> Optional[s
     """The one method that produces this outcome."""
     entry = (registry or {}).get(str(outcome)) or {}
     return entry.get("method")
-
-
-def identity_of(registry: Dict[str, Dict[str, Any]], crew: str) -> Optional[str]:
-    """The hash of the crew as it was when the flow was compiled."""
-    return ((registry or {}).get(str(crew)) or {}).get("identity")
-
-
-def methods_for_crews(method_crews: Dict[str, str], crew_names: Set[str]) -> Set[str]:
-    """The generated methods that run the given crews."""
-    return {
-        method for method, crew in (method_crews or {}).items() if crew in crew_names
-    }

@@ -92,7 +92,16 @@ class KnowledgeSearch:
                 user_token=self.user_token,
                 created_by=self.user_email,
             )
-        return results or []
+        from src.services.decisions.policies import rank
+
+        ranked: List[Dict[str, Any]] = await rank(
+            "knowledge_ranking",
+            query,
+            results or [],
+            [r.get("content", "") for r in results or []],
+            group_id=self.group_id,
+        )
+        return ranked
 
     async def search(
         self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None
@@ -113,7 +122,7 @@ class KnowledgeSearch:
                 f"[knowledge] search timed out after {SEARCH_TIMEOUT_SECONDS}s: {query!r}"
             )
             return f"The knowledge search timed out after {SEARCH_TIMEOUT_SECONDS} seconds."
-        except Exception as search_err:  # noqa: BLE001
+        except Exception as search_err:
             logger.error(f"[knowledge] search failed: {search_err}", exc_info=True)
             return f"Error searching knowledge base: {search_err}"
 

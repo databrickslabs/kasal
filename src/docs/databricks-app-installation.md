@@ -14,7 +14,13 @@ runtime bindings are in `src/app.yaml`.
 | `sql-warehouse` | SQL warehouse for trace queries and SQL operations | Can use |
 | `volume` | Existing UC volume for generated files; its parent catalog/schema is used for new trace tables | Can read and write |
 | `serving-endpoint` | Ready, chat-capable serving endpoint supporting tool calls | Can query |
-| `lakebase` | Lakebase project, branch and database | Can connect and create |
+| `lakebase` (optional) | Lakebase project, branch and database | Can connect and create |
+
+**Without `lakebase`**, Kasal starts on the app container's SQLite file and logs
+a warning. That file is not guaranteed to survive a restart or redeploy, so use
+it for trials only. To make the resource mandatory, uncomment
+`KASAL_REQUIRE_LAKEBASE_RESOURCE` in `src/app.yaml`: `src/deploy.py` then
+refuses to deploy without it, and the app refuses to start.
 
 **Lakebase Marketplace limitation:** the public AppManifest schema currently
 has no database/postgres `resource_specs` field. Attach a native **Database**
@@ -27,6 +33,8 @@ Provisioned resource's type when upgrading it.
 The selected database and branch are used as supplied. Kasal does not guess a
 production branch or create a replacement SQLite database if Lakebase fails.
 Existing data is not automatically migrated when changing the assigned database.
+To upgrade an app installed at v1.3.0, see
+[Upgrading from v1.3.0](./upgrading-from-v1-3-0.md).
 
 ## Startup and fresh databases
 
@@ -38,7 +46,7 @@ including its startup lifecycle, middleware, and shutdown handlers.
 
 Before accepting requests, Kasal creates the application tables in the assigned
 Lakebase database, applies schema updates, initializes memory tables, and awaits
-seeding when `AUTO_SEED_DATABASE` is enabled (the default). Startup verifies that
+seeding. Startup verifies that
 models, prompt templates, and tools have persisted defaults. A database setup
 failure stops startup instead of serving an application with missing tables.
 Redeploying runs the non-destructive initialization again.

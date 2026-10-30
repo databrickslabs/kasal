@@ -5,6 +5,7 @@ import { useUILayoutStore } from '../../../../store/uiLayout';
 import { CanvasAssistantLayout } from './CanvasAssistantLayout';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
 import BuilderNodeEditor from './BuilderNodeEditor';
+import { browserTimeZone } from '../../scheduling/timeZone';
 vi.mock('../../../chat/components/Preview/PreviewPanel', () => ({
   default: ({ content, onClose }: { content: { data: string }; onClose: () => void }) => <aside>Memory for {content.data}<button onClick={onClose}>Close preview</button></aside>,
 }));
@@ -87,7 +88,7 @@ describe('Canvas assistant sidebar', () => {
     expect(screen.getByDisplayValue('My schedule draft')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
     await waitFor(() => expect(created).toHaveBeenCalledWith('Saved schedule'));
-    expect(createSchedule).toHaveBeenCalledWith({ name: 'My schedule draft', execution_id: 'historical-run', cron_expression: '0 9 * * *' });
+    expect(createSchedule).toHaveBeenCalledWith({ name: 'My schedule draft', execution_id: 'historical-run', cron_expression: '0 9 * * *', timezone: browserTimeZone() });
     expect(screen.queryByRole('tab', { name: 'Schedule', exact: true })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Canvas', exact: true })).toHaveAttribute('aria-selected', 'true');
   });

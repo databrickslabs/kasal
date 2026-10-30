@@ -112,7 +112,7 @@ with pre-built SQL when the formula is complex. Most models need no edits here.
   "Dim_wkctr": {
     "alias": "dim_wkctr",
     "join_key": "plant_workcenter_key",
-    "source_table": "dc_datalake_prod_001.udm_example_md.ca_dim_workcenter",
+    "source_table": "acme_prod.udm_example_md.ca_dim_workcenter",
     "dim_columns": ["bic_cwc_type", "workcenter_txtmd"]
   }
 }
@@ -120,7 +120,7 @@ with pre-built SQL when the formula is complex. Most models need no edits here.
 
 **Why it can't be automated**: The PBI Admin Scanner API returns table metadata with M expressions (Power Query), not physical table names. M expressions reference data sources using connection strings, database names, and schema paths that may not directly map to the 3-level UC table name. The translation requires knowing:
 
-- How the data lake is organized (e.g., `dc_datalake_prod_001.udm_example_md` prefix convention).
+- How the data lake is organized (e.g., `acme_prod.udm_example_md` prefix convention).
 - Whether the table was imported, DirectQuery, or uses a gateway; each has a different M expression format.
 - Whether table names were flattened (e.g., `schema__table` vs. `schema.table`).
 
@@ -139,7 +139,7 @@ The MQuery transpiler extracts source tables for **fact tables** (which have `Va
 {
   "fact_scorecard_Actuals_wc": {
     "alias": "sc_actuals",
-    "source_table": "dc_datalake_prod_001.curated_cch_bw_mdm.ca_kbi52r_maa_sub_kbis_rt",
+    "source_table": "acme_prod.curated_acme_bw_mdm.ca_kbi52r_maa_sub_kbis_rt",
     "target_fact": "fact_pe002",
     "union_mode": true,
     "primary_exclude_filter": "comp_code NOT IN ('0403', '0550', '0307')",
@@ -322,7 +322,7 @@ unresolved with a `TODO`.
 
 **2. Review and fill gaps in the Config Editor (`/config-editor`).**
 Open the generated config in the Config Editor. The left sidebar lists every key
-with a color-coded status badge (`getKeyStatus` in `types/configEditor.ts`):
+with a color-coded status badge (`getKeyStatus` in `src/frontend/src/types/config/configEditor.ts`):
 
 | Badge | Meaning |
 |-------|---------|

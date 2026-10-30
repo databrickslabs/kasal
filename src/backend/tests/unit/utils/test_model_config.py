@@ -44,10 +44,14 @@ class TestModelRejectsTemperature:
             "gpt-5",
             "databricks-gpt-5-1",
             "databricks-gpt-6-astra",
+            "databricks-gpt-6-sol",
+            "databricks-gpt-6-luna",
             "databricks-gpt-5-5-pro",
             # Live endpoint regression: the catalogue's 0.7 default made every
             # Gemini 3.8 request fail before generation.
             "databricks-gemini-3-8-flash",
+            # Measured 2026-10-23: "does not support the temperature parameter".
+            "databricks-gemini-4-argon",
         ],
     )
     def test_rejecting_models(self, model):
@@ -164,6 +168,9 @@ class TestModelSupportsReasoningEffort:
             "Qwen3-Coder-30B-A3B-Instruct",
             "databricks-meta-llama-3-3-70b-instruct",
             "gpt-4o",
+            # Measured 2026-10-23: 400 'Unknown name "reasoning_effort" at
+            # generation_config' at every value.
+            "databricks-gemini-4-argon",
             # o1 predates reasoning_effort.
             "o1",
             "o1-preview",
@@ -176,20 +183,16 @@ class TestModelSupportsReasoningEffort:
     def test_unsupported_models(self, model):
         assert model_supports_reasoning_effort(model) is False
 
-    def test_kill_switch_env_disables_everything(self, monkeypatch):
+    def test_env_overrides_are_ignored(self, monkeypatch):
+        """Support comes from the capabilities registry; the old
+        KASAL_REASONING_EFFORT_DISABLED / _MODELS env overrides do nothing."""
         monkeypatch.setenv("KASAL_REASONING_EFFORT_DISABLED", "true")
-        assert model_supports_reasoning_effort("databricks-gpt-5-2") is False
-
-    def test_env_allow_list_extends_the_gate(self, monkeypatch):
-        monkeypatch.setenv("KASAL_REASONING_EFFORT_MODELS", "my-endpoint, other")
-        assert model_supports_reasoning_effort("prod-my-endpoint-v2") is True
-        assert model_supports_reasoning_effort("other") is True
-        assert model_supports_reasoning_effort("unrelated") is False
-
-    def test_env_allow_list_beats_the_deep_research_exclusion(self, monkeypatch):
-        """An explicit operator override is honored over the built-in exclusions."""
-        monkeypatch.setenv("KASAL_REASONING_EFFORT_MODELS", "deep-research")
-        assert model_supports_reasoning_effort("o3-deep-research-2025-06-26") is True
+        monkeypatch.setenv(
+            "KASAL_REASONING_EFFORT_MODELS", "my-endpoint, deep-research"
+        )
+        assert model_supports_reasoning_effort("databricks-gpt-5-2") is True
+        assert model_supports_reasoning_effort("prod-my-endpoint-v2") is False
+        assert model_supports_reasoning_effort("o3-deep-research-2025-06-26") is False
 
 
 class TestGetModelConfig:

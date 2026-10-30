@@ -7,8 +7,12 @@ success when every statement applied (see the tests).
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from src.db.base import Base
-from src.db.self_heal.dialect import _conn_is_sqlite
+from src.db.self_heal.dialect import _conn_is_sqlite, _pg_columns
+from src.db.self_heal.report import run_isolated
+from src.db.self_heal.tables import ensure_index
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +46,7 @@ def _vector_embedding_tables() -> tuple[str, ...]:
     )
 
 
-async def _ensure_pgvector_embedding_columns(conn) -> None:
+async def _ensure_pgvector_embedding_columns(conn: AsyncConnection) -> None:
     """Add back the ``embedding`` column on PostgreSQL when pgvector is present.
 
     Vector tables are created WITHOUT their vector column, because a deployed app
@@ -68,42 +72,54 @@ async def _ensure_pgvector_embedding_columns(conn) -> None:
     # of this helper used the bare name and every statement failed with
     # `type "vector" does not exist` / `operator class "vector_cosine_ops" does
     # not exist` even though the extension WAS installed. Qualifying removes the
-    # dependency on search_path entirely.
-    try:
-        result = await conn.exec_driver_sql(
-            "SELECT n.nspname FROM pg_extension e "
-            "JOIN pg_namespace n ON n.oid = e.extnamespace "
-            "WHERE e.extname IN ('vector', 'pgvector')"
+    # dependency on search_path entirely. A probe failure raises into this
+    # step's SAVEPOINT; catching it here would leave PostgreSQL's transaction
+    # aborted for every step after this one.
+    result = await conn.exec_driver_sql(
+        "SELECT n.nspname FROM pg_extension e "
+        "JOIN pg_namespace n ON n.oid = e.extnamespace "
+        "WHERE e.extname IN ('vector', 'pgvector')"
+    )
+    row = result.fetchone()
+    if row is None:
+        logger.info(
+            "pgvector not enabled; embedding columns skipped. An instance owner "
+            "can run 'CREATE EXTENSION IF NOT EXISTS vector;' and restart to "
+            "enable similarity search."
         )
-        row = result.fetchone()
-        if row is None:
-            logger.info(
-                "pgvector not enabled; embedding columns skipped. An instance owner "
-                "can run 'CREATE EXTENSION IF NOT EXISTS vector;' and restart to "
-                "enable similarity search."
-            )
-            return
-        ext_schema = row[0]
-    except Exception as e:  # noqa: BLE001 — never block startup on the probe
-        logger.warning(f"Could not check for pgvector: {e}")
         return
+    ext_schema = row[0]
 
     applied = True
     for table in _vector_embedding_tables():
-        # Each statement in its own SAVEPOINT: an orphaned-owner table (42501)
-        # must not abort the surrounding self-heal transaction.
-        for stmt in (
-            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding "
-            f"{ext_schema}.vector(1024)",
-            f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding ON {table} "
-            f"USING hnsw (embedding {ext_schema}.vector_cosine_ops)",
-        ):
-            try:
-                async with conn.begin_nested():
-                    await conn.exec_driver_sql(stmt)
-            except Exception as e:  # noqa: BLE001 — best-effort per statement
-                applied = False
-                logger.warning(f"Could not apply '{stmt[:60]}...': {e}")
+        # Catalogue first, as ensure_columns does: PostgreSQL checks ownership
+        # before existence, so on a table another role owns ADD COLUMN IF NOT
+        # EXISTS and CREATE INDEX IF NOT EXISTS fail with "must be owner" even when
+        # the column and index are already there. A table that does not exist yet
+        # is left to create_all and its table step. Each piece has its own
+        # SAVEPOINT, so one table cannot abort the pass or stop the others.
+
+        async def _column(c: AsyncConnection, table: str = table) -> None:
+            existing = await _pg_columns(c, table)
+            if existing and "embedding" not in existing:
+                await c.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding "
+                    f"{ext_schema}.vector(1024)"
+                )
+
+        async def _index(c: AsyncConnection, table: str = table) -> None:
+            if "embedding" in await _pg_columns(c, table):
+                await ensure_index(
+                    c,
+                    table,
+                    f"idx_{table}_embedding",
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding ON {table} "
+                    f"USING hnsw (embedding {ext_schema}.vector_cosine_ops)",
+                )
+
+        prefix = f"_ensure_pgvector_embedding_columns.{table}"
+        applied = await run_isolated(conn, f"{prefix}.column", _column) and applied
+        applied = await run_isolated(conn, f"{prefix}.index", _index) and applied
     if applied:
         logger.info("Ensured pgvector embedding columns + HNSW indexes")
     else:

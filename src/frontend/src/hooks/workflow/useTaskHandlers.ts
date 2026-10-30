@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback } from 'react';
 import { Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import { Task } from '../../types/workflow/task';
@@ -20,7 +21,9 @@ export const useTaskHandlers = ({
   setSuccessMessage,
   setShowSuccess
 }: UseTaskHandlersProps) => {
-  const errorStore = useErrorStore();
+  const errorStore = useErrorStore(useShallow(state => ({
+    showErrorMessage: state.showErrorMessage,
+  })));
 
   const handleTaskGenerated = useCallback(async (task: Task) => {
     if (!task) return;

@@ -95,11 +95,12 @@ class TestStepIsolation:
         async def boom(_c):
             raise RuntimeError("must be owner")
 
-        with patch("src.db.self_heal.runner.logger") as mock_logger:
+        with patch("src.db.self_heal.report.logger") as mock_logger:
             await _run_self_heal_step(conn, boom)
 
         assert mock_logger.warning.called
-        msg = mock_logger.warning.call_args[0][0]
+        fmt, *args = mock_logger.warning.call_args[0]
+        msg = fmt % tuple(args)
         assert "boom" in msg  # names the step
         assert "continuing" in msg
 
@@ -187,7 +188,7 @@ class TestTheWholePassSurvivesTheFirstStepFailing:
         conn = _conn()
         attempted: list[str] = []
 
-        async def always_boom(c):  # noqa: ARG001
+        async def always_boom(c):
             raise RuntimeError("nope")
 
         import src.db.self_heal.runner as runner_module

@@ -3,13 +3,18 @@ import os
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
-from src.core.exceptions import KasalError
+from src.core.exceptions import ForbiddenError, KasalError
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import (
     DatabricksConfigCreate,
     DatabricksConfigResponse,
+)
+from src.services.databricks.workspace.host_guard import (
+    assert_host_is_configured_workspace,
+    validate_stored_workspace_url,
 )
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 
@@ -22,8 +27,11 @@ class DatabricksService:
     """
 
     def __init__(
-        self, session, group_id: Optional[str] = None, user_token: Optional[str] = None
-    ):
+        self,
+        session: AsyncSession,
+        group_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
         """
         Initialize the service with session.
 
@@ -40,18 +48,6 @@ class DatabricksService:
         self.repository = DatabricksConfigRepository(session)
         self.group_id = group_id
         self._user_token = user_token
-        # Don't create secrets_service here to avoid circular dependency
-        self._secrets_service = None
-
-    @property
-    def secrets_service(self):
-        """Lazy load secrets_service to avoid circular dependency."""
-        if self._secrets_service is None:
-            # Import here to avoid circular imports at module level
-            from src.services.databricks.secrets.service import DatabricksSecretsService
-
-            self._secrets_service = DatabricksSecretsService(self.session)
-        return self._secrets_service
 
     @staticmethod
     def _apply_ai_gateway_env(enabled: bool) -> None:
@@ -109,10 +105,14 @@ class DatabricksService:
         Returns:
             Configuration response with success message
         """
+        # The listing calls send the caller's credential to this URL: only the
+        # workspace the credentials belong to may be stored (audit N1). Raised
+        # before the try below so the 403 is not rewrapped as a 500.
+        workspace_url = await validate_stored_workspace_url(config_in.workspace_url)
         try:
             # Create configuration data dictionary
             config_data = {
-                "workspace_url": config_in.workspace_url,
+                "workspace_url": workspace_url,
                 "warehouse_id": config_in.warehouse_id,
                 "catalog": config_in.catalog,
                 "schema": config_in.db_schema,
@@ -147,7 +147,9 @@ class DatabricksService:
             # Propagate the AI Gateway toggle to the runtime so subsequent LLM /
             # embedding calls route correctly without a restart, and invalidate the
             # cached Databricks auth config so the new flag/workspace reload.
-            self._apply_ai_gateway_env(config_data.get("ai_gateway_enabled", False))
+            self._apply_ai_gateway_env(
+                bool(config_data.get("ai_gateway_enabled", False))
+            )
 
             # New catalog/schema/warehouse/experiment must reach parent-process
             # MLflow tracing on the next dispatch, not after the memo TTL.
@@ -310,11 +312,10 @@ class DatabricksService:
                 # Storage roots belong to the installation; object paths below
                 # them remain scoped by the existing teamspace storage services.
                 if installation.output_volume:
-                    result.volume_enabled = bool(self.group_id and not namespace.error)
+                    group_id = self.group_id if not namespace.error else None
+                    result.volume_enabled = bool(group_id)
                     result.volume_path = (
-                        installation.output_path(self.group_id)
-                        if result.volume_enabled
-                        else None
+                        installation.output_path(group_id) if group_id else None
                     )
                 return result
 
@@ -454,112 +455,6 @@ class DatabricksService:
                 detail=f"Error checking personal token requirement: {str(e)}"
             )
 
-    # Methods for Databricks token management
-
-    async def check_apps_configuration(self) -> Tuple[bool, str]:
-        """
-        Check if 'Databricks Apps Integration' is disabled but 'Databricks Settings' is enabled
-        and determine if a personal access token should be used.
-
-        Returns:
-            Tuple[bool, str]: (should_use_personal_token, personal_access_token)
-        """
-        try:
-            config = await self.repository.get_active_config(group_id=self.group_id)
-            if not config:
-                return False, ""
-
-            # Check if Databricks is enabled
-            if hasattr(config, "is_enabled") and config.is_enabled:
-                logger.info("Databricks is enabled, checking for personal access token")
-                token = await self.secrets_service.get_personal_access_token()
-                if token:
-                    return True, token
-
-            return False, ""
-        except Exception as e:
-            logger.error(f"Error checking Databricks apps configuration: {str(e)}")
-            return False, ""
-
-    @staticmethod
-    def setup_endpoint(config) -> bool:
-        """
-        DEPRECATED: Use get_auth_context() from databricks_auth.py instead.
-
-        This method sets process-wide environment variables which causes race conditions
-        in concurrent requests. Use get_auth_context() to get thread-safe AuthContext.
-
-        Set up the DATABRICKS_ENDPOINT and DATABRICKS_API_BASE environment variables from the configuration.
-
-        Args:
-            config: Databricks configuration object with workspace_url attribute
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        import warnings
-
-        warnings.warn(
-            "setup_endpoint() is deprecated and will be removed. "
-            "Use get_auth_context() from databricks_auth.py instead for thread-safe authentication.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        try:
-            if config and hasattr(config, "workspace_url") and config.workspace_url:
-                workspace_url = config.workspace_url.rstrip("/")
-
-                # Set the API_BASE to include /serving-endpoints - this is required by LiteLLM
-                # LiteLLM expects DATABRICKS_API_BASE to point to the serving endpoints
-                os.environ["DATABRICKS_API_BASE"] = f"{workspace_url}/serving-endpoints"
-                logger.info(
-                    f"Set DATABRICKS_API_BASE to {workspace_url}/serving-endpoints"
-                )
-
-                # Ensure the endpoint URL ends with /serving-endpoints
-                if not workspace_url.endswith("/serving-endpoints"):
-                    endpoint_url = f"{workspace_url}/serving-endpoints"
-                else:
-                    endpoint_url = workspace_url
-
-                os.environ["DATABRICKS_ENDPOINT"] = endpoint_url
-                logger.info(f"Set DATABRICKS_ENDPOINT to {endpoint_url}")
-                return True
-            else:
-                logger.warning("No workspace_url found in Databricks configuration")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up Databricks endpoint: {str(e)}")
-            return False
-
-    @classmethod
-    def from_session(cls, session, api_keys_service=None):
-        """
-        Create a service instance from a database session.
-
-        Args:
-            session: Database session
-            api_keys_service: Optional ApiKeysService instance
-
-        Returns:
-            DatabricksService: Service instance with all dependencies
-        """
-        from src.repositories.databricks_config_repository import (
-            DatabricksConfigRepository,
-        )
-
-        # Create repository
-        DatabricksConfigRepository(session)
-
-        # Create service
-        service = cls(session)
-
-        # Set the API keys service if provided
-        if api_keys_service:
-            service.secrets_service.set_api_keys_service(api_keys_service)
-
-        return service
-
     async def get_workspace_auth(
         self, host: str | None = None
     ) -> Tuple[Dict[str, str], str]:
@@ -573,8 +468,17 @@ class DatabricksService:
         """
         return await self._resolve_workspace_url_and_headers(host)
 
-    async def _resolve_workspace_url_and_headers(self, host: str | None = None):
-        """Helper: returns (auth_headers, workspace_url) applying optional host override."""
+    async def _resolve_workspace_url_and_headers(
+        self, host: str | None = None
+    ) -> Tuple[Dict[str, str], str]:
+        """Helper: returns (auth_headers, workspace_url) applying optional host override.
+
+        The headers carry the OBO token, the group's PAT or the app's SPN token,
+        each valid only on the auth context's workspace. So whatever host the
+        request would go to — the caller's ``host``, the team's stored
+        ``workspace_url`` or the installation host — must be that workspace, or
+        nothing is sent (audit C2 / N1).
+        """
         from src.utils.databricks_auth import get_auth_context
 
         # Pass the user token so OBO is attempted first (get_auth_context skips OBO
@@ -585,27 +489,24 @@ class DatabricksService:
         if not auth:
             raise KasalError(detail="No authentication credentials available")
 
-        headers = auth.get_headers()
-
-        if host:
-            workspace_url = host
-        else:
-            config = await self.repository.get_active_config(group_id=self.group_id)
-            workspace_url = ""
-            if config and config.workspace_url:
-                workspace_url = config.workspace_url
-            if not workspace_url:
-                workspace_url = os.getenv("DATABRICKS_HOST", "")
-
-        if not workspace_url:
+        target = host or await self._stored_workspace_url() or auth.workspace_url
+        if not target:
             raise KasalError(
                 detail="workspace_url not configured and DATABRICKS_HOST not set"
             )
-        if not workspace_url.startswith("https://"):
-            workspace_url = f"https://{workspace_url}"
-        workspace_url = workspace_url.rstrip("/")
+        subject = "Workspace host override" if host else "Configured workspace URL"
+        target_host = assert_host_is_configured_workspace(
+            target, (auth.workspace_url,), subject=subject
+        )
+        return auth.get_headers(), f"https://{target_host}"
 
-        return headers, workspace_url
+    async def _stored_workspace_url(self) -> str:
+        """The team's workspace URL; the installation's inside Databricks Apps."""
+        installation = DatabricksAppInstallation.from_env()
+        if installation.hosted:
+            return str(installation.host)
+        config = await self.repository.get_active_config(group_id=self.group_id)
+        return str(config.workspace_url or "") if config else ""
 
     async def list_warehouses(self, host: str | None = None) -> list:
         """List SQL warehouses accessible in the workspace."""
@@ -616,8 +517,13 @@ class DatabricksService:
             response = await client.get(url, headers=headers)
 
         if response.status_code != 200:
+            logger.warning(
+                "List warehouses failed: %s %s",
+                response.status_code,
+                response.text[:500],
+            )
             raise KasalError(
-                detail=f"Failed to list warehouses: {response.status_code} {response.text}"
+                detail=f"Failed to list warehouses: {response.status_code}"
             )
 
         data = response.json()
@@ -635,9 +541,10 @@ class DatabricksService:
             response = await client.get(url, headers=headers)
 
         if response.status_code != 200:
-            raise KasalError(
-                detail=f"Failed to list catalogs: {response.status_code} {response.text}"
+            logger.warning(
+                "List catalogs failed: %s %s", response.status_code, response.text[:500]
             )
+            raise KasalError(detail=f"Failed to list catalogs: {response.status_code}")
 
         data = response.json()
         return [c["name"] for c in data.get("catalogs", [])]
@@ -653,9 +560,10 @@ class DatabricksService:
             )
 
         if response.status_code != 200:
-            raise KasalError(
-                detail=f"Failed to list schemas: {response.status_code} {response.text}"
+            logger.warning(
+                "List schemas failed: %s %s", response.status_code, response.text[:500]
             )
+            raise KasalError(detail=f"Failed to list schemas: {response.status_code}")
 
         data = response.json()
         return [s["name"] for s in data.get("schemas", [])]
@@ -681,11 +589,12 @@ class DatabricksService:
             )
 
         if response.status_code != 200:
-            raise KasalError(
-                detail=(
-                    f"Failed to list functions: {response.status_code} {response.text}"
-                )
+            logger.warning(
+                "List functions failed: %s %s",
+                response.status_code,
+                response.text[:500],
             )
+            raise KasalError(detail=f"Failed to list functions: {response.status_code}")
 
         data = response.json()
         return [
@@ -742,9 +651,9 @@ class DatabricksService:
         # All required fields are present, now test actual connection
         try:
             # Prepare the workspace URL - fall back to environment variable if not in config
-            import os
-
-            workspace_url = config.workspace_url or os.getenv("DATABRICKS_HOST", "")
+            workspace_url = str(config.workspace_url or "") or os.getenv(
+                "DATABRICKS_HOST", ""
+            )
 
             if not workspace_url:
                 return {
@@ -799,6 +708,17 @@ class DatabricksService:
                     "message": "No authentication credentials available (PAT or OAuth)",
                     "connected": False,
                 }
+
+            # The credential is only valid on (and only ever sent to) the auth
+            # context's workspace (audit N1).
+            try:
+                assert_host_is_configured_workspace(
+                    workspace_url,
+                    (auth.workspace_url,),
+                    subject="Configured workspace URL",
+                )
+            except ForbiddenError as e:
+                return {"status": "error", "message": e.detail, "connected": False}
 
             # Make the actual API call to test connection
             async with httpx.AsyncClient(timeout=10.0) as client:

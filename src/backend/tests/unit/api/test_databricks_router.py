@@ -32,8 +32,8 @@ def gc_admin():
     """Create a GroupContext with admin role (workspace admin)."""
     return GroupContext(
         group_ids=["g1"],
-        group_email="admin@x.com",
-        email_domain="x.com",
+        group_email="admin@example.com",
+        email_domain="example.com",
         user_role="admin",
     )
 
@@ -42,8 +42,8 @@ def gc_editor():
     """Create a GroupContext with editor role (not workspace admin)."""
     return GroupContext(
         group_ids=["g1"],
-        group_email="editor@x.com",
-        email_domain="x.com",
+        group_email="editor@example.com",
+        email_domain="example.com",
         user_role="editor",
     )
 
@@ -52,8 +52,8 @@ def gc_operator():
     """Create a GroupContext with operator role (not workspace admin)."""
     return GroupContext(
         group_ids=["g1"],
-        group_email="operator@x.com",
-        email_domain="x.com",
+        group_email="operator@example.com",
+        email_domain="example.com",
         user_role="operator",
     )
 
@@ -150,7 +150,7 @@ class TestSetDatabricksConfig:
         )
 
         call_kwargs = svc.set_databricks_config.call_args
-        assert call_kwargs[1]["created_by_email"] == "admin@x.com"
+        assert call_kwargs[1]["created_by_email"] == "admin@example.com"
 
     @pytest.mark.asyncio
     async def test_set_config_propagates_service_error(self):
@@ -329,7 +329,7 @@ class TestGetDatabricksEnvironment:
 
         mock_auth_context = MagicMock()
         mock_auth_context.auth_method = "pat"
-        mock_auth_context.user_identity = "admin@x.com"
+        mock_auth_context.user_identity = "admin@example.com"
 
         with (
             patch("src.utils.databricks_auth._databricks_auth", mock_auth),
@@ -343,7 +343,7 @@ class TestGetDatabricksEnvironment:
 
         assert result["databricks_host"] == "https://example.com"
         assert result["auth_method"] == "pat"
-        assert result["user_identity"] == "admin@x.com"
+        assert result["user_identity"] == "admin@example.com"
         assert result["authenticated"] is True
 
     @pytest.mark.asyncio

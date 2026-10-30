@@ -323,37 +323,6 @@ class TestSQLBaseKBIContext:
 
     # ========== Instance Method Tests ==========
 
-    def test_get_sql_where_clause_no_filters(self, simple_kbi):
-        """Test get_sql_where_clause with no filters"""
-        context = SQLBaseKBIContext(kbi=simple_kbi)
-        result = context.get_sql_where_clause()
-
-        assert result == ""
-
-    def test_get_sql_where_clause_single_filter(self):
-        """Test get_sql_where_clause with single filter"""
-        kbi = KPI(
-            description="Filtered",
-            technical_name="filtered",
-            formula="amount",
-            aggregation_type="SUM",
-            source_table="sales",
-            filters=["status = 'active'"],
-        )
-        context = SQLBaseKBIContext(kbi=kbi)
-        result = context.get_sql_where_clause()
-
-        assert result == "(status = 'active')"
-
-    def test_get_sql_where_clause_multiple_filters(self, kbi_with_filters):
-        """Test get_sql_where_clause with multiple filters"""
-        context = SQLBaseKBIContext(kbi=kbi_with_filters)
-        result = context.get_sql_where_clause()
-
-        assert "(status = 'active')" in result
-        assert "(region = 'US')" in result
-        assert " AND " in result
-
     def test_get_target_columns_for_calculation_no_constant_selection(self, simple_kbi):
         """Test get_target_columns_for_calculation without constant selection"""
         context = SQLBaseKBIContext(kbi=simple_kbi)

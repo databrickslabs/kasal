@@ -279,38 +279,6 @@ class TestUCMetricsGenerator:
 
     # ========== Format UC Metrics YAML Tests ==========
 
-    def test_format_uc_metrics_yaml_simple(self, generator):
-        """Test formatting UC metrics as YAML"""
-        uc_metrics = {
-            "version": "0.1",
-            "description": "Test Metrics",
-            "source": "catalog.schema.Sales",
-            "measures": [{"name": "revenue", "expr": "SUM(amount)"}],
-        }
-
-        result = generator.format_uc_metrics_yaml(uc_metrics)
-
-        assert "version: 0.1" in result
-        assert "Test Metrics" in result  # Description appears in comment
-        assert "source: catalog.schema.Sales" in result
-        assert "measures:" in result
-        assert "name: revenue" in result
-        assert "expr: SUM(amount)" in result
-
-    def test_format_uc_metrics_yaml_with_filter(self, generator):
-        """Test formatting UC metrics with filter"""
-        uc_metrics = {
-            "version": "0.1",
-            "description": "Test Metrics",
-            "source": "catalog.schema.Sales",
-            "filter": "year = 2023",
-            "measures": [{"name": "revenue", "expr": "SUM(amount)"}],
-        }
-
-        result = generator.format_uc_metrics_yaml(uc_metrics)
-
-        assert "filter: year = 2023" in result
-
     # ========== Format Consolidated UC Metrics YAML Tests ==========
 
     def test_format_consolidated_uc_metrics_yaml_simple(self, generator):

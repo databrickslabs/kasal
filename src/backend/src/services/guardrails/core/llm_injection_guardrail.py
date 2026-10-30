@@ -16,7 +16,7 @@ Results are cached by content hash to avoid redundant LLM calls on retries.
 
 import hashlib
 from collections import OrderedDict
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from src.core.logger import LoggerManager
 from src.services.guardrails.base_guardrail import BaseGuardrail
@@ -54,11 +54,13 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
-def _run_completion(model: str, messages, max_tokens: int = 8):
+def _run_completion(
+    model: str, messages: List[Dict[str, str]], max_tokens: int = 8
+) -> str:
     """Run LLMManager.completion() from a sync context (guardrail validate)."""
     from src.services.llm.manager import LLMManager
 
-    async def _call():
+    async def _call() -> str:
         return await LLMManager.completion(
             messages=messages,
             model=model,

@@ -19,7 +19,6 @@ from src.services.converters.base.models import (
 )
 from src.services.converters.formats.sql.helpers.sql_structures import (
     SQLStructureExpander,
-    SQLTimeIntelligenceHelper,
 )
 from src.services.converters.formats.sql.models import (
     SQLDefinition,
@@ -611,56 +610,3 @@ class TestSQLStructureExpanderGeneration:
 
         sql_text = queries[0].to_sql()
         assert "MAX" in sql_text.upper()
-
-
-class TestSQLTimeIntelligenceHelperExtended:
-    """Additional tests for SQLTimeIntelligenceHelper"""
-
-    def test_create_ytd_structure(self):
-        """Test creating YTD SQL structure"""
-        helper = SQLTimeIntelligenceHelper()
-        structure = helper.create_ytd_sql_structure()
-
-        assert structure is not None
-        assert "Year" in structure.description or "YTD" in structure.description
-
-    def test_create_ytg_structure(self):
-        """Test creating YTG SQL structure"""
-        helper = SQLTimeIntelligenceHelper()
-        structure = helper.create_ytg_sql_structure()
-
-        assert structure is not None
-
-    def test_create_py_structure(self):
-        """Test creating Prior Year SQL structure"""
-        helper = SQLTimeIntelligenceHelper()
-        structure = helper.create_prior_year_sql_structure()
-
-        assert structure is not None
-
-    def test_create_variance_structure(self):
-        """Test creating variance SQL structure"""
-        helper = SQLTimeIntelligenceHelper()
-        structure = helper.create_variance_sql_structure(["actual", "budget"])
-
-        assert structure is not None
-        assert structure.formula is not None or structure.description is not None
-
-    def test_structures_have_description(self):
-        """Test that time intelligence structures have descriptions"""
-        helper = SQLTimeIntelligenceHelper()
-        ytd = helper.create_ytd_sql_structure()
-        ytg = helper.create_ytg_sql_structure()
-        py = helper.create_prior_year_sql_structure()
-
-        assert ytd.description is not None
-        assert ytg.description is not None
-        assert py.description is not None
-
-    def test_ytd_has_date_filter(self):
-        """Test that YTD structure has a date-based filter"""
-        helper = SQLTimeIntelligenceHelper()
-        structure = helper.create_ytd_sql_structure()
-
-        # YTD should have sql_template or filters
-        assert structure.sql_template is not None or len(structure.filters) > 0

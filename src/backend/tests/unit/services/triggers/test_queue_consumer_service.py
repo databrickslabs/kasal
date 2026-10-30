@@ -513,7 +513,11 @@ class TestWebhookDelivery:
     @pytest.fixture(autouse=True)
     def _allow_private(self, monkeypatch):
         # Unit tests must not DNS-resolve; the strict-guard path has its own test.
-        monkeypatch.setenv("KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", "1")
+        monkeypatch.setattr(
+            "src.services.triggers.queue_consumer_service.settings."
+            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS",
+            True,
+        )
 
     @pytest.mark.asyncio
     async def test_2xx_marks_dispatched_and_posts_the_event(self, service):
@@ -609,7 +613,11 @@ class TestWebhookSsrfGuard:
         # Without the dev escape, the shared guard applies: http (non-https)
         # fails the structure check outright -- permanent, no retries, and no
         # DNS lookup in the test.
-        monkeypatch.delenv("KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", raising=False)
+        monkeypatch.setattr(
+            "src.services.triggers.queue_consumer_service.settings."
+            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS",
+            False,
+        )
         mock_session = MagicMock()
         mock_session.commit = AsyncMock()
         repo = MagicMock()

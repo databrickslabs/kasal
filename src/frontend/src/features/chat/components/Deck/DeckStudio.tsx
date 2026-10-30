@@ -1,32 +1,43 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Loader2, Maximize2, Undo2, Upload, X } from 'lucide-react';
+import { Download, Loader2, Maximize2, Undo2, Upload } from 'lucide-react';
 import ScaledFrame from '../Chat/ScaledFrame';
 import DeckPresentation from '../Chat/DeckPresentation';
 import ThumbnailRail from './ThumbnailRail';
 import SlideInstructionBar from './SlideInstructionBar';
 import DeckModelPicker from './DeckModelPicker';
+import DeckEffortPicker from './DeckEffortPicker';
+import { useDeckHistory } from './useDeckHistory';
+import { useSlideEditing } from './useSlideEditing';
+import { createDeckStudioStore, useDeckState, type DeckStudioStore } from './deckStudioStore';
 import RunProgress from '../Chat/RunProgress';
 import StepContent from '../Preview/StepContent';
 import type { RunStep } from '../Preview/traceEventStep';
 import type { TraceEntryData } from '../Chat/ChatMessage';
 import { DeckService } from '../../../../api/chat/DeckService';
+import { AssetService } from '../../../../api/chat/AssetService';
 import { useAppStore } from '../../store/appStore';
+import { useThemeStore } from '../../../../store/theme';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { hasPendingAssets } from '../../utils/assetRefs';
-import { SLIDE_W, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
+import { SLIDE_W, clearRefined, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
 import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx, sanitizeDeckDocument } from '../../utils/deckExport';
+import { concreteModel } from '../../utils/autoModel';
+import { isImageFile, measureImage } from '../../utils/imageFiles';
+import { DEFAULT_EFFORT, type EffortSettings } from '../../../../types/workflow/effort';
 
 /**
- * The deck studio: a deck opened for editing, one slide at a time.
+ * The deck studio: independent slide edits, merged into the latest deck.
  *
  * Thumbnails on the left (select, drag to reorder, duplicate, delete, add
- * between), the selected slide large on a dark stage, and under it the
+ * between), the selected slide large on a themed stage, and under it the
  * instruction bar. An instruction sends ONLY that slide through the one-slide
  * generation call; the thumbnail pulses while it works, the slide swaps in
  * place, and Undo puts the previous deck back. Structural edits are instant.
+ * The slide itself is edited right on the stage — text, bullets, text boxes,
+ * images (see useSlideEditing).
  *
  * The message the deck lives in is the source of truth: every change is
  * written straight back into it, and the studio follows it — so the chat's
@@ -40,15 +51,10 @@ interface DeckStudioProps {
   /** The chat message the deck lives in — where edits are written back. */
   messageId?: string;
   initialIndex?: number;
+  session?: DeckStudioStore;
   onDeckChange?: (next: string, previous: string) => Promise<void>;
   model?: string;
   onClose: () => void;
-}
-
-interface HistoryEntry {
-  label: string;
-  /** The deck before this edit. */
-  prev: string;
 }
 
 const readTextFile = (file: File): Promise<string> => {
@@ -61,13 +67,18 @@ const readTextFile = (file: File): Promise<string> => {
   });
 };
 
-const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model }) => {
-  const [deck, setDeck] = useState(code);
-  // Follow the message: an edit written back (from this studio, or from a
-  // sentence in the chat) is what the studio shows, whichever instance wrote it.
-  useEffect(() => {
-    setDeck(code);
-  }, [code]);
+const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model, session }) => {
+  const [localSession] = useState(() => session ?? createDeckStudioStore(code));
+  const deckSession = session ?? localSession;
+  const dark = useThemeStore(s => s.isDarkMode);
+  const writeBack = useCallback((next: string, previous: string) => {
+    if (onDeckChange) return onDeckChange(next, previous);
+    if (!messageId) return;
+    const store = useSessionStore.getState();
+    const msg = store.messages.find((m) => m.id === messageId);
+    if (msg) store.updateMessage(messageId, { content: replaceDeckInContent(msg.content, next) });
+  }, [messageId, onDeckChange]);
+  const { deck, current, history, saving, pending: savingRef, commit, undo: undoDeck } = useDeckHistory(deckSession, code, writeBack);
   const slides = useMemo(() => splitSlides(deck), [deck]);
   const count = slides.length;
   // What the rail, the stage and the exports SHOW: the deck with its
@@ -76,13 +87,12 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const resolvedDeck = useResolvedAssetHtml(deck);
   const viewSlides = useMemo(() => splitSlides(resolvedDeck), [resolvedDeck]);
   const [selected, setSelected] = useState(() => Math.max(0, Math.min(initialIndex, count - 1)));
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [working, setWorking] = useState<{ index: number } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activity, setActivity] = useState<{ startedAt: number; jobId?: string; step: TraceEntryData } | null>(null);
-  const [activityStep, setActivityStep] = useState<RunStep | null>(null);
+  const { active } = deckSession.getState();
+  const [working, setWorking] = useDeckState(deckSession, 'working');
+  const [error, setError] = useDeckState(deckSession, 'error');
+  const [errors, setErrors] = useDeckState(deckSession, 'errors');
+  const [activities, setActivities] = useDeckState(deckSession, 'activities');
+  const [activitySteps, setActivitySteps] = useDeckState(deckSession, 'activitySteps');
   // The bar revises the selected slide, or writes a just-inserted blank one.
   const [barMode, setBarMode] = useState<{ kind: 'refine' } | { kind: 'fill'; at: number }>({ kind: 'refine' });
   const [present, setPresent] = useState(false);
@@ -91,74 +101,74 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const menuRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const selectedModel = useAppStore((s) => s.selectedModel);
-  const [editModel, setEditModel] = useState(() => model || selectedModel || '');
+  const [editModel, setEditModel] = useState(() => model || concreteModel(selectedModel) || '');
+  const [editEffort, setEditEffort] = useState<EffortSettings>(DEFAULT_EFFORT);
 
   const shown = Math.min(selected, Math.max(0, count - 1));
   const stage = useMemo(() => stageFor(viewSlides[shown] ?? ''), [viewSlides, shown]);
 
-  // Write the deck back into its message, so the chat's card is current and a
-  // closed studio loses nothing.
-  const writeBack = useCallback(
-    (next: string) => {
-      if (onDeckChange) return onDeckChange(next, deck);
-      if (!messageId) return;
-      const store = useSessionStore.getState();
-      const msg = store.messages.find((m) => m.id === messageId);
-      if (msg) store.updateMessage(messageId, { content: replaceDeckInContent(msg.content, next) });
-    },
-    [messageId, onDeckChange, deck],
-  );
-  const save = useCallback((next: string, done: () => void) => {
-    if (savingRef.current) return;
-    setError(null);
-    try {
-      const pending = writeBack(next);
-      if (!pending) { done(); return; }
-      savingRef.current = true;
-      setSaving(true);
-      return pending.then(done).catch(() => {
-        setError('The deck could not be saved. Your previous version is still shown. Try again.');
-      }).finally(() => { savingRef.current = false; setSaving(false); });
-    } catch {
-      setError('The deck could not be saved. Your previous version is still shown. Try again.');
-    }
-  }, [writeBack]);
-  const commit = useCallback((next: string, label: string, done?: () => void) => save(next, () => {
-    setHistory(h => [...h, { label, prev: deck }]);
-    setDeck(next);
-    done?.();
-  }), [deck, save]);
-  const undo = useCallback(() => {
-    const last = history[history.length - 1];
-    if (!last || working) return;
-    void save(last.prev, () => {
-      setDeck(last.prev);
-      setHistory(h => h.slice(0, -1));
-    });
-  }, [history, working, save]);
-
-  const instant = (edit: SlideEdit) => {
-    if (working || savingRef.current) return;
-    const plan = planSlideEdit(edit, deck);
-    if (plan.kind !== 'instant') return;
-    void commit(plan.deck, plan.done, () => {
-      setSelected(plan.focus);
-      if (edit.kind === 'blank') setBarMode({ kind: 'fill', at: edit.index });
-    });
+  // The slide is edited on the stage. Not while the model rewrites it or its
+  // images load: either would replace what is on screen.
+  const imageRef = useRef<HTMLInputElement>(null);
+  const pickImage = useCallback(() => imageRef.current?.click(), []);
+  const onSlide = useSlideEditing({
+    slides, viewSlides, shown, commit, onError: setError, onPickImage: pickImage,
+    editable: !working.has(shown) && !hasPendingAssets(viewSlides[shown] ?? ''),
+  });
+  // An action that reads the deck in the same click saves the slide first: the
+  // frame's own "focus left" save may not have arrived yet.
+  const afterSave = (run: () => void) => {
+    const saved = onSlide.flush();
+    if (saved) void saved.then(run);
+    else run();
   };
 
-  const apply = async (instruction: string) => {
-    if (working || savingRef.current) return;
+  const structureSaving = saving && working.size === 0;
+  const activity = activities[shown];
+  const activityStep = activitySteps[shown];
+  const setActivityStep = (step: RunStep | null) => setActivitySteps(all => ({ ...all, [shown]: step }));
+  const saveError = () => setError('The deck could not be saved. Your previous version is still shown. Try again.');
+  const clearSlideActivity = () => {
+    setActivities({});
+    setActivitySteps({});
+    setErrors({});
+  };
+  const undo = () => afterSave(() => {
+    if (active.current.size || savingRef.current) return;
+    setError(null);
+    void undoDeck().then(clearSlideActivity).catch(saveError);
+  });
+
+  const instant = (edit: SlideEdit) => afterSave(() => {
+    if (active.current.size || savingRef.current) return;
+    const plan = planSlideEdit(edit, current.current);
+    if (plan.kind !== 'instant') return;
+    setError(null);
+    void commit(plan.deck, plan.done, () => {
+      clearSlideActivity();
+      setSelected(plan.focus);
+      if (edit.kind === 'blank') setBarMode({ kind: 'fill', at: edit.index });
+    }).catch(saveError);
+  });
+
+  const apply = (instruction: string) => afterSave(() => void applyInstruction(instruction));
+  const applyInstruction = async (instruction: string) => {
+    const target = barMode.kind === 'fill' ? barMode.at : shown;
+    if (active.current.has(target) || (savingRef.current && !active.current.size)) return;
     const edit: SlideEdit =
       barMode.kind === 'fill'
         ? { kind: 'fill', index: barMode.at, instruction }
         : { kind: 'refine', index: shown, instruction };
-    const plan = planSlideEdit(edit, deck);
+    const base = current.current;
+    const original = splitSlides(clearRefined(base));
+    const plan = planSlideEdit(edit, base);
     if (plan.kind !== 'call') return;
-    const target = barMode.kind === 'fill' ? barMode.at : shown;
     setError(null);
-    setWorking({ index: target });
-    setActivityStep(null);
+    setErrors(all => ({ ...all, [target]: null }));
+    active.current.add(target);
+    setWorking(new Set(active.current));
+    setActivitySteps(all => ({ ...all, [target]: null }));
+    if (barMode.kind === 'fill') setBarMode({ kind: 'refine' });
     // Pin the transcript to the session that initiated this edit. The studio
     // may close or the user may switch sessions before the response arrives.
     const store = useSessionStore.getState();
@@ -176,38 +186,42 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     const updateActivity = (step: TraceEntryData) => {
       const updates = { resultType: 'trace', resultData: step, ...(jobId ? { executionId: jobId } : {}) };
       if (owner && stepId) store.updateMessageInTargetSession(owner, stepId, updates);
-      setActivity({ startedAt, jobId, step });
+      setActivities(all => ({ ...all, [target]: { startedAt, jobId, step } }));
     };
-    setActivity({ startedAt, step: pending });
+    setActivities(all => ({ ...all, [target]: { startedAt, step: pending } }));
     try {
-      const res = await DeckService.refineSlide({ ...plan.request, model: editModel || null }, (id) => {
+      const res = await DeckService.refineSlide({ ...plan.request, model: editModel || null, execution_effort: editEffort }, (id) => {
         jobId = id;
         updateActivity(pending);
       });
       jobId = res.job_id || undefined;
       if (!res.section) throw new Error(res.error || 'The model did not return a slide.');
+      if (clearRefined(res.section).trim() === (original[target] || '').trim()) {
+        throw new Error('The model returned the slide unchanged. Try a more specific instruction.');
+      }
+      await commit(latest => {
+        const now = splitSlides(clearRefined(latest));
+        if (now.length !== original.length || now[target] !== original[target]) {
+          throw new Error('This slide changed while the edit was running. Please retry on the current slide.');
+        }
+        const rebased = planSlideEdit(edit, latest);
+        if (rebased.kind !== 'call') throw new Error('The slide edit could not be applied.');
+        return rebased.apply(res.section!);
+      }, plan.done);
       updateActivity({
         kind: 'tool_result', label: plan.done,
         sublabel: [res.model, 'Agent run'].filter(Boolean).join(' · '),
         source: 'refine', timestamp: Date.now(), durationMs: Date.now() - startedAt,
       });
-      if (res.section.trim() === (slides[target] || '').trim()) {
-        // Silence here read as "nothing happened" — say what did.
-        setError('The model returned the slide unchanged. Try a more specific instruction.');
-        return;
-      }
-      await commit(plan.apply(res.section), plan.done, () => {
-        setSelected(plan.focus);
-        setBarMode({ kind: 'refine' });
-      });
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       const message = typeof detail === 'string' ? detail : e instanceof Error ? e.message : 'The edit failed.';
-      setError(message);
+      setErrors(all => ({ ...all, [target]: message }));
       updateActivity({ kind: 'event', label: 'Slide edit failed', detail: message,
         source: 'refine', timestamp: Date.now(), durationMs: Date.now() - startedAt });
     } finally {
-      setWorking(null);
+      active.current.delete(target);
+      setWorking(new Set(active.current));
     }
   };
 
@@ -272,10 +286,11 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const importHtml = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || working || savingRef.current) return;
+    if (!file || active.current.size || savingRef.current) return;
     setError(null);
     try {
       const documentHtml = await readTextFile(file);
+      if (active.current.size || savingRef.current) return;
       const parsed = new DOMParser().parseFromString(documentHtml, 'text/html');
       // Our own standalone export keeps the authored deck inside #deck-stage.
       // For another HTML document, carry its head styles along with its body.
@@ -288,16 +303,35 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
         return;
       }
       void commit(imported, 'Imported HTML deck', () => {
+        clearSlideActivity();
         setSelected(0);
         setBarMode({ kind: 'refine' });
-      });
+      }).catch(saveError);
     } catch {
       setError('The HTML presentation could not be imported.');
     }
   };
 
+  const replaceImageFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!isImageFile(file)) {
+      setError('Choose a PNG, JPEG, WebP or GIF image.');
+      return;
+    }
+    setError(null);
+    try {
+      const { width, height } = await measureImage(file);
+      const asset = await AssetService.upload(file, { sessionId: useSessionStore.getState().currentSessionId, width, height });
+      onSlide.replaceImage(`asset:${asset.id}`);
+    } catch {
+      setError('The image could not be uploaded. Try again.');
+    }
+  };
+
   const btn =
-    'inline-flex items-center gap-1.5 rounded-md !px-2.5 !py-1.5 text-xs font-medium transition-colors hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent';
+    'inline-flex items-center gap-1.5 rounded-md !px-2.5 !py-1.5 text-xs font-medium transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-40 disabled:hover:bg-transparent';
   const lastEdit = history[history.length - 1];
 
   // Portaled to <body> so its z-index counts in the ROOT stacking context —
@@ -307,11 +341,12 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   // that class on a wrapper; without it `fixed inset-0` would not apply and
   // the studio would land as a giant static block at the end of the page.
   return createPortal(
-    <div className="kasal-chat-root">
+    <div className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'} style={{ colorScheme: dark ? 'dark' : 'light' }}>
       <div
         role="dialog"
         aria-label="Deck studio"
         aria-modal="true"
+        tabIndex={-1}
         className="kasal-deck-studio fixed inset-0 z-[1200] flex flex-col"
         // A portal still bubbles React events up the COMPONENT tree: a click in
         // the instruction bar reached the deck card's onClick, which focuses the
@@ -322,14 +357,19 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
         // key handler — from ever running.
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onDeckKey}
-        style={{ background: '#111', color: '#e5e5e5' }}
+        style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
       >
-        <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid #222' }}>
+        <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--border-color)' }}>
           <span className="text-sm font-medium">Deck</span>
-          <span className="text-xs" style={{ color: '#8a8a8a' }}>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
             {count} slide{count === 1 ? '' : 's'}
             {history.length > 0 ? ` · ${history.length} edit${history.length === 1 ? '' : 's'}` : ''}
           </span>
+          {(working.size > 0 || saving) && (
+            <span role="status" className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              Reordering available after slide edits finish saving
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <input
               ref={importRef}
@@ -339,10 +379,18 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
               data-testid="deck-html-input"
               onChange={importHtml}
             />
+            <input
+              ref={imageRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              hidden
+              data-testid="deck-image-input"
+              onChange={replaceImageFile}
+            />
             <button
               type="button"
               className={btn}
-              disabled={!lastEdit || !!working || saving}
+              disabled={!lastEdit || working.size > 0 || saving}
               onClick={undo}
               title={lastEdit ? `Undo: ${lastEdit.label}` : 'Undo'}
             >
@@ -354,7 +402,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             <button
               type="button"
               className={btn}
-              disabled={!!working || saving}
+              disabled={working.size > 0 || saving}
               onClick={() => importRef.current?.click()}
               title="Import HTML"
             >
@@ -367,22 +415,22 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
               {menu && (
                 <div
                   className="absolute right-0 z-10 mt-1 min-w-[10rem] overflow-hidden rounded-md border py-1 shadow-lg"
-                  style={{ background: '#1c1c1c', borderColor: '#333' }}
+                  style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-color)' }}
                 >
-                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('html')}>
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-[var(--bg-rail-hover)]" onClick={() => runExport('html')}>
                     Download HTML
                   </button>
-                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('pdf')}>
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-[var(--bg-rail-hover)]" onClick={() => runExport('pdf')}>
                     Download PDF
                   </button>
-                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('pptx')}>
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-[var(--bg-rail-hover)]" onClick={() => runExport('pptx')}>
                     Download PowerPoint
                   </button>
                 </div>
               )}
             </div>
-            <button type="button" className={btn} onClick={onClose} title="Done (Esc)" style={{ background: '#2a2a2a' }}>
-              <X size={14} /> Done
+            <button type="button" className={btn} onClick={onClose} title="Done (Esc)" style={{ background: 'var(--bg-active-chip)' }}>
+              Done
             </button>
           </div>
         </div>
@@ -390,7 +438,8 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
           <ThumbnailRail
             slides={viewSlides}
             selected={shown}
-            working={working?.index ?? (saving ? shown : null)}
+            working={working}
+            locked={working.size > 0 || saving}
             onSelect={(i) => {
               setSelected(i);
               setBarMode({ kind: 'refine' });
@@ -408,32 +457,36 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             <div className="min-h-0 flex-1 p-6">
               <div className="h-full w-full">
                 <ScaledFrame
-                  // Remount once the slide's images are in (see hasPendingAssets).
-                  key={hasPendingAssets(stage) ? 'pending' : 'ready'}
-                  html={stage}
+                  // Remount once the slide's images are in (see hasPendingAssets),
+                  // and when the editable slide is rebuilt (see useSlideEditing).
+                  key={onSlide.frameKey ? `edit-${onSlide.frameKey}` : hasPendingAssets(stage) ? 'pending' : 'ready'}
+                  html={onSlide.stage ?? stage}
                   baseWidth={SLIDE_W}
                   contain
                   upscale
                   pad={0}
-                  background="#000"
+                  background="transparent"
                   title={`Slide ${shown + 1}`}
                 />
               </div>
             </div>
-            {activity && <div className="kasal-chat-root overflow-auto px-3" data-theme="dark"
+            {activity && <div className="overflow-auto px-3"
               style={{ maxHeight: '30vh', flexShrink: 0 }} aria-label="Slide edit activity">
               {activityStep ? <>
                 <button type="button" className={btn} onClick={() => setActivityStep(null)}>Back to run activity</button>
                 <StepContent step={activityStep} />
-              </> : <RunProgress key={activity.startedAt} inline autoExpand={false} running={!!working} generating={!!working}
+              </> : <RunProgress key={`${shown}-${activity.startedAt}`} inline autoExpand={false} running={working.has(shown)} generating={working.has(shown)}
                 latestStep={activity.step} jobId={activity.jobId} onSelectStep={setActivityStep} />}
             </div>}
             <SlideInstructionBar
-              controls={<DeckModelPicker value={editModel} onChange={setEditModel} disabled={!!working || saving} />}
+              controls={<>
+                <DeckModelPicker value={editModel} onChange={setEditModel} disabled={working.has(shown) || structureSaving} />
+                <DeckEffortPicker value={editEffort} onChange={setEditEffort} model={editModel} disabled={working.has(shown) || structureSaving} />
+              </>}
               slideNumber={barMode.kind === 'fill' ? barMode.at + 1 : shown + 1}
               mode={barMode.kind}
-              working={!!working || saving}
-              error={error}
+              working={working.has(shown) || structureSaving}
+              error={errors[shown] || error}
               onApply={apply}
               onCancelFill={() => setBarMode({ kind: 'refine' })}
             />

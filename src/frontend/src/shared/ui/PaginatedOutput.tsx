@@ -18,6 +18,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckIcon from '@mui/icons-material/Check';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { safeImageComponents } from '../a2ui/lib/markdown';
 import PlanningOutputFormatter, { isPlanningOutput } from './PlanningOutputFormatter';
 
 // Size thresholds in characters
@@ -459,7 +460,7 @@ const PaginatedOutput: React.FC<PaginatedOutputProps> = ({
         {isPlanningContent ? (
           <PlanningOutputFormatter content={formattedContent} />
         ) : enableMarkdown ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeImageComponents}>{displayContent}</ReactMarkdown>
         ) : (
           <Typography
             component="pre"

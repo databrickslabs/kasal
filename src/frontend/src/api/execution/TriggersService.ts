@@ -84,5 +84,3 @@ export class TriggersService {
     await apiClient.delete(`/triggers/emit-rules/${id}`);
   }
 }
-
-export const triggersService = new TriggersService();

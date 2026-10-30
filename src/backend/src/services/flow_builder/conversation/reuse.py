@@ -38,6 +38,7 @@ again", and no rule inferred from state can tell that turn from the others.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,22 @@ logger = logging.getLogger(__name__)
 #: identity, refused to trust it, and re-ran the crew — reuse could never fire
 #: even once, and nothing failed.
 IDENTITY_CHANNEL = "kasal_crew_identities"
+
+
+def output_slug(crew_name: str) -> str:
+    """A crew's name as a ``{placeholder}`` a later task can interpolate.
+
+    Display names have spaces ("Agentic AI Frameworks"), and the runtime only
+    interpolates ``{[A-Za-z_][A-Za-z0-9_]*}``, so a later crew could not ask
+    for an earlier one's output by name. Lower-cased, every other character run
+    becomes ``_``. Never starts with an underscore (pydantic would treat that
+    state key as private and drop it from the persisted state, see above) or a
+    digit (not a valid placeholder), and "" means "nothing to store".
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", crew_name.lower()).strip("_")
+    if slug[:1].isdigit():
+        slug = f"crew_{slug}"
+    return slug
 
 
 def terminal_crew_names(flow_config: Optional[Dict[str, Any]]) -> Set[str]:

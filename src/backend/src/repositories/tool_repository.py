@@ -1,10 +1,16 @@
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.models.tool import Tool
+
+#: Ids below this are reserved for the tools ``seeds/tools.py`` ships, which it
+#: writes with explicit ids. Every other row (a workspace's copy, credentials
+#: or custom tool) gets an id at or above it, so a tool a later release adds
+#: never finds its id taken.
+TOOL_ID_FLOOR = 10_000
 
 
 class ToolRepository(BaseRepository[Tool]):
@@ -22,10 +28,21 @@ class ToolRepository(BaseRepository[Tool]):
         """
         super().__init__(Tool, session)
 
+    async def create(self, obj_in: Dict[str, object]) -> Tool:
+        """Insert a tool row, with an id at or above :data:`TOOL_ID_FLOOR`.
+
+        The id is explicit, the same on SQLite and PostgreSQL, so no row
+        created here depends on where a database sequence happens to be.
+        """
+        if obj_in.get("id") is None:
+            top = (await self.session.execute(select(func.max(self.model.id)))).scalar()
+            obj_in = {**obj_in, "id": max(TOOL_ID_FLOOR, (top or 0) + 1)}
+        return await super().create(obj_in)
+
     async def find_by_ids(self, tool_ids: List[int]) -> List[Tool]:
         """Resolve an execution's already-selected catalogue IDs in batches."""
         ids = list(dict.fromkeys(tool_ids))
-        tools = []
+        tools: List[Tool] = []
         for start in range(0, len(ids), 500):
             result = await self.session.execute(
                 select(self.model).where(self.model.id.in_(ids[start : start + 500]))
@@ -33,17 +50,24 @@ class ToolRepository(BaseRepository[Tool]):
             tools.extend(result.scalars().all())
         return tools
 
-    async def find_by_title(self, title: str) -> Optional[Tool]:
-        """
-        Find a tool by title.
+    async def find_by_title(
+        self, title: str, group_id: Optional[str] = None
+    ) -> Optional[Tool]:
+        """The tool ``title`` resolves to for one teamspace.
 
-        Args:
-            title: Tool title to search for
-
-        Returns:
-            Tool if found, else None
+        That teamspace's own row when ``group_id`` is given and one exists, else
+        the global row. Nothing else is returned. Without ``group_id`` it
+        is the global row only.
         """
-        query = select(self.model).where(self.model.title == title)
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.title == title) & scope)
+            .order_by(self.model.group_id.is_(None), self.model.id)
+            .limit(1)
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 
@@ -60,8 +84,11 @@ class ToolRepository(BaseRepository[Tool]):
         Returns:
             Tool if found, else None
         """
-        query = select(self.model).where(
-            (self.model.title == title) & (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.title == title) & (self.model.group_id == group_id))
+            .order_by(self.model.id)
+            .limit(1)
         )
         result = await self.session.execute(query)
         return result.scalars().first()
@@ -81,11 +108,7 @@ class ToolRepository(BaseRepository[Tool]):
         """
         Find the base (global) tool by title (group_id is NULL).
         """
-        query = select(self.model).where(
-            (self.model.title == title) & (self.model.group_id.is_(None))
-        )
-        result = await self.session.execute(query)
-        return result.scalars().first()
+        return await self.find_by_title(title)
 
     async def toggle_enabled(self, tool_id: int) -> Optional[Tool]:
         """

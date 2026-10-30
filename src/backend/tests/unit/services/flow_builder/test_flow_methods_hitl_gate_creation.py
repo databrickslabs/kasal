@@ -613,7 +613,14 @@ class TestFlowMethodFactoryCreateHitlGate:
         approved.id = "approved-1"
 
         execution = MagicMock()
-        execution.checkpoint_data = {"edited_config": {"key": "edited_value"}}
+        execution.checkpoint_data = {
+            "edited_config": {"key": "edited_value"},
+            # Saved while this gate's approval was pending (see test_gate_edits).
+            "edited_config_gate": {
+                "approval_id": "approved-1",
+                "gate_node_id": "gate-1",
+            },
+        }
 
         session_ctx = self._make_session_ctx()
 

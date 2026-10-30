@@ -602,8 +602,8 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       // connect-src 'none' blocks all outbound network requests from within the
       // preview (prevents data exfiltration via fetch/XHR even when allow-scripts
       // is present). img-src allows only data:/blob: URIs (base64 images) while
-      // blocking external image URLs (the primary markdown injection exfil vector).
-      const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src data: blob:; connect-src 'none';">`;
+      // blocking external image URLs. No eval: the page policy it inherits blocks it.
+      const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; img-src data: blob:; connect-src 'none';">`;
 
       // Insert CSP meta tag and initialization script at the very beginning of the
       // document. This ensures both run before any library scripts.

@@ -73,25 +73,6 @@ class TestUCMVToolInit:
 # ─── _mask_secret ──────────────────────────────────────────────────────────────
 
 
-class TestMaskSecret:
-    def test_none_value(self):
-        assert UCMetricViewGeneratorTool._mask_secret(None) == "none"
-
-    def test_empty_string(self):
-        assert UCMetricViewGeneratorTool._mask_secret("") == "none"
-
-    def test_short_value(self):
-        """Line 74 — short secret masked as ***."""
-        assert UCMetricViewGeneratorTool._mask_secret("abc") == "***"
-
-    def test_long_value(self):
-        """Line 75 — long secret partially masked."""
-        result = UCMetricViewGeneratorTool._mask_secret("12345678901234")
-        assert result.startswith("1234")
-        assert result.endswith("1234")
-        assert "..." in result
-
-
 # ─── _validate_pbi_inputs ─────────────────────────────────────────────────────
 
 

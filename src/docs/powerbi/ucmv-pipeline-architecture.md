@@ -21,7 +21,7 @@ SQL** and **M → source SQL** — feeding one YAML emitter.
 
 ## End-to-end flow
 
-```
+```text
 Power BI REST / scan
         │
         ▼
@@ -47,7 +47,8 @@ Power BI REST / scan
 ```
 
 All source lives under
-`src/backend/src/engines/kasal/tools/custom/`. Tool numbers match the
+`src/backend/src/services/tools/`, with shared helpers in
+`src/backend/src/services/tools/metric_view_utils/`. Tool numbers match the
 `tool-NN-*.md` docs in this folder.
 
 ---
@@ -130,6 +131,28 @@ every module in `metric_view_utils/`. Phases (see `pipeline.py`):
 `mquery_parser.py` reads the transpiled SQL for each table and extracts source
 table, joins, aggregate columns, group-bys, and static filters.
 
+Catalog-browse M (`Databricks.Catalogs(…){[Name=…]}[Data]…`) carries no SQL, so
+config generation compiles it deterministically
+(`resolve_mquery_to_sql`). That compile only runs when **every** applied step
+is on the allowlist in `mquery_steps.py`: the connector call, its navigation,
+and the column-only steps `Table.SelectColumns`, `RenameColumns`,
+`RemoveColumns`, `ReorderColumns` and `TransformColumnTypes`. Any other step,
+such as a row filter (`Table.SelectRows`), a dedup (`Table.Distinct`), a group,
+a join or a computed column, makes the table **not resolvable**: the raw M is
+shipped instead of a `SELECT *` that would aggregate rows Power BI excluded,
+and the skip reason names the refused steps. A native query is never compiled
+to `SELECT *`; its own SQL, with its `WHERE` and `GROUP BY`, reaches the parser.
+`TransformColumnTypes` stays on the allowlist, but the SQL source does not apply
+it: conversions that can change values (whole-number types round, `Currency`
+rounds to 4 decimals, `type date` drops the time) are listed per table, with the
+Spark SQL that reproduces each one (`CAST(BROUND(c) AS BIGINT)`,
+`BROUND(c, 4)`, `CAST(c AS DATE)`, `CAST(c AS BOOLEAN)`; Power Query rounds half
+to even, as `BROUND` does), in the run's warnings and under "Power Query Type
+Conversions Not Applied" in the migration report. The view itself still reads
+the physical table. A dimension's physical table is used for a join only when
+its M keeps every row of that table; otherwise the join is not built and the
+migration report lists it under "Dimension Joins Not Emitted".
+
 Not every M source is a warehouse table. `classify_mquery_source(mquery)` sorts
 a no-SQL source into one of:
 
@@ -173,6 +196,12 @@ yield SQL can be routed to `mquery_llm_fallback.py` (M → SQL via the LLM).
    denominators, exclusions, additive terms, and share-of-total collapse. A
    translation that drops a DAX component is rejected (routed to LLM / skipped)
    rather than emitted wrong.
+4. **Filters are all or nothing** (`dax_condition_sql.py`). A `FILTER` or
+   `CALCULATE` condition translates only when every `&&` part and every `||`
+   arm does, and each pattern must match the whole part. If one part cannot be
+   read (for example `Sales[OrderDate] >= DATE(2024,1,1)`), the measure is a
+   gap with an "Untranslatable FILTER condition" reason, never the same measure
+   with a smaller filter.
 
 Supporting DAX modules: `dependency_graph.py` (topological order so base
 measures translate before the ratios that reference them),
@@ -196,6 +225,18 @@ measures, tables-not-emitted, native-feature status).
 generated YAML/SQL (expression validation, base-measure classification) before
 deploy.
 
+Statuses mean:
+
+| Status | Meaning |
+|--------|---------|
+| `VALID` | The component checks found no difference, and the canonical forms do not contradict them |
+| `EQUIVALENT` | Written differently, but **proven** the same: both sides reduce to the same fingerprint (`measure_fingerprint.py`): aggregation kind, aggregated expression, every filter conjunct and the ratio shape, with identifiers compared case- and punctuation-insensitively |
+| `REVIEW` | Some parts match but equivalence is not proven, for example a missing filter conjunct, a different filter value or column, a dropped denominator, or a shape the fingerprint cannot read (VAR blocks, `ALL`, window functions). These go on the attention list |
+| `INVALID` | Nothing matches |
+
+A plain aggregate (`SUM(source.col)`) counts as correct by construction only
+when there is no DAX measure to compare it with.
+
 ## Stage 5 — Deploy
 
 `metric_view_deployer_tool.py` (tool 88) issues the `CREATE METRIC VIEW` against
@@ -217,4 +258,4 @@ Unity Catalog. The Genie-facing config is assembled by
 | Understand measure quality vs `report_id` | Stage 1 above + [ucmv-migration-guide.md](./ucmv-migration-guide.md) |
 
 Tests for the generation stage live in
-`src/backend/tests/unit/engines/kasal/tools/custom/metric_view_utils/`.
+`src/backend/tests/unit/services/tools/metric_view_utils/`.

@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
-from sqlalchemy import and_, delete, desc, func, not_, select
+from sqlalchemy import ColumnElement, and_, delete, desc, func, not_, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -13,7 +14,9 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
     Follows Kasal's patterns for multi-group data isolation.
     """
 
-    async def session_has_other_owner(self, session_id, user_id, group_id):
+    async def session_has_other_owner(
+        self, session_id: str, user_id: str, group_id: str
+    ) -> bool:
         """Legacy message-only sessions must not be claimable by another user."""
         from sqlalchemy import or_, select
 
@@ -57,6 +60,8 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             return []
 
         try:
+            # The id breaks timestamp ties, so OFFSET pages are stable: a client
+            # walking every page neither skips nor repeats a row.
             query = (
                 select(self.model)
                 .where(
@@ -65,7 +70,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
                         self.model.group_id.in_(group_ids),
                     )
                 )
-                .order_by(self.model.timestamp.asc())
+                .order_by(self.model.timestamp.asc(), self.model.id.asc())
             )
 
             # Apply pagination
@@ -156,7 +161,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
 
         try:
             # Build base query conditions
-            conditions = [self.model.group_id.in_(group_ids)]
+            conditions: List[ColumnElement[bool]] = [self.model.group_id.in_(group_ids)]
             if user_id:
                 conditions.append(self.model.user_id == user_id)
 
@@ -292,7 +297,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             )
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return (result.rowcount or 0) > 0
+            return (cast("CursorResult[Any]", result).rowcount or 0) > 0
         except Exception:
             await self.session.rollback()
             raise

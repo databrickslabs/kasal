@@ -4,7 +4,7 @@ Guardrail to validate that a task output contains at least a certain number of c
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from src.core.logger import LoggerManager
 from src.services.guardrails.base_guardrail import BaseGuardrail, is_task_output
@@ -136,7 +136,7 @@ class CompanyCountGuardrail(BaseGuardrail):
                     value = getattr(output, attr)
                     logger.info(f"Found {attr} attribute: {value}")
                     if value and isinstance(value, str):
-                        return value
+                        return cast(str, value)
             logger.info("No suitable attribute found in the task output")
             logger.info(f"Available attributes: {dir(output)}")
             # Try to get any string representation
@@ -162,7 +162,7 @@ class CompanyCountGuardrail(BaseGuardrail):
                     value = output[key]
                     logger.info(f"Found {key} key: {value}")
                     if value and isinstance(value, str):
-                        return value
+                        return cast(str, value)
             logger.info("No suitable key found in dictionary")
             logger.info(f"Available keys: {list(output.keys())}")
             # Try to convert the entire dict to string

@@ -26,8 +26,8 @@ def gc(role="admin"):
     """Create a GroupContext with the given role."""
     return GroupContext(
         group_ids=["g1"],
-        group_email="u@x.com",
-        email_domain="x.com",
+        group_email="u@example.com",
+        email_domain="example.com",
         user_role=role,
     )
 
@@ -156,7 +156,7 @@ class TestCreateApiKey:
         await create_api_key(api_key_data=data, group_context=gc("admin"), service=svc)
 
         call_kwargs = svc.create_api_key.call_args
-        assert call_kwargs[1]["created_by_email"] == "u@x.com"
+        assert call_kwargs[1]["created_by_email"] == "u@example.com"
 
     @pytest.mark.asyncio
     async def test_create_propagates_service_error(self):

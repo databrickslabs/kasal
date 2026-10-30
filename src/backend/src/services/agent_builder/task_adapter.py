@@ -5,7 +5,7 @@ This module provides utility functions for working with CrewAI tasks.
 """
 
 import traceback
-from typing import Any, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from pydantic import BaseModel
 
@@ -19,6 +19,19 @@ from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
 # Get loggers from the centralized logging system
 logger = LoggerManager.get_instance().crew
 guardrail_logger = LoggerManager.get_instance().guardrails
+
+
+def _loggable_keys(config: object) -> List[str]:
+    """The key names of a tool or callback config, for the logs (never values)."""
+    return sorted(config) if isinstance(config, dict) else []
+
+
+def _loggable_tool_names(tools: List[object]) -> List[str]:
+    """Tool names for the logs: a tool's repr can include its credentials."""
+    return [
+        t if isinstance(t, str) else str(getattr(t, "name", type(t).__name__))
+        for t in tools
+    ]
 
 
 def is_data_missing(output: Any) -> bool:
@@ -107,7 +120,7 @@ def create_callback_from_string(
     execution_name: Optional[str] = None,
     *,
     group_id: Optional[str] = None,
-):
+) -> Optional[Callable[[Any], Any]]:
     """
     Create a callable callback from a string name.
 
@@ -133,7 +146,7 @@ def create_callback_from_string(
 
             installation = DatabricksAppInstallation.from_env()
             installed_path = (
-                installation.output_path(group_id)
+                installation.output_path(group_id or "")
                 if installation.output_volume
                 else None
             )
@@ -167,12 +180,12 @@ def create_callback_from_string(
             )
 
             # Create a synchronous wrapper for the async callback
-            def databricks_callback_wrapper(output):
+            def databricks_callback_wrapper(output: Any) -> Any:
                 """Synchronous wrapper for DatabricksVolumeCallback"""
                 import asyncio
                 from concurrent.futures import ThreadPoolExecutor
 
-                def run_async_callback():
+                def run_async_callback() -> Any:
                     """Run the async callback in a separate thread with its own event loop"""
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -223,10 +236,10 @@ async def create_task(
     # answer, so naming one engine's class would be a type that is wrong half
     # the time.
     agent: Any,
-    tools: List[Any] = None,
-    config: dict = None,
-    tool_service=None,
-    tool_factory=None,
+    tools: Optional[List[Any]] = None,
+    config: Optional[dict] = None,
+    tool_service: Any = None,
+    tool_factory: Any = None,
     execution_name: Optional[str] = None,
 ) -> Any:
     """
@@ -249,7 +262,7 @@ async def create_task(
         f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}"
     )
     logger.info(
-        f"Task tool_configs: {task_config.get('tool_configs', {}) if isinstance(task_config, dict) else 'N/A'}"
+        f"Task tool_configs: {sorted(task_config.get('tool_configs') or {}) if isinstance(task_config, dict) else 'N/A'}"
     )
 
     # Log agent information
@@ -311,16 +324,19 @@ async def create_task(
             if not tool_name or tool_name == "MCP_SERVERS":
                 continue
             try:
-                tool_config = {}
+                tool_config: Dict[str, Any] = {}
                 if tool_service and hasattr(tool_service, "get_tool_config_by_name"):
                     tool_config = (
                         await tool_service.get_tool_config_by_name(tool_name) or {}
                     )
 
                 tool_override = task_tool_configs_map.get(tool_name, {})
+                # Key names only: the override carries the tool's credentials.
                 logger.info(
-                    f"Task {task_key} - Auto-creating {tool_name} with "
-                    f"override: {tool_override}"
+                    "Task %s - Auto-creating %s with override keys: %s",
+                    task_key,
+                    tool_name,
+                    _loggable_keys(tool_override),
                 )
 
                 tool_instance = tool_factory.create_tool(
@@ -399,26 +415,15 @@ async def create_task(
                             "Measure Conversion Pipeline",
                         ]
                         if tool_name in debug_tools:
+                            # Key names only: the override carries credentials.
                             logger.info(
-                                f"Task {task_key} - {tool_name} task_tool_configs keys: {list(task_tool_configs.keys())}"
+                                "Task %s - %s task_tool_configs keys: %s; "
+                                "override keys: %s",
+                                task_key,
+                                tool_name,
+                                list(task_tool_configs.keys()),
+                                _loggable_keys(tool_override),
                             )
-                            logger.info(
-                                f"Task {task_key} - {tool_name} tool_override: {tool_override}"
-                            )
-                            # Also log if the override has actual values
-                            if tool_override:
-                                override_preview = {
-                                    k: (
-                                        v[:30] + "..."
-                                        if isinstance(v, str) and len(v) > 30
-                                        else v
-                                    )
-                                    for k, v in tool_override.items()
-                                    if v and "secret" not in k.lower()
-                                }
-                                logger.info(
-                                    f"Task {task_key} - {tool_name} override values preview: {override_preview}"
-                                )
 
                         # Create the tool instance with overrides
                         tool_instance = tool_factory.create_tool(
@@ -471,12 +476,12 @@ async def create_task(
                                 )
                         else:
                             logger.error(
-                                f"Could not create tool instance for {tool_name}"
+                                "Could not create tool instance for %s: the tool "
+                                "factory returned None (see its logs). Tool config "
+                                "keys: %s",
+                                tool_name,
+                                _loggable_keys(tool_config),
                             )
-                            logger.error(
-                                "Tool factory returned None - check tool factory logs for details"
-                            )
-                            logger.error(f"Tool config: {tool_config}")
                     except Exception as e:
                         logger.error(f"Error creating tool {tool_name}: {str(e)}")
             else:
@@ -488,7 +493,7 @@ async def create_task(
         except Exception as e:
             logger.error(f"Error resolving tool IDs for task {task_key}: {str(e)}")
 
-    logger.info(f"This is the tools: {task_tools}")
+    logger.info("This is the tools: %s", _loggable_tool_names(task_tools))
     # Log tool information if provided
     if task_tools:
         logger.info(f"Task {task_key} has {len(task_tools)} specific tools assigned:")
@@ -604,8 +609,12 @@ async def create_task(
                                     is not None
                                     else True
                                 )
+                            # Key names only: a task's callback_config can hold a PAT.
                             logger.info(
-                                f"Merged task-specific config with global defaults for task {task_key}: {callback_config}"
+                                "Merged task-specific config with global defaults "
+                                "for task %s: keys %s",
+                                task_key,
+                                _loggable_keys(callback_config),
                             )
                     else:
                         logger.info(
@@ -683,7 +692,7 @@ async def create_task(
         return task
     except Exception as e:
         logger.error(f"Error creating task: {e}")
-        # Log the task_args for debugging
-        logger.error(f"Task args: {task_args}")
+        # Key names only: the values include tool instances and their credentials.
+        logger.error("Task args keys: %s", sorted(task_args))
         logger.error(f"Stack trace: {traceback.format_exc()}")
         raise

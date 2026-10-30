@@ -5,12 +5,18 @@ The ``/records`` pair is backend-agnostic: it reads the group's active
 ``record_browsers``.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
 from src.core.exceptions import BadRequestError
-from src.dependencies.providers import GroupContextDep
+from src.dependencies.providers import GroupContextDep, require_group_id
+from src.schemas.memory_backend import (
+    MemoryGraphForgetResponse,
+    MemoryGraphResponse,
+)
+from src.services.memory.storage.graph_browse import forget_fact, graph_snapshot
 from src.utils.databricks_auth import extract_user_token_from_request
 
 from .dependencies import MemoryBackendServiceDep, logger
@@ -42,7 +48,7 @@ async def get_memory_stats(
         Memory usage statistics
     """
     # Service is injected via dependency
-    stats = await service.get_memory_stats(group_context.primary_group_id, crew_id)
+    stats = await service.get_memory_stats(require_group_id(group_context), crew_id)
     return stats
 
 
@@ -112,15 +118,12 @@ async def list_memory_records(
     or Lakebase pgvector based on the user's active ``MemoryBackend``
     configuration. Records are filtered by the caller's group (tenant).
     """
-    group_id = group_context.primary_group_id
+    group_id = require_group_id(group_context)
     extract_user_token_from_request(request) if request else None
 
     active = await service.get_active_config(group_id)
-    backend_type = (
-        getattr(active, "backend_type", None).value
-        if active and getattr(active, "backend_type", None)
-        else "default"
-    )
+    active_type = getattr(active, "backend_type", None) if active else None
+    backend_type = active_type.value if active_type else "default"
 
     logger.info(
         "[memory/records] group=%s backend=%s scope=%s limit=%s offset=%s",
@@ -170,6 +173,36 @@ async def list_memory_records(
     }
 
 
+@router.get("/graph", response_model=MemoryGraphResponse)
+async def get_memory_graph(
+    group_context: GroupContextDep,
+    service: MemoryBackendServiceDep,
+    limit: int = Query(
+        500, ge=1, le=5000, description="Maximum number of facts to return."
+    ),
+) -> MemoryGraphResponse:
+    """The teamspace's graph memory: entities, and the facts between them
+    (replaced facts included, marked by ``valid_to``). Empty with
+    ``enabled: false`` when graph memory is switched off."""
+    group_id = require_group_id(group_context)
+    active = await service.get_active_config(group_id)
+    return await asyncio.to_thread(graph_snapshot, active, group_id, limit)
+
+
+@router.delete("/graph/facts/{fact_id}", response_model=MemoryGraphForgetResponse)
+async def forget_memory_fact(
+    fact_id: str,
+    group_context: GroupContextDep,
+    service: MemoryBackendServiceDep,
+) -> MemoryGraphForgetResponse:
+    """Stop recalling one fact in the caller's teamspace. The fact is retired,
+    not deleted: it stays listed under replaced facts."""
+    group_id = require_group_id(group_context)
+    active = await service.get_active_config(group_id)
+    forgotten = await asyncio.to_thread(forget_fact, active, group_id, fact_id)
+    return MemoryGraphForgetResponse(forgotten=forgotten)
+
+
 @router.delete("/records")
 async def delete_memory_records(
     group_context: GroupContextDep,
@@ -190,15 +223,12 @@ async def delete_memory_records(
     local (LanceDB) path only touches the group's store directory
     ``kasal_default_<group_id>``.
     """
-    group_id = group_context.primary_group_id
+    group_id = require_group_id(group_context)
     extract_user_token_from_request(request) if request else None
 
     active = await service.get_active_config(group_id)
-    backend_type = (
-        getattr(active, "backend_type", None).value
-        if active and getattr(active, "backend_type", None)
-        else "default"
-    )
+    active_type = getattr(active, "backend_type", None) if active else None
+    backend_type = active_type.value if active_type else "default"
 
     logger.info(
         "[memory/records][DELETE] group=%s backend=%s scope=%s",

@@ -44,6 +44,7 @@ from src.core.llm.transport.request_deadline import (
 )
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
+from src.services.execution.harnesses.crewai.outcome import begin_task, flag_output
 
 logger = LoggerManager.get_instance().crew
 
@@ -71,13 +72,15 @@ def kasal_memory_crew_class() -> type:
         def context_providers(self) -> List[Any]:
             if not hasattr(self, "_context_providers"):
                 object.__setattr__(self, "_context_providers", [])
-            return self._context_providers  # type: ignore[attr-defined]
+            providers: List[Any] = self._context_providers
+            return providers
 
         @property
         def output_sinks(self) -> List[Any]:
             if not hasattr(self, "_output_sinks"):
                 object.__setattr__(self, "_output_sinks", [])
-            return self._output_sinks  # type: ignore[attr-defined]
+            sinks: List[Any] = self._output_sinks
+            return sinks
 
         def _get_context(self, task: Any, task_outputs: List[Any]) -> str:
             """CrewAI's context, plus whatever the providers recall.
@@ -85,8 +88,12 @@ def kasal_memory_crew_class() -> type:
             ``_get_context`` is a ``staticmethod`` on the base class but is
             always called as ``self._get_context(...)``, so overriding it as an
             instance method is a supported extension point rather than a trick.
+
+            Also where the task's tool-outcome ledger starts: CrewAI calls this
+            right before running each task, in the context it runs in.
             """
-            base = crew_base._get_context(task, task_outputs)
+            begin_task(task)
+            base: str = crew_base._get_context(task, task_outputs)
             providers = self.context_providers
             if not providers:
                 return base
@@ -110,10 +117,14 @@ def kasal_memory_crew_class() -> type:
             that produced the checkpoint, and running them again would write
             the same memory twice and record a second checkpoint unit for work
             that did not happen.
+
+            The outcome is flagged BEFORE the sinks, so memory sees a degraded
+            answer as degraded (see ``outcome.py``).
             """
             crew_base._process_task_result(self, task, output)
             if getattr(task, "_kasal_restored", False):
                 return
+            flag_output(task, output)
             for sink in self.output_sinks:
                 try:
                     sink(task=task, output=output)
@@ -125,7 +136,9 @@ def kasal_memory_crew_class() -> type:
         # ---------------------------------------------------------------
 
         @run_with_deadline
-        def kickoff(self, *args: Any, from_checkpoint: Any = None, **kwargs: Any):
+        def kickoff(
+            self, *args: Any, from_checkpoint: Any = None, **kwargs: Any
+        ) -> Any:
             self._stamp_run_deadline()
             self._seed_from_checkpoint(from_checkpoint)
             return crew_base.kickoff(self, *args, **kwargs)
@@ -133,18 +146,28 @@ def kasal_memory_crew_class() -> type:
         @async_run_with_deadline
         async def kickoff_async(
             self, *args: Any, from_checkpoint: Any = None, **kwargs: Any
-        ):
+        ) -> Any:
             self._stamp_run_deadline()
             self._seed_from_checkpoint(from_checkpoint)
             return await crew_base.kickoff_async(self, *args, **kwargs)
 
         def _create_manager_agent(self) -> None:
             from src.core.llm.effort import apply_manager_limits
+            from src.core.llm.transport.budget import turn_cap
+            from src.services.execution.harnesses.crewai.deadline import (
+                carry_turn_cap,
+            )
 
             crew_base._create_manager_agent(self)
             apply_manager_limits(
                 self.manager_agent, getattr(self, "_kasal_execution_effort", None)
             )
+            # Off CrewAI's field, like every agent build_agent makes. A custom
+            # manager built by build_agent already carries its cap and has an
+            # empty field, so fall back to the carried value, not to None.
+            manager = self.manager_agent
+            if manager is not None:
+                carry_turn_cap(manager, turn_cap(manager))
 
         def _stamp_run_deadline(self) -> None:
             """One deadline for the whole run, on every agent.

@@ -3,10 +3,6 @@ export const kasalStageBackground = (dark: boolean) => dark
   ? 'radial-gradient(ellipse 80% 62% at 50% 58%, #21272E 0%, #1B1F23 42%, #101317 100%)'
   : 'radial-gradient(ellipse 80% 62% at 50% 58%, #FFFFFF 0%, #FFFFFF 42%, #E7EBF2 100%)';
 
-export const kasalSurfaceShadow = (dark: boolean) => dark
-  ? '0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35)'
-  : '0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06)';
-
 // Align every workspace surface to the same viewport-sized stage, so adjoining
 // panels do not restart the gradient and create visible seams.
 export const kasalStageSurface = (dark: boolean) => ({

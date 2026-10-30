@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, List
+from typing import Annotated, List, Sequence, Union
 
 from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.exc import IntegrityError
@@ -11,10 +11,16 @@ from src.core.exceptions import (
     NotFoundError,
 )
 from src.core.permissions import check_role_in_context
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.dependencies.providers import (
+    GroupContextDep,
+    SessionDep,
+    ToolSecretsVisibleDep,
+)
+from src.models.agent import Agent as AgentModel
 from src.schemas.agent import Agent as AgentSchema
 from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
 from src.services.catalog.agents import AgentService
+from src.services.catalog.secret_view import masked_response
 
 router = APIRouter(
     prefix="/agents",
@@ -51,7 +57,7 @@ async def create_agent(
     agent_in: AgentCreate,
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+) -> AgentModel:
     """
     Create a new agent with group isolation.
     Only Editors and Admins can create agents.
@@ -78,22 +84,29 @@ async def create_agent(
 async def list_agents(
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+    secrets_visible: ToolSecretsVisibleDep,
+) -> Sequence[Union[AgentModel, AgentSchema]]:
     """
     Retrieve all agents for the current group.
+
+    Any member (Operator / Editor / Admin). Stored credentials in tool_configs
+    are masked for members without builder rights.
 
     Args:
         service: Agent service injected by dependency
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         List of agents for the current group
     """
-    if group_context and group_context.is_valid():
-        return await service.find_by_group(group_context)
-    else:
+    if not (group_context and group_context.is_valid()):
         # If no context available, return empty list for security
         return []
+    agents = await service.find_by_group(group_context)
+    if secrets_visible:
+        return agents
+    return [masked_response(AgentSchema, a, ("tool_configs",)) for a in agents]
 
 
 @router.get("/{agent_id}", response_model=AgentSchema)
@@ -101,14 +114,19 @@ async def get_agent(
     agent_id: Annotated[str, Path(title="The ID of the agent to get")],
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+    secrets_visible: ToolSecretsVisibleDep,
+) -> Union[AgentModel, AgentSchema]:
     """
     Get a specific agent by ID with group isolation.
+
+    Any member (Operator / Editor / Admin). Stored credentials in tool_configs
+    are masked for members without builder rights.
 
     Args:
         agent_id: ID of the agent to get
         service: Agent service injected by dependency
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         Agent if found and belongs to user's group
@@ -119,7 +137,9 @@ async def get_agent(
     agent = await service.get_with_group_check(agent_id, group_context)
     if not agent:
         raise NotFoundError("Agent not found")
-    return agent
+    if secrets_visible:
+        return agent
+    return masked_response(AgentSchema, agent, ("tool_configs",))
 
 
 @router.put("/{agent_id}/full", response_model=AgentSchema)
@@ -128,7 +148,7 @@ async def update_agent_full(
     agent_in: AgentUpdate,
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+) -> AgentModel:
     """
     Update all fields of an existing agent with group isolation.
     Only Editors and Admins can update agents.
@@ -161,7 +181,7 @@ async def update_agent(
     agent_in: AgentLimitedUpdate,
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+) -> AgentModel:
     """
     Update limited fields of an existing agent with group isolation.
     Only Editors and Admins can update agents.
@@ -195,7 +215,7 @@ async def delete_agent(
     agent_id: Annotated[str, Path(title="The ID of the agent to delete")],
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete an agent with group isolation.
     Only Editors and Admins can delete agents.
@@ -221,7 +241,7 @@ async def delete_agent(
 async def delete_all_agents(
     service: AgentServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete all agents for the current group.
     Only Admins can delete all agents.

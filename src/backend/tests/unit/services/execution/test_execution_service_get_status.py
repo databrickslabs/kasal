@@ -62,55 +62,7 @@ def make_crew_config(**kw):
     return cfg
 
 
-# ---------------------------------------------------------------------------
-# _mask_inputs_sensitive_data
-# ---------------------------------------------------------------------------
-
-
-class TestMaskInputsSensitiveData:
-    def _svc(self):
-        return make_service()
-
-    def test_returns_none_when_empty(self):
-        svc = self._svc()
-        assert svc._mask_inputs_sensitive_data(None) is None
-        assert svc._mask_inputs_sensitive_data({}) == {}
-
-    def test_masks_agent_tool_configs(self):
-        svc = self._svc()
-        with patch("src.services.execution.service.mask_sensitive_fields") as msk:
-            msk.return_value = {"masked": True}
-            inputs = {"agents_yaml": {"a": {"tool_configs": {"secret": "s"}}}}
-            result = svc._mask_inputs_sensitive_data(inputs)
-            assert result["agents_yaml"]["a"]["tool_configs"] == {"masked": True}
-
-    def test_masks_task_tool_configs(self):
-        svc = self._svc()
-        with patch("src.services.execution.service.mask_sensitive_fields") as msk:
-            msk.return_value = {"masked": True}
-            inputs = {"tasks_yaml": {"t": {"tool_configs": {"secret": "s"}}}}
-            result = svc._mask_inputs_sensitive_data(inputs)
-            assert result["tasks_yaml"]["t"]["tool_configs"] == {"masked": True}
-
-    def test_masks_nested_inputs(self):
-        svc = self._svc()
-        with patch("src.services.execution.service.mask_sensitive_fields") as msk:
-            msk.return_value = {"key": "***"}
-            inputs = {"inputs": {"client_secret": "my-secret"}}
-            result = svc._mask_inputs_sensitive_data(inputs)
-            assert result["inputs"] == {"key": "***"}
-
-    def test_no_tool_configs_in_agent(self):
-        svc = self._svc()
-        inputs = {"agents_yaml": {"a": {"role": "researcher"}}}
-        result = svc._mask_inputs_sensitive_data(inputs)
-        assert result["agents_yaml"]["a"]["role"] == "researcher"
-
-    def test_agents_yaml_not_dict_skipped(self):
-        svc = self._svc()
-        inputs = {"agents_yaml": "string"}
-        result = svc._mask_inputs_sensitive_data(inputs)
-        assert result["agents_yaml"] == "string"
+# _mask_inputs_sensitive_data: see test_mask_run_inputs.py.
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +689,9 @@ class TestGetExecutionStatusDetail:
 # ---------------------------------------------------------------------------
 
 
+_LISTING_HISTORY = "src.services.execution.listing.ExecutionHistoryRepository"
+
+
 def _mock_execution_repo(repo_instance):
     """Helper to mock locally-imported ExecutionRepository."""
     return patch.dict(
@@ -771,47 +726,46 @@ class TestListExecutions:
             created_at=datetime(2024, 1, 1),
             completed_at=datetime(2024, 1, 2),
             run_name="run-1",
-            result=None,
             error=None,
             group_email="u@e.com",
             group_id="g1",
-            inputs=None,
             execution_type=None,
+            input_execution_type="flow",
+            harness="kasal",
             flow_id=None,
+            input_flow_id="f-1",
+            crew_id=None,
+            model="m",
+            result_preview='{"content": "done"}',
         )
 
         ExecutionService.executions.clear()
 
         mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([fake_exec], 1))
+        mock_repo.get_execution_summaries = AsyncMock(return_value=[fake_exec])
         with _mock_execution_repo(mock_repo):
             results = await svc.list_executions(group_ids=["g1"])
 
         assert len(results) == 1
         assert results[0]["execution_id"] == "job-1"
+        assert results[0]["execution_type"] == "flow"
+        assert results[0]["flow_id"] == "f-1"
+        assert results[0]["result_preview"] == '{"content": "done"}'
+        assert "result" not in results[0] and "inputs" not in results[0]
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
     async def test_includes_memory_only_executions(self):
-        session = AsyncMock()
-        svc = make_service(session=session)
-
-        ExecutionService.executions["mem-only"] = {
-            "status": "RUNNING",
-            "run_name": "mem",
-        }
-
+        svc = make_service(session=AsyncMock())
+        # Scoped to its group (see test_run_registry_tenancy.py).
+        ExecutionService.executions["mem-only"] = {"status": "RUNNING", "group_id": "g"}
         mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([], 0))
-        with _mock_execution_repo(mock_repo):
-            results = await svc.list_executions()
-
-        mem_results = [
-            r
-            for r in results
-            if r.get("execution_id") == "mem-only" or r.get("status") == "RUNNING"
-        ]
-        assert len(mem_results) >= 1
+        mock_repo.get_execution_summaries = AsyncMock(return_value=[])
+        history = MagicMock()
+        history.return_value.get_execution_statuses_by_job_ids = AsyncMock()
+        with _mock_execution_repo(mock_repo), patch(_LISTING_HISTORY, history):
+            results = await svc.list_executions(group_ids=["g"])
+        assert [r["execution_id"] for r in results] == ["mem-only"]
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
@@ -1361,106 +1315,6 @@ class TestCreateExecution:
 
 
 # ---------------------------------------------------------------------------
-# _check_for_running_jobs (lines 1150-1190)
-# ---------------------------------------------------------------------------
-
-
-class TestCheckForRunningJobs:
-    @pytest.mark.asyncio
-    async def test_raises_when_active_job_exists(self):
-        svc = make_service()
-        gc = make_group_context()
-
-        fake_exec = SimpleNamespace(run_name="Running Job", status="RUNNING")
-        mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([fake_exec], 1))
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "src.repositories.execution_repository": MagicMock(
-                    ExecutionRepository=MagicMock(return_value=mock_repo)
-                ),
-                "src.db.session": MagicMock(
-                    routed_scoped_session=MagicMock(
-                        return_value=AsyncMock(
-                            __aenter__=AsyncMock(return_value=AsyncMock()),
-                            __aexit__=AsyncMock(return_value=None),
-                        )
-                    )
-                ),
-            },
-        ):
-            with pytest.raises(ValueError, match="Cannot start new job"):
-                # Mock the session context manager
-                mock_db = AsyncMock()
-                mock_db.__aenter__ = AsyncMock(return_value=mock_db)
-                mock_db.__aexit__ = AsyncMock(return_value=None)
-                repo_cls = MagicMock(return_value=mock_repo)
-
-                import src.services.execution.service as svc_mod
-
-                getattr(svc_mod, "routed_scoped_session", None)
-                # Patch locally
-                with patch("src.db.session.routed_scoped_session") as rss_mock:
-                    rss_mock.return_value.__aenter__ = AsyncMock(return_value=mock_db)
-                    rss_mock.return_value.__aexit__ = AsyncMock(return_value=None)
-                    mock_db.__class__ = type("MockDB", (), {})
-                    mock_db.ExecutionRepository = repo_cls
-                    await svc._check_for_running_jobs(gc)
-
-    @pytest.mark.asyncio
-    async def test_does_not_raise_when_no_active_jobs(self):
-        svc = make_service()
-        gc = make_group_context()
-        mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([], 0))
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "src.repositories.execution_repository": MagicMock(
-                    ExecutionRepository=MagicMock(return_value=mock_repo)
-                ),
-            },
-        ):
-            mock_db = AsyncMock()
-
-            async def mock_rss():
-                yield mock_db
-
-            # Just verify the method can run without raising
-            # The method has a nested import - test from the public face
-            # If the inner import fails (in test env), it's swallowed
-            try:
-                await svc._check_for_running_jobs(gc)
-            except Exception:
-                # In test env, import may fail - that's expected
-                pass
-
-    @pytest.mark.asyncio
-    async def test_swallows_non_value_error_exceptions(self):
-        svc = make_service()
-        # When there's a generic exception, it should be swallowed (not re-raised)
-        # The method catches ValueError separately and other exceptions are swallowed
-        with patch.dict(
-            "sys.modules",
-            {
-                "src.db.session": MagicMock(
-                    routed_scoped_session=MagicMock(
-                        side_effect=Exception("connection error")
-                    )
-                ),
-            },
-        ):
-            # Should not raise - exceptions are caught and swallowed
-            try:
-                await svc._check_for_running_jobs(None)
-            except Exception:
-                pass  # May fail due to import issues in test env
-
-
-# ---------------------------------------------------------------------------
 # create_execution - additional branches
 # ---------------------------------------------------------------------------
 
@@ -1899,6 +1753,12 @@ class TestTheRunListSaysWhichHarnessRanEach:
             harness="crewai",
             agents_yaml=None,
             tasks_yaml=None,
+            # summary-projection columns
+            crew_id=None,
+            input_execution_type=None,
+            input_flow_id=None,
+            model=None,
+            result_preview=None,
         )
         for key, value in overrides.items():
             setattr(row, key, value)
@@ -1908,7 +1768,7 @@ class TestTheRunListSaysWhichHarnessRanEach:
     async def test_each_row_carries_its_harness(self):
         svc = make_service(session=AsyncMock())
         mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([self._row()], 1))
+        mock_repo.get_execution_summaries = AsyncMock(return_value=[self._row()])
         with patch(
             "src.repositories.execution_repository.ExecutionRepository",
             MagicMock(return_value=mock_repo),
@@ -1928,6 +1788,7 @@ class TestTheRunListSaysWhichHarnessRanEach:
             "src.repositories.execution_repository.ExecutionRepository",
             MagicMock(return_value=mock_repo),
         ):
-            rows = await svc.list_executions(group_ids=["g1"])
+            # Whole ORM rows (include_payload) are read with getattr.
+            rows = await svc.list_executions(group_ids=["g1"], include_payload=True)
 
         assert rows and rows[0]["harness"] is None

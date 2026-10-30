@@ -198,7 +198,8 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             elif response_text.startswith("```"):
                 response_text = response_text.split("```")[1].split("```")[0].strip()
 
-            return json.loads(response_text)
+            parsed: Dict[str, Any] = json.loads(response_text)
+            return parsed
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse LLM response as JSON: {e}")
             return {
@@ -211,9 +212,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         self,
         table_name: str,
         expression: MQueryExpression,
-        columns: List[Dict[str, str]],  # noqa: ARG002
-        target_catalog: Optional[str] = None,  # noqa: ARG002
-        target_schema: Optional[str] = None,  # noqa: ARG002
+        columns: List[Dict[str, str]],
+        target_catalog: Optional[str] = None,
+        target_schema: Optional[str] = None,
     ) -> ConversionResult:
         """
         Fallback conversion when LLM is not available.

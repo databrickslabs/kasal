@@ -578,10 +578,13 @@ class TestGetModelConfigCaching:
         svc, repo = self._svc()
         await svc.get_model_config("mkey")
         repo.update = AsyncMock(return_value=mk_model("mkey"))
+        repo.find_global_by_key = AsyncMock(return_value=mk_model("mkey"))
         await svc.update_model_config("mkey", {"name": "Updated"})
         await svc.get_model_config("mkey")
-        # find_by_key: 1 (initial get) + 1 (update existence check) + 1 (refetch after invalidation)
-        assert repo.find_by_key.await_count == 3
+        # find_by_key: 1 (initial get) + 1 (refetch after invalidation); the
+        # update's existence check reads the global row.
+        assert repo.find_by_key.await_count == 2
+        repo.find_global_by_key.assert_awaited_once_with("mkey")
 
     @pytest.mark.asyncio
     async def test_toggle_invalidates_model_entry(self, clean_model_cache):
@@ -622,3 +625,57 @@ class TestGetModelConfigCaching:
         )
         await svc.get_model_config("mkey")
         repo.find_by_key.assert_awaited()  # refetched after create invalidated
+
+
+class TestEnabledModelsWorkspaceIsolation:
+    """Audit V5-2: the cache key and the query scope are the same workspace.
+
+    A user in workspaces A and B, with different enabled models. The list was
+    keyed by ``primary_group_id`` (A) but merged every id in ``group_ids``, so
+    a no-selection (union) request cached B's models - and B's disables - as
+    A's list, and Auto picked from it.
+    """
+
+    @staticmethod
+    def _service():
+        svc = ModelConfigService(session=SimpleNamespace())
+        repo = svc.repository = AsyncMock()
+        repo.find_all = AsyncMock(
+            return_value=[
+                mk_model("shared", group_id=None),
+                mk_model("a-only", group_id="ws-a"),
+                mk_model("b-only", group_id="ws-b"),
+                # B disables a global model; that must not hide it for A.
+                mk_model("shared", group_id="ws-b", enabled=False),
+            ]
+        )
+        return svc, repo
+
+    @staticmethod
+    async def _keys(svc, group_ids):
+        gc = make_group_context(group_ids=group_ids)
+        return sorted(m.key for m in await svc.find_enabled_models_for_group(gc))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "first", [["ws-a", "ws-b"], ["ws-b", "ws-a"], ["ws-b"], ["ws-a"]]
+    )
+    async def test_a_never_sees_b_only_models_even_on_a_cache_hit(
+        self, clean_model_cache, first
+    ):
+        svc, repo = self._service()
+        await self._keys(svc, first)  # warms whichever entry that scope uses
+
+        a_list = await self._keys(svc, ["ws-a"])
+        assert a_list == ["a-only", "shared"]
+
+        calls = repo.find_all.call_count
+        assert await self._keys(svc, ["ws-a"]) == ["a-only", "shared"]
+        assert repo.find_all.call_count == calls  # served from the cache
+
+    @pytest.mark.asyncio
+    async def test_union_scope_is_the_primary_workspace_only(self, clean_model_cache):
+        svc, _ = self._service()
+        assert await self._keys(svc, ["ws-a", "ws-b"]) == ["a-only", "shared"]
+        assert await self._keys(svc, ["ws-b", "ws-a"]) == ["b-only"]
+        assert await self._keys(svc, ["ws-b"]) == ["b-only"]

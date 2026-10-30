@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Button, Typography } from '@mui/material';
 import { Bot, ChevronDown, GitBranch, MessageSquare } from 'lucide-react';
 import type { Run } from '../../../types/execution/run';
+import { runService } from '../../../api/execution/ExecutionHistoryService';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
 import ExecutionMemoryButton from './ExecutionMemoryButton';
 import RecipeCurationButton from './RecipeCurationButton';
@@ -21,12 +22,23 @@ export default function RunActivityRow({ run, expanded, showSubmitter, onToggle,
   run: Run; expanded: boolean; showSubmitter: boolean; onToggle: () => void;
   onStatusChange: () => void; actions: React.ReactNode;
 }) {
+  // List rows are summaries without inputs; the agent/task/node counts come
+  // from the run's detail, fetched the first time the row is expanded.
+  const [fullRun, setFullRun] = useState<Run | null>(null);
+  useEffect(() => {
+    if (!expanded || run.inputs !== undefined || fullRun?.job_id === run.job_id) return;
+    let live = true;
+    void runService.withPayload(run).then(full => { if (live) setFullRun(full); });
+    return () => { live = false; };
+  }, [expanded, run, fullRun]);
+  const inputs = run.inputs ?? (fullRun?.job_id === run.job_id ? fullRun.inputs : undefined);
   const name = run.run_name?.replace(/^"|"$/g, '') || run.job_id;
-  const flow = run.execution_type === 'flow' || run.inputs?.execution_type === 'flow' || Boolean(run.flow_id || run.inputs?.flow_id);
-  const chat = run.execution_type === 'agent' || run.inputs?.execution_type === 'agent';
-  const agents = countEntries(run.inputs?.agents_yaml ?? run.agents_yaml);
-  const tasks = countEntries(run.inputs?.tasks_yaml ?? run.tasks_yaml);
-  const nodes = Array.isArray(run.inputs?.nodes) ? run.inputs.nodes.length : null;
+  const flow = run.execution_type === 'flow' || inputs?.execution_type === 'flow' || Boolean(run.flow_id || inputs?.flow_id);
+  const chat = run.execution_type === 'agent' || inputs?.execution_type === 'agent';
+  const agents = countEntries(inputs?.agents_yaml ?? run.agents_yaml);
+  const tasks = countEntries(inputs?.tasks_yaml ?? run.tasks_yaml);
+  const nodes = Array.isArray(inputs?.nodes) ? inputs.nodes.length : null;
+  const model = inputs?.model ?? run.model;
   const detail = chat ? 'Chat' : flow ? (nodes === null ? 'Flow' : `Flow · ${nodes} ${nodes === 1 ? 'node' : 'nodes'}`)
     : ['Crew', agents === null ? null : `${agents} ${agents === 1 ? 'agent' : 'agents'}`, tasks === null ? null : `${tasks} ${tasks === 1 ? 'task' : 'tasks'}`].filter(Boolean).join(' · ');
   const created = startedAt(run.created_at);
@@ -64,7 +76,7 @@ export default function RunActivityRow({ run, expanded, showSubmitter, onToggle,
       <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2,
         '& dt': { fontSize: 11, color: 'text.secondary', mb: 0.25 }, '& dd': { m: 0, fontSize: 12 } }}>
         <Box><Typography component="dt">Framework</Typography><Typography component="dd">{run.harness === 'crewai' ? 'CrewAI' : run.harness === 'kasal' ? 'Kasal' : run.harness || 'Not recorded'}</Typography></Box>
-        {run.inputs?.model && <Box><Typography component="dt">Model</Typography><Typography component="dd">{run.inputs.model}</Typography></Box>}
+        {model && <Box><Typography component="dt">Model</Typography><Typography component="dd">{model}</Typography></Box>}
         <Box><Typography component="dt">Submitter</Typography><Typography component="dd">{run.group_email || 'Not recorded'}</Typography></Box>
         <Box><Typography component="dt">Execution ID</Typography><Typography component="dd" sx={{ fontFamily: 'monospace', userSelect: 'all' }}>{run.job_id}</Typography></Box>
       </Box>

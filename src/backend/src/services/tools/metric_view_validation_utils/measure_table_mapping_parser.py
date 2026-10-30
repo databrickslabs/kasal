@@ -12,7 +12,7 @@ class MeasureTableMappingParser:
 
     def __init__(self, json_path: str):
         self.json_path = json_path
-        self.mappings = []
+        self.mappings: List[Dict] = []
         self._mappings_index: Dict[str, Dict] = (
             {}
         )  # lower(name) → mapping for O(1) lookup
@@ -29,19 +29,6 @@ class MeasureTableMappingParser:
                 self._mappings_index[name.lower()] = mapping
 
         return self.mappings
-
-    def get_measures_for_table(self, table_name: str) -> List[Dict]:
-        """Get all measures allocated to a specific fact table."""
-        if not self.mappings:
-            self.load()
-
-        result = []
-        for mapping in self.mappings:
-            proposed = mapping.get("proposed_allocation", "")
-            if proposed == table_name:
-                result.append(mapping)
-
-        return result
 
     def get_measure_by_name(self, name: str) -> Optional[Dict]:
         """Get a specific measure mapping by name (case-insensitive, O(1) via index)."""

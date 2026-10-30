@@ -179,11 +179,11 @@ class _SpanBridge(BaseEventListener):
 
     # ---------------------------------------------------------------- listeners
 
-    def setup_listeners(self, bus) -> None:  # noqa: ANN001 — bus is EventsBus
+    def setup_listeners(self, bus) -> None:  # bus is EventsBus
         from mlflow.entities import SpanType
 
         @bus.on(CrewKickoffStartedEvent)
-        def _crew_start(source, event):  # noqa: ANN001, ARG001
+        def _crew_start(source, event):
             self._open(
                 event,
                 f"crew.{event.crew_name or 'kickoff'}",
@@ -192,11 +192,11 @@ class _SpanBridge(BaseEventListener):
             )
 
         @bus.on(CrewKickoffCompletedEvent)
-        def _crew_end(source, event):  # noqa: ANN001, ARG001
+        def _crew_end(source, event):
             self._close(event, outputs=event.output)
 
         @bus.on(TaskStartedEvent)
-        def _task_start(source, event):  # noqa: ANN001, ARG001
+        def _task_start(source, event):
             self._open(
                 event,
                 f"task: {_task_label(event)}",
@@ -205,15 +205,15 @@ class _SpanBridge(BaseEventListener):
             )
 
         @bus.on(TaskCompletedEvent)
-        def _task_end(source, event):  # noqa: ANN001, ARG001
+        def _task_end(source, event):
             self._close(event, outputs=getattr(event.output, "raw", event.output))
 
         @bus.on(TaskFailedEvent)
-        def _task_failed(source, event):  # noqa: ANN001, ARG001
+        def _task_failed(source, event):
             self._close(event, error=event.error)
 
         @bus.on(AgentExecutionStartedEvent)
-        def _agent_start(source, event):  # noqa: ANN001, ARG001
+        def _agent_start(source, event):
             self._open(
                 event,
                 f"agent: {_agent_role(event)}",
@@ -222,11 +222,11 @@ class _SpanBridge(BaseEventListener):
             )
 
         @bus.on(AgentExecutionCompletedEvent)
-        def _agent_end(source, event):  # noqa: ANN001, ARG001
+        def _agent_end(source, event):
             self._close(event, outputs=event.output)
 
         @bus.on(LiteAgentExecutionStartedEvent)
-        def _lite_start(source, event):  # noqa: ANN001, ARG001
+        def _lite_start(source, event):
             # The conversation layer's classify/gather steps are standalone
             # agents; without these the intake half of a turn traces as nothing.
             self._open(
@@ -237,15 +237,15 @@ class _SpanBridge(BaseEventListener):
             )
 
         @bus.on(LiteAgentExecutionCompletedEvent)
-        def _lite_end(source, event):  # noqa: ANN001, ARG001
+        def _lite_end(source, event):
             self._close(event, outputs=event.output)
 
         @bus.on(LiteAgentExecutionErrorEvent)
-        def _lite_error(source, event):  # noqa: ANN001, ARG001
+        def _lite_error(source, event):
             self._close(event, error=event.error)
 
         @bus.on(LLMCallStartedEvent)
-        def _llm_start(source, event):  # noqa: ANN001, ARG001
+        def _llm_start(source, event):
             attributes = {}
             if event.model:
                 attributes["model"] = str(event.model)
@@ -260,7 +260,7 @@ class _SpanBridge(BaseEventListener):
             )
 
         @bus.on(LLMCallCompletedEvent)
-        def _llm_end(source, event):  # noqa: ANN001, ARG001
+        def _llm_end(source, event):
             span_id = getattr(event, "started_event_id", None)
             if span_id and event.usage:
                 with self._lock:
@@ -279,11 +279,11 @@ class _SpanBridge(BaseEventListener):
             self._close(event, outputs=event.response)
 
         @bus.on(LLMCallFailedEvent)
-        def _llm_failed(source, event):  # noqa: ANN001, ARG001
+        def _llm_failed(source, event):
             self._close(event, error=event.error)
 
         @bus.on(ToolUsageStartedEvent)
-        def _tool_start(source, event):  # noqa: ANN001, ARG001
+        def _tool_start(source, event):
             self._open(
                 event,
                 f"tool: {event.tool_name}",
@@ -292,11 +292,11 @@ class _SpanBridge(BaseEventListener):
             )
 
         @bus.on(ToolUsageFinishedEvent)
-        def _tool_end(source, event):  # noqa: ANN001, ARG001
+        def _tool_end(source, event):
             self._close(event, outputs=event.output)
 
         @bus.on(ToolUsageErrorEvent)
-        def _tool_error(source, event):  # noqa: ANN001, ARG001
+        def _tool_error(source, event):
             self._close(event, error=event.error)
 
 

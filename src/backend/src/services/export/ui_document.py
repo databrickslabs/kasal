@@ -190,7 +190,8 @@ def _coerce_json(
         if not (c.startswith("{") or c.startswith("[")):
             continue
         try:
-            return json.loads(c)
+            parsed: dict[str, Any] | list[Any] | None = json.loads(c)
+            return parsed
         except ValueError:
             continue
 
@@ -202,7 +203,8 @@ def _coerce_json(
         if not (c.startswith("{") or c.startswith("[")):
             continue
         try:
-            return json.loads(_repair_json_brackets(c))
+            parsed = json.loads(_repair_json_brackets(c))
+            return parsed
         except ValueError:
             continue
     return None
@@ -213,7 +215,8 @@ def _extract_messages(obj: Any) -> Optional[List[Any]]:
     of messages is wrapped into ``{messages}`` by the caller before this runs."""
     if isinstance(obj, dict):
         if isinstance(obj.get("messages"), list):
-            return obj["messages"]
+            messages: list[Any] = obj["messages"]
+            return messages
         if "createSurface" in obj or "updateComponents" in obj:
             return [obj]
     return None

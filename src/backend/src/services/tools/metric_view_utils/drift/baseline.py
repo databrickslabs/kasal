@@ -17,7 +17,7 @@ holds no auth or HTTP code and is unit-testable.
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import yaml
 
@@ -45,7 +45,7 @@ class BaselineView:
         return self.error is None and bool(self.spec)
 
 
-def parse_view_names(raw: Any) -> list[str]:
+def parse_view_names(raw: object) -> list[str]:
     """Accept a JSON list, newline/comma-separated text, or a list of names.
 
     Databricks Catalog Explorer URLs (``…/explore/data/<cat>/<sch>/<view>``) are
@@ -88,7 +88,8 @@ def split_full_name(full_name: str) -> Optional[tuple[str, str, str]]:
     m = _FQN_RE.match(full_name or "")
     if not m:
         return None
-    return tuple(p.strip("`") for p in m.groups())  # type: ignore[return-value]
+    first, second, third = m.groups()
+    return (first.strip("`"), second.strip("`"), third.strip("`"))
 
 
 def _quoted(parts: tuple[str, str, str]) -> str:

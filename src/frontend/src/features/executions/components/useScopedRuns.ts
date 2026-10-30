@@ -3,6 +3,13 @@ import { runService, type Run } from '../../../api/execution/ExecutionHistorySer
 import { useGroupStore } from '../../../store/groups';
 import { useRunStatusStore } from '../../../store/runStatus';
 
+/** `run` over `base`, skipping fields `run` does not carry. A list row has no
+ *  result/inputs and an empty YAML string; it must not erase the detail's. */
+function overlay(base: Run, run: Run): Run {
+  const present = Object.entries(run).filter(([, value]) => value !== undefined && value !== '');
+  return { ...base, ...(Object.fromEntries(present) as Partial<Run>) };
+}
+
 /** Fetch linked executions directly so older session runs are not lost to global pagination. */
 export function useScopedRuns(jobIds?: string[]) {
   const groupId = useGroupStore(state => state.currentGroupId);
@@ -42,7 +49,8 @@ export function useScopedRuns(jobIds?: string[]) {
     const byId = new Map(cached.map(run => [run.job_id, run]));
     for (const run of liveRuns) {
       const previous = byId.get(run.job_id);
-      if (!previous || Date.parse(run.updated_at || run.created_at) >= Date.parse(previous.updated_at || previous.created_at)) byId.set(run.job_id, run);
+      if (!previous) byId.set(run.job_id, run);
+      else if (Date.parse(run.updated_at || run.created_at) >= Date.parse(previous.updated_at || previous.created_at)) byId.set(run.job_id, overlay(previous, run));
     }
     return [...byId.values()].filter(run => allowed.has(run.job_id) && Boolean(groupId) && run.group_id === groupId);
   }, [jobIds, key, groupId, snapshot, liveRuns]);

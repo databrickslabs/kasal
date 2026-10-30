@@ -7,8 +7,9 @@ access control and prevents unauthorized access to other groups' data.
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import Request
 
+from src.core.exceptions import ForbiddenError
 from src.dependencies.providers import get_group_context
 from src.utils.user_context import GroupContext
 
@@ -157,7 +158,10 @@ class TestGroupAuthorizationSecurity:
 
     @pytest.mark.asyncio
     async def test_dependency_raises_http_403_on_unauthorized_access(self):
-        """Test that the FastAPI dependency raises HTTPException 403 for unauthorized access."""
+        """The FastAPI dependency refuses an unauthorized workspace with a 403.
+
+        The detail is fixed text: it must not echo the requested group id.
+        """
         # Create mock request
         mock_request = Mock(spec=Request)
         # Ensure request.state has no _group_context_cache so cache logic is bypassed
@@ -185,7 +189,7 @@ class TestGroupAuthorizationSecurity:
             return_value=(mock_user, user_groups_with_roles),
         ):
             # Attempt to get group context with unauthorized group_id
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ForbiddenError) as exc_info:
                 await get_group_context(
                     request=mock_request,
                     x_forwarded_email="regulatory@databricks.com",
@@ -200,6 +204,7 @@ class TestGroupAuthorizationSecurity:
             # Verify it's a 403 Forbidden error
             assert exc_info.value.status_code == 403
             assert "Access denied" in exc_info.value.detail
+            assert "marketing_cfe676ee" not in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_multiple_groups_with_unauthorized_selection(self):

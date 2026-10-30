@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CrewOptimizeDialog from './CrewOptimizeDialog';
 import { PromptOptimizationService } from '../../../../api/config/PromptOptimizationService';
@@ -28,6 +28,12 @@ vi.mock('react-markdown', () => ({
 }));
 vi.mock('remark-gfm', () => ({ default: () => {} }));
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue || key,
+  }),
+}));
+
 vi.mock('react-hot-toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -38,6 +44,8 @@ vi.mock('../../../../api/config/PromptOptimizationService', () => ({
     listCrewEvals: vi.fn(),
     listJudges: vi.fn(),
     judgeRegistryInfo: vi.fn(),
+    listBuiltinJudges: vi.fn(),
+    getCrewLabels: vi.fn(),
     startCrewOptimization: vi.fn(),
     cancelRun: vi.fn(),
     applyRun: vi.fn(),
@@ -78,6 +86,29 @@ const JUDGES = [
     crew_id: 'deadbeef1234',
     instructions: 'other crew',
   },
+];
+
+const builtin = (id: string, role: 'gate' | 'graded', extra = {}) => ({
+  id,
+  label: id,
+  description: `${id} description`,
+  role,
+  weight: 1,
+  needs_labels: false,
+  available: true,
+  ...extra,
+});
+
+const BUILTINS = [
+  builtin('Safety', 'gate'),
+  builtin('RelevanceToQuery', 'graded'),
+  // Needs labels: offered, disabled until expected facts/answer exist.
+  builtin('Correctness', 'graded', {
+    needs_labels: true,
+    label_fields: ['expected_facts', 'expected_response'],
+  }),
+  // Not installed: never offered.
+  builtin('Completeness', 'graded', { available: false }),
 ];
 
 const RUNS = [
@@ -137,6 +168,8 @@ beforeEach(() => {
     url: 'http://127.0.0.1:5555/#/prompts',
   });
   getEnabledModels.mockResolvedValue({ 'qwen-30b': {} });
+  service.listBuiltinJudges.mockResolvedValue(BUILTINS);
+  service.getCrewLabels.mockResolvedValue({ labels: null, suggestions: [], has_review_notes: false });
 });
 
 describe('Optimization setup', () => {
@@ -219,11 +252,13 @@ describe('judge lifecycle', () => {
     await screen.findByText('accuracy');
     await userEvent.click(screen.getByText('+ Custom criteria'));
     expect(screen.getAllByRole('combobox', { name: 'Judge model' })).toHaveLength(1);
-    await userEvent.type(screen.getByLabelText(/Criteria name/), 'freshness');
-    await userEvent.type(
-      screen.getByLabelText(/Evaluation criteria/),
-      'Listings must be recent.',
-    );
+    // One input event per field. `type` sent one per character (33 here), and
+    // each re-rendered the whole dialog, which is what ran past the timeout
+    // under a loaded machine.
+    await userEvent.click(screen.getByLabelText(/Criteria name/));
+    await userEvent.paste('freshness');
+    await userEvent.click(screen.getByLabelText(/Evaluation criteria/));
+    await userEvent.paste('Listings must be recent.');
     await userEvent.click(screen.getByRole('button', { name: 'Add criteria' }));
     await waitFor(() =>
       expect(service.createJudge).toHaveBeenCalledWith(
@@ -258,6 +293,72 @@ describe('runs and progress chips', () => {
     const request = service.startCrewOptimization.mock.calls[0][0];
     expect(request.crew_id).toBe(CREW_ID);
     expect(request.max_metric_calls).toBe(10); // the default budget
+    expect(request.builtin_judges).toBeUndefined(); // built-ins are opt-in
+  });
+});
+
+describe('MLflow built-in judges', () => {
+  it('shows the two judge groups and the installed built-ins, with one badge each', async () => {
+    renderDialog();
+    const group = await screen.findByTestId('builtin-judges');
+    expect(screen.getByText('Your judges')).toBeInTheDocument();
+    expect(within(group).getByText('MLflow built-in judges')).toBeInTheDocument();
+    expect(within(group).getByText('Safety description')).toBeInTheDocument();
+    expect(within(group).getByText('gate')).toBeInTheDocument();
+    expect(within(group).getByText('no labels needed')).toBeInTheDocument();
+    expect(within(group).getByText('needs labels')).toBeInTheDocument();
+    expect(within(group).getByRole('checkbox', { name: 'Correctness' })).toBeDisabled();
+    expect(within(group).queryByText('Completeness')).not.toBeInTheDocument();
+  });
+
+  it('enables Correctness once facts are entered and sends the labels with the run', async () => {
+    service.startCrewOptimization.mockResolvedValue({
+      run_id: 'r3',
+      status: 'pending',
+      dataset_size: 1,
+      skipped_judges: ['Expectations guidelines skipped: not labelled'],
+    });
+    renderDialog();
+    const group = await screen.findByTestId('builtin-judges');
+    await waitFor(() => expect(service.getCrewLabels).toHaveBeenCalledWith(CREW_ID));
+    fireEvent.change(screen.getByLabelText('Expected facts'), {
+      target: { value: 'Zurich is listed\nPrices in CHF' },
+    });
+    const correctness = within(group).getByRole('checkbox', { name: 'Correctness' });
+    await waitFor(() => expect(correctness).toBeEnabled());
+    await userEvent.click(correctness);
+    const start = screen.getByRole('button', { name: 'Start optimization' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await userEvent.click(start);
+    await waitFor(() => expect(service.startCrewOptimization).toHaveBeenCalled());
+    const request = service.startCrewOptimization.mock.calls[0][0];
+    expect(request.builtin_judges).toEqual(['Correctness']);
+    expect(request.labels).toEqual({
+      expected_facts: ['Zurich is listed', 'Prices in CHF'],
+      expected_response: '',
+    });
+    expect(
+      await screen.findByText('Expectations guidelines skipped: not labelled'),
+    ).toBeInTheDocument();
+  });
+
+  it('sends the selected built-ins with the run and none by default', async () => {
+    service.startCrewOptimization.mockResolvedValue({ run_id: 'r2', status: 'pending', dataset_size: 1 });
+    renderDialog();
+    const group = await screen.findByTestId('builtin-judges');
+    await userEvent.click(within(group).getByRole('checkbox', { name: 'Safety' }));
+    const start = screen.getByRole('button', { name: 'Start optimization' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await userEvent.click(start);
+    await waitFor(() => expect(service.startCrewOptimization).toHaveBeenCalled());
+    expect(service.startCrewOptimization.mock.calls[0][0].builtin_judges).toEqual(['Safety']);
+  });
+
+  it('hides the group when the catalog cannot be loaded', async () => {
+    service.listBuiltinJudges.mockRejectedValue(new Error('down'));
+    renderDialog();
+    await screen.findByText('10/10 executions');
+    expect(screen.queryByTestId('builtin-judges')).not.toBeInTheDocument();
   });
 });
 

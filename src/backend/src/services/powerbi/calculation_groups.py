@@ -18,8 +18,6 @@ being folded into the SWITCH-branch resolver.
 
 from __future__ import annotations
 
-from typing import Any
-
 
 def derive_calculation_groups(admin_tables: dict[str, dict]) -> list[dict]:
     """Collect every calculation group found across ``parse_admin_tables``' output.
@@ -35,7 +33,7 @@ def derive_calculation_groups(admin_tables: dict[str, dict]) -> list[dict]:
         cg = info.get("calculation_group")
         if not cg:
             continue
-        items: list[dict[str, Any]] = []
+        items: list[dict[str, str]] = []
         for item in cg.get("calculationItems", []):
             name = item.get("name", "")
             if not name:

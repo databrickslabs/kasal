@@ -46,11 +46,17 @@ class TestPerplexitySearchTool:
         assert tool._temperature == custom_temperature
         assert tool._max_tokens == custom_max_tokens
 
+    def test_result_as_answer_is_applied(self):
+        """result_as_answer reaches the BaseTool field (it used to be dropped)."""
+        assert PerplexitySearchTool(api_key="k").result_as_answer is False
+        tool = PerplexitySearchTool(api_key="k", result_as_answer=True)
+        assert tool.result_as_answer is True
+
     @patch.dict("os.environ", {"PERPLEXITY_API_KEY": "env-test-key"})
-    def test_api_key_from_environment(self):
-        """Test that the tool uses API key from environment when not provided."""
-        tool = PerplexitySearchTool()
-        assert tool._api_key == "env-test-key"
+    def test_api_key_is_never_read_from_environment(self):
+        """The shared process env is not a key source: the caller passes one."""
+        with pytest.raises(ValueError, match="Perplexity API key is required"):
+            PerplexitySearchTool()
 
     @patch.dict("os.environ", {}, clear=True)
     def test_api_key_fallback(self):

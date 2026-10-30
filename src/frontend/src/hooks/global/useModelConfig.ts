@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback } from 'react';
 import { Models, ModelConfig } from '../../types/config/models';
 import { useModelConfigStore } from '../../store/modelConfig';
@@ -29,7 +30,33 @@ export const useModelConfig = () => {
     incrementRefreshKey,
     setActiveCanvas,
     resetModelConfig,
-  } = useModelConfigStore();
+  } = useModelConfigStore(useShallow(state => ({
+    models: state.models,
+    currentEditModel: state.currentEditModel,
+    editDialogOpen: state.editDialogOpen,
+    isNewModel: state.isNewModel,
+    loading: state.loading,
+    saving: state.saving,
+    modelsChanged: state.modelsChanged,
+    searchTerm: state.searchTerm,
+    databricksEnabled: state.databricksEnabled,
+    error: state.error,
+    refreshKey: state.refreshKey,
+    activeTab: state.activeTab,
+    setModels: state.setModels,
+    setCurrentEditModel: state.setCurrentEditModel,
+    setEditDialogOpen: state.setEditDialogOpen,
+    setIsNewModel: state.setIsNewModel,
+    setLoading: state.setLoading,
+    setSaving: state.setSaving,
+    setModelsChanged: state.setModelsChanged,
+    setSearchTerm: state.setSearchTerm,
+    setDatabricksEnabled: state.setDatabricksEnabled,
+    setError: state.setError,
+    incrementRefreshKey: state.incrementRefreshKey,
+    setActiveCanvas: state.setActiveCanvas,
+    resetModelConfig: state.resetModelConfig,
+  })));
 
   const handleSetModels = useCallback((models: Models) => {
     setModels(models);

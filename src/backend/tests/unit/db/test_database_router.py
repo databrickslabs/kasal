@@ -657,7 +657,7 @@ class TestGetSmartDbSessionLakebasePath:
 
     @pytest.mark.asyncio
     async def test_uses_env_var_instance_name_when_config_has_none(self):
-        """When config has no instance_name, fall back to LAKEBASE_INSTANCE_NAME env var."""
+        """When config has no instance_name, fall back to the Apps binding."""
         lakebase_session = AsyncMock()
 
         lakebase_config = {
@@ -701,7 +701,7 @@ class TestGetSmartDbSessionLakebasePath:
                 return_value=mock_auth,
             ),
             patch("src.db.session._request_session", mock_request_session),
-            patch.dict("os.environ", {"LAKEBASE_INSTANCE_NAME": "env-instance"}),
+            patch.dict("os.environ", {"KASAL_LAKEBASE_RESOURCE": "env-instance"}),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1387,7 +1387,7 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
 
     @pytest.mark.asyncio
     async def test_uses_default_instance_name_when_config_is_none(self):
-        """When config is None after Lakebase enabled, instance_name falls back to env."""
+        """When config is None after Lakebase enabled, the Apps binding names it."""
         lakebase_session = AsyncMock()
 
         mock_auth = MagicMock()
@@ -1424,7 +1424,7 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
                 return_value=mock_auth,
             ),
             patch("src.db.session._request_session", mock_request_session),
-            patch.dict("os.environ", {"LAKEBASE_INSTANCE_NAME": "env-fallback"}),
+            patch.dict("os.environ", {"KASAL_LAKEBASE_RESOURCE": "env-fallback"}),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1441,17 +1441,9 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
                 await gen.__anext__()
 
     @pytest.mark.asyncio
-    async def test_uses_kasal_lakebase_default_when_no_env(self):
-        """When config is None and no env var, instance_name defaults to 'kasal-lakebase'."""
-        lakebase_session = AsyncMock()
-
-        mock_token = MagicMock(spec=Token)
-        mock_request_session = MagicMock()
-        mock_request_session.set.return_value = mock_token
-
-        mock_get_lakebase_session = MagicMock(
-            return_value=_make_async_ctx(lakebase_session)
-        )
+    async def test_no_configured_instance_and_no_binding_raises(self):
+        """No invented "kasal-lakebase" default: a clear error instead."""
+        from src.core.exceptions import LakebaseNotConfiguredError
 
         with (
             patch(
@@ -1464,39 +1456,18 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
+            patch("src.db.database_router.get_lakebase_session") as get_session,
             patch(
-                "src.db.database_router.get_lakebase_session",
-                mock_get_lakebase_session,
-            ),
-            patch(
-                "src.utils.databricks_auth.get_auth_context",
-                new_callable=AsyncMock,
+                "src.core.databricks_app.LakebaseAppResource.from_env",
                 return_value=None,
             ),
-            patch("src.db.session._request_session", mock_request_session),
-            patch.dict("os.environ", {}, clear=False),
+            patch.dict("os.environ", {"KASAL_LAKEBASE_RESOURCE": ""}),
         ):
-            # Remove LAKEBASE_INSTANCE_NAME if set
-            import os
+            from src.db.database_router import get_smart_db_session
 
-            env_backup = os.environ.pop("LAKEBASE_INSTANCE_NAME", None)
-            try:
-                from src.db.database_router import get_smart_db_session
-
-                gen = get_smart_db_session()
-                session = await gen.__anext__()
-                assert session is lakebase_session
-
-                # Default fallback is "kasal-lakebase"
-                mock_get_lakebase_session.assert_called_once_with(
-                    "kasal-lakebase", None, None
-                )
-
-                with pytest.raises(StopAsyncIteration):
-                    await gen.__anext__()
-            finally:
-                if env_backup is not None:
-                    os.environ["LAKEBASE_INSTANCE_NAME"] = env_backup
+            with pytest.raises(LakebaseNotConfiguredError):
+                await get_smart_db_session().__anext__()
+        get_session.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

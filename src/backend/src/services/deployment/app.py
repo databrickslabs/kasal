@@ -31,6 +31,13 @@ from src.schemas.crew_export import (
     AppDeploymentStatusResponse,
     ExportFormat,
 )
+from src.services.deployment.app_guards import (
+    KASAL_DESCRIPTION,
+    app_description,
+    refuse_foreign_app,
+    trace_grant_statements,
+    validate_uc_name,
+)
 from src.services.deployment.crew_export import CrewExportService
 from src.utils.user_context import GroupContext
 
@@ -127,6 +134,11 @@ class CrewAppDeploymentService:
         eff_catalog = config.catalog or ws_catalog or ""
         eff_schema = config.schema_name or ws_schema or ""
         eff_warehouse = config.warehouse_id or ws_warehouse or ""
+        # These names go into GRANT statements: refuse an invalid one now.
+        if eff_catalog:
+            validate_uc_name(eff_catalog, "catalog")
+        if eff_schema:
+            validate_uc_name(eff_schema, "schema")
 
         # Generate the deployable project (reuses the export pipeline).
         export = await self.export_service.export_crew(
@@ -139,6 +151,9 @@ class CrewAppDeploymentService:
         app_name = (
             self._normalize_app_name(config.app_name) or export["metadata"]["app_name"]
         )
+        # Never replace an app this crew did not deploy (another crew's, or one
+        # made outside Kasal, Kasal's own included).
+        await asyncio.to_thread(refuse_foreign_app, client, app_name, str(crew_id))
 
         deployment_id = str(uuid.uuid4())
         self._deployments[deployment_id] = {
@@ -165,6 +180,7 @@ class CrewAppDeploymentService:
                 config.lakebase_instance or "",
                 bool(config.create_lakebase),
                 eff_warehouse,
+                str(crew_id),
             )
         )
 
@@ -383,11 +399,8 @@ class CrewAppDeploymentService:
             if not sp:
                 logger.warning("No app service principal id; skipping trace grants")
                 return
-            statements = [
-                f"GRANT USE CATALOG ON CATALOG `{catalog}` TO `{sp}`",
-                "GRANT USE SCHEMA, CREATE TABLE, MODIFY, SELECT ON SCHEMA "
-                f"`{catalog}`.`{schema}` TO `{sp}`",
-            ]
+            # Validates and quotes every name; refuses before any SQL is built.
+            statements = trace_grant_statements(catalog, schema, str(sp))
             for stmt in statements:
                 client.statement_execution.execute_statement(
                     warehouse_id=warehouse_id, statement=stmt, wait_timeout="30s"
@@ -437,6 +450,7 @@ class CrewAppDeploymentService:
         catalog: str,
         schema: str,
         lakebase_instance: str = "",
+        description: str = KASAL_DESCRIPTION,
     ) -> None:
         """Set the app's OAuth scopes, Lakebase resource, and OTel->UC telemetry
         destination in a single update.
@@ -461,7 +475,7 @@ class CrewAppDeploymentService:
 
         app = App(
             name=app_name,
-            description="Deployed from Kasal",
+            description=description,
             user_api_scopes=list(DESIRED_OAUTH_SCOPES),
         )
         resources = []
@@ -534,6 +548,7 @@ class CrewAppDeploymentService:
         lakebase_instance: str = "",
         create_lakebase: bool = False,
         warehouse_id: str = "",
+        crew_id: str = "",
     ) -> None:
         """Run the blocking SDK deploy off the event loop and record the outcome."""
         loop = asyncio.get_event_loop()
@@ -550,8 +565,9 @@ class CrewAppDeploymentService:
                 lakebase_instance,
                 create_lakebase,
                 warehouse_id,
+                crew_id,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception(f"Deployment {deployment_id} failed")
             self._set(
                 deployment_id,
@@ -572,6 +588,7 @@ class CrewAppDeploymentService:
         lakebase_instance: str = "",
         create_lakebase: bool = False,
         warehouse_id: str = "",
+        crew_id: str = "",
     ) -> None:
         from databricks.sdk.service.apps import (
             App,
@@ -586,6 +603,9 @@ class CrewAppDeploymentService:
             step="CREATING_APP",
             message=f"Creating app '{app_name}'",
         )
+        # Records which crew deployed the app; start_deployment checks it before
+        # redeploying over an existing app.
+        description = app_description(crew_id)
 
         # 1. Create the app if it does not already exist.
         try:
@@ -593,9 +613,7 @@ class CrewAppDeploymentService:
             logger.info(f"App {app_name} already exists; redeploying")
         except Exception:
             logger.info(f"Creating app {app_name}")
-            client.apps.create_and_wait(
-                app=App(name=app_name, description="Deployed from Kasal")
-            )
+            client.apps.create_and_wait(app=App(name=app_name, description=description))
 
         # 1a. Create the Lakebase instance if the user asked for a new one. It
         # must exist before it can be attached as an app resource below.
@@ -629,6 +647,7 @@ class CrewAppDeploymentService:
             catalog,
             schema,
             lakebase_instance,
+            description,
         )
 
         # 1c. Grant the app's service principal the EXPLICIT Unity Catalog
@@ -697,7 +716,7 @@ class CrewAppDeploymentService:
                     ):
                         raise RuntimeError("App deployment did not succeed")
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if (
                     "active deployment in progress" in str(exc)
                     and time.time() < deadline
@@ -711,7 +730,7 @@ class CrewAppDeploymentService:
         self._set(deployment_id, step="STARTING", message="Starting app")
         try:
             client.apps.start(app_name)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if "compute is in ACTIVE state" not in str(exc):
                 raise
 

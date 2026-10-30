@@ -10,9 +10,10 @@ makes ``WorkflowRecipeRepository.list_missing_embeddings`` unscoped.
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.workflow_recipe_trial import WorkflowRecipeTrial
@@ -93,4 +94,4 @@ class WorkflowRecipeTrialRepository:
             stmt = stmt.where(WorkflowRecipeTrial.group_id.in_(group_ids))
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0

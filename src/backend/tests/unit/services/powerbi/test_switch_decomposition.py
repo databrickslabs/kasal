@@ -29,9 +29,9 @@ class TestSwitchDecompositionRehoming:
                 "measure_name": "ACT vs Target",
                 "table_name": "Measures_Table",
                 "expression": (
-                    'VAR _sel = SELECTEDVALUE(Slicer[Value])\n'
-                    'VAR _KPI = [ACT]\nVAR _Target = [BP]\n'
-                    'RETURN SWITCH(TRUE(), _condition, _KPI, _Target)'
+                    "VAR _sel = SELECTEDVALUE(Slicer[Value])\n"
+                    "VAR _KPI = [ACT]\nVAR _Target = [BP]\n"
+                    "RETURN SWITCH(TRUE(), _condition, _KPI, _Target)"
                 ),
             },
             {
@@ -63,9 +63,9 @@ class TestSwitchDecompositionRehoming:
                 "measure_name": "Net Change",
                 "table_name": "Measures_Table",
                 "expression": (
-                    'VAR _sel = SELECTEDVALUE(Slicer[Value])\n'
-                    'VAR _A = [Gross]\nVAR _B = [Adjustment]\n'
-                    'RETURN SWITCH(TRUE(), _cond, _A - _B)'
+                    "VAR _sel = SELECTEDVALUE(Slicer[Value])\n"
+                    "VAR _A = [Gross]\nVAR _B = [Adjustment]\n"
+                    "RETURN SWITCH(TRUE(), _cond, _A - _B)"
                 ),
             },
             {
@@ -91,9 +91,9 @@ class TestSwitchDecompositionRehoming:
                 "measure_name": "Display Toggle",
                 "table_name": "Measures_Table",
                 "expression": (
-                    'VAR _sel = SELECTEDVALUE(Slicer[Value])\n'
-                    'VAR _A = [SomeUnresolvable]\n'
-                    'RETURN SWITCH(TRUE(), _cond, _A)'
+                    "VAR _sel = SELECTEDVALUE(Slicer[Value])\n"
+                    "VAR _A = [SomeUnresolvable]\n"
+                    "RETURN SWITCH(TRUE(), _cond, _A)"
                 ),
             },
         ]
@@ -110,8 +110,8 @@ class TestSwitchDecompositionRehoming:
                 "measure_name": "ACT vs Target",
                 "table_name": "Measures_Table",
                 "expression": (
-                    'VAR _sel = SELECTEDVALUE(Slicer[Value])\n'
-                    'VAR _KPI = [ACT]\nRETURN SWITCH(TRUE(), _c, _KPI)'
+                    "VAR _sel = SELECTEDVALUE(Slicer[Value])\n"
+                    "VAR _KPI = [ACT]\nRETURN SWITCH(TRUE(), _c, _KPI)"
                 ),
             },
             {
@@ -134,8 +134,8 @@ class TestGeoSwitchDecompositionRehoming:
                 "expression": (
                     "SWITCH(TRUE(),\n"
                     "  OR(ISFILTERED(Dim_Plant[plant_desc]), HASONEVALUE(Dim_Plant[plant])),\n"
-                    "  CALCULATE(SUM(Fact_OTC[kbi_value]), Fact_OTC[creg_type]=\"Plant\"),\n"
-                    "  CALCULATE(SUM(Fact_OTC[kbi_value]), Fact_OTC[creg_type]=\"Company Code\"))"
+                    '  CALCULATE(SUM(Fact_OTC[kbi_value]), Fact_OTC[creg_type]="Plant"),\n'
+                    '  CALCULATE(SUM(Fact_OTC[kbi_value]), Fact_OTC[creg_type]="Company Code"))'
                 ),
             },
         ]

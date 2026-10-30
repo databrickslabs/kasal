@@ -33,7 +33,7 @@ async def test_merges_mcp_from_crew_node_when_db_task_has_none():
         {
             "id": f"task-{task_id}",
             "type": "taskNode",
-            "data": {"tool_configs": {"MCP_SERVERS": {"servers": ["nemotemo"]}}},
+            "data": {"tool_configs": {"MCP_SERVERS": {"servers": ["example-mcp"]}}},
         }
     ]
 
@@ -69,7 +69,7 @@ async def test_merges_mcp_from_crew_node_when_db_task_has_none():
         assert mock_agent_config.configure_agent_and_tools.await_count == 1
         _, kwargs = mock_agent_config.configure_agent_and_tools.call_args
         assert kwargs.get("crew_tool_configs", {}).get("MCP_SERVERS") == {
-            "servers": ["nemotemo"]
+            "servers": ["example-mcp"]
         }
 
 

@@ -23,11 +23,12 @@ none of them owns policy.
 
 import json
 import logging
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.core.exceptions import KasalError
 from src.dependencies.providers import SessionDep
 from src.services.external.identity import (
     ExternalAuthError,
@@ -37,6 +38,8 @@ from src.services.external.identity import (
 from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp.mcp_server import server as mcp_server
 from src.services.mcp.mcp_server import sessions
+from src.services.mcp.mcp_server.tools import UnknownCapabilityError, UnknownRunError
+from src.utils.request_identity import resolve_request_identity
 
 router = APIRouter(tags=["mcp-server"])
 
@@ -56,6 +59,19 @@ _INVALID_REQUEST = -32600
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _INTERNAL_ERROR = -32603
+
+
+def _client_error_code(http_status: int) -> int:
+    """A refused tool call's JSON-RPC code, distinct per kind of refusal.
+
+    Bad arguments (400, 422) are the spec's invalid-params. The rest use the
+    range the spec reserves for implementation-defined server errors, ending
+    in the HTTP status they mirror: -32003 forbidden, -32004 not found,
+    -32009 conflict (already decided), -32010 gone (expired).
+    """
+    if http_status in (400, 422):
+        return _INVALID_PARAMS
+    return -32000 - (http_status % 100)
 
 
 def _result(request_id: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -189,7 +205,16 @@ async def _handle(
             return _error(request_id, _INVALID_REQUEST, exc.detail)
         except TypeError as exc:
             return _error(request_id, _INVALID_PARAMS, str(exc))
-        except Exception as exc:  # noqa: BLE001
+        except (UnknownCapabilityError, UnknownRunError) as exc:
+            return _error(request_id, _client_error_code(404), str(exc))
+        except KasalError as exc:
+            if exc.status_code >= 500:
+                logger.exception("[mcp] tool %s failed", name)
+                return _error(request_id, _INTERNAL_ERROR, str(exc))
+            # A refusal written for the caller (already decided, expired, not
+            # an allowed approver, invalid arguments), not a server failure.
+            return _error(request_id, _client_error_code(exc.status_code), exc.detail)
+        except Exception as exc:
             logger.exception("[mcp] tool %s failed", name)
             return _error(request_id, _INTERNAL_ERROR, str(exc))
 
@@ -228,7 +253,7 @@ async def mcp_endpoint(
     x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
     accept: Annotated[Optional[str], Header()] = None,
     mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
-):
+) -> Response:
     """The MCP Streamable HTTP endpoint.
 
     Accepts a single JSON-RPC message or a batch. Answers with JSON, or with SSE
@@ -245,9 +270,15 @@ async def mcp_endpoint(
         return JSONResponse(_error(None, _PARSE_ERROR, "Invalid JSON"), status_code=400)
 
     try:
+        identity = resolve_request_identity(
+            forwarded_email=x_forwarded_email,
+            forwarded_access_token=x_forwarded_access_token,
+            auth_request_email=x_auth_request_email,
+            auth_request_access_token=x_auth_request_access_token,
+        )
         caller = await _resolve(
-            email=x_auth_request_email or x_forwarded_email,
-            token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:
@@ -296,7 +327,7 @@ async def mcp_endpoint(
         # The client asked ONLY for SSE, so give it SSE. When it accepts both —
         # which Claude Code does — plain JSON is the cheaper answer and every
         # client handles it.
-        async def _sse():
+        async def _sse() -> AsyncIterator[bytes]:
             yield f"data: {json.dumps(payload, default=str)}\n\n".encode("utf-8")
 
         return StreamingResponse(
@@ -329,7 +360,7 @@ async def mcp_endpoint_get(
     x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
     accept: Annotated[Optional[str], Header()] = None,
     mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
-):
+) -> Response:
     """The server-initiated SSE stream.
 
     Kasal has exactly one thing to say on it — ``tools/list_changed`` — and that
@@ -348,9 +379,15 @@ async def mcp_endpoint_get(
         )
 
     try:
+        identity = resolve_request_identity(
+            forwarded_email=x_forwarded_email,
+            forwarded_access_token=x_forwarded_access_token,
+            auth_request_email=x_auth_request_email,
+            auth_request_access_token=x_auth_request_access_token,
+        )
         caller = await _resolve(
-            email=x_auth_request_email or x_forwarded_email,
-            token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:
@@ -377,7 +414,7 @@ async def mcp_endpoint_get(
 @router.delete("/mcp")
 async def mcp_endpoint_delete(
     mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
-):
+) -> JSONResponse:
     """Session termination, as the transport defines it.
 
     Nothing is authorised by a session id — the caller is resolved from headers

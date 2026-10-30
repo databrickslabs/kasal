@@ -1,19 +1,20 @@
-"""The two helpers every column / table self-heal step delegates to.
+"""The helpers every column / table / index self-heal step delegates to.
 
-``ensure_columns`` must read the catalogue BEFORE altering on both dialects
-(SQLite has no ADD COLUMN IF NOT EXISTS; on PostgreSQL an ALTER on a table this
-role does not own raises "must be owner" even when the column exists, and that
-aborts the whole self-heal transaction). ``ensure_table`` must create every
-model it is given, checkfirst, and never let a failure escape.
+``ensure_columns`` and ``ensure_index`` must read the catalogue BEFORE altering
+on both dialects (SQLite has no ADD COLUMN IF NOT EXISTS; on PostgreSQL DDL on a
+table this role does not own raises "must be owner" even when the column or
+index exists). ``ensure_table`` must create every model it is given, checkfirst.
+All three RAISE on failure: the runner's SAVEPOINT has to see the error to roll
+the step back (src/db/self_heal/report.py).
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.db.self_heal.columns import ensure_columns
-from src.db.self_heal.tables import ensure_table
+from src.db.self_heal.tables import ensure_index, ensure_table
 
 
 async def _sqlite_columns(conn, table: str) -> list[str]:
@@ -84,7 +85,7 @@ class TestEnsureColumnsOnPostgres:
             conn, "t", [("a", "TEXT", "JSONB"), ("b", "TEXT", "JSONB")]
         )
         stmts = _statements(conn)
-        assert "information_schema.columns" in stmts[0]
+        assert "pg_attribute" in stmts[0]
         assert stmts[1:] == ["ALTER TABLE t ADD COLUMN IF NOT EXISTS b JSONB"]
 
     async def test_no_alter_at_all_when_every_column_is_present(self):
@@ -98,14 +99,14 @@ class TestEnsureColumnsOnPostgres:
         await ensure_columns(conn, "t", [("a", "TEXT", "TEXT")])
         assert len(_statements(conn)) == 1
 
-    async def test_a_driver_error_is_logged_not_raised(self):
+    async def test_a_driver_error_is_raised_to_the_savepoint(self):
+        """Swallowing it left the PostgreSQL transaction aborted, so the whole
+        pass — and create_all's new tables — were lost at COMMIT."""
         conn = MagicMock()
         conn.engine.dialect.name = "postgresql"
         conn.exec_driver_sql = AsyncMock(side_effect=RuntimeError("must be owner"))
-        with patch("src.db.self_heal.columns.logger") as mock_logger:
+        with pytest.raises(RuntimeError, match="must be owner"):
             await ensure_columns(conn, "t", [("a", "TEXT", "TEXT")])
-        assert mock_logger.warning.called
-        assert "t" in mock_logger.warning.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -132,15 +133,44 @@ class TestEnsureTable:
         await ensure_table(conn, "src.models.chat_session", "ChatSession")
         conn.run_sync.assert_awaited_once()
 
-    async def test_a_failure_is_swallowed_and_named(self):
+    async def test_a_failure_is_raised_to_the_savepoint(self):
         conn = MagicMock()
         conn.run_sync = AsyncMock(side_effect=Exception("locked"))
-        with patch("src.db.self_heal.tables.logger") as mock_logger:
+        with pytest.raises(Exception, match="locked"):
             await ensure_table(conn, "src.models.chat_session", "ChatSession")
-        assert "ChatSession" in mock_logger.warning.call_args[0][0]
 
-    async def test_an_unknown_model_is_swallowed_too(self):
+    async def test_an_unknown_model_raises_before_any_ddl(self):
         conn = MagicMock()
         conn.run_sync = AsyncMock()
-        await ensure_table(conn, "src.models.chat_session", "NoSuchModel")
+        with pytest.raises(AttributeError):
+            await ensure_table(conn, "src.models.chat_session", "NoSuchModel")
         conn.run_sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+class TestEnsureIndex:
+    async def test_creates_a_missing_index_once(self):
+        engine = create_async_engine("sqlite+aiosqlite://")
+        ddl = "CREATE INDEX IF NOT EXISTS ix_t_a ON t (a)"
+        try:
+            async with engine.begin() as conn:
+                await conn.exec_driver_sql("CREATE TABLE t (a TEXT)")
+                await ensure_index(conn, "t", "ix_t_a", ddl)
+                await ensure_index(conn, "t", "ix_t_a", ddl)
+                rows = await conn.exec_driver_sql("PRAGMA index_list(t)")
+                assert [r[1] for r in rows.fetchall()] == ["ix_t_a"]
+        finally:
+            await engine.dispose()
+
+    async def test_an_existing_index_is_never_re_created(self):
+        """On PostgreSQL CREATE INDEX IF NOT EXISTS still needs ownership."""
+        conn = MagicMock()
+        conn.engine.dialect.name = "postgresql"
+        found = MagicMock()
+        found.fetchone = MagicMock(return_value=(1,))
+        conn.exec_driver_sql = AsyncMock(return_value=found)
+        await ensure_index(
+            conn, "t", "ix_t_a", "CREATE INDEX IF NOT EXISTS ix_t_a ON t (a)"
+        )
+        statements = _statements(conn)
+        assert len(statements) == 1 and "pg_index" in statements[0]

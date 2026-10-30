@@ -28,8 +28,8 @@ def gc():
     """Create a valid GroupContext for testing."""
     return GroupContext(
         group_ids=["g1"],
-        group_email="u@x.com",
-        email_domain="x.com",
+        group_email="u@example.com",
+        email_domain="example.com",
         user_role="admin",
     )
 

@@ -35,12 +35,15 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from src.services.prompt_optimization.gepa.registry_errors import (
     is_permission_denied,
     prompt_registry_grant_hint,
 )
+
+if TYPE_CHECKING:
+    from mlflow import MlflowClient
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,8 @@ TAG_CREW = "kasal_crew"
 KIND = "judge"
 #: Prompts per search page; judges number in the tens, not thousands.
 PAGE_SIZE = 200
+#: A Unity Catalog catalog or schema name as it may appear in a search filter.
+_UC_NAME = re.compile(r"[A-Za-z0-9_-]+")
 #: Header of the guideline block MemAlign folds into a judge's instructions.
 GUIDELINES_HEADER = "Distilled Guidelines"
 MEMORY_HEADER = "\n\n<!-- kasal-memalign-v1 -->\n"
@@ -96,6 +101,35 @@ def strip_guidelines(instructions: str) -> Tuple[str, List[str]]:
         if line.strip().startswith("- ")
     ]
     return head.rstrip(), [g for g in guidelines if g]
+
+
+def latest_version_number(client: MlflowClient, name: str) -> Optional[int]:
+    """Newest version number of a prompt, or None when it does not exist.
+
+    Resolved explicitly rather than via ``load_prompt(name)``: without a
+    version that call asks the store for an ALIAS named "latest", which
+    the OSS server treats as "newest" but Unity Catalog looks up literally
+    — no such alias, so every judge read as missing there. The two stores
+    also return different shapes here (a list of versions vs. a response
+    proto carrying ``prompt_versions``); both are read.
+    """
+    try:
+        result = client.search_prompt_versions(name, max_results=PAGE_SIZE)
+    except Exception as exc:  # UC raises for an unknown prompt
+        text = str(exc).lower()
+        if "not exist" in text or "not found" in text:
+            return None
+        raise
+    items = getattr(result, "prompt_versions", None)
+    if items is None:
+        items = list(result or [])
+    numbers = []
+    for item in items:
+        try:
+            numbers.append(int(getattr(item, "version", "")))
+        except (TypeError, ValueError):
+            continue
+    return max(numbers) if numbers else None
 
 
 @dataclass
@@ -169,8 +203,13 @@ class JudgeRegistry:
     def _search_filter(self) -> str:
         if self._uc_schema:
             catalog, schema = self._uc_schema.split(".", 1)
+            # Both go inside quoted literals of the MLflow filter string, and the
+            # schema is read off a registry prompt name: refuse anything that
+            # could close the quote.
+            if not (_UC_NAME.fullmatch(catalog) and _UC_NAME.fullmatch(schema)):
+                raise ValueError(f"Invalid Unity Catalog schema: {self._uc_schema!r}")
             return f"catalog = '{catalog}' AND schema = '{schema}'"
-        return f"name LIKE '{PROMPT_PREFIX}%'"
+        return f"name LIKE '{PROMPT_PREFIX}%'"  # module constant — nosemgrep: tmp.databricks.sql-injection.fstring-like
 
     def _prompt_names(self) -> Iterator[str]:
         token = None
@@ -200,32 +239,7 @@ class JudgeRegistry:
         return out
 
     def _latest_version_number(self, name: str) -> Optional[int]:
-        """Newest version number of a prompt, or None when it does not exist.
-
-        Resolved explicitly rather than via ``load_prompt(name)``: without a
-        version that call asks the store for an ALIAS named "latest", which
-        the OSS server treats as "newest" but Unity Catalog looks up literally
-        — no such alias, so every judge read as missing there. The two stores
-        also return different shapes here (a list of versions vs. a response
-        proto carrying ``prompt_versions``); both are read.
-        """
-        try:
-            result = self._client.search_prompt_versions(name, max_results=PAGE_SIZE)
-        except Exception as exc:  # noqa: BLE001 — UC raises for an unknown prompt
-            text = str(exc).lower()
-            if "not exist" in text or "not found" in text:
-                return None
-            raise
-        items = getattr(result, "prompt_versions", None)
-        if items is None:
-            items = list(result or [])
-        numbers = []
-        for item in items:
-            try:
-                numbers.append(int(getattr(item, "version", None)))
-            except (TypeError, ValueError):
-                continue
-        return max(numbers) if numbers else None
+        return latest_version_number(self._client, name)
 
     def load(self, full_name: str) -> Optional[JudgeSpec]:
         """The judge's newest version, or None."""
@@ -300,7 +314,7 @@ class JudgeRegistry:
                 for number in range(1, latest + 1):
                     try:
                         self._client.delete_prompt_version(name, str(number))
-                    except Exception as exc:  # noqa: BLE001 — gaps are fine
+                    except Exception as exc:  # gaps are fine
                         if (
                             "not exist" in str(exc).lower()
                             or "not found" in str(exc).lower()

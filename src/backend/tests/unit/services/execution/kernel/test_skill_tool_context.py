@@ -24,13 +24,13 @@ from src.services.tools.ucmv_drift_monitor_tool import UCMVDriftMonitorTool
 
 
 def _skill(
-    name="cchbc-context",
-    body="# CCHBC\nFiscal calendar 4-4-5.",
+    name="acme-context",
+    body="# the reference customer\nFiscal calendar 4-4-5.",
     param: Optional[str] = "domain_context",
 ):
     return SimpleNamespace(
         name=name,
-        description="Domain context for the CCHBC model.",
+        description="Domain context for the reference customer model.",
         body=body,
         enabled=True,
         global_enabled=False,
@@ -126,7 +126,7 @@ class TestWiring:
         with p_session, p_resolve, patch.object(agent_skills, "_add_skill_tools"):
             await agent_skills.inject_skills(
                 kwargs,
-                {"skills": ["cchbc-context"]},
+                {"skills": ["acme-context"]},
                 group_id="acme",
                 tool_context=context,
             )

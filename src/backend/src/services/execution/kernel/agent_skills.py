@@ -14,7 +14,7 @@ session does not exist. An isolated session is the only thing that behaves the
 same on both sides of that boundary.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.logger import LoggerManager
 
@@ -77,6 +77,15 @@ async def inject_skills(
 
         async with get_isolated_db_session() as session:
             skills = await resolve_for_agent(names, group_ids, session)
+            from src.services.decisions.policies import rank
+
+            skills = await rank(
+                "skill_recommendation",
+                spec.get("goal") or label,
+                skills,
+                [{"name": s.name, "description": s.description} for s in skills],
+                group_id=group_id,
+            )
             section = build_prompt_section(skills)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[skills] not attached to agent '%s': %s", label, exc)
@@ -114,8 +123,8 @@ async def inject_skills(
 
 
 def _feed_tool_params(
-    agent_kwargs: Dict[str, Any],
-    skills: List[Any],
+    agent_kwargs: Dict[str, object],
+    skills: Iterable[object],
     tool_context: Optional[Dict[str, str]],
     label: str,
 ) -> None:
@@ -129,7 +138,10 @@ def _feed_tool_params(
         context = collect_tool_context(skills)
         if not context:
             return
-        apply_tool_context(agent_kwargs.get("tools") or [], context, label=label)
+        tools = agent_kwargs.get("tools")
+        apply_tool_context(
+            tools if isinstance(tools, list) else [], context, label=label
+        )
         if tool_context is not None:
             tool_context.update(context)
     except Exception as exc:  # noqa: BLE001

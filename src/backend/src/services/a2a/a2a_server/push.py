@@ -81,6 +81,8 @@ async def register(
 
     repository = A2APushConfigRepository(session)
     group_id = caller.group_context.primary_group_id
+    if group_id is None:  # no workspace: nothing it could have registered against
+        raise PushConfigNotFound(f"No task {task_id!r}")
     existing = await repository.find_for_task_and_url(task_id, url, group_id)
 
     if existing is not None:

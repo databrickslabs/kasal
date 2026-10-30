@@ -1,28 +1,157 @@
 # Developer guide
 
-Build, extend, and debug Kasal efficiently. This guide focuses on day-to-day workflows.
+Build, extend, and debug Kasal. This guide covers local setup, the backend and frontend architecture rules, and how tests and CI check your change.
 
 - [Components you'll touch](#components-youll-touch)
 - [Before you begin](#before-you-begin)
+- [Run the stack locally](#run-the-stack-locally)
+- [Authentication in local development](#authentication-in-local-development)
+- [Choose a database](#choose-a-database)
 - [Developer architecture overview](#developer-architecture-overview)
 - [Backend architecture](#backend-architecture)
 - [Frontend architecture](#frontend-architecture)
 - [End-to-end flow](#end-to-end-flow)
+- [Test and lint your change](#test-and-lint-your-change)
 
 ## Components you'll touch
 - **Frontend (React SPA)**: UI, designer, monitoring
 - **API (FastAPI)**: REST endpoints and validation
 - **Services**: Orchestration and business logic
 - **Repositories**: DB and external I/O (Databricks, Vector, MLflow)
-- **Engines (CrewAI)**: Agent/flow preparation and execution
+- **Execution**: Kasal's own agent runtime (`services/execution/`) behind three paths: Chat, Agent Builder and Flow Builder
 - **Data & Storage**: SQLAlchemy models/sessions, embeddings, volumes
 
 ## Before you begin
 Tools and versions you need before running the stack.
-- Python 3.9+
-- Node.js 18+
-- Postgres (recommended) or SQLite for local dev
-- Databricks access if exercising Databricks features
+- Python 3.11 (the backend pins `>=3.11,<3.12`) and [uv](https://docs.astral.sh/uv/). Dependencies are declared in `src/backend/pyproject.toml` and pinned in `src/backend/uv.lock`; there is no `requirements.txt`.
+- Node.js 22 (what CI uses) and npm.
+- SQLite needs nothing extra and is what `run.sh` uses by default. PostgreSQL is optional locally.
+- Databricks access if you exercise Databricks features.
+
+## Run the stack locally
+
+Install the backend dependencies and start the server from `src/backend`:
+
+```bash
+cd src/backend
+uv sync --frozen   # creates src/backend/.venv from exactly what uv.lock pins
+./run.sh           # SQLite; ./run.sh postgres for PostgreSQL
+```
+
+Always pass `--frozen`. A plain `uv sync` re-resolves against whatever package index your machine is configured for and can rewrite `uv.lock` with that index's URLs; `--frozen` installs the committed lock as it is. `run.sh` and CI both use `uv sync --frozen`.
+
+To change a dependency, edit `src/backend/pyproject.toml`, run `uv lock`, check that the `uv.lock` diff only points at public registries, then run `uv sync --frozen`. Never edit `uv.lock` by hand.
+
+`run.sh` does the following, in order:
+
+1. Stops Kasal processes left over from a previous run of this checkout: the `uvicorn` reload parent, orphaned crew and flow subprocesses, and their `multiprocessing` resource trackers. It only touches processes whose working directory is inside `src/backend`.
+2. Checks the port (`KASAL_PORT`, default `8000`). If something else still holds it, `run.sh` prints the owning PID and command and refuses to start, unless `KASAL_KILL_PORT_OWNER=true`, in which case it sends that process SIGTERM.
+3. Runs `uv sync --frozen`. If the sync fails, it prints the error and continues with the existing `.venv`, or exits if there is none.
+4. Exports `LOCAL_DEV_AUTH=true` (unless you set it), then starts `.venv/bin/uvicorn src.main:app --reload --reload-dir src` on `KASAL_BIND_HOST` (default `127.0.0.1`).
+
+Binding to anything other than loopback prints a warning, because with `LOCAL_DEV_AUTH` on, anyone who can reach the port acts as the development user. Run `./run.sh -h` for the logging flags (`-q`, `-v`, `-d`, `--no-console`, `--no-file`) and the `KASAL_LOG_*` variables.
+
+Start the frontend in a second terminal:
+
+```bash
+cd src/frontend
+npm ci
+npm start          # Vite dev server on http://localhost:3000
+```
+
+In development the frontend calls the backend directly at `http://localhost:<port>/api/v1` (`src/frontend/src/shared/api/client.ts`), and the Vite `/api` proxy targets the same port. The port comes from `VITE_KASAL_PORT`, else `KASAL_PORT`, else `8000` (`src/frontend/vite.config.ts`), so if you move the backend with `KASAL_PORT`, start the frontend with the same value:
+
+```bash
+KASAL_PORT=8001 npm start
+```
+
+Interactive API docs are served at `/api-docs` on the backend. For every environment variable, see the [configuration reference](./CONFIGURATION.md).
+
+## Compare the launchers
+
+There are three ways to start Kasal, and they don't share defaults. Use `run.sh` for development.
+
+| | `src/backend/run.sh` | `src/entrypoint.py` | `kasal` (pip package, `packaging/kasal/cli.py`) |
+|---|---|---|---|
+| Intended use | Local development | Production / Databricks Apps entry point (`src/app.yaml` runs it) | Trying Kasal from an installed wheel |
+| Bind host | `KASAL_BIND_HOST`, default `127.0.0.1`; warns on any other host | `KASAL_BIND_HOST` if set; otherwise `0.0.0.0` inside Databricks Apps and `127.0.0.1` elsewhere | `--host`, default `127.0.0.1` |
+| Port | `KASAL_PORT`, default `8000` | `--port`; default `DATABRICKS_APP_PORT` inside Databricks Apps, else `8000` | `--port`, default `8000` |
+| `LOCAL_DEV_AUTH` | Set to `true` unless you set it | Set to `true` by `--environment dev` unless you set it; otherwise not set, and refused inside Apps | Not set; export it yourself, or API calls return 401 (see the [pip package guide](./PIP_PACKAGE.md)) |
+| Default database | SQLite, `src/backend/app.db` (`./run.sh postgres` for PostgreSQL) | SQLite, `src/kasal.db`; inside Apps, the attached Lakebase resource | SQLite, `~/.kasal/kasal.db`; any `DATABASE_TYPE` or `SQLITE_DB_PATH` you export wins |
+| Frontend | None; run the Vite dev server on port 3000 | Serves the built `src/frontend_static` | Serves the UI bundled in the wheel |
+| Dependencies | Runs `uv sync --frozen` first | Uses the current interpreter | Installed with the wheel |
+| Reload on code change | Yes (`--reload --reload-dir src`) | With `--reload` | No |
+
+`src/entrypoint.py` flags: `--db-type sqlite|postgres` and `--db-url` (a `postgresql://` URL is rewritten to `postgresql+asyncpg://`, and `DATABASE_TYPE` is exported so the crew and flow subprocesses agree), `--port`, `--reload`, `--debug` and `--environment dev|prod` (`dev` behaves like `run.sh`: `KASAL_DEPLOYMENT_MODE=local` and `LOCAL_DEV_AUTH=true`). For day-to-day development, `run.sh` is still the simplest option.
+
+## Authentication in local development
+
+Every API call needs an identity. Inside Databricks Apps it comes from the platform proxy, through the `X-Forwarded-Email`, `X-Forwarded-User` and `X-Forwarded-Access-Token` headers. A request with no identity gets **401**; the backend no longer assumes a default user.
+
+Locally there is no proxy, so Kasal offers an opt-in development identity:
+
+- `LOCAL_DEV_AUTH=true` makes `LocalDevAuthMiddleware` (`src/backend/src/main.py`) add `X-Forwarded-Email: dev@localhost` to any request that has no identity header.
+- The dev frontend sends its own `X-Forwarded-Email` (`VITE_DEV_USER_EMAIL`), which always wins.
+- `run.sh` sets `LOCAL_DEV_AUTH=true` for you. If you start `uvicorn` or `src/entrypoint.py` yourself, export it first, or every API call returns 401.
+- It is refused in production: when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`, the flag is ignored and an error is logged. `python src/entrypoint.py --environment dev` turns it on, the same as `run.sh`.
+
+`LOCAL_DEV_AUTH` is read with `os.getenv`, so putting it in a `.env` file has no effect. Export it in your shell.
+
+To start the backend without `run.sh`:
+
+```bash
+cd src/backend
+export LOCAL_DEV_AUTH=true
+.venv/bin/uvicorn src.main:app --host 127.0.0.1 --port 8000
+```
+
+For the full auth model, see the [security reference](./SECURITY.md) and the [API endpoints reference](./api_endpoints.md).
+
+## Choose a database
+
+The backend, `alembic` and `python run_seeders.py` all read `src/backend/src/config/settings.py`, so they share one default: SQLite at the absolute path `src/backend/app.db`, whatever directory you run them from. `run.sh` changes into `src/backend` itself and no longer sets `SQLITE_DB_PATH`. The other entry points keep their own files:
+
+| Entry point | Default database | SQLite file |
+|---|---|---|
+| `./run.sh`, `uvicorn`, `alembic`, `python run_seeders.py` | SQLite (`DATABASE_TYPE` defaults to `sqlite`) | `src/backend/app.db` |
+| `python src/entrypoint.py` | SQLite | `src/kasal.db` |
+| `kasal` (pip package) | SQLite | `~/.kasal/kasal.db` |
+
+For the other ways the launchers differ, see [Compare the launchers](#compare-the-launchers).
+
+### Create and seed a database
+
+On a new database, start the app once. `./run.sh` (or any other launcher; see [compare the launchers](#compare-the-launchers)) runs `init_db()` at startup, which builds the whole schema, and then seeds it in the background while `AUTO_SEED_DATABASE` is on. Nothing else is needed.
+
+To build and seed a database without starting the server, for example a scratch file for a test, run the seeders script. It runs `init_db()` first (idempotent, so it is safe on an existing database), then every seeder:
+
+```bash
+cd src/backend
+export DATABASE_TYPE=sqlite SQLITE_DB_PATH=/tmp/kasal-scratch.db
+uv run --frozen python run_seeders.py
+```
+
+The script exits 0 only when every seeder succeeded. If any seeder fails it still runs the rest, then logs `SEEDING FAILED` with the name and error of each failed seeder and exits 1. No seeder is optional: each one writes rows the app or its bundled examples rely on. Best-effort cleanup inside a seeder, such as pruning retired model rows, logs a warning instead.
+
+At server startup, seeding runs in the background and a failure never stops the server: it is logged as an ERROR that names the failed seeders, and the app keeps serving. The exception is a fresh Lakebase installation (the attached database resource), which refuses to start when an essential seeder (`model_configs`, `prompt_templates` or `tools`) fails, because it has no earlier defaults to fall back on.
+
+### Status of Alembic
+
+Don't use `alembic upgrade head` to create a database. The migration history has several roots and no baseline revision, so it cannot build a schema from nothing: on an empty SQLite file it stops at `no such table: agents`, and on a database that `init_db()` built it fails too, because it replays every migration from the start. CI runs that step as report-only for the same reason (see [continuous integration](./continuous-integration.md)).
+
+What Alembic is for today is recording schema changes. To create a migration, bring a database to the current schema with `init_db()`, mark it as current, then autogenerate:
+
+```bash
+cd src/backend
+uv run --frozen alembic stamp head    # once per database that init_db() built
+uv run --frozen alembic revision --autogenerate -m "description"
+```
+
+Review the generated file before you commit it. On SQLite, autogenerate also reports type changes (for example `NUMERIC` to `UUID`) that are only differences between the SQLite and PostgreSQL column types; delete those operations.
+
+To use PostgreSQL, start the server with `./run.sh postgres` and set `DATABASE_TYPE=postgres` (plus the `POSTGRES_*` variables) on every other command you run. To use another SQLite file, set `SQLITE_DB_PATH` the same way.
+
+Alembic does not run at startup. The app builds its schema with `init_db()` (`create_all` plus the self-heal steps in `src/backend/src/db/self_heal/`), so a column added to an existing table needs a self-heal step as well as a migration. Seeders run in the background at startup while `AUTO_SEED_DATABASE` is on.
 
 ## Developer architecture overview
 
@@ -34,13 +163,13 @@ The backend uses FastAPI with a clean layered structure. It separates HTTP routi
 
 ### Core components
 
-- API Routers: src/backend/src/api/* map HTTP endpoints to service calls.
-- Services: src/backend/src/services/* implement business logic and transactions.
-- Repositories: src/backend/src/repositories/* handle database CRUD.
-- Models/Schemas: src/backend/src/models/* and src/backend/src/schemas/* define persistence and I/O contracts.
-- Core/Engines: src/backend/src/core/* and src/backend/src/services/execution/* integrate LLMs and execution flows.
-- DB/Session: src/backend/src/db/* configures sessions and Alembic migrations.
-- Config/Security: src/backend/src/config/* and src/backend/src/dependencies/* provide settings and auth.
+- API routers: `src/backend/src/api/` map HTTP endpoints to service calls.
+- Services: `src/backend/src/services/<domain>/` implement business logic and hold the transaction. Every service lives in a domain package.
+- Repositories: `src/backend/src/repositories/` own every query and every row write.
+- Models and schemas: `src/backend/src/models/` and `src/backend/src/schemas/` define persistence and I/O contracts.
+- Execution: `src/backend/src/services/execution/` holds the agent runtime (`runtime/`), the harnesses (`harnesses/`) and the shared kernel, behind the Chat (`services/chat/`), Agent Builder (`services/agent_builder/`) and Flow Builder (`services/flow_builder/`) paths. LLM calls go through `src/backend/src/core/llm/`.
+- Database and sessions: `src/backend/src/db/` configures sessions, the database router and the schema self-heal; migrations live in `src/backend/migrations/`.
+- Config and security: `src/backend/src/config/` and `src/backend/src/dependencies/` provide settings, identity and group context.
 
 ### Typical request flow
 
@@ -58,7 +187,7 @@ sequenceDiagram
 
     C->>R: HTTP Request
     R->>S: Validate and delegate
-    S->>U: Use injected session (router owns the transaction)
+    S->>U: Use the injected session (never opens its own)
     S->>Repo: Query/Command
     Repo->>DB: SQLAlchemy operation
     DB-->>Repo: Rows/Status
@@ -66,7 +195,7 @@ sequenceDiagram
         S->>L: Generate/Score
         L-->>S: LLM Result
     end
-    S->>U: Router commits at end of request
+    S->>U: Request dependency commits (or rolls back) at end of request
     S-->>R: DTO/Schema
     R-->>C: HTTP Response
 ```
@@ -81,25 +210,65 @@ sequenceDiagram
 
 ### Example: minimal endpoint wiring
 
-This shows a typical router, service, and repository connection.
+This shows the router, service and repository wiring the backend uses (modelled
+on `api/agents_router.py` and `services/CLAUDE.md`). The session is created once
+per request by the `SessionDep` dependency and flows **down**: router, then
+service, then repository. Nothing below the router acquires a session of its own.
 
 ```python
-# router.py
-@router.get("/items/{item_id}", response_model=ItemOut)
-async def get_item(item_id: UUID, service: ItemService = Depends(...)):
-    return await service.get_item(item_id)
+# api/items_router.py
+async def get_item_service(session: SessionDep) -> ItemService:
+    return ItemService(session=session)
 
-# services/item_service.py
+ItemServiceDep = Annotated[ItemService, Depends(get_item_service)]
+
+@router.get("/{item_id}", response_model=ItemOut)
+async def get_item(item_id: UUID, service: ItemServiceDep, group_context: GroupContextDep):
+    item = await service.get_item(item_id, group_context)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+# services/items/item_service.py  (every service lives in a domain package)
 class ItemService:
-    async def get_item(self, item_id: UUID) -> ItemOut:
-        with self.uow as uow:
-            item = uow.items.get(item_id)
-            return ItemOut.model_validate(item)
+    def __init__(self, session: AsyncSession,
+                 repository_class: Type[ItemRepository] = ItemRepository):
+        self.session = session
+        self.repository = repository_class(session)  # built on the GIVEN session
+
+    async def get_item(self, item_id: UUID, group_context: GroupContext) -> ItemOut | None:
+        item = await self.repository.get_for_group(item_id, group_context.group_ids)
+        return ItemOut.model_validate(item) if item else None
 
 # repositories/item_repository.py
 class ItemRepository(BaseRepository[Item]):
-    ...
+    def __init__(self, session: AsyncSession):
+        super().__init__(Item, session)  # receives a session, never opens one
+
+    async def get_for_group(self, item_id: UUID, group_ids: list[str]) -> Item | None:
+        result = await self.session.execute(
+            select(Item).where(Item.id == item_id, Item.group_id.in_(group_ids))
+        )
+        return result.scalar_one_or_none()
 ```
+
+The rules CI enforces (details in `src/backend/src/services/CLAUDE.md`):
+
+- **Layers only import downward.** `api` → `services` → `repositories` → `models`, with `core`, `utils` and `schemas` below everything. `import-linter` checks this, including transitive chains; the contracts are `[tool.importlinter]` in `src/backend/pyproject.toml`.
+- **Every service is a package.** A new service goes in `services/<domain>/<module>.py`, never a loose `services/<name>_service.py`.
+- **A service never builds queries or persists rows.** `select(...)`,
+  `session.execute` and `session.add/delete/merge` belong in a repository; a
+  service holds the session only for transaction control.
+- **A service never opens a session or builds an engine.** Use the injected
+  session inside a request, or `routed_scoped_session()` outside one.
+- **Another domain's data goes through that domain's service**, not its
+  repository, so the owning domain's rules (group scoping, encryption, status
+  transitions) still apply.
+- **There is no Unit of Work.** `src.core.unit_of_work` has been deleted; the
+  session already is the unit of work. Treat any example using `self.uow` or
+  `UnitOfWork` as stale.
+
+The AST checks for the last four rules live in `src/backend/tests/unit/architecture/`.
 
 ## Frontend architecture
 
@@ -107,12 +276,12 @@ The frontend is a React + TypeScript application. It organizes UI components, AP
 
 ### Core components
 
-- API Clients: src/frontend/src/api/* wrap HTTP calls with typed methods.
-- UI Components: src/frontend/src/components/* render views and dialogs.
-- Hooks: src/frontend/src/hooks/* encapsulate logic and side effects.
-- Stores: src/frontend/src/store/* manage app and workflow state.
-- Types/Config: src/frontend/src/types/* and src/frontend/src/config/* provide typing and environment.
-- Utils: src/frontend/src/utils/* offer reusable helpers.
+- App shell: `src/frontend/src/app/` holds routes, startup and cross-feature composition.
+- Features: `src/frontend/src/features/<domain>/` hold a domain's views, feature-local state, hooks and API calls (for example `features/chat/`, `features/workflow/`, `features/executions/`).
+- Shared: `src/frontend/src/shared/` holds the HTTP client (`shared/api/client.ts`), presentation helpers and the A2UI renderer.
+- API clients: `src/frontend/src/api/` wrap domain endpoints with typed static methods over `apiClient`.
+- Stores: `src/frontend/src/store/` holds the shared Zustand stores. Zustand is the only state library.
+- Types and config: `src/frontend/src/types/` and `src/frontend/src/config/` provide contracts, defaults and i18n.
 
 ### UI data flow
 
@@ -139,20 +308,23 @@ flowchart LR
 
 ### Example: calling an API from a component
 
-A component loads items using an API service and updates local state.
+A component loads items through an API service built on `apiClient`, which sets the base URL (`/api/v1` in production) and reports failures. Don't call `fetch` with hand-built auth headers: in Databricks Apps the platform proxy supplies the identity.
 
 ```ts
-// api/ItemService.ts
-export async function getItem(id: string) {
-  const res = await fetch(`/v1/items/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error("Failed");
-  return (await res.json()) as Item;
+// api/items/ItemService.ts
+import { apiClient } from '../../shared/api/client';
+
+export class ItemService {
+  static async getItem(id: string): Promise<Item> {
+    const response = await apiClient.get<Item>(`/items/${id}`);
+    return response.data;
+  }
 }
 
-// components/Items/ItemView.tsx
+// features/items/components/ItemView.tsx
 const ItemView: React.FC<{ id: string }> = ({ id }) => {
   const [item, setItem] = useState<Item | null>(null);
-  useEffect(() => { getItem(id).then(setItem); }, [id]);
+  useEffect(() => { ItemService.getItem(id).then(setItem); }, [id]);
   return item ? <div>{item.name}</div> : <span>Loading...</span>;
 };
 ```
@@ -163,15 +335,38 @@ This ties front end and back end with shared contracts. It helps new developers 
 
 - The request path runs: Frontend Component, Hook, Store/API Client, Backend Router, Service, Repository, DB.
 - Shared types and response shapes live in frontend types and backend schemas.
-- Tests in src/backend/tests and frontend __tests__ show usage patterns.
+- Tests show usage patterns: `src/backend/tests/unit/` mirrors `src/backend/src/`, and frontend tests sit next to the code as `*.test.ts(x)`.
+
+## Test and lint your change
+
+Run the backend checks from `src/backend`:
+
+```bash
+uv run python run_tests.py              # tests, then black, isort, ruff, the mypy baseline and import-linter
+uv run python run_tests.py --skip-lint  # tests only
+uv run python run_tests.py --lint-only  # static checks only
+uv run python run_tests.py --type unit --coverage
+```
+
+`run_tests.py` runs pytest in parallel by default (`--parallel auto`); pass `--parallel 0` to step through a test. The mypy step fails only on errors that are not in `mypy-baseline.json`.
+
+Run the frontend checks from `src/frontend`. The frontend uses Vitest with React Testing Library; there is no Jest and no Cypress or Playwright suite:
+
+```bash
+npm run test:run   # Vitest, single run (what CI runs); npm test for watch mode
+npm run lint
+npm run build      # tsc -b, then vite build
+```
+
+CI runs the same commands. For what gates a pull request and what is report-only, see [continuous integration](./continuous-integration.md).
 
 ---
 
 ## Related
 - [Code structure guide](./CODE_STRUCTURE_GUIDE.md)
 - [Architecture guide](./ARCHITECTURE_GUIDE.md)
-- [API endpoints reference](./api_endpoints.md)
-- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md)
-- [Why Kasal](./WHY_KASAL.md)
+- [Configuration reference](./CONFIGURATION.md)
+- [Continuous integration](./continuous-integration.md)
+- [Harnesses](./harnesses.md)
 
 Back to the [documentation hub](./README.md).

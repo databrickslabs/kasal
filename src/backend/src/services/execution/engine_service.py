@@ -35,7 +35,15 @@ Example:
 import asyncio  # noqa: E402 - import follows module initialization
 import os  # noqa: E402 - import follows module initialization
 from datetime import datetime  # noqa: E402 - import follows module initialization
-from typing import Any, Dict  # noqa: E402 - import follows module initialization
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    Optional,
+)
+
+from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
+    AsyncSession,
+)
 
 # Import logger manager
 from src.core.logger import (  # noqa: E402 - import follows module initialization
@@ -51,11 +59,15 @@ from src.services.agent_builder.execution_runner import (  # noqa: E402 - import
 from src.services.execution.base import (  # noqa: E402 - import follows module initialization
     BaseEngineService,
 )
+from src.services.execution.config.auto_model import (  # noqa: E402 - import follows module initialization
+    stamp_decision,
+)
 from src.services.execution.config_adapter import (  # noqa: E402 - import follows module initialization
     normalize_config,
     normalize_flow_config,
 )
 from src.services.execution.harness_choice import (  # noqa: E402 - import follows module initialization
+    HarnessName,
     dispatch_session,
     harness_for_execution,
     stamp_on_config,
@@ -78,6 +90,19 @@ from src.utils.user_context import (  # noqa: E402 - import follows module initi
 )
 
 logger = LoggerManager.get_instance().crew
+
+
+def _stamp_payload(
+    config: Dict[str, object], execution_id: str, engine: HarnessName
+) -> None:
+    """What the spawned interpreter must know before it parses the config.
+
+    The engine this run was created with (payload and environment), and the
+    run's Auto decision, which its trace continues (``auto_model``).
+    """
+    stamp_on_config(config, engine)
+    stamp_decision(config, execution_id)
+    os.environ.update(subprocess_env(engine))
 
 
 class KasalEngineService(BaseEngineService):
@@ -106,7 +131,9 @@ class KasalEngineService(BaseEngineService):
         ensuring that crew failures don't affect the main application process.
     """
 
-    def __init__(self, db=None):
+    _init_task: "asyncio.Task[bool]"  # set by EngineFactory.get_engine
+
+    def __init__(self, db: Any = None) -> None:
         """Initialize the CrewAI engine service with database connection.
 
         Sets up the service with repository access patterns and initializes
@@ -121,7 +148,7 @@ class KasalEngineService(BaseEngineService):
             factory functions to maintain proper separation of concerns.
         """
         # Don't store db directly - repositories should handle db access
-        self._running_jobs = {}  # Map of execution_id -> job info
+        self._running_jobs: Dict[str, Any] = {}  # Map of execution_id -> job info
 
         # Import repository factory functions
         from src.repositories.execution_repository import get_execution_repository
@@ -132,7 +159,7 @@ class KasalEngineService(BaseEngineService):
         )
         self._status_service = ExecutionStatusService  # Store reference to service
 
-    async def initialize(self, **kwargs) -> bool:
+    async def initialize(self, **kwargs: Any) -> bool:
         """Initialize the CrewAI engine service and its dependencies.
 
         Performs startup initialization including trace writer setup,
@@ -192,8 +219,8 @@ class KasalEngineService(BaseEngineService):
         self,
         execution_id: str,
         execution_config: Dict[str, Any],
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> str:
         """Execute a CrewAI crew with process isolation and comprehensive monitoring.
 
@@ -247,8 +274,7 @@ class KasalEngineService(BaseEngineService):
             # it to a different runtime than the one recorded against it.
             async with dispatch_session(session) as db:
                 engine = await harness_for_execution(db, execution_id)
-            stamp_on_config(execution_config, engine)
-            os.environ.update(subprocess_env(engine))
+            _stamp_payload(execution_config, execution_id, engine)
             logger.info(
                 f"[KasalEngineService] Execution {execution_id} engine: {engine}"
             )
@@ -363,7 +389,7 @@ class KasalEngineService(BaseEngineService):
 
             # The runner reports the workload outcome separately from persistence.
             # A normal return can mean FAILED; it must never imply COMPLETED.
-            async def run_with_exception_handler():
+            async def run_with_exception_handler() -> None:
                 from src.services.execution.finalization import (
                     ExecutionOutcome,
                     persist_execution_outcome,
@@ -570,8 +596,8 @@ class KasalEngineService(BaseEngineService):
         self,
         execution_id: str,
         flow_config: Dict[str, Any],
-        group_context: GroupContext = None,
-        user_token: str = None,
+        group_context: Optional[GroupContext] = None,
+        user_token: Optional[str] = None,
     ) -> str:
         """
         Run a CrewAI flow with the given configuration using process isolation.
@@ -600,8 +626,7 @@ class KasalEngineService(BaseEngineService):
             # every caller would pass as None.
             async with dispatch_session() as db:
                 engine = await harness_for_execution(db, execution_id)
-            stamp_on_config(flow_config, engine)
-            os.environ.update(subprocess_env(engine))
+            _stamp_payload(flow_config, execution_id, engine)
             flow_logger.info(
                 f"[KasalEngineService] Flow {execution_id} engine: {engine}"
             )
@@ -634,7 +659,7 @@ class KasalEngineService(BaseEngineService):
             )
 
             # Create a task for process-based flow execution with exception handler
-            async def run_with_exception_handler():
+            async def run_with_exception_handler() -> None:
                 try:
                     flow_logger.info(
                         f"[KasalEngineService] About to call run_flow_in_process for {execution_id}"
@@ -698,8 +723,8 @@ class KasalEngineService(BaseEngineService):
         self,
         execution_id: str,
         config: Any,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """Run a single agent ("chat"/light) execution at the engine level.
 

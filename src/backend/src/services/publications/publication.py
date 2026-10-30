@@ -30,7 +30,7 @@ attribution on internal traffic, polluting the external audit trail.
 import logging
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -193,7 +193,9 @@ class PublicationService:
             return True
         return _normalize_id(row.entity_id) in live
 
-    async def _live_rows(self, group_ids: List[str], protocol: str) -> List[Any]:
+    async def _live_rows(
+        self, group_ids: List[str], protocol: str
+    ) -> List[Publication]:
         """Publications for these groups, minus the ones whose entity is gone.
 
         The single row set both the catalogue and resolution work from. They
@@ -206,7 +208,7 @@ class PublicationService:
         )
         existing, _ = await self._entity_facts(rows)
 
-        live: List[Any] = []
+        live: List[Publication] = []
         for row in rows:
             known = existing.get(row.entity_type)
             if (
@@ -270,7 +272,9 @@ class PublicationService:
             existing["crew"] = set()
 
         conversational: Set[str] = set()
-        flow_ids = [str(row.entity_id) for row in rows if row.entity_type == "flow"]
+        flow_ids: List[Union[uuid.UUID, str]] = [
+            str(row.entity_id) for row in rows if row.entity_type == "flow"
+        ]
         if not flow_ids:
             existing["flow"] = set()
             return existing, conversational

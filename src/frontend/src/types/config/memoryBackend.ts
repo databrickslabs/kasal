@@ -30,8 +30,9 @@ export interface MemoryTuningConfig {
   /** Minimum semantic similarity for a memory to be recalled at all (default 0.35). */
   relevance_threshold?: number;
   /**
-   * Blended-score floor below which a recall returns nothing. Unset = the
-   * embedder's own default (0.75 Databricks, 0.62 local Ollama fallback).
+   * Similarity (cosine) floor below which a memory is not recalled; recency and
+   * importance only rank what passes it. Unset = the embedder's own default
+   * (0.60 Databricks, 0.64 local Ollama fallback).
    */
   recall_min_score?: number;
 
@@ -46,6 +47,20 @@ export interface MemoryTuningConfig {
   complex_query_threshold?: number;
   exploration_budget?: number;
   query_analysis_threshold?: number;
+
+  // Hygiene and retention (were KASAL_MEMORY_* environment variables).
+  /** Recall drops candidates scoring more than this below the best one. */
+  recall_max_drop?: number;
+  write_screening?: 'quarantine' | 'annotate' | 'off';
+  /** Opt-in: delete memories past their retention rule. */
+  forgetting_enabled?: boolean;
+  superseded_retention_days?: number;
+  episodic_ttl_days?: number;
+  importance_floor?: number;
+  supersession_enabled?: boolean;
+  llm_consolidation_enabled?: boolean;
+  /** Store extracted facts in an entity graph instead of whole records. */
+  graph_memory?: boolean;
 
   // LLM override for memory analysis.
   memory_llm_model?: string;
@@ -87,6 +102,8 @@ export interface LakebaseMemoryConfig {
   // Memory table — one table for every MemoryRecord.
   memory_table?: string;
   tables_initialized?: boolean;
+  /** Role assumed for knowledge search (SET ROLE); unset = databricks_superuser. */
+  db_role?: string;
 }
 
 export interface MemoryBackendConfig {
@@ -148,6 +165,15 @@ export const MEMORY_TUNING_DEFAULTS: Required<
     | 'complex_query_threshold'
     | 'exploration_budget'
     | 'query_analysis_threshold'
+    | 'recall_max_drop'
+    | 'write_screening'
+    | 'forgetting_enabled'
+    | 'superseded_retention_days'
+    | 'episodic_ttl_days'
+    | 'importance_floor'
+    | 'supersession_enabled'
+    | 'llm_consolidation_enabled'
+    | 'graph_memory'
   >
 > = {
   semantic_weight: 0.6,
@@ -156,7 +182,7 @@ export const MEMORY_TUNING_DEFAULTS: Required<
   importance_weight: 0.1,
   recency_half_life_days: 30,
   relevance_threshold: 0.35,
-  recall_min_score: 0.75,
+  recall_min_score: 0.6,
   consolidation_threshold: 0.85,
   consolidation_limit: 5,
   default_importance: 0.5,
@@ -165,6 +191,15 @@ export const MEMORY_TUNING_DEFAULTS: Required<
   complex_query_threshold: 0.7,
   exploration_budget: 1,
   query_analysis_threshold: 200,
+  recall_max_drop: 0.12,
+  write_screening: 'quarantine',
+  forgetting_enabled: false,
+  superseded_retention_days: 90,
+  episodic_ttl_days: 180,
+  importance_floor: 0.4,
+  supersession_enabled: true,
+  llm_consolidation_enabled: true,
+  graph_memory: false,
 };
 
 // Validation helpers
@@ -305,4 +340,39 @@ export interface ManualConfig {
   memory_index: string;
   document_index: string;
   embedding_model: string;
+}
+
+// Graph memory (the Memory Browser's ontology view).
+export interface MemoryGraphEntity {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface MemoryGraphFact {
+  id: string;
+  subject_id: string;
+  subject: string;
+  relation: string;
+  object_id?: string | null;
+  object: string;
+  statement: string;
+  source?: string | null;
+  created_at?: string | null;
+  /** Set when a newer fact (superseded_by) replaced this one. */
+  valid_to?: string | null;
+  superseded_by?: string | null;
+  execution_id?: string | null;
+  /** What qualifies the relation: a role, a period, a field of study. */
+  qualifiers?: Record<string, string>;
+  /** procedural (standing, always recalled), semantic (the user stated it),
+   *  finding (a run established it) or episodic (a run note). */
+  kind?: 'procedural' | 'semantic' | 'finding' | 'episodic';
+}
+
+export interface MemoryGraphResponse {
+  backend: string;
+  enabled: boolean;
+  entities: MemoryGraphEntity[];
+  facts: MemoryGraphFact[];
 }

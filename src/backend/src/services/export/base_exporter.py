@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class BaseExporter(ABC):
     """Abstract base class for crew exporters"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logger
 
     @abstractmethod

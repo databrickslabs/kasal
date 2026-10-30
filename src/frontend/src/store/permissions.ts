@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import { GroupService } from '../api/groups/GroupService';
-import { useUserStore } from './user';
+import { isOwnPersonalWorkspace, isPersonalWorkspaceId, useUserStore } from './user';
+import { getTabGroupId } from '../shared/api/tabGroup';
 
 // Define permission types based on backend privileges
 export const Permissions = {
@@ -68,6 +69,9 @@ export const Permissions = {
 } as const;
 
 export type PermissionType = typeof Permissions[keyof typeof Permissions];
+
+/** The persisted slice's key (the "v2" forced a cache refresh after the 3-tier migration). */
+const PERSIST_KEY = 'permission-store-v2';
 export type UserRole = 'admin' | 'editor' | 'operator';
 
 // Define role-permission mappings (matching backend)
@@ -173,6 +177,9 @@ interface PermissionState {
   getDisabledFeatures: () => string[];
 }
 
+// The store used to persist here, shared by every tab. Drop what it left behind.
+try { localStorage.removeItem(PERSIST_KEY); } catch { /* storage blocked */ }
+
 export const usePermissionStore = create<PermissionState>()(
   devtools(
     persist(
@@ -242,10 +249,10 @@ export const usePermissionStore = create<PermissionState>()(
             });
 
             // Get the selected group from localStorage (set by workspace selector)
-            const targetGroupId = groupId || localStorage.getItem('selectedGroupId');
+            const targetGroupId = groupId || getTabGroupId();
 
             // If it's a personal workspace, determine role based on permissions
-            if (targetGroupId && targetGroupId.startsWith('user_')) {
+            if (isPersonalWorkspaceId(targetGroupId, currentUserFromStore?.personal_group_id)) {
               // Check if user has personal workspace manager permission
               const effectiveRole = userIsSystemAdmin || userIsPersonalWorkspaceManager ? 'admin' : 'editor';
               const rolePermissions = ROLE_PERMISSIONS[effectiveRole];
@@ -459,8 +466,8 @@ export const usePermissionStore = create<PermissionState>()(
         isOperator: () => get().userRole === 'operator',
         isWorkspaceAdmin: () => {
           const { userRole, isSystemAdmin, isPersonalWorkspaceManager } = get();
-          const groupId = localStorage.getItem('selectedGroupId');
-          const isPersonalWorkspace = groupId?.startsWith('user_');
+          const groupId = getTabGroupId();
+          const isPersonalWorkspace = isOwnPersonalWorkspace(groupId);
 
           if (isSystemAdmin) return true;
           if (isPersonalWorkspace && isPersonalWorkspaceManager) return true;
@@ -505,7 +512,10 @@ export const usePermissionStore = create<PermissionState>()(
         },
       }),
       {
-        name: 'permission-store-v2', // Updated to force cache refresh after 3-tier migration
+        name: PERSIST_KEY,
+        // Per tab, like the teamspace the role belongs to (shared/api/tabGroup.ts):
+        // in localStorage a reload showed the role another tab loaded last.
+        storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
           userRole: state.userRole,
           allowAgentBuilder: state.allowAgentBuilder,

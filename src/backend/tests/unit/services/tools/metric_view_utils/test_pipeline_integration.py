@@ -646,7 +646,7 @@ class TestCatalogSchemaPlaceholderResolution:
                 },
                 {
                     "name": "dim_real",
-                    "source": "dc_prod.idor.ca_dim_plant",
+                    "source": "acme_prod.acme_hr.ca_dim_plant",
                     "on": "source.p = dim_real.p",
                 },
             ],
@@ -654,16 +654,16 @@ class TestCatalogSchemaPlaceholderResolution:
 
     def test_placeholders_substituted(self):
         spec = self._spec()
-        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
-        assert spec.source_table == "dc_prod.idor.fact_x"
-        assert spec.joins[0]["source"] == "dc_prod.idor.c_dim_calendar"
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
+        assert spec.source_table == "acme_prod.acme_hr.fact_x"
+        assert spec.joins[0]["source"] == "acme_prod.acme_hr.c_dim_calendar"
         # already-resolved sources untouched
-        assert spec.joins[1]["source"] == "dc_prod.idor.ca_dim_plant"
+        assert spec.joins[1]["source"] == "acme_prod.acme_hr.ca_dim_plant"
 
     def test_idempotent(self):
         spec = self._spec()
-        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
-        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
         assert "{catalog}" not in spec.joins[0]["source"]
         assert "{schema}" not in spec.joins[0]["source"]
 
@@ -672,7 +672,7 @@ class TestNativeQuerySourceCatalogQualification:
     """A source resolved from a Value.NativeQuery native-SQL FROM uses an
     implicit-catalog schema.table and must be qualified to 3-level
     catalog.schema.table like its connector-M siblings, instead of emitting a
-    2-part source that cannot deploy (CCHBC Fact_FX_Rate (2) bug)."""
+    2-part source that cannot deploy (the reference customer Fact_FX_Rate (2) bug)."""
 
     @staticmethod
     def _ns(source_table):
@@ -690,12 +690,12 @@ class TestNativeQuerySourceCatalogQualification:
     def test_infers_modal_source_catalog_from_siblings(self):
         fake = self._pipeline_with_sources(
             [
-                "dc_datalake_prod_001.udm_datamart_ftd.pe002",
-                "dc_datalake_prod_001.udm_cchbc_md.ca_dim_calendar_v1",
-                "udm_datamart_mtc.fm016_write_offs",  # 2-part native-SQL source
+                "acme_prod.acme_datamart_ftd.pe002",
+                "acme_prod.acme_md.ca_dim_calendar_v1",
+                "acme_datamart_mtc.fm016_write_offs",  # 2-part native-SQL source
             ]
         )
-        assert MetricViewPipeline._infer_source_catalog(fake) == "dc_datalake_prod_001"
+        assert MetricViewPipeline._infer_source_catalog(fake) == "acme_prod"
 
     def test_placeholder_and_todo_sources_ignored_for_inference(self):
         fake = self._pipeline_with_sources(
@@ -705,17 +705,14 @@ class TestNativeQuerySourceCatalogQualification:
         assert MetricViewPipeline._infer_source_catalog(fake) is None
 
     def test_qualifies_two_part_source(self):
-        spec = self._ns("udm_datamart_mtc.fm016_write_offs")
-        MetricViewPipeline._qualify_source_catalog(spec, "dc_datalake_prod_001")
-        assert (
-            spec.source_table
-            == "dc_datalake_prod_001.udm_datamart_mtc.fm016_write_offs"
-        )
+        spec = self._ns("acme_datamart_mtc.fm016_write_offs")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        assert spec.source_table == "acme_prod.acme_datamart_mtc.fm016_write_offs"
 
     def test_leaves_three_part_source_untouched(self):
-        spec = self._ns("dc_datalake_prod_001.udm_x.tbl")
-        MetricViewPipeline._qualify_source_catalog(spec, "dc_datalake_prod_001")
-        assert spec.source_table == "dc_datalake_prod_001.udm_x.tbl"
+        spec = self._ns("acme_prod.udm_x.tbl")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        assert spec.source_table == "acme_prod.udm_x.tbl"
 
     def test_noop_without_inferred_catalog(self):
         spec = self._ns("udm_x.tbl")
@@ -725,11 +722,11 @@ class TestNativeQuerySourceCatalogQualification:
     def test_skips_placeholder_and_token_sources(self):
         for src in ("TODO.none_allocated.measures", "{catalog}.{schema}.x"):
             spec = self._ns(src)
-            MetricViewPipeline._qualify_source_catalog(spec, "dc_datalake_prod_001")
+            MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
             assert spec.source_table == src
 
     def test_idempotent(self):
         spec = self._ns("udm_x.tbl")
-        MetricViewPipeline._qualify_source_catalog(spec, "dc_datalake_prod_001")
-        MetricViewPipeline._qualify_source_catalog(spec, "dc_datalake_prod_001")
-        assert spec.source_table == "dc_datalake_prod_001.udm_x.tbl"
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        assert spec.source_table == "acme_prod.udm_x.tbl"

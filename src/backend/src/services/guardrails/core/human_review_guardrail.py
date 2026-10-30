@@ -20,7 +20,7 @@ pipe) from ``kernel.tool_approval``.
 
 import logging
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -92,15 +92,13 @@ class HumanReviewGuardrail:
 
     async def _restore_running(self) -> None:
         # create_approval_request flips the execution to WAITING_FOR_APPROVAL;
-        # once decided, the run is live again. Safe unconditionally: the run
-        # cannot have reached a terminal state while blocked here.
-        from src.models.execution_status import ExecutionStatus
-        from src.services.execution.status import ExecutionStatusService
+        # once decided, the run is live again, unless it was settled from
+        # outside meanwhile (services/hitl/run_state.py).
+        from src.services.hitl.run_state import restore_running
 
-        await ExecutionStatusService.update_status(
-            job_id=self.execution_id,
-            status=ExecutionStatus.RUNNING.value,
-            message=f"Review of task '{self.task_name}' decided — run continuing",
+        await restore_running(
+            self.execution_id,
+            f"Review of task '{self.task_name}' decided — run continuing",
         )
 
     # ------------------------------ guardrail ------------------------------
@@ -114,7 +112,7 @@ class HumanReviewGuardrail:
 
         try:
             approval_id = run_async_with_context(self._create(raw), timeout=30)
-        except Exception as create_err:  # noqa: BLE001
+        except Exception as create_err:
             # Fail closed: a review-required task must not silently advance.
             logger.error(f"[task_review] could not create approval: {create_err}")
             raise RuntimeError(
@@ -142,7 +140,9 @@ class HumanReviewGuardrail:
         while time.monotonic() < deadline:
             try:
                 status, reason = run_async_with_context(
-                    self._decision(approval_id), timeout=15
+                    # create_approval_request always returns a row, so never None.
+                    self._decision(cast(str, approval_id)),
+                    timeout=15,
                 )
             except Exception as poll_err:  # noqa: BLE001
                 logger.warning(f"[task_review] poll failed (retrying): {poll_err}")

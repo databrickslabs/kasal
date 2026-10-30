@@ -128,36 +128,6 @@ class TestGetToolInfo:
 # ============================================================================
 
 
-class TestRegisterToolImplementation:
-
-    def test_register_single_tool(self):
-        f = _make_factory()
-        mock_cls = MagicMock()
-        f.register_tool_implementation("NewTool", mock_cls)
-        assert f._tool_implementations["NewTool"] is mock_cls
-
-    def test_register_overwrites_existing(self):
-        f = _make_factory()
-        old_cls = MagicMock()
-        new_cls = MagicMock()
-        f._tool_implementations["OldTool"] = old_cls
-        f.register_tool_implementation("OldTool", new_cls)
-        assert f._tool_implementations["OldTool"] is new_cls
-
-    def test_register_multiple_tools(self):
-        f = _make_factory()
-        impls = {"A": MagicMock(), "B": MagicMock(), "C": MagicMock()}
-        f.register_tool_implementations(impls)
-        for name, cls in impls.items():
-            assert f._tool_implementations[name] is cls
-
-    def test_register_empty_dict(self):
-        f = _make_factory()
-        original_len = len(f._tool_implementations)
-        f.register_tool_implementations({})
-        assert len(f._tool_implementations) == original_len
-
-
 # ============================================================================
 # create_tool – core scenarios
 # ============================================================================
@@ -276,7 +246,7 @@ class TestCreateTool:
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        with patch.dict(os.environ, {"SERPER_API_KEY": "test-serper-key"}):
+        with patch.object(f, "_get_api_key", return_value="test-serper-key"):
             f.create_tool("SerperDevTool")
 
         call_kwargs = mock_cls.call_args[1]
@@ -293,7 +263,7 @@ class TestCreateTool:
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        with patch.dict(os.environ, {"SERPER_API_KEY": "key"}):
+        with patch.object(f, "_get_api_key", return_value="key"):
             f.create_tool("SerperDevTool")
 
         call_kwargs = mock_cls.call_args[1]
@@ -306,24 +276,28 @@ class TestCreateTool:
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        with patch.dict(os.environ, {"SERPER_API_KEY": "key"}):
+        with patch.object(f, "_get_api_key", return_value="key"):
             f.create_tool("SerperDevTool")
 
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("search_type") == "search"
 
-    def test_perplexity_tool_uses_env_key(self):
+    def test_perplexity_tool_uses_the_workspace_key_not_the_env(self):
         f = _make_factory()
         info = _make_tool_info("PerplexityTool", 3, config={})
         f._available_tools["PerplexityTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["PerplexityTool"] = mock_cls
 
-        with patch.dict(os.environ, {"PERPLEXITY_API_KEY": "env-perplexity-key"}):
+        with (
+            patch.dict(os.environ, {"PERPLEXITY_API_KEY": "env-perplexity-key"}),
+            patch.object(f, "_get_api_key", return_value="ws-key") as get_key,
+        ):
             f.create_tool("PerplexityTool")
 
+        get_key.assert_called_once_with("PERPLEXITY_API_KEY")
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("api_key") == "env-perplexity-key"
+        assert call_kwargs.get("api_key") == "ws-key"
 
     def test_perplexity_tool_key_from_config(self):
         f = _make_factory()
@@ -474,14 +448,6 @@ class TestRunInNewLoop:
 # ============================================================================
 
 
-class TestUpdateToolConfig:
-
-    def test_returns_false_when_tool_not_found(self):
-        f = _make_factory()
-        result = f.update_tool_config("GhostTool", {"x": "y"})
-        assert result is False
-
-
 # ============================================================================
 # initialize / async lifecycle
 # ============================================================================
@@ -549,14 +515,6 @@ class TestCleanup:
 # ============================================================================
 # cleanup_after_crew_execution
 # ============================================================================
-
-
-class TestCleanupAfterCrewExecution:
-
-    @pytest.mark.asyncio
-    async def test_does_not_raise(self):
-        f = _make_factory()
-        await f.cleanup_after_crew_execution()  # Should complete without error
 
 
 # ============================================================================

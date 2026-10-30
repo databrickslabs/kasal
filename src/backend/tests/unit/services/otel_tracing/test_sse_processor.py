@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core import process_role
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -41,28 +43,28 @@ def _make_span(
 class TestKasalSSESpanProcessorInit:
 
     def test_stores_job_id(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-001")
         assert proc._job_id == "job-001"
 
     def test_not_subprocess_when_env_absent(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-002")
         assert proc._is_subprocess is False
 
     def test_is_subprocess_when_env_true(self, monkeypatch):
-        monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
+        process_role.mark_run_subprocess("crew")
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-003")
         assert proc._is_subprocess is True
 
     def test_not_subprocess_when_env_false(self, monkeypatch):
-        monkeypatch.setenv("CREW_SUBPROCESS_MODE", "false")
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-004")
@@ -77,7 +79,7 @@ class TestKasalSSESpanProcessorInit:
 class TestOnStart:
 
     def test_on_start_does_nothing(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-start")
@@ -87,7 +89,7 @@ class TestOnStart:
         span.assert_not_called()
 
     def test_on_start_with_parent_context_does_nothing(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-start2")
@@ -108,7 +110,7 @@ class TestOnEndSubprocessMode:
         early-return by checking that the sse_manager module is never imported
         (i.e. sys.modules is not touched for the sse path).
         """
-        monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
+        process_role.mark_run_subprocess("crew")
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-sub")
@@ -151,7 +153,7 @@ class TestOnEndEventTypeFromAttributes:
 
     @pytest.fixture(autouse=True)
     def no_subprocess(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
 
     def _run_on_end(self, span):
         """Helper that patches SSE machinery and runs on_end, returning broadcast args."""
@@ -250,7 +252,7 @@ class TestOnEndSpanNameFallback:
 
     @pytest.fixture(autouse=True)
     def no_subprocess(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
 
     def _event_type_from_name(self, span_name: str) -> str | None:
         """Run on_end and capture event_type from SSEEvent kwargs."""
@@ -320,7 +322,7 @@ class TestOnEndSSEPayload:
 
     @pytest.fixture(autouse=True)
     def no_subprocess(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
 
     def test_sse_event_carries_job_id(self):
         span = _make_span(
@@ -391,21 +393,21 @@ class TestOnEndSSEPayload:
 class TestShutdownAndForceFlush:
 
     def test_shutdown_is_no_op(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-sd")
         proc.shutdown()  # must not raise
 
     def test_force_flush_returns_true(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-ff")
         assert proc.force_flush() is True
 
     def test_force_flush_with_timeout_returns_true(self, monkeypatch):
-        monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
+        process_role.reset()
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
 
         proc = KasalSSESpanProcessor("job-ff2")

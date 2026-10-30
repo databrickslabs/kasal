@@ -13,25 +13,33 @@ MCP servers are only loaded when explicitly configured on agents or tasks.
 No global/automatic loading occurs.
 """
 
-import os
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from src.core.exceptions import MCPConnectionError
 from src.core.logger import LoggerManager
+from src.core.process_role import in_flow_subprocess
 from src.services.mcp.mcp_client.databricks_presets import follow_preset_for
 from src.services.tools.mcp_handler import (
     create_kasal_tool_from_mcp,
     format_mcp_exception,
 )
 
+if TYPE_CHECKING:
+    from src.services.mcp.mcp_client.service import MCPService
+
 # Get logger from the centralized logging system
 # Use flow logger if running in flow subprocess mode, otherwise use crew logger
 logger_manager = LoggerManager.get_instance()
-if os.environ.get("FLOW_SUBPROCESS_MODE", "false").lower() == "true":
+if in_flow_subprocess():
     logger = logger_manager.flow
 else:
     logger = logger_manager.crew
+
+
+#: Paths of Databricks-hosted MCP servers: managed MCP, and Unity Gateway MCP
+#: services. The workspace host check still applies to both.
+_DATABRICKS_MCP_PATHS = ("/api/2.0/mcp/", "/ai-gateway/mcp-services/")
 
 
 def _follow_config_for(server: Dict[str, Any]) -> Optional[Any]:
@@ -109,7 +117,7 @@ class MCPIntegration:
     @staticmethod
     async def resolve_effective_mcp_servers(
         explicit_servers: List[str],
-        mcp_service,
+        mcp_service: "MCPService",
         include_global: bool = True,
         group_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
@@ -133,7 +141,9 @@ class MCPIntegration:
 
             # 1. Add all enabled servers (they are all available to all agents/tasks)
             if include_global:
-                enabled_response = await mcp_service.get_enabled_servers()
+                enabled_response = await mcp_service.get_enabled_servers(
+                    [group_id] if group_id else []
+                )
                 for server in enabled_response.servers:
                     payload = server.model_dump()
                     name = payload.get("name")
@@ -200,7 +210,7 @@ class MCPIntegration:
             Dict mapping agent_id -> list of required MCP server names
         """
         try:
-            agent_requirements = {}
+            agent_requirements: Dict[str, List[Any]] = {}
 
             # Process each task to collect MCP requirements
             for task_config in config.get("tasks", []):
@@ -240,7 +250,7 @@ class MCPIntegration:
     async def create_mcp_tools_for_agent(
         agent_config: Dict[str, Any],
         agent_key: str,
-        mcp_service,
+        mcp_service: "MCPService",
         config: Optional[Dict[str, Any]] = None,
     ) -> List[Any]:
         """
@@ -318,7 +328,7 @@ class MCPIntegration:
     async def create_mcp_tools_for_task(
         task_config: Dict[str, Any],
         task_key: str,
-        mcp_service,
+        mcp_service: "MCPService",
         config: Optional[Dict[str, Any]] = None,
     ) -> List[Any]:
         """
@@ -440,9 +450,9 @@ class MCPIntegration:
         try:
             # Try to find agent by exact match on various fields
             for agent_config in config.get("agents", []):
-                agent_id = agent_config.get("id")
-                agent_name = agent_config.get("name")
-                agent_role = agent_config.get("role")
+                agent_id: Optional[str] = agent_config.get("id")
+                agent_name: Optional[str] = agent_config.get("name")
+                agent_role: Optional[str] = agent_config.get("role")
 
                 if agent_ref in [agent_id, agent_name, agent_role]:
                     return agent_id or agent_name or agent_role
@@ -458,7 +468,7 @@ class MCPIntegration:
     async def _create_tools_for_server(
         server: Dict[str, Any],
         context_key: str,
-        mcp_service,
+        mcp_service: Optional["MCPService"],  # unused here; callers may pass None
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
     ) -> List[Any]:
@@ -499,18 +509,21 @@ class MCPIntegration:
                 "headers": {},
             }
 
-            # Detect Databricks-hosted MCP URLs (external MCP proxy)
+            # Detect Databricks-hosted MCP URLs (see _DATABRICKS_MCP_PATHS)
             # These always require Databricks auth, regardless of auth_type setting
             server_url = server.get("server_url", "")
-            is_databricks_mcp = "/api/2.0/mcp/" in server_url
+            is_databricks_mcp = any(p in server_url for p in _DATABRICKS_MCP_PATHS)
 
             # Add authentication headers
             auth_type = server.get("auth_type", "api_key")
 
             if is_databricks_mcp or auth_type in ("databricks_spn", "databricks_obo"):
                 # Databricks MCP proxy endpoints require Databricks auth (OBO → PAT → SPN)
+                from src.core.exceptions import ForbiddenError
+                from src.services.tools.databricks_tool_utils import (
+                    assert_mcp_server_host,
+                )
                 from src.utils.databricks_auth import get_auth_context
-                from src.utils.url_security import is_trusted_databricks_host
 
                 # Reject insecure legacy configurations before resolving credentials.
                 if urlparse(server_url).scheme.lower() != "https":
@@ -526,26 +539,23 @@ class MCPIntegration:
                     user_token=user_token, group_id=group_id
                 )
                 if auth_context and auth_context.token:
-                    # SECURITY (SSRF / confused deputy): only ever forward a
-                    # Databricks credential to a verified Databricks host. The
-                    # server_url is tenant-controlled, so without this check a
-                    # registered URL pointing at an attacker host would receive
-                    # the OBO/PAT/SPN token and could replay it against the
-                    # workspace.
-                    workspace_host = getattr(auth_context, "workspace_url", None)
-                    if not is_trusted_databricks_host(server_url, workspace_host):
+                    # SECURITY (SSRF): the URL is tenant-configured, so a Databricks
+                    # credential goes only to its own workspace or that workspace's
+                    # Apps, never any *.databricks(apps).com host (audit V3-2).
+                    try:
+                        assert_mcp_server_host(auth_context, server_url)
+                    except ForbiddenError:
                         mcp_err = MCPConnectionError(
                             server_name=server_name,
                             server_url=server_url,
                             detail=(
                                 f"MCP server '{server_name}': refusing to send Databricks "
-                                f"credentials to non-Databricks host '{server_url}'. "
-                                f"Databricks authentication is only permitted for the "
-                                f"configured workspace host or *.databricks.com endpoints. "
-                                f"Use api_key authentication for third-party MCP servers."
+                                f"credentials to '{server_url}': only this workspace's host "
+                                f"or its Databricks Apps may receive them. Use api_key "
+                                f"authentication for any other MCP server."
                             ),
                         )
-                        logger.error(mcp_err.detail)
+                        logger.error(mcp_err.detail)  # noqa: TRY400 — refusal
                         MCPIntegration.add_warning(mcp_err.detail)
                         return []
                     server_params["headers"][
@@ -655,7 +665,7 @@ class MCPIntegration:
             return []
 
     @staticmethod
-    async def get_mcp_settings(mcp_service) -> Dict[str, bool]:
+    async def get_mcp_settings(mcp_service: "MCPService") -> Dict[str, bool]:
         """
         Get MCP global settings.
 
@@ -674,43 +684,3 @@ class MCPIntegration:
         except Exception as e:
             logger.error(f"Error getting MCP settings: {str(e)}")
             return {"global_enabled": False, "individual_enabled": True}
-
-    @staticmethod
-    def validate_mcp_configuration(config: Dict[str, Any]) -> bool:
-        """
-        Validate MCP configuration structure.
-
-        Args:
-            config: Configuration to validate
-
-        Returns:
-            True if valid, False otherwise
-        """
-        try:
-            # Basic structure validation
-            if not isinstance(config, dict):
-                return False
-
-            # Validate agent configurations
-            for agent_config in config.get("agents", []):
-                if not isinstance(agent_config, dict):
-                    return False
-
-                tool_configs = agent_config.get("tool_configs", {})
-                if tool_configs and not isinstance(tool_configs, dict):
-                    return False
-
-            # Validate task configurations
-            for task_config in config.get("tasks", []):
-                if not isinstance(task_config, dict):
-                    return False
-
-                tool_configs = task_config.get("tool_configs", {})
-                if tool_configs and not isinstance(tool_configs, dict):
-                    return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error validating MCP configuration: {str(e)}")
-            return False

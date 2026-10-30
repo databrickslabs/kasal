@@ -24,3 +24,11 @@ it('leaves other HTTP errors to the calling feature', () => {
   reportApiFailure({ status: 403 });
   expect(toast.error).not.toHaveBeenCalled();
 });
+
+it('asks the user to pick a teamspace when a write was refused for lack of one', () => {
+  reportApiFailure({ status: 0, url: '/crews', code: 'teamspace_required' });
+  expect(toast.error).toHaveBeenCalledWith(
+    expect.stringMatching(/pick a teamspace/i),
+    expect.objectContaining({ id: 'teamspace-required' }),
+  );
+});

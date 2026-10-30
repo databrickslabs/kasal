@@ -54,7 +54,7 @@ except Exception:
 try:
     import builtins as _kasal_builtins_mod
 
-    def _kasal_noinput_global(prompt=None):
+    def _kasal_noinput_global(prompt: object = None) -> str:
         try:
             if prompt:
                 print(f"[SUBPROCESS] Suppressed interactive prompt at import: {prompt}")
@@ -71,17 +71,30 @@ try:
     import click as _kasal_click
 
     _kasal_click.confirm = lambda *a, **k: False
-    _kasal_click.prompt = lambda *a, **k: ""
+    _kasal_click.prompt = lambda *a, **k: ""  # type: ignore[assignment]  # monkeypatch
 except Exception:
     pass
 
+import asyncio
 import logging
 import multiprocessing as mp
 import os
 import signal
-from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
-from typing import Any, Dict, Optional
+from multiprocessing.process import BaseProcess
+from typing import Any, Dict, Literal, Optional
+
+from src.services.execution.process_tree import (
+    terminate_owned_processes,
+    terminate_process_tree,
+)
+from src.services.execution.run_admission import (
+    RunCancelledWhileQueued,
+    queue_status_callbacks,
+    run_admission,
+    stopped_while_queued,
+)
+from src.services.execution.run_wait import collect_result, run_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +139,7 @@ def run_crew_in_process(
         to ensure proper cleanup of child processes on termination.
 
     Environment Variables Set:
-        - CREW_SUBPROCESS_MODE: Marks subprocess execution mode
+        - the run-subprocess role (core.process_role): direct DB writes
         - DATABASE_TYPE: Ensures correct database configuration
         - CREWAI_VERBOSE: Controls CrewAI output verbosity
     """
@@ -135,8 +148,11 @@ def run_crew_in_process(
     import os
     import sys
 
-    # Mark that we're in subprocess mode for logging purposes
-    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    # FIRST: allow-listed environment, subprocess mode, execution id and the
+    # base DATABASE_TYPE (see subprocess_bootstrap.prepare_child_environment).
+    from src.services.execution.subprocess_bootstrap import prepare_child_environment
+
+    prepare_child_environment(execution_id, "crew")
 
     # Pin the engine for this whole interpreter, from the payload the parent
     # decided it with. Process-wide rather than a ContextVar because a crew
@@ -145,17 +161,6 @@ def run_crew_in_process(
     from src.services.execution.harness_choice import adopt_in_subprocess
 
     adopt_in_subprocess(crew_config if isinstance(crew_config, dict) else None)
-    # CRITICAL: Store execution_id in environment for orphaned process detection
-    # This allows us to find and terminate this process even after server reloads
-    os.environ["KASAL_EXECUTION_ID"] = execution_id
-
-    # Ensure DATABASE_TYPE is set correctly in subprocess
-    # The subprocess needs to know which database to use
-    if "DATABASE_TYPE" not in os.environ:
-        from src.config.settings import settings
-
-        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
-        print(f"[SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
     # No monkey-patches to install: kasal_engine carries the patched
     # behavior natively in both the parent and this spawned subprocess.
@@ -214,6 +219,7 @@ def run_crew_in_process(
     # This must be done early before any other imports that might configure logging
     from src.services.execution.subprocess_bootstrap import (
         configure_subprocess_logging,
+        open_child_database,
         restore_stdout_stderr,
         suppress_stdout_stderr,
     )
@@ -222,7 +228,7 @@ def run_crew_in_process(
     original_stdout, original_stderr, captured_output = suppress_stdout_stderr()
 
     # Set up signal handlers for graceful shutdown with child process cleanup
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: Any) -> None:
         # Kill all child processes spawned by this subprocess
         try:
             import psutil
@@ -275,7 +281,7 @@ def run_crew_in_process(
         # Belt-and-suspenders: suppress any input() prompts in this subprocess
         import builtins as _kasal_builtins
 
-        def _kasal_noinput(prompt=None):
+        def _kasal_noinput(prompt: Any = None) -> str:
             try:
                 if prompt:
                     print(f"[SUBPROCESS] Suppressed interactive prompt: {prompt}")
@@ -343,9 +349,9 @@ def run_crew_in_process(
                 subprocess_logger.info(
                     f"[JOB_CONFIGURATION] Tasks: {len(crew_config.get('tasks', []))}"
                 )
-                # Log full config for debugging
+                # Keys only: the config carries decrypted tool_configs (V5-1)
                 subprocess_logger.info(
-                    f"[JOB_CONFIGURATION] Full Config: {json.dumps(crew_config, indent=2)}"
+                    f"[JOB_CONFIGURATION] Config keys: {sorted(crew_config)}"
                 )
             except AttributeError as e:
                 subprocess_logger.error(
@@ -355,7 +361,7 @@ def run_crew_in_process(
                     f"[JOB_CONFIGURATION] crew_config type: {type(crew_config)}"
                 )
                 subprocess_logger.error(
-                    f"[JOB_CONFIGURATION] crew_config value: {repr(crew_config)}"
+                    f"[JOB_CONFIGURATION] crew_config keys: {sorted(crew_config)}"
                 )
                 # Re-raise to see the full error
                 raise
@@ -452,16 +458,14 @@ def run_crew_in_process(
 
         # Rebuild the crew from config using async context
         # We need to run the async crew preparation in the subprocess
-        async def prepare_and_run():
+        async def prepare_and_run() -> Any:
             # Import within async context
             import os  # Import os first
 
             # Activate Lakebase on async_session_factory so ALL callers
             # (tools, memory, etc.) automatically use Lakebase.
             try:
-                from src.db.database_router import activate_lakebase_in_subprocess
-
-                lb_ok = await activate_lakebase_in_subprocess()
+                lb_ok = await open_child_database()  # Lakebase + engine settings
                 if lb_ok:
                     subprocess_logger.info(
                         "[SUBPROCESS] Lakebase activated on async_session_factory"
@@ -496,9 +500,6 @@ def run_crew_in_process(
             os.environ["CREWAI_ANALYTICS_OPT_OUT"] = "1"
             os.environ["CREWAI_CLOUD_TRACING"] = "false"
             os.environ["PYTHONUNBUFFERED"] = "0"
-
-            # Set subprocess mode flag for direct DB writes
-            os.environ["CREW_SUBPROCESS_MODE"] = "true"
 
             # Get logger early for this function
             import logging
@@ -874,7 +875,7 @@ def run_crew_in_process(
                     )
 
                 # Get the prepared crew
-                crew = crew_preparation.crew
+                crew: Any = crew_preparation.crew
 
                 # Log the full configuration with pretty formatting (only if crew_config is valid)
                 if isinstance(crew_config, dict):
@@ -928,7 +929,7 @@ def run_crew_in_process(
                                     )
                                 else:
                                     async_logger.info(
-                                        f"[JOB_CONFIGURATION]     LLM: {llm_config}"
+                                        f"[JOB_CONFIGURATION]     LLM: {type(llm_config).__name__}"
                                     )
 
                         # Log tasks configuration
@@ -955,9 +956,9 @@ def run_crew_in_process(
                         else:
                             async_logger.info("[JOB_CONFIGURATION] No inputs provided")
 
-                        # Log complete configuration as JSON for debugging
+                        # Keys only: the config carries decrypted tool_configs
                         async_logger.info(
-                            f"[JOB_CONFIGURATION] Full Config JSON: {json.dumps(crew_config, indent=2)}"
+                            f"[JOB_CONFIGURATION] Config keys: {sorted(crew_config)}"
                         )
                     except AttributeError as e:
                         async_logger.error(
@@ -967,7 +968,7 @@ def run_crew_in_process(
                             f"[JOB_CONFIGURATION ASYNC] crew_config type: {type(crew_config)}"
                         )
                         async_logger.error(
-                            f"[JOB_CONFIGURATION ASYNC] crew_config value: {repr(crew_config)[:500]}"
+                            f"[JOB_CONFIGURATION ASYNC] crew_config keys: {sorted(crew_config)}"
                         )
                         raise
                 else:
@@ -1008,9 +1009,7 @@ def run_crew_in_process(
                     # just below on this same bus.
                     from src.core.events import event_bus
 
-                    async_logger.info(
-                        f"CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled"
-                    )
+                    async_logger.info("[SUBPROCESS] Direct DB writes enabled")
 
                     # Register OTel Event Bridge on the CrewAI event bus
                     # (OTel provider was initialized earlier, before crew preparation)
@@ -1024,7 +1023,7 @@ def run_crew_in_process(
                                 "kasal-event-bridge"
                             )
                             _otel_bridge = OTelEventBridge(
-                                _bridge_tracer, execution_id, group_context
+                                _bridge_tracer, execution_id, group_context, crew_config
                             )
                             _otel_bridge.register(event_bus)
                             async_logger.info(
@@ -1116,7 +1115,7 @@ def run_crew_in_process(
 
                     # os is already imported at the top of prepare_and_run()
                     # Get log directory from environment or determine dynamically
-                    log_dir = os.environ.get("LOG_DIR")
+                    log_dir: str | os.PathLike | None = os.environ.get("LOG_DIR")
                     if not log_dir:
                         # Determine log directory relative to backend root
                         import pathlib
@@ -1393,7 +1392,7 @@ def run_crew_in_process(
                         f"({len((resume_checkpoint.get('completed') or []))} completed task(s))"
                     )
 
-                async def kickoff_fn():
+                async def kickoff_fn() -> Any:
                     if inputs:
                         return await crew.kickoff_async(
                             inputs=inputs, from_checkpoint=resume_checkpoint
@@ -1721,7 +1720,7 @@ def run_crew_in_process(
                 )
                 max_wait = 5  # Shorter wait on error
                 wait_interval = 0.1
-                waited = 0
+                waited: float = 0
 
                 while trace_queue.qsize() > 0 and waited < max_wait:
                     time.sleep(wait_interval)
@@ -1807,7 +1806,7 @@ class ProcessCrewExecutor:
 
     Features:
         - One process per execution (no shared pool)
-        - Concurrent execution management with configurable limits
+        - One concurrent-run limit shared with Flow Builder (run_admission)
         - Graceful and forceful termination support
         - Child process tracking and cleanup
         - Async/await interface for non-blocking operations
@@ -1815,14 +1814,10 @@ class ProcessCrewExecutor:
 
     Attributes:
         _ctx: Multiprocessing context using 'spawn' for better isolation
-        _processes: Dictionary tracking active processes by execution ID
-        _futures: Dictionary of asyncio futures for execution results
-        _executor: Thread pool for managing process lifecycle
-        _semaphore: Asyncio semaphore for concurrency control
-        _lock: Asyncio lock for thread-safe operations
+        _running_processes: Dictionary tracking active processes by execution ID
 
     Example:
-        >>> executor = ProcessCrewExecutor(max_concurrent=4)
+        >>> executor = ProcessCrewExecutor()
         >>> result = await executor.execute_crew_async(
         ...     execution_id="exec_123",
         ...     crew_config=config
@@ -1831,15 +1826,11 @@ class ProcessCrewExecutor:
         >>> stopped = await executor.stop_execution("exec_123")
     """
 
-    def __init__(self, max_concurrent: int = 4):
-        """Initialize the process executor with concurrency control.
+    def __init__(self) -> None:
+        """Initialize the process executor.
 
-        Sets up the multiprocessing context, tracking structures, and
-        concurrency management primitives.
-
-        Args:
-            max_concurrent: Maximum number of concurrent crew executions.
-                Defaults to 4 to balance resource usage and parallelism.
+        How many runs may go at once is not decided here: crew and flow runs
+        share one limit, ``run_admission`` in ``services/execution``.
 
         Note:
             Uses 'spawn' context instead of 'fork' for better isolation
@@ -1854,15 +1845,10 @@ class ProcessCrewExecutor:
         os.environ["CREWAI_VERBOSE"] = "false"
 
         # NO POOL - we create individual processes per execution
-        self._max_concurrent = max_concurrent
-
-        # Track running processes and their executors
-        self._running_processes: Dict[str, mp.Process] = {}
-        self._running_futures: Dict[str, Any] = {}
-        self._running_executors: Dict[str, ProcessPoolExecutor] = {}
+        self._running_processes: Dict[str, BaseProcess] = {}
 
         # Metrics
-        self._metrics = {
+        self._metrics: Dict[str, int] = {
             "total_executions": 0,
             "active_executions": 0,
             "completed_executions": 0,
@@ -1870,30 +1856,7 @@ class ProcessCrewExecutor:
             "terminated_executions": 0,
         }
 
-        logger.info(
-            f"ProcessCrewExecutor initialized for per-execution processes (max concurrent: {max_concurrent})"
-        )
-
-    @staticmethod
-    def _subprocess_initializer():
-        """
-        Initialize subprocess environment to suppress output.
-        This runs once when each worker process is created.
-        """
-        import logging
-        import os
-
-        # Suppress all output in subprocess
-        os.environ["PYTHONUNBUFFERED"] = "0"
-        os.environ["CREWAI_VERBOSE"] = "false"
-
-        # Configure logging to suppress console output
-        logging.basicConfig(level=logging.WARNING)
-
-        # Suppress warnings
-        import warnings
-
-        warnings.filterwarnings("ignore")
+        logger.info("ProcessCrewExecutor initialized for per-execution processes")
 
     @staticmethod
     def _run_crew_wrapper(
@@ -1903,7 +1866,7 @@ class ProcessCrewExecutor:
         group_context: Any,
         result_queue: mp.Queue,
         log_queue: mp.Queue,
-    ):
+    ) -> None:
         """
         Wrapper to run crew in subprocess and put result in queue.
 
@@ -1933,15 +1896,39 @@ class ProcessCrewExecutor:
         """
         Run a crew in an isolated process using direct Process control.
 
+        Waits for a run slot first (``run_admission``). While queued the run
+        is PENDING and holds no thread; a stop request removes it from the
+        queue. ``timeout`` counts from when the subprocess starts.
+
         Args:
             execution_id: Unique identifier for the execution
             crew_config: Configuration to build the crew
             inputs: Optional inputs for the crew
-            timeout: Optional timeout in seconds
+            timeout: Optional timeout in seconds of run time
 
         Returns:
             Dictionary with execution results
         """
+        try:
+            async with run_admission.slot(
+                execution_id, "crew", **queue_status_callbacks(execution_id)
+            ):
+                return await self._run_admitted(
+                    execution_id, crew_config, group_context, inputs, timeout
+                )
+        except RunCancelledWhileQueued:
+            self._metrics["terminated_executions"] += 1
+            return stopped_while_queued(execution_id)
+
+    async def _run_admitted(
+        self,
+        execution_id: str,
+        crew_config: Dict[str, Any],
+        group_context: Any,
+        inputs: Optional[Dict[str, Any]],
+        timeout: Optional[float],
+    ) -> Dict[str, Any]:
+        """Spawn and supervise one crew run that holds a run slot."""
         logger.info(
             f"[ProcessCrewExecutor] run_crew_isolated called for {execution_id}"
         )
@@ -2042,36 +2029,10 @@ class ProcessCrewExecutor:
             f"[ProcessCrewExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance"
         )
 
-        # Propagate Lakebase config to subprocess so the OTel trace exporter
-        # writes traces to Lakebase instead of the local DB when Lakebase is active.
-        old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
-        old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
-        try:
-            import asyncio
-
-            from src.db.database_router import (
-                get_lakebase_config_from_db,
-                is_lakebase_enabled,
-            )
-
-            loop = asyncio.get_running_loop()
-            lakebase_enabled = await is_lakebase_enabled()
-            if lakebase_enabled:
-                os.environ["LAKEBASE_ACTIVE"] = "true"
-                lakebase_config = await get_lakebase_config_from_db()
-                if lakebase_config:
-                    instance_name = lakebase_config.get(
-                        "instance_name"
-                    ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
-                    os.environ["LAKEBASE_INSTANCE_NAME"] = instance_name
-                logger.info(
-                    f"[ProcessCrewExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
-                    f"LAKEBASE_INSTANCE_NAME={os.environ.get('LAKEBASE_INSTANCE_NAME')}"
-                )
-            else:
-                os.environ.pop("LAKEBASE_ACTIVE", None)
-        except Exception as e:
-            logger.debug(f"[ProcessCrewExecutor] Could not check Lakebase status: {e}")
+        # Lakebase is NOT propagated through the environment: the child reads
+        # the same configuration (the Lakebase config row / the Apps resource
+        # binding) and re-activates it itself (activate_lakebase_in_subprocess).
+        # Mutating os.environ here raced every other concurrent spawn.
 
         try:
             # Create a direct Process instead of using ProcessPoolExecutor
@@ -2088,11 +2049,13 @@ class ProcessCrewExecutor:
                 ),
             )
 
-            # Store the process for tracking and termination
+            run_admission.claim_start(execution_id)  # a stop since admission wins
             self._running_processes[execution_id] = process
 
-            # Start the process
+            # Start the process. The run clock starts here, not before the
+            # run was admitted: time spent queued is not run time.
             process.start()
+            deadline = run_deadline(timeout)
             logger.info(f"Started process {process.pid} for execution {execution_id}")
         except Exception:
             # Spawning failed before the main try/finally below could run; close
@@ -2108,13 +2071,6 @@ class ProcessCrewExecutor:
                 os.environ["KASAL_EXECUTION_ID"] = old_kasal_exec_id
             else:
                 os.environ.pop("KASAL_EXECUTION_ID", None)
-            # Restore Lakebase env vars
-            if old_lakebase_active is not None:
-                os.environ["LAKEBASE_ACTIVE"] = old_lakebase_active
-            else:
-                os.environ.pop("LAKEBASE_ACTIVE", None)
-            if old_lakebase_instance is not None:
-                os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
         # Start a background task to relay live events (LLM token chunks +
         # task/tool/LLM lifecycle trace frames) from the subprocess to the
@@ -2127,39 +2083,10 @@ class ProcessCrewExecutor:
         )
 
         try:
-            # Wait for the process to complete, draining result_queue concurrently.
-            #
-            # CRITICAL: Never call process.join() before draining result_queue.
-            # The subprocess calls result_queue.put(result) which uses a pipe
-            # internally. On Linux the pipe buffer is ~65 KB. If the result is
-            # larger (e.g. a 149 KB LLM response), put() BLOCKS until the
-            # reader consumes data — but if the main process is sitting on
-            # process.join(), nobody reads → classic deadlock.
-            #
-            # Fix: drain the result_queue in a background thread while joining.
-            import threading as _threading
-
-            drained_result: list = []
-
-            def _drain_queue():
-                """Read result_queue in a background thread so the pipe never fills."""
-                try:
-                    r = result_queue.get(timeout=(timeout or 3700))
-                    drained_result.append(r)
-                except Exception:
-                    pass
-
-            drain_thread = _threading.Thread(target=_drain_queue, daemon=True)
-            drain_thread.start()
-
-            loop = asyncio.get_event_loop()
-            if timeout:
-                future = loop.run_in_executor(None, process.join, timeout)
-                await asyncio.wait_for(future, timeout=timeout)
-            else:
-                await loop.run_in_executor(None, process.join)
-
-            drain_thread.join(timeout=10)  # give it a moment to finish
+            # Wait for the child to exit while reading its result: joining
+            # first would deadlock on a result larger than the pipe buffer.
+            # See services/execution/run_wait.py.
+            drained_result = await collect_result(process, result_queue, deadline)
 
             # The child has exited, so everything it wrote is already in the
             # queue. Append a parent-side EOF so the relay drains the final
@@ -2260,151 +2187,15 @@ class ProcessCrewExecutor:
         finally:
             self._metrics["active_executions"] -= 1
 
-            # CRITICAL: Terminate the process to prevent zombie processes
-            if execution_id in self._running_processes:
-                process = self._running_processes[execution_id]
-                if process.is_alive():
-                    try:
-                        # First try graceful termination
-                        logger.info(
-                            f"Terminating process {process.pid} for execution {execution_id}"
-                        )
-                        process.terminate()
-
-                        # Wait up to 2 seconds for graceful termination
-                        process.join(timeout=2)
-
-                        if process.is_alive():
-                            # Force kill if still alive
-                            logger.warning(
-                                f"Force killing process {process.pid} for execution {execution_id}"
-                            )
-                            process.kill()
-                            process.join(timeout=1)  # Wait briefly for kill
-
-                        logger.info(f"Process {process.pid} terminated successfully")
-                    except Exception as e:
-                        logger.error(
-                            f"Error terminating process for {execution_id}: {e}"
-                        )
-                        # Try psutil as fallback
-                        try:
-                            import psutil
-
-                            psutil_proc = psutil.Process(process.pid)
-                            psutil_proc.kill()
-                            logger.info(
-                                f"Force killed process {process.pid} using psutil"
-                            )
-                        except Exception:
-                            pass
-
-                # Remove from tracking
-                del self._running_processes[execution_id]
-
-            # Additional cleanup: Kill any lingering child processes
-            # This runs after successful completion, error, or timeout
-            try:
-                # Try psutil first (best option)
-                import psutil
-
-                # Try to find and kill any processes still running with our execution ID
-                # Look for processes that might be orphaned
-                for proc in psutil.process_iter(["pid", "name", "cmdline", "ppid"]):
-                    try:
-                        # Check if process command line contains our execution ID
-                        cmdline = proc.info.get("cmdline", [])
-                        if cmdline and any(execution_id in str(arg) for arg in cmdline):
-                            logger.warning(
-                                f"Found orphaned process {proc.info['pid']} for execution {execution_id}, terminating..."
-                            )
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=2)  # Wait up to 2 seconds
-                            except psutil.TimeoutExpired:
-                                proc.kill()  # Force kill if still running
-                                logger.warning(
-                                    f"Force killed orphaned process {proc.info['pid']}"
-                                )
-                    except (
-                        psutil.NoSuchProcess,
-                        psutil.AccessDenied,
-                        psutil.ZombieProcess,
-                    ):
-                        pass  # Process already gone or we can't access it
-
-                # Also check for any multiprocessing.spawn processes without proper parents
-                # These are often left over from ProcessPoolExecutor
-                for proc in psutil.process_iter(["pid", "name", "ppid", "create_time"]):
-                    try:
-                        proc_info = proc.info
-                        # Look for Python processes spawned by multiprocessing
-                        if proc_info["name"] and "python" in proc_info["name"].lower():
-                            # Check if parent is dead (ppid = 1 on Unix means orphaned)
-                            if proc_info["ppid"] == 1:
-                                # Check if it was created recently (within last 10 minutes)
-                                create_time = datetime.fromtimestamp(proc.create_time())
-                                age_minutes = (
-                                    datetime.now() - create_time
-                                ).total_seconds() / 60
-                                if age_minutes < 10:
-                                    logger.info(
-                                        f"Found recent orphaned Python process {proc_info['pid']} (age: {age_minutes:.1f} min)"
-                                    )
-                                    # Don't auto-kill these - just log for now
-                                    # proc.terminate()
-                    except (
-                        psutil.NoSuchProcess,
-                        psutil.AccessDenied,
-                        psutil.ZombieProcess,
-                    ):
-                        pass
-
-            except ImportError:
-                # Fallback: Use subprocess to find and kill processes (Unix/Linux/macOS)
-                logger.info("psutil not available, using fallback process cleanup")
+            # CRITICAL: Terminate the process to prevent zombie processes.
+            # Only the tree this executor started is touched — the tracked
+            # Process and its own descendants, never a host-wide scan.
+            tracked = self._running_processes.pop(execution_id, None)
+            if tracked is not None:
                 try:
-                    import signal
-                    import subprocess
-
-                    # Try to find processes with our execution ID using ps command
-                    result = subprocess.run(
-                        ["ps", "aux"], capture_output=True, text=True, timeout=5
-                    )
-
-                    if result.returncode == 0:
-                        # Parse ps output to find processes with our execution ID
-                        for line in result.stdout.split("\n"):
-                            if (
-                                execution_id[:8] in line
-                                and "multiprocessing.spawn" in line
-                            ):
-                                # Extract PID (second column in ps aux output)
-                                parts = line.split()
-                                if len(parts) > 1:
-                                    try:
-                                        pid = int(parts[1])
-                                        logger.info(
-                                            f"Found orphaned process {pid} with execution ID, terminating..."
-                                        )
-                                        os.kill(pid, signal.SIGTERM)
-                                    except (ValueError, OSError) as e:
-                                        logger.debug(f"Could not kill process: {e}")
-
+                    await asyncio.to_thread(terminate_process_tree, tracked)
                 except Exception as e:
-                    logger.debug(f"Fallback process cleanup failed: {e}")
-
-            except Exception as cleanup_error:
-                logger.error(
-                    f"Error during process cleanup for {execution_id}: {cleanup_error}"
-                )
-
-            # Cleanup tracking
-            if execution_id in self._running_futures:
-                del self._running_futures[execution_id]
-            if execution_id in self._running_executors:
-                # Should already be deleted above, but ensure cleanup
-                del self._running_executors[execution_id]
+                    logger.error(f"Error terminating process for {execution_id}: {e}")
 
             # The event relay must be finished before log_queue closes —
             # error paths (timeout/exception) skip the graceful drain above.
@@ -2425,7 +2216,7 @@ class ProcessCrewExecutor:
             self._close_queue(log_queue)
 
     @staticmethod
-    def _close_queue(queue) -> None:
+    def _close_queue(queue: Any) -> None:
         """Safely close a multiprocessing.Queue and release its semaphores.
 
         A spawn-context ``mp.Queue`` is backed by three SemLock primitives
@@ -2447,8 +2238,8 @@ class ProcessCrewExecutor:
             logger.debug(f"[ProcessCrewExecutor] Error closing queue: {e}")
 
     async def _process_log_queue(
-        self, log_queue, execution_id: str, group_context=None
-    ):
+        self, log_queue: Any, execution_id: str, group_context: Any = None
+    ) -> None:
         """
         Read crew.log file and write logs for the execution to the database.
         This is a better approach than using queues since it captures ALL logs.
@@ -2498,193 +2289,53 @@ class ProcessCrewExecutor:
         """
         Forcefully terminate a running execution process.
 
-        This directly kills the process, ensuring complete cleanup.
+        A run still queued for a slot is removed from the queue and never
+        spawns. Otherwise stops the tracked Process and its own descendants.
+        When the handle is no longer tracked, falls back to this server's
+        descendants whose ``KASAL_EXECUTION_ID`` equals ``execution_id``
+        exactly. It never scans processes this server did not start.
 
         Args:
             execution_id: The execution to terminate
 
         Returns:
-            True if terminated, False if not found
+            True if terminated, False if not found or still alive
         """
+        if run_admission.cancel_waiting(execution_id):
+            return True
+
         terminated = False
 
-        # Terminate the process if it exists
-        if execution_id in self._running_processes:
-            process = self._running_processes[execution_id]
+        process = self._running_processes.pop(execution_id, None)
+        if process is not None:
+            try:
+                logger.info(
+                    f"Terminating process {process.pid} for execution {execution_id}"
+                )
+                terminated = await asyncio.to_thread(
+                    terminate_process_tree, process, grace_timeout=0.5
+                )
+            except Exception as e:
+                logger.error(f"Error terminating process for {execution_id}: {e}")
 
-            if process.is_alive():
-                try:
-                    pid = process.pid
-                    logger.info(
-                        f"Terminating process {pid} for execution {execution_id}"
-                    )
-
-                    # Try graceful termination first
-                    process.terminate()
-
-                    # Give it a moment to terminate (non-blocking check)
-                    process.join(timeout=0.5)
-
-                    if process.is_alive():
-                        # Force kill if still alive
-                        logger.warning(
-                            f"Force killing process {pid} for execution {execution_id}"
-                        )
-                        process.kill()
-                        process.join(timeout=0.5)
-
-                    logger.info(
-                        f"Successfully terminated process {pid} for execution {execution_id}"
-                    )
-                    terminated = True
-
-                except Exception as e:
-                    logger.error(f"Error terminating process for {execution_id}: {e}")
-                    # Try psutil as fallback
-                    try:
-                        import psutil
-
-                        if process.pid:
-                            psutil_proc = psutil.Process(process.pid)
-                            psutil_proc.kill()
-                            logger.info("Force killed process using psutil")
-                            terminated = True
-                    except Exception:
-                        pass
-            else:
-                logger.info(f"Process for execution {execution_id} already terminated")
-                terminated = True
-
-            # Remove from tracking
-            del self._running_processes[execution_id]
-
-        # If not found in tracking (e.g., server reloaded), search ALL processes
         if not terminated:
             logger.info(
-                f"[ProcessCrewExecutor] Process not in tracking, searching all processes for {execution_id}..."
+                f"[ProcessCrewExecutor] {execution_id} not tracked; checking this "
+                f"server's own subprocesses"
             )
-            terminated = self._terminate_orphaned_process(execution_id)
+            try:
+                terminated = (
+                    await asyncio.to_thread(terminate_owned_processes, execution_id) > 0
+                )
+            except Exception as e:
+                logger.error(
+                    f"[ProcessCrewExecutor] Error terminating owned processes: {e}"
+                )
 
         if terminated:
             self._metrics["terminated_executions"] += 1
 
         return terminated
-
-    def _terminate_orphaned_process(self, execution_id: str) -> bool:
-        """
-        Find and terminate orphaned crew processes by searching all running processes.
-
-        This handles the case where the server was reloaded and we lost the process reference.
-        It searches for processes that have the KASAL_EXECUTION_ID environment variable.
-
-        Args:
-            execution_id: The execution ID to search for
-
-        Returns:
-            True if a matching process was found and terminated
-        """
-        try:
-            import psutil
-
-            # Use short execution_id for matching (first 8 chars is common in logs)
-            exec_id_short = execution_id[:8]
-            killed_count = 0
-
-            logger.info(
-                f"[ProcessCrewExecutor] Searching for orphaned processes with execution_id {exec_id_short}..."
-            )
-
-            # Search ALL processes, not just children of current process
-            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-                try:
-                    # Skip non-Python processes for efficiency
-                    proc_name = proc.info.get("name", "").lower()
-                    if "python" not in proc_name:
-                        continue
-
-                    # Check command line for execution_id
-                    cmdline = proc.info.get("cmdline", [])
-                    cmdline_str = " ".join(cmdline) if cmdline else ""
-
-                    # Check for KASAL_EXECUTION_ID environment variable (most reliable)
-                    kasal_exec_id = None
-                    try:
-                        env = proc.environ()
-                        kasal_exec_id = env.get("KASAL_EXECUTION_ID", "")
-                    except (psutil.AccessDenied, psutil.NoSuchProcess):
-                        pass
-
-                    # Check if this process matches our execution
-                    is_match = False
-                    if kasal_exec_id:
-                        is_match = (
-                            kasal_exec_id == execution_id
-                            or kasal_exec_id.startswith(exec_id_short)
-                        )
-                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
-                        is_match = True
-
-                    if is_match:
-                        pid = proc.info["pid"]
-                        logger.info(
-                            f"[ProcessCrewExecutor] Found matching process {pid}, terminating..."
-                        )
-
-                        # Kill the process and all its children
-                        try:
-                            parent = psutil.Process(pid)
-                            children = parent.children(recursive=True)
-
-                            # Terminate children first
-                            for child in children:
-                                try:
-                                    child.kill()
-                                    logger.info(
-                                        f"[ProcessCrewExecutor] Terminated child process {child.pid}"
-                                    )
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-
-                            # Give children time to terminate
-                            if children:
-                                psutil.wait_procs(children, timeout=2)
-
-                            # Now kill the parent
-                            parent.kill()
-                            logger.info(
-                                f"[ProcessCrewExecutor] Successfully terminated orphaned process {pid}"
-                            )
-                            killed_count += 1
-
-                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                            logger.warning(
-                                f"[ProcessCrewExecutor] Could not terminate process {pid}: {e}"
-                            )
-
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-            if killed_count > 0:
-                logger.info(
-                    f"[ProcessCrewExecutor] Terminated {killed_count} orphaned processes for {execution_id}"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"[ProcessCrewExecutor] No orphaned processes found for {execution_id}"
-                )
-                return False
-
-        except ImportError:
-            logger.error(
-                "[ProcessCrewExecutor] psutil not available for orphaned process cleanup"
-            )
-            return False
-        except Exception as e:
-            logger.error(
-                f"[ProcessCrewExecutor] Error searching for orphaned processes: {e}"
-            )
-            return False
 
     def get_metrics(self) -> Dict[str, Any]:
         """
@@ -2695,7 +2346,7 @@ class ProcessCrewExecutor:
         """
         return self._metrics.copy()
 
-    def shutdown(self, wait: bool = True):
+    def shutdown(self, wait: bool = True) -> None:
         """
         Shutdown the process executor and terminate all running processes.
 
@@ -2704,151 +2355,29 @@ class ProcessCrewExecutor:
         """
         logger.info("Shutting down ProcessCrewExecutor")
 
-        # Terminate all running processes
+        # Terminate every tracked process together with its own descendants.
+        # Nothing else: other children of this server (flow runs, MCP servers)
+        # are not this executor's to stop.
         for execution_id, process in list(self._running_processes.items()):
-            if process.is_alive():
-                try:
-                    logger.info(
-                        f"Terminating process {process.pid} for execution {execution_id}"
-                    )
-                    process.terminate()
-                    if wait:
-                        process.join(timeout=2)
-                        if process.is_alive():
-                            process.kill()
-                            process.join(timeout=1)
-                except Exception as e:
-                    logger.error(f"Error terminating process for {execution_id}: {e}")
+            try:
+                logger.info(
+                    f"Terminating process {process.pid} for execution {execution_id}"
+                )
+                terminate_process_tree(process, wait=wait)
+            except Exception as e:
+                logger.error(f"Error terminating process for {execution_id}: {e}")
 
-        # Clear all tracking
         self._running_processes.clear()
-        self._running_futures.clear()
-        self._running_executors.clear()
-
-        # Extra cleanup: Kill any remaining worker processes from the pool
-        try:
-            import os
-
-            import psutil
-
-            current_pid = os.getpid()
-            current_process = psutil.Process(current_pid)
-
-            # Find all child processes (workers from ProcessPoolExecutor)
-            children = current_process.children(recursive=True)
-            if children:
-                logger.info(f"Found {len(children)} child processes to clean up")
-                for child in children:
-                    try:
-                        logger.info(f"Terminating child process {child.pid}")
-                        child.terminate()
-                    except psutil.NoSuchProcess:
-                        pass
-
-                # Give them time to terminate gracefully
-                gone, alive = psutil.wait_procs(children, timeout=3)
-
-                # Force kill any that didn't terminate
-                for p in alive:
-                    try:
-                        logger.warning(f"Force killing stubborn child process {p.pid}")
-                        p.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-        except Exception as e:
-            logger.error(f"Error during executor shutdown cleanup: {e}")
 
         logger.info(
             f"ProcessCrewExecutor shutdown complete. Final metrics: {self.get_metrics()}"
         )
 
-    @staticmethod
-    def kill_orphan_crew_processes():
-        """
-        Static method to find and kill orphaned crew processes.
-        Can be called independently to clean up stale processes.
-        """
-        try:
-            import psutil
-
-            killed_count = 0
-
-            logger.info("Scanning for orphaned crew processes...")
-
-            for proc in psutil.process_iter(
-                ["pid", "name", "cmdline", "ppid", "create_time"]
-            ):
-                try:
-                    proc_info = proc.info
-                    cmdline = proc_info.get("cmdline", [])
-
-                    # Look for processes that might be crew-related
-                    is_crew_process = False
-
-                    # Check if command line contains crew-related keywords
-                    if cmdline:
-                        cmd_str = " ".join(str(arg) for arg in cmdline)
-                        crew_keywords = [
-                            "run_crew_in_process",
-                            "CrewAI",
-                            "crew.kickoff",
-                            "multiprocessing.spawn",
-                            "ProcessPoolExecutor",
-                        ]
-                        if any(keyword in cmd_str for keyword in crew_keywords):
-                            is_crew_process = True
-
-                    # Check for orphaned Python processes (ppid = 1)
-                    if proc_info["name"] and "python" in proc_info["name"].lower():
-                        if proc_info["ppid"] == 1:  # Orphaned process
-                            is_crew_process = True
-
-                    if is_crew_process:
-                        # Check age - only kill if older than 1 minute
-                        create_time = datetime.fromtimestamp(proc.create_time())
-                        age_minutes = (
-                            datetime.now() - create_time
-                        ).total_seconds() / 60
-
-                        if (
-                            age_minutes > 1
-                        ):  # Process is old enough to be considered orphaned
-                            logger.warning(
-                                f"Killing orphaned crew process {proc_info['pid']} (age: {age_minutes:.1f} min)"
-                            )
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=2)
-                            except psutil.TimeoutExpired:
-                                proc.kill()
-                            killed_count += 1
-
-                except (
-                    psutil.NoSuchProcess,
-                    psutil.AccessDenied,
-                    psutil.ZombieProcess,
-                ):
-                    pass
-
-            if killed_count > 0:
-                logger.info(f"Killed {killed_count} orphaned crew processes")
-            else:
-                logger.info("No orphaned crew processes found")
-
-            return killed_count
-
-        except ImportError:
-            logger.error("psutil not available - cannot clean orphan processes")
-            return 0
-        except Exception as e:
-            logger.error(f"Error killing orphan processes: {e}")
-            return 0
-
-    def __enter__(self):
+    def __enter__(self) -> "ProcessCrewExecutor":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         """Context manager exit."""
         self.shutdown(wait=True)
         return False
@@ -2856,57 +2385,3 @@ class ProcessCrewExecutor:
 
 # Global instance
 process_crew_executor = ProcessCrewExecutor()
-
-
-# Configuration to choose execution mode
-class ExecutionMode:
-    """Configuration for selecting crew execution mode.
-
-    This class defines execution modes and provides logic for determining
-    whether to use thread-based or process-based execution based on the
-    crew configuration and requirements.
-
-    Attributes:
-        THREAD: Thread pool execution mode - faster but less isolation
-        PROCESS: Process pool execution mode - complete isolation but slower
-
-    Note:
-        Process mode is recommended for:
-        - Long-running executions that need termination capability
-        - Untrusted or potentially unstable code
-        - Memory-intensive operations requiring isolation
-        - Multi-tenant scenarios requiring strict separation
-    """
-
-    THREAD = "thread"  # Default: Use thread pool (faster, less isolation)
-    PROCESS = "process"  # Use process pool (slower, complete isolation)
-
-    @staticmethod
-    def should_use_process(crew_config: Dict[str, Any]) -> bool:
-        """Determine if process isolation should be used for execution.
-
-        Analyzes the crew configuration to decide whether process-based
-        execution is necessary for safety, isolation, or termination needs.
-
-        Args:
-            crew_config: The crew configuration
-
-        Returns:
-            True if process isolation should be used
-        """
-        # Use process isolation for:
-        # 1. Untrusted or experimental crews
-        # 2. Long-running crews (>10 minutes expected)
-        # 3. Crews marked as requiring isolation
-
-        if crew_config.get("require_isolation", False):
-            return True
-
-        if crew_config.get("expected_duration_minutes", 0) > 10:
-            return True
-
-        if crew_config.get("experimental", False):
-            return True
-
-        # Default to thread execution
-        return False

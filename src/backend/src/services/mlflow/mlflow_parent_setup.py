@@ -32,11 +32,11 @@ from src.core.databricks_app import is_databricks_app
 logger = logging.getLogger(__name__)
 
 try:  # mirror dispatcher's guarded import
-    import mlflow as _mlflow  # noqa: F401
+    import mlflow as _mlflow
 
     _HAS_MLFLOW = True
 except Exception:  # pragma: no cover - mlflow always present in prod
-    _mlflow = None
+    _mlflow = None  # type: ignore[assignment]  # optional-import sentinel
     _HAS_MLFLOW = False
 
 
@@ -81,6 +81,20 @@ def invalidate_parent_mlflow_cache() -> None:
     _bound_expires_at = 0.0
     _off_cache.clear()
     _hosted_destinations.clear()
+
+
+def owns_process_binding(group_context: object) -> bool:
+    """Whether the process-wide MLflow binding is this group's, right now.
+
+    Off Databricks Apps nothing here is context-local: ``set_experiment`` and
+    the destination belong to the whole process, and another group's setup
+    re-points them (on a worker thread, while it holds the lock). A trace's
+    experiment is fixed when its root span starts, so a caller that must never
+    write into another group's experiment checks this in the same synchronous
+    step that opens the root — no ``await`` in between.
+    """
+    ours = _bound_group_key == _group_cache_key(group_context)
+    return ours and not _setup_lock.locked()
 
 
 def set_mlflow_tracing(enabled: bool) -> None:
@@ -176,11 +190,14 @@ def _setup_sync(
 
         auth_header = headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            os.environ["DATABRICKS_TOKEN"] = auth_header[len("Bearer ") :]
+            # The SP credentials work. Do NOT export the minted bearer as
+            # DATABRICKS_TOKEN: the process environment is shared by every
+            # workspace (and inherited by children), a static bearer expires
+            # within the hour, and with oauth-m2m pinned the SDK mints and
+            # refreshes its own token from the client credentials anyway.
             if not workspace_url.startswith("http"):
                 workspace_url = f"https://{workspace_url}"
             os.environ["DATABRICKS_HOST"] = workspace_url
-            # Env now holds oauth AND a token; pin SPN oauth to disambiguate.
             os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
             auth_method = "service_principal"
             logger.info("[%s] SPN credential set", label)
@@ -246,7 +263,8 @@ def _setup_sync(
             from mlflow.tracing.destination import Databricks as _Dest
 
             mlflow.tracing.set_destination(
-                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))
+                # mlflow's stub types the legacy Databricks destination out.
+                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))  # type: ignore[arg-type]  # stub gap
             )
         mlflow.tracing.enable()
     except Exception as te:

@@ -13,9 +13,68 @@ from cryptography.fernet import Fernet
 from src.utils.encryption_utils import EncryptionUtils
 
 
+@pytest.fixture(autouse=True)
+def _fresh_key_cache():
+    """These tests patch the key loaders; never serve them a key parsed earlier."""
+    EncryptionUtils.reset_key_cache()
+    yield
+    EncryptionUtils.reset_key_cache()
+
+
+class TestParsedKeyCache:
+    """The RSA key is parsed once per PEM, not on every encrypt/decrypt."""
+
+    def _roundtrip(self, keys, value="v"):
+        with patch.object(EncryptionUtils, "get_or_create_ssh_keys", return_value=keys):
+            return EncryptionUtils.decrypt_with_ssh(
+                EncryptionUtils.encrypt_with_ssh(value)
+            )
+
+    def test_each_key_is_parsed_once(self):
+        keys = EncryptionUtils.generate_ssh_key_pair()
+        from cryptography.hazmat.primitives import serialization
+
+        with (
+            patch(
+                "src.utils.encryption_utils.serialization.load_pem_private_key",
+                wraps=serialization.load_pem_private_key,
+            ) as private,
+            patch(
+                "src.utils.encryption_utils.serialization.load_pem_public_key",
+                wraps=serialization.load_pem_public_key,
+            ) as public,
+        ):
+            for value in ("a", "b", "c"):
+                assert self._roundtrip(keys, value) == value
+        assert private.call_count == 1
+        assert public.call_count == 1
+
+    def test_a_replaced_key_file_is_parsed_again(self):
+        first, second = (EncryptionUtils.generate_ssh_key_pair() for _ in range(2))
+        assert self._roundtrip(first) == "v"
+        # Same process, new key files: the new pair must be used, not the cached one.
+        with patch.object(
+            EncryptionUtils, "get_or_create_ssh_keys", return_value=second
+        ):
+            sealed = EncryptionUtils.encrypt_with_ssh("w")
+            assert EncryptionUtils.decrypt_with_ssh(sealed) == "w"
+        with patch.object(
+            EncryptionUtils, "get_or_create_ssh_keys", return_value=first
+        ):
+            assert EncryptionUtils.decrypt_with_ssh(sealed) == ""
+
+    def test_reset_drops_the_parsed_keys(self):
+        self._roundtrip(EncryptionUtils.generate_ssh_key_pair())
+        assert EncryptionUtils._cached_private is not None
+        EncryptionUtils.reset_key_cache()
+        assert EncryptionUtils._cached_private is None
+        assert EncryptionUtils._cached_public is None
+
+
 class TestEncryptionUtils:
     """Test EncryptionUtils class."""
 
+    @pytest.mark.usefixtures("real_key_directory")
     def test_get_key_directory(self):
         """Test get_key_directory creates and returns correct path."""
         with patch("pathlib.Path.home") as mock_home:
@@ -476,6 +535,7 @@ class TestEncryptionIntegration:
 class TestEncryptionUtilsKeyDirectory:
     """Test get_key_directory static method"""
 
+    @pytest.mark.usefixtures("real_key_directory")
     @patch("pathlib.Path.home")
     def test_get_key_directory_real_path(self, mock_home):
         """Test get_key_directory with real path operations"""

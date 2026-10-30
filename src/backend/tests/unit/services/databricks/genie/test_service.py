@@ -127,32 +127,6 @@ class TestGenieService:
         assert result.next_page_token == "next-token"
 
     @pytest.mark.asyncio
-    async def test_search_spaces_success(self, service_with_mock_repo, mock_repository):
-        """Test successful search_spaces call"""
-        mock_spaces = [
-            GenieSpace(id="space1", name="Development Space", description="Dev space")
-        ]
-        mock_response = GenieSpacesResponse(
-            spaces=mock_spaces, next_page_token=None, total_fetched=1
-        )
-        mock_repository.get_spaces = AsyncMock(return_value=mock_response)
-
-        result = await service_with_mock_repo.search_spaces("development", page_size=50)
-
-        # Assertions
-        assert len(result.spaces) == 1
-        assert result.spaces[0].name == "Development Space"
-
-        # Verify repository was called with correct parameters
-        mock_repository.get_spaces.assert_called_once_with(
-            search_query="development",
-            space_ids=None,
-            enabled_only=True,
-            page_token=None,
-            page_size=50,
-        )
-
-    @pytest.mark.asyncio
     async def test_start_conversation_success(
         self, service_with_mock_repo, mock_repository
     ):
@@ -321,17 +295,6 @@ class TestGenieService:
         assert result.spaces == []
 
     @pytest.mark.asyncio
-    async def test_search_spaces_repository_error(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test search_spaces when repository raises an error"""
-        mock_repository.get_spaces = AsyncMock(side_effect=Exception("Search failed"))
-
-        # search_spaces catches exceptions and returns empty response
-        result = await service_with_mock_repo.search_spaces("test", page_size=50)
-        assert result.spaces == []
-
-    @pytest.mark.asyncio
     async def test_start_conversation_repository_error(
         self, service_with_mock_repo, mock_repository
     ):
@@ -378,26 +341,6 @@ class TestGenieService:
         assert result.status == "FAILED"
         assert "Query execution failed" in result.error
 
-    def test_service_provides_consistent_interface(self, service):
-        """Test that service provides all expected methods"""
-        # Check that all expected async methods exist
-        assert hasattr(service, "get_spaces")
-        assert hasattr(service, "search_spaces")
-        assert hasattr(service, "start_conversation")
-        assert hasattr(service, "send_message")
-        assert hasattr(service, "get_message_status")
-        assert hasattr(service, "get_query_result")
-        assert hasattr(service, "execute_query")
-
-        # Check that methods are callable
-        assert callable(service.get_spaces)
-        assert callable(service.search_spaces)
-        assert callable(service.start_conversation)
-        assert callable(service.send_message)
-        assert callable(service.get_message_status)
-        assert callable(service.get_query_result)
-        assert callable(service.execute_query)
-
     @pytest.mark.asyncio
     async def test_service_request_validation(
         self, service_with_mock_repo, mock_repository
@@ -408,27 +351,6 @@ class TestGenieService:
         # Test with invalid request type returns empty response (error is logged)
         result = await service_with_mock_repo.get_spaces("invalid_request")
         assert result.spaces == []
-
-    @pytest.mark.asyncio
-    async def test_search_spaces_empty_query(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test search_spaces with empty query falls back to get_spaces"""
-        mock_response = GenieSpacesResponse(
-            spaces=[], next_page_token=None, total_fetched=0
-        )
-        mock_repository.get_spaces = AsyncMock(return_value=mock_response)
-
-        await service_with_mock_repo.search_spaces("", page_size=50)
-
-        # Should call get_spaces with empty query and specified page_size
-        mock_repository.get_spaces.assert_called_once_with(
-            search_query="",
-            space_ids=None,
-            enabled_only=True,
-            page_token=None,
-            page_size=50,
-        )
 
     @pytest.mark.asyncio
     async def test_service_with_default_repository_creation(self, auth_config):
@@ -494,46 +416,6 @@ class TestGenieService:
 
         assert isinstance(result, GenieSpacesResponse)
         # Default request has page_size=100, enabled_only=True, no search/pagination
-        mock_repository.get_spaces.assert_called_once_with(
-            search_query=None,
-            space_ids=None,
-            enabled_only=True,
-            page_token=None,
-            page_size=100,
-        )
-
-    @pytest.mark.asyncio
-    async def test_search_spaces_with_page_token(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test search_spaces passes page_token correctly"""
-        mock_response = GenieSpacesResponse(spaces=[], total_fetched=0)
-        mock_repository.get_spaces = AsyncMock(return_value=mock_response)
-
-        result = await service_with_mock_repo.search_spaces(
-            "query", page_size=25, page_token="token-abc"
-        )
-
-        assert isinstance(result, GenieSpacesResponse)
-        mock_repository.get_spaces.assert_called_once_with(
-            search_query="query",
-            space_ids=None,
-            enabled_only=True,
-            page_token="token-abc",
-            page_size=25,
-        )
-
-    @pytest.mark.asyncio
-    async def test_search_spaces_no_args_uses_defaults(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test search_spaces with no args uses default page_size from schema"""
-        mock_response = GenieSpacesResponse(spaces=[], total_fetched=0)
-        mock_repository.get_spaces = AsyncMock(return_value=mock_response)
-
-        result = await service_with_mock_repo.search_spaces()
-
-        assert isinstance(result, GenieSpacesResponse)
         mock_repository.get_spaces.assert_called_once_with(
             search_query=None,
             space_ids=None,
@@ -677,69 +559,3 @@ class TestGenieService:
 
         assert result.status == "FAILED"
         assert result.error == "Query timed out"
-
-    @pytest.mark.asyncio
-    async def test_validate_space_access_success(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test validate_space_access when space exists"""
-        mock_space = GenieSpace(id="space1", name="Test Space")
-        mock_repository.get_space_details = AsyncMock(return_value=mock_space)
-
-        result = await service_with_mock_repo.validate_space_access("space1")
-
-        assert result is True
-        mock_repository.get_space_details.assert_called_once_with("space1")
-
-    @pytest.mark.asyncio
-    async def test_validate_space_access_not_found(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test validate_space_access when space not found"""
-        mock_repository.get_space_details = AsyncMock(return_value=None)
-
-        result = await service_with_mock_repo.validate_space_access("nonexistent")
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_validate_space_access_with_auth_config(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test validate_space_access with custom auth config"""
-        mock_space = GenieSpace(id="space1", name="Test Space")
-        mock_repository.get_space_details = AsyncMock(return_value=mock_space)
-
-        custom_auth = GenieAuthConfig(host="https://custom.databricks.com")
-        result = await service_with_mock_repo.validate_space_access(
-            "space1", auth_config=custom_auth
-        )
-
-        assert result is True
-        assert mock_repository.auth_config == custom_auth
-
-    @pytest.mark.asyncio
-    async def test_validate_space_access_repository_error(
-        self, service_with_mock_repo, mock_repository
-    ):
-        """Test validate_space_access when repository raises an error"""
-        mock_repository.get_space_details = AsyncMock(
-            side_effect=Exception("Access check failed")
-        )
-
-        result = await service_with_mock_repo.validate_space_access("space1")
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_search_spaces_exception_in_get_spaces(self, service_with_mock_repo):
-        """Test search_spaces exception handler when get_spaces raises unexpectedly"""
-        # Patch get_spaces to raise directly (bypassing its own try/except)
-        service_with_mock_repo.get_spaces = AsyncMock(
-            side_effect=Exception("Unexpected error in get_spaces")
-        )
-
-        result = await service_with_mock_repo.search_spaces("test", page_size=50)
-
-        assert isinstance(result, GenieSpacesResponse)
-        assert result.spaces == []

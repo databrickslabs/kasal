@@ -14,7 +14,7 @@ __all__ = ["get_prompt_template", "robust_json_parser"]
 
 
 async def get_prompt_template(
-    db: Session, name: str, default_template: str = None
+    db: Session, name: str, default_template: Optional[str] = None
 ) -> Optional[str]:
     """
     Legacy wrapper for TemplateService.get_template_content.
@@ -34,4 +34,6 @@ async def get_prompt_template(
     # Import inside function to avoid circular imports
     from src.services.catalog.templates import TemplateService
 
-    return await TemplateService.get_template_content(name, default_template)
+    # get_template_content is an instance method: calling it on the class passed
+    # ``name`` as ``self``. Bind a service to the caller's session.
+    return await TemplateService(db).get_template_content(name, default_template)

@@ -38,7 +38,7 @@ const ShowTraceTimeline: React.FC<ShowTraceProps> = ({
   onShowLogs: _onShowLogs,
 }) => {
   const { t } = useTranslation();
-  const { useNewExecutionUI } = useUserPreferencesStore();
+  const useNewExecutionUI = useUserPreferencesStore(state => state.useNewExecutionUI);
   const { showRunResult } = useRunResult();
 
   const [showLogsDialog, setShowLogsDialog] = useState(false);

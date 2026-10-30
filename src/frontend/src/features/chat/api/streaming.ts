@@ -1,6 +1,7 @@
 import { getBaseUrl, getClient } from './client';
 import { SSE_ENABLED } from '../../../utils/sseTransport';
 import { withLocalSseContext } from '../../../shared/api/sseContext';
+import { devBackendOrigin } from '../../../shared/api/backendOrigin';
 
 export interface StreamEvent {
   event: string;
@@ -12,7 +13,8 @@ type EventCallback = (event: StreamEvent) => void;
 /**
  * Build the SSE URL.
  *
- * In development mode, connect directly to the backend (port 8000) to avoid
+ * In development mode, connect directly to the backend (KASAL_PORT, default
+ * 8000; see shared/api/backendOrigin.ts) to avoid
  * Vite proxy buffering issues with Server-Sent Events. In production, use the
  * relative URL which goes through the app gateway.
  */
@@ -29,7 +31,7 @@ function buildSseUrl(path: string): string {
 
   // In dev mode, connect directly to the backend to avoid proxy issues with SSE
   if (import.meta.env.DEV) {
-    return withLocalSseContext(`http://localhost:8000/api/v1${path}`);
+    return withLocalSseContext(`${devBackendOrigin()}/api/v1${path}`);
   }
 
   // In production, resolve against the current origin

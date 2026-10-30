@@ -20,7 +20,6 @@ from src.schemas.crew import (
     CrewCreationResponse,
     CrewFromConversationRequest,
     CrewGenerationRequest,
-    CrewGenerationResponse,
     CrewInDBBase,
     CrewResponse,
     CrewStreamingRequest,
@@ -939,44 +938,6 @@ class TestTask:
         assert "description" in missing_fields
 
 
-class TestCrewGenerationResponse:
-    """Test cases for CrewGenerationResponse schema."""
-
-    def test_valid_crew_generation_response(self):
-        """Test CrewGenerationResponse with agents and tasks."""
-        agents = [
-            Agent(name="Analyst", role="analyst", goal="Analyze", backstory="Expert"),
-            Agent(name="Writer", role="writer", goal="Write", backstory="Professional"),
-        ]
-        tasks = [
-            Task(name="Analysis", description="Analyze data"),
-            Task(name="Report", description="Write report"),
-        ]
-
-        response = CrewGenerationResponse(agents=agents, tasks=tasks)
-        assert len(response.agents) == 2
-        assert len(response.tasks) == 2
-        assert response.agents[0].name == "Analyst"
-        assert response.tasks[0].name == "Analysis"
-
-    def test_crew_generation_response_empty(self):
-        """Test CrewGenerationResponse with empty lists."""
-        response = CrewGenerationResponse(agents=[], tasks=[])
-        assert len(response.agents) == 0
-        assert len(response.tasks) == 0
-
-    def test_crew_generation_response_missing_fields(self):
-        """Test CrewGenerationResponse validation with missing fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            CrewGenerationResponse(agents=[])
-
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "tasks" in missing_fields
-
-
 class TestCrewCreationResponse:
     """Test cases for CrewCreationResponse schema."""
 
@@ -1010,106 +971,6 @@ class TestCrewCreationResponse:
 
 class TestSchemaIntegration:
     """Integration tests for crew schema interactions."""
-
-    def test_complete_crew_workflow(self):
-        """Test a complete crew workflow with all schemas."""
-        # Create a crew generation request
-        request = CrewGenerationRequest(
-            prompt="Create a data analysis crew with visualization",
-            model="gpt-4",
-            tools=["pandas", "matplotlib", "seaborn"],
-        )
-
-        # Create agents and tasks (simulating generation response)
-        agents = [
-            Agent(
-                name="Data Analyst",
-                role="analyst",
-                goal="Analyze data thoroughly",
-                backstory="Expert in statistical analysis",
-                tools=["pandas", "numpy"],
-            ),
-            Agent(
-                name="Data Visualizer",
-                role="visualizer",
-                goal="Create insightful visualizations",
-                backstory="Specialist in data visualization",
-                tools=["matplotlib", "seaborn"],
-            ),
-        ]
-
-        tasks = [
-            Task(
-                name="Data Analysis",
-                description="Perform statistical analysis on the dataset",
-                expected_output="Statistical summary and insights",
-                tools=["pandas", "numpy"],
-                assigned_agent="agent-1",
-            ),
-            Task(
-                name="Data Visualization",
-                description="Create visualizations based on analysis",
-                expected_output="Charts and graphs",
-                tools=["matplotlib", "seaborn"],
-                assigned_agent="agent-2",
-                context=["task-1"],
-            ),
-        ]
-
-        generation_response = CrewGenerationResponse(agents=agents, tasks=tasks)
-
-        # Create crew with nodes and edges
-        position1 = Position(x=100, y=100)
-        position2 = Position(x=300, y=100)
-
-        node1 = Node(
-            id="node-1",
-            type="agent",
-            position=position1,
-            data=NodeData(
-                label="Data Analyst",
-                role="analyst",
-                goal="Analyze data thoroughly",
-                backstory="Expert in statistical analysis",
-                agentId="agent-1",
-            ),
-        )
-
-        node2 = Node(
-            id="node-2",
-            type="agent",
-            position=position2,
-            data=NodeData(
-                label="Data Visualizer",
-                role="visualizer",
-                goal="Create insightful visualizations",
-                backstory="Specialist in data visualization",
-                agentId="agent-2",
-            ),
-        )
-
-        edge = Edge(source="node-1", target="node-2", id="edge-1")
-
-        crew_create = CrewCreate(
-            name="Data Analysis Crew",
-            agent_ids=["agent-1", "agent-2"],
-            task_ids=["task-1", "task-2"],
-            nodes=[node1, node2],
-            edges=[edge],
-        )
-
-        # Verify the complete workflow
-        assert request.prompt == "Create a data analysis crew with visualization"
-        assert len(generation_response.agents) == 2
-        assert len(generation_response.tasks) == 2
-        assert crew_create.name == "Data Analysis Crew"
-        assert len(crew_create.nodes) == 2
-        assert len(crew_create.edges) == 1
-        assert crew_create.nodes[0].data.label == "Data Analyst"
-        assert crew_create.nodes[1].data.label == "Data Visualizer"
-        assert crew_create.edges[0].source == "node-1"
-        assert crew_create.edges[0].target == "node-2"
-        assert generation_response.tasks[1].context == ["task-1"]  # Task dependency
 
     def test_crew_update_workflow(self):
         """Test crew update workflow with partial updates."""

@@ -2,6 +2,7 @@
 Databricks Knowledge Source Service
 """
 
+import asyncio
 import hashlib
 import io
 import logging
@@ -136,7 +137,7 @@ class DatabricksKnowledgeService:
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
             # TTL sweep: purge expired knowledge BEFORE adding more, so the
-            # embedding store never bloats (KNOWLEDGE_TTL_DAYS; non-fatal).
+            # embedding store never bloats (knowledge_ttl_days(); non-fatal).
             await self.embedding_service.purge_expired(user_token=user_token)
 
             # Stage the raw upload in a LOCAL TEMP FILE — its content is
@@ -151,12 +152,10 @@ class DatabricksKnowledgeService:
             )
             logger.info(f"[UPLOAD] Staged upload in temp file: {tmp_path}")
             try:
-                with os.fdopen(tmp_fd, "wb") as staged:
-                    staged.write(content)
-                with open(tmp_path, "rb") as staged:
-                    raw_bytes = staged.read()
-
-                extraction = self._extract_text_content(safe_name, raw_bytes)
+                # Off the event loop: PDF and workbook parsing is CPU-bound.
+                extraction = await asyncio.to_thread(
+                    self._stage_and_extract, tmp_fd, tmp_path, safe_name, content
+                )
                 if extraction.get("status") != "success":
                     raise UnprocessableEntityError(
                         detail=extraction.get(
@@ -336,6 +335,22 @@ class DatabricksKnowledgeService:
                 f"Could not register knowledge search tool for group {group_id}: {e}"
             )
 
+    def _stage_and_extract(
+        self, tmp_fd: int, tmp_path: str, filename: str, content: bytes
+    ) -> Dict[str, str]:
+        """Write the upload to its temp file, read it back, extract its text.
+
+        Blocking file I/O plus pdfminer/openpyxl parsing, which is pure-Python
+        and CPU-bound: seconds for a 300-page PDF or a large workbook. The
+        caller runs this in a worker thread so the one event loop keeps serving
+        every other request while it does.
+        """
+        with os.fdopen(tmp_fd, "wb") as staged:
+            staged.write(content)
+        with open(tmp_path, "rb") as staged:
+            raw_bytes = staged.read()
+        return self._extract_text_content(filename, raw_bytes)
+
     def _extract_text_content(self, filename: str, content: Any) -> Dict[str, Any]:
         """Extract embeddable text from raw file content (bytes or str).
 
@@ -418,7 +433,7 @@ class DatabricksKnowledgeService:
         if lower_name.endswith(".xls"):
             # Legacy binary .xls — openpyxl cannot read it.
             try:
-                import xlrd  # type: ignore
+                import xlrd  # type: ignore[import-untyped]
             except ImportError:
                 logger.error("xlrd not installed — cannot extract legacy .xls text")
                 return {
@@ -605,37 +620,6 @@ class DatabricksKnowledgeService:
         except Exception as e:
             logger.error(f"Error browsing volume files: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
-
-    def _get_file_type(self, filename: str) -> str:
-        """
-        Determine file type from extension.
-
-        Args:
-            filename: Name of the file
-
-        Returns:
-            File type string
-        """
-        ext = os.path.splitext(filename)[1].lower()
-        type_map = {
-            ".pdf": "pdf",
-            ".txt": "text",
-            ".md": "markdown",
-            ".json": "json",
-            ".csv": "csv",
-            ".doc": "word",
-            ".docx": "word",
-            ".xlsx": "excel",
-            ".xls": "excel",
-            ".py": "python",
-            ".js": "javascript",
-            ".ts": "typescript",
-            ".yaml": "yaml",
-            ".yml": "yaml",
-            ".xml": "xml",
-            ".html": "html",
-        }
-        return type_map.get(ext, "file")
 
     async def list_knowledge_files(
         self, execution_id: str, group_id: str

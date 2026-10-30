@@ -16,7 +16,7 @@ def sanitize_for_database(data: Dict[str, Any]) -> Dict[str, Any]:
         Sanitized data safe for database storage
     """
     # Create a deep copy to avoid modifying the original
-    result = {}
+    result: Dict[str, Any] = {}
 
     for key, value in data.items():
         if isinstance(value, dict):

@@ -16,7 +16,7 @@ file is well over the size ceiling, and this is a self-contained seam.
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from src.core.exceptions import KasalError
 from src.services.flow_builder.resume_authorization import get_owned_resume_source
@@ -28,7 +28,7 @@ async def load_resume_outputs(
     resume_from_execution_id: Optional[str],
     repositories: Optional[Dict[str, Any]],
     from_unit: Optional[Any] = None,
-    group_ids=None,
+    group_ids: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Load ``{crew_name: output}`` for a flow resuming from an earlier run.
 
@@ -88,8 +88,8 @@ async def load_resume_outputs(
             )
             return {}, {}
 
-        identities = {
-            unit.get("name"): unit.get("identity")
+        identities: Dict[str, Any] = {
+            cast(str, unit.get("name")): unit.get("identity")
             for unit in select_prefix(record, from_unit)
             if unit.get("name")
         }

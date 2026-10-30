@@ -14,14 +14,19 @@ the rows that carried them (see the migration that rewrites
 import logging
 import threading
 from collections import OrderedDict, deque
-from typing import Any, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from opentelemetry.context import Context
 from opentelemetry.trace import (
     NonRecordingSpan,
+    Span,
     StatusCode,
     Tracer,
     set_span_in_context,
 )
+
+from src.services.otel_tracing.auto_decision import LLM_EVENT_TYPES, AutoDecision
+from src.services.otel_tracing.event_subscriptions import _EVENT_CLASSES
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,7 @@ _RUN_LEVEL_EVENTS = frozenset(
 _SELECTED_RECALL_SPAN = ("kasal.memory.recall_selected", "memory_retrieval")
 
 _EVENT_SPAN_MAP = {
+    "DecisionEvaluatedEvent": ("kasal.decision.evaluate", "decision_evaluated"),
     # Crew lifecycle
     "CrewKickoffStartedEvent": ("kasal.crew.kickoff", "crew_started"),
     "CrewKickoffCompletedEvent": ("kasal.crew.complete", "crew_completed"),
@@ -216,7 +222,7 @@ _PLAN_TOOL = "todo"
 # The two halves of a tool call, by event type. The frontend reads this to
 # label a row "(input)" / "(output)"; see the operation block in
 # _set_extra_attributes for what its absence looked like.
-_TOOL_OPERATIONS = {
+_TOOL_OPERATIONS: Dict[Optional[str], str] = {
     "tool_usage_started": "tool_started",
     "tool_usage_finished": "tool_finished",
 }
@@ -368,80 +374,6 @@ def _get_output(event: Any) -> str:
     return ""
 
 
-# Every event class the bridge subscribes to, as (module_path, class_name).
-#
-# Module-level, not a local inside register(): it is a constant, and as a local
-# it could only be checked by duplicating it in the test file — which is exactly
-# what happened, and the copy drifted out of sync with this one.
-#
-# Every entry here must actually resolve. Twelve did not: Knowledge*, AgentReasoning*,
-# MCP* and HumanFeedback* were crewAI event names the kasal engine never
-# implemented — nothing defines them, nothing emits them. They made register()
-# log a "missing" WARNING twelve times on every single run, which is how a
-# warning that means "a whole event type is invisible in every trace" stops
-# being read at all.
-_EVENT_CLASSES = [
-    # Crew lifecycle
-    ("src.core.events", "CrewKickoffStartedEvent"),
-    ("src.core.events", "CrewKickoffCompletedEvent"),
-    ("src.core.events", "CrewCheckpointRestoredEvent"),
-    ("src.core.events", "FlowCheckpointSavedEvent"),
-    ("src.core.events", "CheckpointUnitSavedEvent"),
-    ("src.core.events", "PlanUpdatedEvent"),
-    # Agent execution
-    ("src.core.events", "AgentExecutionStartedEvent"),
-    ("src.core.events", "AgentExecutionCompletedEvent"),
-    # Task lifecycle
-    ("src.core.events", "TaskStartedEvent"),
-    ("src.core.events", "TaskCompletedEvent"),
-    ("src.core.events", "TaskCheckpointRestoredEvent"),
-    ("src.core.events", "TaskFailedEvent"),
-    # Tool usage
-    ("src.core.events", "ToolUsageStartedEvent"),
-    ("src.core.events", "ToolUsageFinishedEvent"),
-    ("src.core.events", "ToolUsageErrorEvent"),
-    # LLM calls
-    ("src.core.events", "LLMCallStartedEvent"),
-    ("src.core.events", "LLMCallCompletedEvent"),
-    ("src.core.events", "LLMCallFailedEvent"),
-    ("src.core.events", "LLMStreamChunkEvent"),
-    # Subscribed so the event pipe can forward it to the live UI; the bridge
-    # itself skips writing a span (see _SKIP_EVENTS) — one per delta is noise,
-    # and LLMCallCompletedEvent.reasoning already records it once per call.
-    ("src.core.events", "LLMReasoningChunkEvent"),
-    # Memory
-    ("src.core.events", "MemorySaveStartedEvent"),
-    ("src.core.events", "MemorySaveCompletedEvent"),
-    ("src.core.events", "MemorySaveFailedEvent"),
-    ("src.core.events", "MemoryQueryStartedEvent"),
-    ("src.core.events", "MemoryQueryCompletedEvent"),
-    ("src.core.events", "MemoryQueryFailedEvent"),
-    ("src.core.events", "MemoryRetrievalCompletedEvent"),
-    # Knowledge
-    # Reasoning
-    # Guardrails
-    ("src.core.events", "LLMGuardrailStartedEvent"),
-    ("src.core.events", "LLMGuardrailCompletedEvent"),
-    ("src.core.events", "LLMGuardrailFailedEvent"),
-    # Flow. No FlowCreatedEvent: the engine's Flow has no "created"
-    # lifecycle point (only kickoff start/finish), so subscribing to one
-    # would be permanently dead wiring — which is exactly how flow spans
-    # went missing in the first place.
-    ("src.core.events", "FlowStartedEvent"),
-    ("src.core.events", "FlowFinishedEvent"),
-    # MCP
-    # HITL
-    # A2UI surface composition. Emitted for every outcome, including the
-    # gates that decline — a chat turn that produced no surface is the
-    # case people ask about, and it left no trace at all.
-    ("src.core.events", "A2UISurfaceEvent"),
-    # Context compaction. Lossy, and its absence from this list is how
-    # a whole event type stays invisible: the map below is not enough,
-    # the bridge only ever sees what it SUBSCRIBES to here.
-    ("src.core.events", "ContextCompactionEvent"),
-]
-
-
 class OTelEventBridge:
     """Subscribes to CrewAI event bus and creates OTel spans per event.
 
@@ -459,15 +391,19 @@ class OTelEventBridge:
         tracer: Tracer,
         job_id: str,
         group_context: Optional[Any] = None,
+        run_config: Optional[Mapping[str, object]] = None,
         *,
         scoped: bool = False,
     ):
         self._tracer = tracer
+        # The run's Auto decision, from its payload: the run's trace starts
+        # there (see otel_tracing/auto_decision.py).
+        self._auto = AutoDecision.from_payload(run_config)
         self._job_id = job_id
         self._group_context = group_context
         self._registered_count = 0
         self._scoped = scoped
-        self._subscriptions = []
+        self._subscriptions: List[Tuple[Any, Any, Callable[..., None]]] = []
         # Captured from CrewKickoffStartedEvent and stamped on all subsequent
         # spans so that task-level traces carry the crew name for flow monitoring.
         self._current_crew_name: Optional[str] = None
@@ -558,6 +494,8 @@ class OTelEventBridge:
                 missing.append(class_name)
 
         self._registered_count = registered
+        if self._auto is not None:
+            self._auto.emit(self._tracer)
         logger.info(
             f"[OTel-Bridge][{self._job_id}] Registered {registered} event types on event bus"
         )
@@ -620,8 +558,8 @@ class OTelEventBridge:
             event_type,
         )
         try:
-            agent_name = _get_agent_name(event)
-            task_name = _get_task_name(event)
+            agent_name: Optional[str] = _get_agent_name(event)
+            task_name: Optional[str] = _get_task_name(event)
             tool_name = _get_tool_name(event)
             output = _get_output(event)
             event_task_id = getattr(event, "task_id", None)
@@ -804,11 +742,9 @@ class OTelEventBridge:
             self._bridge_tool_to_mlflow(span_name, tool_name, output, event)
 
             # Parent this span to the span of the event that caused it, so the
-            # bus's causality DAG survives into parent_span_id. Falls back to the
-            # ambient context (previous behavior) when the parent is unknown —
-            # e.g. the root event, or a parent emitted before this bridge
-            # registered.
-            parent_context = self._dag_parent_context(event)
+            # bus's causality DAG survives into parent_span_id (see
+            # _parent_context for a span with no known parent).
+            parent_context = self._parent_context(event)
 
             with self._tracer.start_as_current_span(
                 span_name, context=parent_context
@@ -860,6 +796,7 @@ class OTelEventBridge:
 
                 # Extra metadata
                 self._set_extra_attributes(span, event, skip_attribution=is_run_level)
+                self._set_auto_attributes(span, event_type, event)
 
                 # Mark failed events with error status
                 if "failed" in event_type or "error" in event_type:
@@ -974,6 +911,25 @@ class OTelEventBridge:
                 "[OTel-Bridge][%s] DAG parent resolution failed: %s", self._job_id, e
             )
             return None
+
+    def _parent_context(self, event: object) -> Optional[Context]:
+        """The causal parent's context; else the run's Auto decision, else ambient.
+
+        Ambient (None) is the previous behavior for a span with no known parent:
+        the root event, or a parent emitted before this bridge registered. A run
+        that used Auto continues the decision's trace there instead.
+        """
+        parent_context: Optional[Context] = self._dag_parent_context(event)
+        if parent_context is None and self._auto is not None:
+            return self._auto.parent_context()
+        return parent_context
+
+    def _set_auto_attributes(self, span: Span, event_type: str, event: object) -> None:
+        """Link a call to the model Auto chose back to the decision span."""
+        if self._auto is not None and event_type in LLM_EVENT_TYPES:
+            span.set_attributes(
+                self._auto.llm_attributes(getattr(event, "model", None))
+            )
 
     def _track_span_for_dag(self, event: Any, span: Any) -> None:
         """Remember this event's SpanContext so its children can parent to it."""
@@ -1282,6 +1238,7 @@ class OTelEventBridge:
                 "completion_tokens",
                 "total_tokens",
                 "cached_prompt_tokens",
+                "cache_creation_tokens",
             ):
                 value = usage.get(key)
                 if value is not None:
@@ -1330,9 +1287,9 @@ class OTelEventBridge:
         # span per delta is unreadable. Kept as its own attribute rather than
         # folded into the response so the UI can show it collapsed and separate:
         # it is the model's private deliberation, not the answer.
-        reasoning = getattr(event, "reasoning", None)
-        if reasoning:
-            span.set_attribute("kasal.extra.reasoning", str(reasoning))
+        for key in ("reasoning", "served_model"):  # served_model: a router's pick
+            if value := getattr(event, key, None):
+                span.set_attribute(f"kasal.extra.{key}", str(value))
 
         # ── Agent execution fields ──
         task_prompt = getattr(event, "task_prompt", None)

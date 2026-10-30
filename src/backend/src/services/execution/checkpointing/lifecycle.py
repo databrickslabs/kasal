@@ -22,6 +22,8 @@ the list endpoint filters on it, and filtering on a JSON key is a table scan.
 import logging
 from typing import List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,7 +98,7 @@ def resumable_blocker(
 
 
 async def set_status(
-    session,
+    session: AsyncSession,
     job_id: str,
     status: Optional[str],
     group_ids: Optional[List[str]] = None,
@@ -116,7 +118,9 @@ async def set_status(
     return ok
 
 
-async def expire(session, job_id: str, group_ids: Optional[List[str]] = None) -> bool:
+async def expire(
+    session: AsyncSession, job_id: str, group_ids: Optional[List[str]] = None
+) -> bool:
     """Dismiss a checkpoint so it stops appearing as resumable.
 
     The units are left in place: expiring is a listing decision, and keeping
@@ -127,7 +131,7 @@ async def expire(session, job_id: str, group_ids: Optional[List[str]] = None) ->
 
 
 async def mark_resumed(
-    session, job_id: str, group_ids: Optional[List[str]] = None
+    session: AsyncSession, job_id: str, group_ids: Optional[List[str]] = None
 ) -> bool:
     """Mark a checkpoint as having been resumed from."""
     return await set_status(session, job_id, CheckpointStatus.RESUMED, group_ids)

@@ -15,9 +15,9 @@ The fix was to make the SERVICE offer the guarantee (``get_execution_record``), 
 to keep reaching past it. That is the general shape: when the owning service does
 not expose what you need, add it there rather than bypassing it.
 
-**Almost a gate.** This started at 42 cross-domain pairs and is down to **6**, all of
-them the same thing: the ``repositories`` dict the flow runner injects into
-``BackendFlow`` inside the flow SUBPROCESS (see ``_BASELINE``). Convert that and the
+**Almost a gate.** This started at 42 cross-domain pairs and is down to **6**: two
+are flow_builder's catalog reads (see ``_BASELINE``), and four are deployment's
+catalog reads, which used to be hidden by an ``_OWNED`` grant. Convert those and the
 ratchet becomes a hard ban.
 
 Fixing the other 36 surfaced four real bugs that the bypass had been hiding, each one
@@ -54,39 +54,34 @@ _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"
 #: Derived from where the write path lives, not from name similarity — `knowledge`
 #: owns `documentation_embedding` even though the names share nothing.
 _OWNED = {
+    "decisions": {"decision_config"},
     "billing": {"model_billing_rate"},
     "a2a": {"a2a_agent", "a2a_push_config"},
-    "a2ui": {"ui_config"},
     "assets": {"chat_asset"},
-    "agent_builder": {"agent", "task", "crew"},
     "catalog": {"agent", "task", "crew", "template", "crew_feedback", "schema"},
     "chat": {"chat_history", "chat_session"},
     "databricks": {
         "databricks_config",
         "databricks_volume",
-        "database_config",
-        "database_backup",
         "genie",
         "agentbricks",
     },
-    "deployment": {"crew", "agent", "task", "tool"},
+    # `deployment` used to OWN crew/agent/task/tool here, which silently licensed
+    # it to read the catalog tables past CatalogService's group checks. It owns
+    # none of them: its uses are now recorded in _BASELINE instead.
     "execution": {
         "execution",
         "execution_history",
         "execution_logs",
         "execution_trace",
-        "flow_state",
         "log",
     },
-    "export": {"crew", "agent", "task", "tool"},
-    "external": {"crew_publication"},
     "flow_builder": {"flow", "flow_state"},
     "generation": {"crew_generator", "log"},
     "groups": {"group", "group_tool", "group_duplication", "user"},
     "guardrails": {"data_processing"},
     "hitl": {"hitl"},
     "knowledge": {"documentation_embedding", "databricks_volume"},
-    "llm": {"model_config", "log"},
     "mcp": {"mcp"},
     "memory": {"memory_backend", "memory_maintenance"},
     "mlflow": {"mlflow"},
@@ -102,30 +97,35 @@ _OWNED = {
     "publications": {"crew_publication"},
     "recipes": {"workflow_recipe", "workflow_recipe_trial"},
     "scheduling": {"schedule"},
-    "security": {"api_key", "user"},
-    "settings": {"api_key", "model_config", "ui_config", "engine_config", "schema"},
+    "settings": {"api_key", "model_config", "ui_config", "engine_config"},
     "skills": {"skill"},
-    "tools": {"tool", "group_tool", "schema"},
+    "tools": {"tool", "group_tool"},
     "trace": {"execution_trace", "trace_usage"},
     "triggers": {"trigger_queue", "event_subscription"},
 }
 
-#: The ONLY cross-domain pairs left, and all six are the same thing: the
-#: ``repositories`` dict that ``flow_runner_service`` builds and injects into
-#: ``BackendFlow`` for a DYNAMIC flow run.
+#: The ONLY cross-domain pairs left: deployment's catalog reads (below) and
+#: flow_builder's.
 #:
-#: They are not converted because that dict is threaded through 17 read sites across
-#: 6 modules INSIDE the flow subprocess (``backend_flow``, ``checkpoint_resume``,
-#: ``flow_config``, ``flow_processors``, ``task_adapter``). Replacing it with services
-#: cannot be proven safe from in-process tests: the spawned interpreter has its own
-#: event loop and its own Lakebase activation, so a break shows up only in a real
-#: flow execution. See services/execution/CLAUDE.md on subprocess-boundary changes.
+#: The ``repositories`` bundle the flow SUBPROCESS reads (``data_access.py``) holds
+#: services now, bound to the run's workspace; ``flow_builder -> agent`` went when
+#: ``modules/task_adapter`` stopped reading ``AgentRepository`` after a bundle
+#: miss (test_flow_run_lookups_workspace_scoped.py runs the real child). What is
+#: left is ``FlowGenerationService`` (``generation.py``) listing a group's crews and
+#: tasks through their repositories.
 #:
 #: Everything else that was here is gone — 42 pairs down to these 6. Do not add to
-#: this list; convert the dict in a change that can be exercised by a live flow run,
-#: and this becomes a hard gate.
+#: this list; route generation and deployment through the catalog services, and this
+#: becomes a hard gate.
 _BASELINE = {
-    "flow_builder -> agent",
+    # CrewDeploymentService / crew_export build the catalog repositories
+    # themselves (services/deployment/crew.py, crew_export.py). Route those reads
+    # through CrewService / AgentService / TaskService / ToolService, then delete
+    # these four. Until then they are recorded, not granted via _OWNED.
+    "deployment -> agent",
+    "deployment -> crew",
+    "deployment -> task",
+    "deployment -> tool",
     "flow_builder -> crew",
     "flow_builder -> task",
 }
@@ -223,4 +223,34 @@ def test_owned_repositories_exist():
     assert not unknown, (
         f"_OWNED names repositories that do not exist: {sorted(unknown)}. "
         "A typo here silently exempts a real cross-domain use."
+    )
+
+
+def test_every_ownership_grant_is_used():
+    """A grant nobody uses is a latent exemption: the next import rides on it.
+
+    ``_OWNED`` once gave ``crew``/``agent``/``task`` to four domains, two of which
+    never touched them. Keep the map to what each domain actually uses; a new
+    need is a review decision, not something a stale grant pre-approves.
+    """
+    used: dict[str, set[str]] = {}
+    for path in _SERVICES.rglob("*.py"):
+        rel = path.relative_to(_SERVICES.parents[0]).as_posix()
+        if any(part in rel for part in _EXEMPT):
+            continue
+        parts = rel.split("/")
+        if len(parts) < 3:
+            continue
+        for match in re.finditer(
+            r"from src\.repositories\.(\w+)_repository", path.read_text()
+        ):
+            used.setdefault(parts[1], set()).add(match.group(1))
+    unused = sorted(
+        f"{domain} -> {repo}"
+        for domain, repos in _OWNED.items()
+        for repo in repos - used.get(domain, set())
+    )
+    assert not unused, (
+        "These _OWNED grants are not used by their domain — delete them:\n  "
+        + "\n  ".join(unused)
     )

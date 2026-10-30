@@ -488,7 +488,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       expected_output: data.expected_output || '',
       tools: data.tools || [],
       tool_configs: data.tool_configs || {},  // Include tool_configs
-      agent_id: '',  // This will be set by TaskForm
+      agent_id: null,  // Assignment is the canvas edge; null leaves the row's agent_id as it is
       async_execution: data.async_execution || false,
       context: data.context || [],
       markdown: data.config?.markdown || false,

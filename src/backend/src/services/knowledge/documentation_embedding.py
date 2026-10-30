@@ -1,7 +1,7 @@
 import traceback
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,9 +40,11 @@ class DocumentationEmbeddingService:
         if not self.session:
             raise ValueError("Session is required for database operations")
 
-        import os
-
-        database_type = os.getenv("DATABASE_TYPE", "postgres").lower()
+        # The session's own dialect decides: DATABASE_TYPE names the BASE
+        # engine (SQLite inside Databricks Apps) even when this session is
+        # Lakebase Postgres, which sent Lakebase writes to the SQLite queue.
+        bind = self.session.get_bind() if hasattr(self.session, "get_bind") else None
+        database_type = getattr(getattr(bind, "dialect", None), "name", "postgresql")
 
         # Use the batching queue for SQLite to reduce write-lock contention.
         if database_type == "sqlite":
@@ -103,19 +105,6 @@ class DocumentationEmbeddingService:
 
         repository = DocumentationEmbeddingRepository(self.session)
         return await repository.get_all(skip, limit)
-
-    async def update_documentation_embedding(
-        self, embedding_id: int, update_data: Dict[str, Any]
-    ) -> Optional[DocumentationEmbedding]:
-        """Update a documentation embedding by ID."""
-        if not self.session:
-            raise ValueError("Session is required for database operations")
-        from src.repositories.documentation_embedding_repository import (
-            DocumentationEmbeddingRepository,
-        )
-
-        repository = DocumentationEmbeddingRepository(self.session)
-        return await repository.update(embedding_id, update_data)
 
     async def delete_documentation_embedding(self, embedding_id: int) -> bool:
         """Delete a documentation embedding by ID."""

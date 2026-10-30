@@ -12,11 +12,14 @@ keeping it (the subprocess is risky to change) was an argument for care, not for
 different standard: a flow run reading an agent skips ``AgentService`` exactly as any
 other caller would, and loses the same group check.
 
-So the bundle holds SERVICES now. Two things made that safe to do:
+So the bundle holds SERVICES now, and ``task``/``agent``/``crew`` are BOUND TO THE
+RUN'S WORKSPACE. Their ids come from the flow_config, the client, or a flow or crew
+imported from another workspace, so the bundle's ``get`` reads through the
+catalog's run-scoped, group-checked lookups (``catalog/run_lookup.py``): a row
+outside the run's groups, or any row when the run has no groups, is ``None``, which
+every reader already handles as "not found". The 17 read sites downstream only call
+``get``, so they are unchanged.
 
-* the consumers only ever called four methods, three of them a plain ``get`` —
-  ``task.get``, ``agent.get``, ``crew.get``, plus ``execution_history``'s two
-  by-id lookups. Nothing needed a repository-only API.
 * ``tool`` and ``execution_trace`` were injected and NEVER read. They are gone
   rather than translated.
 
@@ -26,13 +29,53 @@ So the bundle holds SERVICES now. Two things made that safe to do:
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Dict,
+    Generic,
+    Optional,
+    TypeVar,
+)
 
-logger = logging.getLogger(__name__)
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.logger import LoggerManager
+from src.utils.user_context import GroupContext
+
+_Service = TypeVar("_Service")
+_Id = TypeVar("_Id")
+_Row = TypeVar("_Row")
+
+#: ``catalog/run_lookup``'s ``agent_for_run`` / ``task_for_run`` / ``crew_for_run``.
+_ScopedRead = Callable[
+    [_Service, _Id, Optional[GroupContext], logging.Logger], Awaitable[Optional[_Row]]
+]
+
+
+class _RunScopedReads(Generic[_Service, _Id, _Row]):
+    """``get(id)`` over one catalog kind, scoped to the run's workspace."""
+
+    def __init__(
+        self,
+        read: _ScopedRead[_Service, _Id, _Row],
+        service: _Service,
+        group_context: Optional[GroupContext],
+    ) -> None:
+        self._read = read
+        self._service = service
+        self._group_context = group_context
+
+    async def get(self, entity_id: _Id) -> Optional[_Row]:
+        # The flow log, so a refused id shows up beside the run's other lines.
+        log = LoggerManager.get_instance().flow
+        return await self._read(self._service, entity_id, self._group_context, log)
 
 
 @asynccontextmanager
-async def _short_lived_session():
+async def _short_lived_session() -> AsyncIterator[AsyncSession]:
     """A fresh, routed, auto-committing session for ONE data-access call.
 
     The flow subprocess runs for many minutes doing LLM work with no DB traffic.
@@ -45,7 +88,7 @@ async def _short_lived_session():
     """
     from src.db.database_router import get_smart_db_session
 
-    gen = get_smart_db_session().__aiter__()
+    gen = get_smart_db_session()
     session = await gen.__anext__()
     try:
         yield session
@@ -70,16 +113,16 @@ class _ShortLivedDataAccess:
     session that the idle timeout was killing.
     """
 
-    def __init__(self, build: Callable[[Any], Any]):
+    def __init__(self, build: Callable[[AsyncSession], object]) -> None:
         self._build = build
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Callable[..., Awaitable[object]]:
         if name.startswith("__"):
             # Don't synthesize dunders (repr/copy/pickle/awaitable checks).
             raise AttributeError(name)
         build = self._build
 
-        async def _call(*args, **kwargs):
+        async def _call(*args: object, **kwargs: object) -> object:
             async with _short_lived_session() as session:
                 return await getattr(build(session), name)(*args, **kwargs)
 
@@ -87,22 +130,38 @@ class _ShortLivedDataAccess:
         return _call
 
 
-def build_flow_data_access(session: Any = None) -> Dict[str, Any]:
-    """The ``repositories`` bundle for a ``BackendFlow``, keyed as before
-    (``flow``/``task``/``agent``/``crew``/``execution_history``).
+def build_flow_data_access(
+    session: Any = None, group_context: Optional[GroupContext] = None
+) -> Dict[str, Any]:
+    """The ``repositories`` bundle for a ``BackendFlow``, keyed as before.
 
-    Each entry is a SHORT-LIVED-session handle: every call opens its own fresh
-    session rather than sharing one held across the whole run. This is the durable
-    fix for the long-run connection death — the flow never holds a DB connection
-    idle while the crews do their (minutes-long, DB-idle) LLM work, so the idle
-    timeout has nothing to drop and the mid-run reads + terminal writes succeed.
+    The keys are unchanged (``flow``/``task``/``agent``/``crew``/
+    ``execution_history``) so the 17 read sites downstream keep working; what they
+    receive is the owning SERVICE rather than that domain's repository, and for
+    the catalog kinds a reader bound to ``group_context``.
 
-    ``session`` is accepted for call-site compatibility but intentionally NOT held
-    (that is the whole point); callers may stop passing it.
+    Every entry also runs each call on its OWN short-lived session
+    (``_ShortLivedDataAccess``) instead of one held across the whole run, so the
+    flow never holds a DB connection idle while the crews do their minutes-long,
+    DB-idle LLM work — the Lakebase idle timeout has nothing to drop.
+
+    Args:
+        session: accepted for call-site compatibility but intentionally NOT held
+            (that is the point of the short-lived handles).
+        group_context: the run's group context (``config["group_context"]``).
+            Required: with none, or none with group ids, no catalog row is read.
+
+    Returns:
+        Mapping of key -> service (or, for ``flow``, this domain's repository).
     """
     from src.repositories.flow_repository import FlowRepository
     from src.services.catalog.agents import AgentService
     from src.services.catalog.crews import CrewService
+    from src.services.catalog.run_lookup import (
+        agent_for_run,
+        crew_for_run,
+        task_for_run,
+    )
     from src.services.catalog.tasks import TaskService
     from src.services.execution.service import ExecutionService
 
@@ -110,9 +169,17 @@ def build_flow_data_access(session: Any = None) -> Dict[str, Any]:
         # flow_builder's own data — no cross-domain hop, and FlowService would be a
         # circular import from here.
         "flow": _ShortLivedDataAccess(lambda s: FlowRepository(s)),
-        # Other domains: through their services.
-        "task": _ShortLivedDataAccess(lambda s: TaskService(s)),
-        "agent": _ShortLivedDataAccess(lambda s: AgentService(s)),
-        "crew": _ShortLivedDataAccess(lambda s: CrewService(s)),
+        # Other domains: through their services, scoped to the run's workspace.
+        "task": _RunScopedReads(
+            task_for_run, _ShortLivedDataAccess(lambda s: TaskService(s)), group_context
+        ),
+        "agent": _RunScopedReads(
+            agent_for_run,
+            _ShortLivedDataAccess(lambda s: AgentService(s)),
+            group_context,
+        ),
+        "crew": _RunScopedReads(
+            crew_for_run, _ShortLivedDataAccess(lambda s: CrewService(s)), group_context
+        ),
         "execution_history": _ShortLivedDataAccess(lambda s: ExecutionService(s)),
     }

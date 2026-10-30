@@ -152,15 +152,6 @@ class TestToolFactoryAsyncMethods:
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_cleanup_after_crew_execution(self):
-        """Test cleanup_after_crew_execution method"""
-        config = {"test": "value"}
-        factory = ToolFactory(config)
-
-        # Should complete without errors
-        await factory.cleanup_after_crew_execution()
-
 
 class TestToolFactorySyncMethods:
     """Test ToolFactory synchronous methods"""
@@ -197,34 +188,6 @@ class TestToolFactorySyncMethods:
 
         assert result is None
 
-    def test_register_tool_implementation(self):
-        """Test register_tool_implementation method"""
-        config = {"test": "value"}
-        factory = ToolFactory(config)
-
-        mock_tool_class = Mock()
-        tool_name = "CustomTool"
-
-        factory.register_tool_implementation(tool_name, mock_tool_class)
-
-        assert factory._tool_implementations[tool_name] == mock_tool_class
-
-    def test_register_tool_implementations_multiple(self):
-        """Test register_tool_implementations with multiple tools"""
-        config = {"test": "value"}
-        factory = ToolFactory(config)
-
-        implementations = {
-            "CustomTool1": Mock(),
-            "CustomTool2": Mock(),
-            "CustomTool3": Mock(),
-        }
-
-        factory.register_tool_implementations(implementations)
-
-        for tool_name, tool_class in implementations.items():
-            assert factory._tool_implementations[tool_name] == tool_class
-
     def test_cleanup_method(self):
         """Test cleanup method"""
         config = {"test": "value"}
@@ -244,17 +207,6 @@ class TestToolFactorySyncMethods:
 
     # Removed complex tests that require database connections or event loop management
 
-    def test_update_tool_config_tool_not_found(self):
-        """Test update_tool_config when tool is not found"""
-        config = {"test": "value"}
-        factory = ToolFactory(config)
-
-        config_update = {"new_config": "value"}
-
-        result = factory.update_tool_config("Non-existent Tool", config_update)
-
-        assert result is False
-
 
 class TestToolFactoryToolCreation:
     """Test ToolFactory tool creation methods"""
@@ -272,42 +224,6 @@ class TestToolFactoryToolCreation:
             result = self.factory.create_tool(tool_identifier)
 
             assert result is None
-
-
-class TestToolFactoryRegistration:
-    """Test ToolFactory tool registration methods"""
-
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.config = {"test": "value"}
-        self.factory = ToolFactory(self.config)
-
-    def test_register_tool_implementation(self):
-        """Test register_tool_implementation"""
-        tool_name = "TestTool"
-        tool_class = Mock()
-
-        self.factory.register_tool_implementation(tool_name, tool_class)
-
-        assert self.factory._tool_implementations[tool_name] == tool_class
-
-    def test_register_tool_implementations(self):
-        """Test register_tool_implementations with multiple tools"""
-        implementations = {"Tool1": Mock(), "Tool2": Mock(), "Tool3": Mock()}
-
-        self.factory.register_tool_implementations(implementations)
-
-        for tool_name, tool_class in implementations.items():
-            assert self.factory._tool_implementations[tool_name] == tool_class
-
-    def test_register_tool_implementations_empty_dict(self):
-        """Test register_tool_implementations with empty dict"""
-        implementations = {}
-
-        self.factory.register_tool_implementations(implementations)
-
-        # Should not raise any errors
-        assert True
 
 
 class TestToolFactoryUtilityMethods:

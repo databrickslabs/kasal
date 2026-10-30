@@ -1,7 +1,7 @@
 """Resolve a run's effort against the actual served model, on both harnesses."""
 
 import logging
-from typing import Any
+from typing import Any, Optional, Union
 
 from src.core.llm.effort import EFFORT_PROFILES, resolve_effort
 from src.core.llm.model_capabilities import ReasoningStyle, model_capability
@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 def apply_execution_effort(
-    llm: Any, spec: dict, label: str = "", catalog_output_cap=None
+    llm: Any,
+    spec: dict,
+    label: str = "",
+    catalog_output_cap: Optional[Union[int, str]] = None,
 ) -> None:
     raw = spec.get("execution_effort")
     if raw is None or llm is None or isinstance(llm, str):

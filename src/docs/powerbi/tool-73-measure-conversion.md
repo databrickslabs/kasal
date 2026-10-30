@@ -104,6 +104,7 @@ Tool 73 is Phase 1 of the full migration. Its output (`measures_json`) feeds dir
 ## Notes
 
 - Also supports YAML as inbound format, useful if you already have measure definitions in YAML and want to convert to SQL
+- Measures the DAX patterns cannot translate are **gaps**, not output: in SQL output they get `sql: null`, `status: "gap"` and a `gap_reason`; in UC Metrics output they get a `# GAP: <measure>` comment instead of an `expr:`. The tool's answer starts with "Partial conversion: N of M measures were translated" and lists each gap with its reason, so a partial conversion never reads as a complete one
 - For the full UCMV pipeline, use this alongside Tool 74 (M-Query) and Tool 75 (Relationships)
 - See the [end-to-end UCMV migration guide](./ucmv-migration-guide.md) for the complete flow
 

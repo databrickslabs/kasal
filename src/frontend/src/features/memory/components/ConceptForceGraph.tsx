@@ -41,6 +41,8 @@ export interface ConceptGraphEdge {
   source: string;
   target: string;
   weight: number;
+  /** Written along the line when set (the ontology's relation names). */
+  label?: string;
 }
 
 interface PhysicsNode extends ConceptGraphNode {
@@ -55,7 +57,25 @@ interface PhysicsLink {
   source: string | PhysicsNode;
   target: string | PhysicsNode;
   weight: number;
+  label?: string;
 }
+
+/** The words around the graph. Defaults describe memory concepts; the
+ *  ontology view passes its own, since its nodes are entities, not tags. */
+export interface GraphLabels {
+  empty: string;
+  tip: (node: ConceptGraphNode) => string;
+  connected: string;
+  legend: string[];
+}
+
+const DEFAULT_LABELS: GraphLabels = {
+  empty: 'No concepts yet — run a crew with memory enabled.',
+  tip: (node) =>
+    `${node.count} ${node.count === 1 ? 'record' : 'records'} · importance ${node.avgImportance.toFixed(2)}`,
+  connected: 'connected concepts',
+  legend: ['size = frequency', 'color = concept', 'ring = importance', 'click = filter'],
+};
 
 interface Props {
   nodes: ConceptGraphNode[];
@@ -64,6 +84,7 @@ interface Props {
   onToggleNode: (id: string) => void;
   importanceColor: (value: number) => string;
   height?: number;
+  labels?: GraphLabels;
 }
 
 // Only render edges whose weight ≥ this fraction of the maximum.
@@ -140,6 +161,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
   onToggleNode,
   importanceColor,
   height = 520,
+  labels = DEFAULT_LABELS,
 }) => {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
@@ -147,12 +169,13 @@ export const ConceptForceGraph: React.FC<Props> = ({
   const taskPalette = kasalNodePalette(dark, 'task');
   // Read current colours inside the persistent canvas callbacks. Changing the
   // theme should repaint the graph without resetting node positions or pins.
-  const colorsRef = useRef({ fills: [] as string[], text: '', edge: '', focus: '', shadow: '' });
+  const colorsRef = useRef({ fills: [] as string[], text: '', edge: '', focus: '', shadow: '', paper: '' });
   useEffect(() => {
     colorsRef.current = {
       fills: [agentPalette.surface, taskPalette.surface, agentPalette.badge, taskPalette.badge],
       text: theme.palette.text.primary, edge: theme.palette.text.secondary,
       focus: taskPalette.accent, shadow: alpha(theme.palette.common.black, dark ? 0.22 : 0.08),
+      paper: theme.palette.background.paper,
     };
   }, [theme, agentPalette.surface, agentPalette.badge, taskPalette.surface, taskPalette.badge, taskPalette.accent, dark]);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -322,6 +345,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
       source: typeof e.source === 'object' ? (e.source as PhysicsNode).id : e.source,
       target: typeof e.target === 'object' ? (e.target as PhysicsNode).id : e.target,
       weight: e.weight,
+      label: e.label,
     }));
     g.graphData({ nodes: physicsNodes, links: links as PhysicsLink[] });
   }, [physicsNodes, displayEdges]);
@@ -329,7 +353,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
   // ---- Canvas drawing ----
 
   const drawLink = useCallback(
-    (link: PhysicsLink, ctx: CanvasRenderingContext2D) => {
+    (link: PhysicsLink, ctx: CanvasRenderingContext2D, scale: number) => {
       const a = link.source as PhysicsNode;
       const b = link.target as PhysicsNode;
       if (typeof a !== 'object' || typeof b !== 'object') return;
@@ -351,6 +375,22 @@ export const ConceptForceGraph: React.FC<Props> = ({
       ctx.lineWidth   = 0.5 + wRatio * 1.6;
       ctx.lineCap     = 'round';
       ctx.stroke();
+
+      // Relation name at the midpoint, on a backing so the line does not
+      // strike through it. Skipped when zoomed far out, where it is noise.
+      if (link.label && scale > 0.45 && !dimmed) {
+        const size = 10 / Math.max(scale, 1);
+        ctx.font = `${size}px Inter, system-ui, sans-serif`;
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        const w  = ctx.measureText(link.label).width + size * 0.8;
+        ctx.fillStyle = colorsRef.current.paper;
+        ctx.fillRect(mx - w / 2, my - size * 0.75, w, size * 1.5);
+        ctx.fillStyle    = colorsRef.current.edge;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(link.label, mx, my);
+      }
     },
     [],
   );
@@ -517,7 +557,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
           }}
         >
           <Typography variant="body2">
-            No concepts yet — run a crew with memory enabled.
+            {labels.empty}
           </Typography>
         </Box>
       )}
@@ -546,12 +586,11 @@ export const ConceptForceGraph: React.FC<Props> = ({
             {tipNode.label}
           </Typography>
           <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
-            {tipNode.count} {tipNode.count === 1 ? 'record' : 'records'}
-            {' · '}importance {tipNode.avgImportance.toFixed(2)}
+            {labels.tip(tipNode)}
           </Typography>
           {tipNbrCount > 0 && (
             <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
-              {tipNbrCount} connected concepts
+              {tipNbrCount} {labels.connected}
             </Typography>
           )}
         </Box>
@@ -577,13 +616,12 @@ export const ConceptForceGraph: React.FC<Props> = ({
           flexWrap: 'wrap', maxWidth: 'calc(100% - 16px)',
         }}
       >
-        <span>size = frequency</span>
-        <span style={{ opacity: 0.35 }}>·</span>
-        <span>color = concept</span>
-        <span style={{ opacity: 0.35 }}>·</span>
-        <span>ring = importance</span>
-        <span style={{ opacity: 0.35 }}>·</span>
-        <span>click = filter</span>
+        {labels.legend.map((item, i) => (
+          <React.Fragment key={item}>
+            {i > 0 && <span style={{ opacity: 0.35 }}>·</span>}
+            <span>{item}</span>
+          </React.Fragment>
+        ))}
       </Box>
 
       {/* Zoom / view controls */}

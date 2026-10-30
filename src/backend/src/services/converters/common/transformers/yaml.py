@@ -7,7 +7,7 @@ from ...base.models import KPI, KPIDefinition, QueryFilter, Structure
 
 
 class YAMLKPIParser:
-    def __init__(self):
+    def __init__(self) -> None:
         self.parsed_definitions: List[KPIDefinition] = []
 
     def parse_file(self, file_path: Union[str, Path]) -> KPIDefinition:
@@ -58,12 +58,7 @@ class YAMLKPIParser:
         if "structures" in data:
             structures = {}
             for struct_name, struct_data in data["structures"].items():
-                # Debug: check what filter data we're getting from YAML
                 filter_data = struct_data.get("filter", [])
-                with open("/tmp/sql_debug.log", "a") as f:
-                    f.write(
-                        f"YAML Parser - Structure {struct_name}: raw filter data = {filter_data}\n"
-                    )
 
                 # Create structure - bypass constructor to avoid Pydantic alias issues
                 structure = Structure.model_validate(
@@ -77,11 +72,6 @@ class YAMLKPIParser:
                         "variables": struct_data.get("variables"),
                     }
                 )
-
-                with open("/tmp/sql_debug.log", "a") as f:
-                    f.write(
-                        f"YAML Parser - Structure {struct_name}: created with filters = {structure.filters}\n"
-                    )
 
                 structures[struct_name] = structure
 
@@ -121,11 +111,3 @@ class YAMLKPIParser:
             structures=structures,
             kpis=kbis,
         )
-
-    def get_all_kbis(self) -> List[tuple[KPIDefinition, KPI]]:
-        """Get all KBIs from all parsed definitions as (definition, kbi) tuples."""
-        all_kbis = []
-        for definition in self.parsed_definitions:
-            for kpi in definition.kpis:
-                all_kbis.append((definition, kpi))
-        return all_kbis

@@ -180,23 +180,6 @@ class TestSSEConnectionManager:
         # Should handle gracefully without raising
         assert count == 0
 
-    def test_get_connection_count_global(self):
-        """get_connection_count returns total connections."""
-        manager = SSEConnectionManager()
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-2")
-        assert manager.get_connection_count() == 2
-
-    def test_get_connection_count_for_specific_job(self):
-        """get_connection_count returns count for specific job."""
-        manager = SSEConnectionManager()
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-2")
-        assert manager.get_connection_count("job-1") == 2
-        assert manager.get_connection_count("job-2") == 1
-        assert manager.get_connection_count("nonexistent") == 0
-
     def test_get_statistics(self):
         """get_statistics returns connection summary."""
         manager = SSEConnectionManager()

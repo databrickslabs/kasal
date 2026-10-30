@@ -38,7 +38,7 @@ async def get_llm_logs(
         None, description="Filter by endpoint, 'all' or None for all endpoints"
     ),
     log_service: LLMLogService = Depends(get_log_service),
-):
+) -> List[LLMLogResponse]:
     """
     Get LLM logs with pagination and optional endpoint filtering for the current group.
 
@@ -69,7 +69,7 @@ async def count_llm_logs(
         None, description="Filter by endpoint, 'all' or None for all endpoints"
     ),
     log_service: LLMLogService = Depends(get_log_service),
-):
+) -> int:
     """
     Count LLM logs with optional endpoint filtering for the current group.
 
@@ -92,7 +92,7 @@ async def count_llm_logs(
 async def get_unique_endpoints(
     group_context: GroupContextDep,
     log_service: LLMLogService = Depends(get_log_service),
-):
+) -> List[str]:
     """
     Get list of unique endpoints in the logs for the current group.
 
@@ -117,7 +117,7 @@ async def get_log_stats(
         30, ge=1, le=365, description="Number of days to include in stats"
     ),
     log_service: LLMLogService = Depends(get_log_service),
-):
+) -> Dict[str, Any]:
     """
     Get statistics about LLM usage for the current group.
 

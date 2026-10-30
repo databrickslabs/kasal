@@ -3,10 +3,13 @@ SQL Aggregation Builders for YAML2DAX SQL Translation
 Provides comprehensive SQL aggregation support for various SQL dialects
 """
 
+import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..models import SQLAggregationType, SQLDialect
+
+logger = logging.getLogger(__name__)
 
 
 class SQLAggregationBuilder:
@@ -41,7 +44,7 @@ class SQLAggregationBuilder:
         agg_type: SQLAggregationType,
         column_name: str,
         table_name: str,
-        kbi_definition: Dict[str, Any] = None,
+        kbi_definition: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Build SQL aggregation expression
@@ -432,37 +435,6 @@ GROUP BY {", ".join(middle_group_by)}"""
         # DATABRICKS and STANDARD both support window functions
         return True
 
-    def build_conditional_aggregation(
-        self, base_aggregation: str, conditions: List[str], table_name: str
-    ) -> str:
-        """Build conditional aggregation with CASE WHEN logic"""
-        if not conditions:
-            return base_aggregation
-
-        # Combine conditions with AND
-        combined_condition = " AND ".join(conditions)
-
-        # Extract the aggregation function and column from base aggregation
-        # This is a simplified approach - real implementation would be more robust
-        if self.dialect == SQLDialect.DATABRICKS:
-            # Use FILTER clause where supported
-            return f"{base_aggregation} FILTER (WHERE {combined_condition})"
-        else:
-            # Use CASE WHEN for other dialects
-            # Extract column reference from base aggregation
-            column_pattern = r"\(([^)]+)\)"
-            match = re.search(column_pattern, base_aggregation)
-
-            if match:
-                column_ref = match.group(1)
-                agg_function = base_aggregation[: base_aggregation.find("(")]
-                case_expr = (
-                    f"CASE WHEN {combined_condition} THEN {column_ref} ELSE NULL END"
-                )
-                return f"{agg_function}({case_expr})"
-            else:
-                return base_aggregation
-
     def build_exception_handling(
         self, base_expression: str, exceptions: List[Dict[str, Any]]
     ) -> str:
@@ -509,8 +481,8 @@ class SQLFilterProcessor:
     def process_filters(
         self,
         filters: List[str],
-        variables: Dict[str, Any] = None,
-        definition_filters: Dict[str, Any] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        definition_filters: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         """Process a list of filters for SQL"""
         if variables is None:
@@ -524,28 +496,20 @@ class SQLFilterProcessor:
             try:
                 # Handle special $query_filter expansion
                 if filter_condition.strip() == "$query_filter":
-                    with open("/tmp/sql_debug.log", "a") as f:
-                        f.write(
-                            f"SQLFilterProcessor: Found $query_filter, definition_filters = {definition_filters}\n"
-                        )
-
                     # Expand $query_filter into individual filter conditions
                     if "query_filter" in definition_filters:
                         query_filters = definition_filters["query_filter"]
-                        with open("/tmp/sql_debug.log", "a") as f:
-                            f.write(
-                                f"SQLFilterProcessor: Expanding query_filters = {query_filters}\n"
-                            )
-
                         if isinstance(query_filters, dict):
                             for filter_name, filter_value in query_filters.items():
                                 processed = self._process_single_filter(
                                     filter_value, variables
                                 )
-                                with open("/tmp/sql_debug.log", "a") as f:
-                                    f.write(
-                                        f"SQLFilterProcessor: Processed {filter_name}: {filter_value} -> {processed}\n"
-                                    )
+                                logger.debug(
+                                    "query filter %s: %s -> %s",
+                                    filter_name,
+                                    filter_value,
+                                    processed,
+                                )
                                 if processed:
                                     processed_filters.append(processed)
                         else:
@@ -555,10 +519,9 @@ class SQLFilterProcessor:
                             if processed:
                                 processed_filters.append(processed)
                     else:
-                        with open("/tmp/sql_debug.log", "a") as f:
-                            f.write(
-                                "SQLFilterProcessor: No 'query_filter' found in definition_filters\n"
-                            )
+                        logger.debug(
+                            "$query_filter used, but the definition has no query_filter"
+                        )
                     continue
 
                 processed = self._process_single_filter(filter_condition, variables)
@@ -694,7 +657,7 @@ def detect_and_build_sql_aggregation(
 
 
 def _detect_sql_aggregation_type(
-    formula: str, aggregation_hint: str = None
+    formula: str, aggregation_hint: Optional[str] = None
 ) -> SQLAggregationType:
     """Detect SQL aggregation type from formula or hint"""
     if aggregation_hint:

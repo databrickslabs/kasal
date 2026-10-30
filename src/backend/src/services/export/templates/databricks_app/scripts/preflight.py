@@ -97,7 +97,7 @@ def stop_server(proc: subprocess.Popen):
 def check_health(base_url: str) -> bool:
     try:
         req = urllib.request.Request(f"{base_url}/health")
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # fmt: skip # localhost URL of the app this script started — nosemgrep: tmp.databricks.ssrf.requests-user-url
             data = json.loads(resp.read())
             return data.get("status") == "healthy"
     except Exception as e:
@@ -117,7 +117,7 @@ def check_invocations(base_url: str, retries: int = 2) -> bool:
                 data=payload,
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:  # fmt: skip # localhost URL of the app this script started — nosemgrep: tmp.databricks.ssrf.requests-user-url
                 data = json.loads(resp.read())
                 # Check that we got a response with output
                 if "output" in data and len(data["output"]) > 0:

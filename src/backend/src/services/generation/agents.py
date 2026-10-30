@@ -8,9 +8,8 @@ structured CrewAI agent configurations.
 
 import json
 import logging
-import os
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, ContextManager, Dict, List, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.repositories.log_repository import LLMLogRepository
@@ -77,8 +76,8 @@ class AgentGenerationService:
     async def generate_agent(
         self,
         prompt_text: str,
-        model: str = None,
-        tools: List[str] = None,
+        model: Optional[str] = None,
+        tools: Optional[List[str]] = None,
         group_context: Optional[GroupContext] = None,
         fast_planning: bool = True,
         available_tools: Optional[List[Dict]] = None,
@@ -99,7 +98,7 @@ class AgentGenerationService:
         if mlflow_on:
             from src.services.mlflow.tracing import start_root_trace
 
-            trace_ctx = start_root_trace(
+            trace_ctx: ContextManager[Any] = start_root_trace(
                 "agent_generation",
                 inputs={"prompt": prompt_text, "model": model or "default"},
             )
@@ -121,8 +120,8 @@ class AgentGenerationService:
     async def _generate_agent_impl(
         self,
         prompt_text: str,
-        model: str = None,
-        tools: List[str] = None,
+        model: Optional[str] = None,
+        tools: Optional[List[str]] = None,
         group_context: Optional[GroupContext] = None,
         fast_planning: bool = True,
         available_tools: Optional[List[Dict]] = None,
@@ -135,7 +134,7 @@ class AgentGenerationService:
 
         Args:
             prompt_text: Natural language description of the agent
-            model: Model to use for generation, defaults to AGENT_MODEL or the engine default
+            model: Model to use for generation, defaults to the engine default model
             tools: List of tools available to the agent (ignored — use available_tools)
             group_context: Optional group context for multi-group isolation
             available_tools: Optional list of dicts with 'name' and 'description' for tool selection
@@ -148,7 +147,7 @@ class AgentGenerationService:
             Exception: For any other errors during generation
         """
         # Default values
-        model = model or os.getenv("AGENT_MODEL", DEFAULT_ENGINE_MODEL)
+        model = model or DEFAULT_ENGINE_MODEL
         tools = tools or []
 
         logger.info(f"Generating agent with model: {model}")
@@ -226,7 +225,7 @@ class AgentGenerationService:
         prompt_text: str,
         system_message: str,
         model: str,
-        documentation_context: str = None,
+        documentation_context: Optional[str] = None,
         fast_planning: bool = False,
         group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
@@ -277,7 +276,7 @@ class AgentGenerationService:
             raise ValueError(f"Failed to generate agent configuration: {str(e)}")
 
     def _process_agent_config(
-        self, setup: Dict[str, Any], model: str, tools: List[str] = None
+        self, setup: Dict[str, Any], model: str, tools: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Process and validate agent configuration.

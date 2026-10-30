@@ -15,7 +15,7 @@ describe('settings navigation permissions', () => {
     expect(getSettingsSections('workspace', admin).map(item => item.id)).toContain('models');
     expect(getSettingsSections('system', admin)).toEqual([]);
     const system = getSettingsSections('system', { ...admin, isSystemAdmin: true }).map(item => item.id);
-    expect(system).toEqual(['models', 'tools', 'mcp', 'remote-agents', 'access', 'engines', 'database']);
+    expect(system).toEqual(['models', 'tools', 'ui', 'mcp', 'remote-agents', 'access', 'engines', 'database']);
     expect(system).not.toContain('api-keys');
   });
   it('uses one unique stable ID per section across scopes', () => {

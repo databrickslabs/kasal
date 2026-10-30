@@ -5,7 +5,7 @@ Tests cover all public methods:
   - __init__ (constructor logic)
   - export_to_volume (SQLite, PostgreSQL, unsupported, error paths)
   - import_from_volume (SQLite, PostgreSQL, validation, error paths)
-  - list_backups (happy path, error, auth fallback)
+  - list_backups: see test_database_management_backups.py
   - get_database_info (SQLite, PostgreSQL, Lakebase, unsupported, error paths)
   - check_user_permission (happy path, exception fallback)
 """
@@ -26,20 +26,19 @@ def mock_session():
     """Create a mock async database session."""
     session = AsyncMock()
     session.bind = None
+    session.get_bind = MagicMock(
+        return_value=SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    )
     return session
 
 
 @pytest.fixture
 def mock_repository():
-    """Create a mock DatabaseBackupRepository."""
+    """A mock DatabaseBackupRepository; PostgreSQL sessions are in 'public'."""
     repo = AsyncMock()
-    repo.create_sqlite_backup = AsyncMock()
-    repo.create_postgres_backup = AsyncMock()
-    repo.restore_sqlite_backup = AsyncMock()
-    repo.restore_postgres_backup = AsyncMock()
+    repo.get_current_schema = AsyncMock(return_value="public")
     repo.list_backups = AsyncMock(return_value=[])
     repo.cleanup_old_backups = AsyncMock(return_value={"success": True, "deleted": []})
-    repo.get_database_info = AsyncMock()
     return repo
 
 
@@ -709,9 +708,9 @@ class TestExportToVolume:
 
     @pytest.mark.asyncio
     async def test_export_general_exception(self, service):
-        """Unhandled exceptions are caught and returned as error dict."""
+        """Unhandled exceptions in the export body are returned as error dict."""
         with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+            "src.services.databricks.lakebase.management.os.path.isabs",
             side_effect=RuntimeError("boom"),
         ):
             result = await service.export_to_volume(catalog="c", schema="s")
@@ -1126,9 +1125,9 @@ class TestImportFromVolume:
 
     @pytest.mark.asyncio
     async def test_import_general_exception(self, service):
-        """Unhandled exceptions are caught and returned as error dict."""
+        """Unhandled exceptions in the import body are returned as error dict."""
         with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+            "src.services.databricks.lakebase.management.os.path.isabs",
             side_effect=RuntimeError("kaboom"),
         ):
             result = await service.import_from_volume(
@@ -1137,109 +1136,6 @@ class TestImportFromVolume:
 
         assert result["success"] is False
         assert "kaboom" in result["error"]
-
-
-# ===================================================================
-# list_backups Tests
-# ===================================================================
-
-
-class TestListBackups:
-    """Tests for DatabaseManagementService.list_backups."""
-
-    @pytest.mark.asyncio
-    async def test_list_backups_success(self, service, mock_repository):
-        """Successful listing formats backups and returns correct structure."""
-        mock_repository.list_backups.return_value = [
-            {
-                "filename": "kasal_backup_20240601_120000.db",
-                "size": 1048576,
-                "created_at": datetime(2024, 6, 1, 12, 0, 0),
-                "backup_type": "sqlite",
-            },
-            {
-                "filename": "kasal_backup_20240501_100000.sql",
-                "size": 2097152,
-                "created_at": datetime(2024, 5, 1, 10, 0, 0),
-                "backup_type": "postgres_sql",
-            },
-        ]
-
-        result = await service.list_backups(catalog="c", schema="s", volume_name="v")
-
-        assert result["success"] is True
-        assert result["total_backups"] == 2
-        assert result["volume_path"] == "c.s.v"
-        assert len(result["backups"]) == 2
-        assert result["backups"][0]["filename"] == "kasal_backup_20240601_120000.db"
-        assert result["backups"][0]["size_mb"] == 1.0
-        assert result["backups"][0]["backup_type"] == "sqlite"
-        assert "databricks_url" in result["backups"][0]
-
-    @pytest.mark.asyncio
-    async def test_list_backups_empty(self, service, mock_repository):
-        """Empty backup list returns correctly."""
-        mock_repository.list_backups.return_value = []
-
-        result = await service.list_backups(catalog="c", schema="s", volume_name="v")
-
-        assert result["success"] is True
-        assert result["total_backups"] == 0
-        assert result["backups"] == []
-
-    @pytest.mark.asyncio
-    async def test_list_backups_workspace_url_fallback(self, service, mock_repository):
-        """When auth fails, uses placeholder workspace URL in backup URLs."""
-        mock_repository.list_backups.return_value = [
-            {
-                "filename": "kasal_backup_20240601_120000.db",
-                "size": 1024,
-                "created_at": datetime(2024, 6, 1),
-                "backup_type": "sqlite",
-            }
-        ]
-
-        result = await service.list_backups(catalog="c", schema="s", volume_name="v")
-
-        assert result["success"] is True
-        assert "your-workspace" in result["backups"][0]["databricks_url"]
-
-    @pytest.mark.asyncio
-    async def test_list_backups_with_workspace_url_from_auth(
-        self, service, mock_repository
-    ):
-        """When asyncio.run(get_auth_context()) returns a workspace URL, it is used."""
-        import asyncio
-
-        mock_repository.list_backups.return_value = [
-            {
-                "filename": "backup.db",
-                "size": 1024,
-                "created_at": datetime(2024, 6, 1),
-                "backup_type": "sqlite",
-            }
-        ]
-
-        # The list_backups method does `import asyncio; asyncio.run(get_auth_context())`
-        # which fails in a running loop.  We patch asyncio.run at the builtins level.
-        mock_auth = SimpleNamespace(workspace_url="https://my-ws.databricks.com/")
-        with patch.object(asyncio, "run", return_value=mock_auth):
-            result = await service.list_backups(
-                catalog="c", schema="s", volume_name="v"
-            )
-
-        assert result["success"] is True
-        assert "my-ws" in result["backups"][0]["databricks_url"]
-
-    @pytest.mark.asyncio
-    async def test_list_backups_exception(self, service, mock_repository):
-        """Repository exception is caught and returned as error."""
-        mock_repository.list_backups.side_effect = RuntimeError("connection lost")
-
-        result = await service.list_backups(catalog="c", schema="s", volume_name="v")
-
-        assert result["success"] is False
-        assert "connection lost" in result["error"]
 
 
 # ===================================================================

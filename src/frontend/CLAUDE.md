@@ -18,7 +18,7 @@ Frontend-specific instructions for Claude Code when working in the frontend dire
 - React 18 with TypeScript, bundled with **Vite** (not Create React App)
 - Material-UI (MUI) for components
 - ReactFlow for workflow visualization
-- **Zustand** for state management (primary; some legacy Redux Toolkit still present)
+- **Zustand** for state management (the only store library; there is no Redux)
 - Axios for HTTP requests, wrapped by `apiClient`
 - **Vitest** + React Testing Library for tests (no Cypress in this repo)
 
@@ -56,6 +56,12 @@ src/
 - Follow Material-UI theming
 - Keep components focused and single-purpose
 - Extract reusable logic into custom hooks
+- **Every `Suspense` around `lazy()` components sits inside an `ErrorBoundary`**
+  (`shared/errors/ErrorBoundary.tsx`; `LazyDialogBoundary` in
+  `features/executions/components/lazyRunDialogs.tsx` for dialogs). A chunk that
+  fails to load, usually after a redeploy, otherwise unmounts the whole app. The
+  same goes for a dynamic `import()` in a handler: catch it and tell the user
+  (see `features/executions/components/downloadRunPDF.ts`), never `void` it.
 
 ## Documentation Management
 
@@ -103,7 +109,14 @@ array in `src/features/help/documentation/Documentation.tsx`.
 
 ## Environment
 
-- Node.js 18+ recommended
+- Node.js 22 (the version CI uses)
 - React 18 with TypeScript, Vite dev server (HMR)
 - Development server auto-refreshes on file changes
 - Environment variables use Vite's `VITE_` prefix (e.g. `VITE_API_URL`); `.env` is not committed
+- The dev UI talks to the backend on `KASAL_PORT` (default 8000), the same variable
+  `run.sh` reads: `KASAL_PORT=8001 npm start`. `vite.config.ts` resolves it
+  (`VITE_KASAL_PORT`, then `KASAL_PORT`, then 8000) for the `/api` proxy and exposes it
+  as `import.meta.env.VITE_KASAL_PORT`; build URLs with `shared/api/backendOrigin.ts`,
+  never a literal `localhost:8000`
+- `VITE_DEV_USER_EMAIL` (default `dev@localhost`) is the identity the dev client sends as
+  `X-Forwarded-Email`

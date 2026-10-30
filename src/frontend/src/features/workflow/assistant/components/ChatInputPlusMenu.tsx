@@ -1,9 +1,11 @@
+import { useShallow } from 'zustand/react/shallow';
 import type { PopoverActions } from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
 import { Badge, Box, CircularProgress, Divider, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
 import { Add as AddIcon, ArrowBack as BackIcon, AttachFile as AttachFileIcon, Check as CheckIcon, ChevronRight as ChevronRightIcon } from '@mui/icons-material';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { ReasoningModelCatalogue, useReasoningSupport } from '../../../../hooks/global/useReasoningSupport';
+import { useRefreshModelsWhen } from '../../../../hooks/global/useEnabledModels';
 
 import CapabilitiesPicker from '../../../tools/components/configuration/CapabilitiesPicker';
 import EffortPicker, { EffortModel } from '../../../../shared/components/EffortPicker';
@@ -94,8 +96,17 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
   const popoverActions = useRef<PopoverActions>(null);
   const menuObserver = useRef<ResizeObserver | null>(null);
   const open = Boolean(anchorEl);
+  // Opening the menu picks up model changes made elsewhere (throttled).
+  useRefreshModelsWhen(open);
   const { processType, setProcessType, managerLLM, setManagerLLM,
-    reasoningConfig, setReasoningConfig } = useCrewExecutionStore();
+    reasoningConfig, setReasoningConfig } = useCrewExecutionStore(useShallow(state => ({
+    processType: state.processType,
+    setProcessType: state.setProcessType,
+    managerLLM: state.managerLLM,
+    setManagerLLM: state.setManagerLLM,
+    reasoningConfig: state.reasoningConfig,
+    setReasoningConfig: state.setReasoningConfig,
+  })));
   const { agentModelNames } = useReasoningSupport(models, selectedModel);
   const hasNonDefault = processType !== 'sequential' || Boolean(reasoningConfig.execution_effort);
   const effort = reasoningConfig.execution_effort;

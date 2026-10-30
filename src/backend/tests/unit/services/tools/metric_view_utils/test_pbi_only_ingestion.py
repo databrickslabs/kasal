@@ -19,7 +19,6 @@ from src.services.tools.metric_view_utils.pbi_only_ingestion import (
     detect_pbi_only_source,
 )
 
-
 # ---------------------------------------------------------------------------
 # OTC-derived M-query fixtures
 # ---------------------------------------------------------------------------
@@ -27,7 +26,7 @@ from src.services.tools.metric_view_utils.pbi_only_ingestion import (
 # SKU Active Or NotActive: Excel file on SharePoint
 MQUERY_EXCEL_SHAREPOINT = """
 let
-    Source = SharePoint.Files("https://cchbc.sharepoint.com/sites/Supply", [ApiVersion = 15]),
+    Source = SharePoint.Files("https://acme.sharepoint.example.com/sites/Supply", [ApiVersion = 15]),
     #"OTC inactiveness" = Source{[Name="OTC inactiveness.xlsx", Kind="File"]}[Content],
     #"Imported Excel" = Excel.Workbook(#"OTC inactiveness", null, true),
     Data = #"Imported Excel"{[Item="Sheet1",Kind="Sheet"]}[Data]
@@ -52,8 +51,8 @@ let
     Source = #table(
         {"CompanyCode", "CompanyName"},
         {
-            {"1000", "CCHBC Austria GmbH"},
-            {"2000", "CCHBC Greece SA"}
+            {"1000", "the reference customer Austria GmbH"},
+            {"2000", "the reference customer Greece SA"}
         }
     )
 in
@@ -81,8 +80,8 @@ in
 MQUERY_DATABRICKS = """
 let
     Source = DatabricksMultiCloud.Catalogs("https://adb-1234.azuredatabricks.net"),
-    db = Source{[Name="dc_datalake_prod_001",Kind="Database"]}[Data],
-    schema = db{[Name="udm_datamart_cust_exp",Kind="Schema"]}[Data],
+    db = Source{[Name="acme_prod",Kind="Database"]}[Data],
+    schema = db{[Name="acme_datamart_cust_exp",Kind="Schema"]}[Data],
     table = schema{[Name="cust_exp_dim_company",Kind="Table"]}[Data]
 in
     table
@@ -141,7 +140,7 @@ def test_detect_web_contents():
 
 def test_detect_json_document_no_database():
     # Pure Json.Document without a web endpoint
-    mq = 'let Source = Json.Document("[{\"a\":1}]") in Source'
+    mq = 'let Source = Json.Document("[{"a":1}]") in Source'
     result = detect_pbi_only_source(mq)
     assert result is not None
     assert result.kind == PBIOnlyKind.JSON_DOCUMENT
@@ -213,20 +212,20 @@ def test_web_url_extracted():
 def test_build_ingestion_task_excel():
     source = PBIOnlySource(
         kind=PBIOnlyKind.EXCEL_WORKBOOK,
-        url="https://cchbc.sharepoint.com/sites/Supply",
+        url="https://acme.sharepoint.example.com/sites/Supply",
         description="Excel on SharePoint: OTC inactiveness.xlsx",
     )
     task = build_ingestion_task(
         "SKU Active Or NotActive",
         PBIOnlyKind.EXCEL_WORKBOOK,
-        "dc_adb-landing-zone-002",
+        "acme_adb-landing-zone-002",
         "idor",
         source=source,
     )
 
     assert isinstance(task, IngestionTask)
     assert task.table_name == "SKU Active Or NotActive"
-    assert "dc_adb-landing-zone-002" in task.uc_target
+    assert "acme_adb-landing-zone-002" in task.uc_target
     assert "idor" in task.uc_target
     assert task.kind == PBIOnlyKind.EXCEL_WORKBOOK
     assert task.recommended_approach == "dax_evaluate"
@@ -242,14 +241,18 @@ def test_build_ingestion_task_tmdl_expression():
     task = build_ingestion_task(
         "CompanyCodesMapping",
         PBIOnlyKind.TMDL_EXPRESSION,
-        "dc_adb-landing-zone-002",
+        "acme_adb-landing-zone-002",
         "idor",
         source=source,
     )
 
     assert task.recommended_approach == "tmdl_decode"
     assert "CompanyCodesMapping" in task.snapshot_loader_stub
-    assert "Binary.FromText" in task.snapshot_loader_stub or "getDefinition" in task.snapshot_loader_stub or "expressions.tmdl" in task.snapshot_loader_stub
+    assert (
+        "Binary.FromText" in task.snapshot_loader_stub
+        or "getDefinition" in task.snapshot_loader_stub
+        or "expressions.tmdl" in task.snapshot_loader_stub
+    )
 
 
 def test_build_ingestion_task_web_contents():
@@ -310,7 +313,7 @@ def test_build_ingestion_task_uc_table_suffix_override():
 # ---------------------------------------------------------------------------
 
 
-def test_stub_contains_create_or_replace_table(  ):
+def test_stub_contains_create_or_replace_table():
     task = build_ingestion_task(
         "MyTable",
         PBIOnlyKind.EXCEL_WORKBOOK,

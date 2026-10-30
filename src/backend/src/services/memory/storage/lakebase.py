@@ -22,11 +22,12 @@ import os
 import re
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, Coroutine, TypeVar, cast
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
@@ -53,7 +54,7 @@ _SAFE_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_table_name(name: str) -> str:
-    if not name or not _SAFE_TABLE_NAME.match(str(name)):
+    if not name or not _SAFE_TABLE_NAME.fullmatch(str(name)):
         raise ValueError(f"Invalid memory table name: {name!r}")
     return name
 
@@ -79,6 +80,8 @@ if not os.environ.get("USE_NULLPOOL"):
 
 
 logger = LoggerManager.get_instance().crew
+
+_T = TypeVar("_T")
 
 
 class LakebaseStorageBackend:
@@ -174,6 +177,7 @@ class LakebaseStorageBackend:
         limit: int = 10,
         min_score: float = 0.0,
         query_text: str | None = None,
+        min_semantic: float = 0.0,
     ) -> list[tuple[MemoryRecord, float]]:
         return self._run_sync(
             self.asearch(
@@ -184,6 +188,7 @@ class LakebaseStorageBackend:
                 limit=limit,
                 min_score=min_score,
                 query_text=query_text,
+                min_semantic=min_semantic,
             )
         )
 
@@ -214,7 +219,7 @@ class LakebaseStorageBackend:
                 # Workspace-wide read: fetch by id within the workspace,
                 # regardless of which crew wrote it.
                 sql = text(
-                    f"SELECT {_RECORD_COLUMNS} "
+                    f"SELECT {_RECORD_COLUMNS} "  # constant column list — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     f"FROM {self.table_name} "
                     f"WHERE id = :id AND group_id = :group_id"
                 )
@@ -243,16 +248,20 @@ class LakebaseStorageBackend:
                 params["scope_prefix"] = f"{scope_prefix}%"
             async with self._session() as session:
                 sql = text(
-                    f"SELECT {_RECORD_COLUMNS} "
+                    f"SELECT {_RECORD_COLUMNS} "  # constant column list — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     f"FROM {self.table_name} "
-                    f"WHERE {' AND '.join(where)} "
+                    f"WHERE {' AND '.join(where)} "  # fixed tenant WHERE fragments, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                     f"ORDER BY created_at DESC "
                     f"LIMIT :limit OFFSET :offset"
                 )
                 params["limit"] = limit
                 params["offset"] = offset
                 result = await session.execute(sql, params)
-                return [self._row_to_record(row) for row in result.fetchall()]
+                # fetchall() never yields None rows, so no record is None here.
+                return [
+                    cast(MemoryRecord, self._row_to_record(row))
+                    for row in result.fetchall()
+                ]
 
         return self._run_sync(_list())
 
@@ -263,8 +272,8 @@ class LakebaseStorageBackend:
             params["scope"] = scope
             async with self._session() as session:
                 sql = text(
-                    f"SELECT metadata, created_at FROM {self.table_name} "
-                    f"WHERE {' AND '.join(where)}"
+                    f"SELECT metadata, created_at FROM {self.table_name} "  # table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    f"WHERE {' AND '.join(where)}"  # fixed tenant WHERE fragments, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 )
                 result = await session.execute(sql, params)
                 rows = result.fetchall()
@@ -305,7 +314,7 @@ class LakebaseStorageBackend:
                 params["scope_prefix"] = f"{scope_prefix}%"
             async with self._session() as session:
                 sql = text(
-                    f"SELECT metadata FROM {self.table_name} WHERE {' AND '.join(where)}"
+                    f"SELECT metadata FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
                 )
                 result = await session.execute(sql, params)
                 counts: dict[str, int] = {}
@@ -329,7 +338,7 @@ class LakebaseStorageBackend:
                 params["scope_prefix"] = f"{scope_prefix}%"
             async with self._session() as session:
                 sql = text(
-                    f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}"
+                    f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
                 )
                 result = await session.execute(sql, params)
                 return int(result.scalar() or 0)
@@ -429,8 +438,13 @@ class LakebaseStorageBackend:
         limit: int = 10,
         min_score: float = 0.0,
         query_text: str | None = None,
+        min_semantic: float = 0.0,
     ) -> list[tuple[MemoryRecord, float]]:
         """Hybrid-scored search: semantic + keyword + recency + importance.
+
+        ``min_semantic`` is the recall floor. It raises the cosine gate the
+        outer query applies, so relevance alone decides what is returned and
+        the blend only ranks it — an old memory is never gated out for its age.
 
         Two stages so the pgvector HNSW index stays in play: the inner query
         pulls the top candidates by pure vector distance (index-accelerated),
@@ -462,16 +476,18 @@ class LakebaseStorageBackend:
             params["categories"] = list(categories)
         if metadata_filter:
             for index, (key, value) in enumerate(metadata_filter.items()):
-                placeholder = f"mf_{index}"
-                where.append(f"metadata->>'{key}' = :{placeholder}")
-                params[placeholder] = str(value)
+                # Key AND value are bound: a key is a caller string too.
+                where.append(f"metadata ->> :mk_{index} = :mf_{index}")
+                params[f"mk_{index}"], params[f"mf_{index}"] = str(key), str(value)
 
         params["query_embedding"] = vector_to_pg(query_embedding)
         params["limit"] = limit
         # Re-rank pool: enough candidates that keyword/recency can promote a
         # non-top-cosine hit, small enough that the outer pass is negligible.
         params["candidate_limit"] = max(limit * 5, 25)
-        params["relevance_threshold"] = float(self.relevance_threshold)
+        params["relevance_threshold"] = max(
+            float(self.relevance_threshold), float(min_semantic or 0.0)
+        )
         params["half_life_days"] = float(self.recency_half_life_days)
         params["w_semantic"] = float(self.semantic_weight)
         params["w_recency"] = float(self.recency_weight)
@@ -571,12 +587,14 @@ class LakebaseStorageBackend:
             params["older_than"] = older_than
         if metadata_filter:
             for index, (key, value) in enumerate(metadata_filter.items()):
-                placeholder = f"mf_{index}"
-                where.append(f"metadata->>'{key}' = :{placeholder}")
-                params[placeholder] = str(value)
+                # Key AND value are bound: a key is a caller string too.
+                where.append(f"metadata ->> :mk_{index} = :mf_{index}")
+                params[f"mk_{index}"], params[f"mf_{index}"] = str(key), str(value)
 
         async with self._session() as session:
-            sql = text(f"DELETE FROM {self.table_name} WHERE {' AND '.join(where)}")
+            sql = text(
+                f"DELETE FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+            )
             result = await session.execute(sql, params)
             return int(getattr(result, "rowcount", 0) or 0)
 
@@ -610,6 +628,11 @@ class LakebaseStorageBackend:
             instance_name=self.instance_name, group_id=self.group_id
         ) as session:
             yield session
+
+    def open_session(self) -> AbstractAsyncContextManager[AsyncSession]:
+        """This backend's Lakebase session, for the graph store beside it — so
+        memory keeps ONE place that reaches Lakebase."""
+        return self._session()
 
     def _tenant_where(
         self, workspace_wide: bool | None = None
@@ -647,7 +670,7 @@ class LakebaseStorageBackend:
         async with self._session() as session:
             sql = text(
                 f"SELECT DISTINCT metadata->>'scope' AS scope "
-                f"FROM {self.table_name} WHERE {' AND '.join(where)}"
+                f"FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
             )
             result = await session.execute(sql, params)
             children: set[str] = set()
@@ -742,7 +765,7 @@ class LakebaseStorageBackend:
             return list(vector.tolist())
         return list(vector)
 
-    def _run_sync(self, coro: Any) -> Any:
+    def _run_sync(self, coro: Coroutine[Any, Any, _T]) -> _T:
         """Run a coroutine on the shared long-lived bridge loop (PERF-013).
 
         A fresh loop per call made _is_engine_loop_stale() trip on EVERY
@@ -751,4 +774,4 @@ class LakebaseStorageBackend:
         each <10ms pgvector query. A stable loop keeps the engine cached;
         token freshness is handled lazily by get_session.
         """
-        return run_on_bridge_loop(coro)
+        return cast(_T, run_on_bridge_loop(coro))

@@ -53,8 +53,41 @@ export interface ModelConfig {
    * returns the trace.
    */
   returns_thinking_text?: boolean;
+  /**
+   * Per-model settings stored on the model row. Includes the endpoint
+   * (`api_base`) and, for vLLM, `supports_tools` / `tool_choice`.
+   */
+  params?: Record<string, unknown> | null;
 }
 
 export interface Models {
   [key: string]: ModelConfig;
-} 
+}
+
+/**
+ * One row of `GET /models/enabled`, as the server sends it. The shared models
+ * store (`store/models.ts`) keeps these, and derives the `Models` record the
+ * builder surfaces use from them. Chat's `ModelConfigResponse` is this type.
+ */
+export interface EnabledModelRow {
+  id: number;
+  key: string;
+  name: string;
+  provider: string | null;
+  temperature: number | null;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  extended_thinking: boolean;
+  enabled: boolean;
+  /** Optional: treat `undefined` as "unknown", not as "unsupported". */
+  supports_reasoning_effort?: boolean;
+  allowed_efforts?: string[];
+  thinking_mode?: 'manual' | 'adaptive' | null;
+  thinking_budget_tokens?: number | null;
+  reasoning_effort?: string | null;
+  refused_params?: string[];
+  returns_thinking_text?: boolean;
+  params?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}

@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager, nullcontext
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _get_mlflow():
+def _get_mlflow() -> Any:
     """Get mlflow module if available."""
     try:
-        import mlflow  # type: ignore
+        import mlflow
 
         return mlflow
     except Exception as e:
@@ -26,7 +26,9 @@ def _get_mlflow():
 
 
 @contextmanager
-def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
+def start_root_trace(
+    trace_name: str, inputs: Optional[Dict[str, Any]] = None
+) -> Iterator[Any]:
     """Start a root trace using fluent API if available; otherwise no-op context.
 
     In MLflow 3.x, mlflow.start_span() without a parent creates a root trace.
@@ -76,7 +78,7 @@ def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
     entered = False
     if callable(start_trace_fn):
         try:
-            with start_trace_fn(name=trace_name, inputs=inputs) as rt:  # type: ignore[misc]
+            with start_trace_fn(name=trace_name, inputs=inputs) as rt:
                 entered = True
                 yield rt
                 return
@@ -90,7 +92,9 @@ def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
     if callable(start_span_fn):
         try:
             # start_span uses 'attributes' parameter, not 'inputs'
-            with start_span_fn(name=trace_name, span_type="CHAIN", attributes=inputs) as span:  # type: ignore[misc]
+            with start_span_fn(
+                name=trace_name, span_type="CHAIN", attributes=inputs
+            ) as span:
                 # Explicitly set inputs on the span if method exists
                 # This ensures inputs appear in the MLflow UI
                 if inputs and hasattr(span, "set_inputs"):
@@ -129,10 +133,12 @@ def get_last_active_trace_id() -> Optional[str]:
             getattr(mlflow, "tracing", None), "get_last_active_trace_id", None
         )
         if callable(get_last):
-            return get_last()
+            trace_id: Optional[str] = get_last()
+            return trace_id
         alt = getattr(mlflow, "get_last_active_trace_id", None)
         if callable(alt):
-            return alt()
+            alt_id: Optional[str] = alt()
+            return alt_id
     except Exception:
         return None
     return None

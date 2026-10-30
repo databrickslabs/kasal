@@ -22,9 +22,10 @@ import {
 import { GroupWithRole } from '../../../api/groups/GroupService';
 import toast from 'react-hot-toast';
 import { useRunStatusStore } from '../../../store/runStatus';
-import { useUserStore } from '../../../store/user';
+import { isPersonalWorkspaceId, useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useUILayoutStore } from '../../../store/uiLayout';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 // Kasal's brand accent (chat.css --accent), used ONLY while chat mode is
 // active — the builder canvases are MUI-themed and keep their original
@@ -85,8 +86,10 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
 
   const switchToGroup = async (group: GroupWithRole) => {
     try {
-      // Don't switch if we're already on this group
-      if (currentGroup?.id === group.id) {
+      // Don't switch if this tab is already on this group. After the server
+      // refused the tab's group the menu still shows it, and picking it again
+      // must re-pin the tab.
+      if (currentGroup?.id === group.id && getTabGroupId() === group.id) {
         handleClose();
         return;
       }
@@ -104,7 +107,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
       handleClose();
 
       // Show success message with the actual group ID being used
-      const displayName = group.id.startsWith('user_')
+      const displayName = isPersonalWorkspaceId(group.id, currentUser?.personal_group_id)
         ? 'Personal Space'
         : `${group.name} teamspace`;
       toast.success(`Switched to ${displayName}`);
@@ -170,7 +173,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
           onClick={handleClick}
           size="small"
           aria-label={
-            currentGroup.id.startsWith('user_')
+            isPersonalWorkspaceId(currentGroup.id, currentUser?.personal_group_id)
               ? `Switch teamspace: Personal Space (${currentUser?.email})`
               : `Switch teamspace: ${currentGroup.name} - Shared Teamspace`
           }
@@ -191,7 +194,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
                 {avatarElement}
               </Box>
               <Typography component="span" noWrap sx={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: 'text.secondary' }}>
-                {currentGroup.id.startsWith('user_') ? 'Personal Space' : currentGroup.name}
+                {isPersonalWorkspaceId(currentGroup.id, currentUser?.personal_group_id) ? 'Personal Space' : currentGroup.name}
               </Typography>
             </>
           ) : avatarElement}
@@ -243,7 +246,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
           </Typography>
         </Box>
         {groups.map((group) => {
-          const isPersonalWorkspace = group.id.startsWith('user_');
+          const isPersonalWorkspace = isPersonalWorkspaceId(group.id, currentUser?.personal_group_id);
           const isSelected = currentGroup?.id === group.id;
 
           return (

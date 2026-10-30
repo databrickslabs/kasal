@@ -45,7 +45,6 @@ interface MemoryBackendState {
   
   // API actions
   validateConfig: () => Promise<boolean>;
-  saveConfig: () => Promise<boolean>;
   loadConfig: () => Promise<void>;
   
   // Utility actions
@@ -133,31 +132,6 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
 
   // Load available indexes
 
-  // Save configuration
-  saveConfig: async () => {
-    const { config, validateConfig } = get();
-    
-    // Validate before saving
-    const isValid = await validateConfig();
-    if (!isValid) {
-      return false;
-    }
-    
-    set({ isLoading: true, error: null });
-    
-    try {
-      const result = await MemoryBackendService.saveConfig(config);
-      set({ isLoading: false });
-      return result.success;
-    } catch (error: unknown) {
-      set({ 
-        error: (error instanceof Error ? error.message : String(error)) || 'Failed to save configuration',
-        isLoading: false,
-      });
-      return false;
-    }
-  },
-
   // Load configuration
   loadConfig: async () => {
     set({ isLoading: true, error: null });
@@ -195,6 +169,5 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
 export const useMemoryBackendConfig = () => useMemoryBackendStore((state) => state.config);
 export const useMemoryBackendType = () => useMemoryBackendStore((state) => state.config.backend_type);
 export const useDatabricksConfig = () => useMemoryBackendStore((state) => state.config.databricks_config);
-export const useLakebaseConfig = () => useMemoryBackendStore((state) => state.config.lakebase_config);
 export const useMemoryTuningConfig = () =>
   useMemoryBackendStore((state) => state.config.cognitive_config);

@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,7 @@ from src.core.base_repository import BaseRepository
 from src.models.api_key import ApiKey
 
 
-class ApiKeyRepository(BaseRepository[ApiKey]):
+class ApiKeyRepository(BaseRepository[ApiKey, int]):
     """
     Repository for ApiKey model with custom query methods.
     Inherits base CRUD operations from BaseRepository.
@@ -82,41 +83,6 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def get_api_key_value(self, key_name: str) -> Optional[str]:
-        """
-        Get the decrypted value of an API key by name.
-
-        Args:
-            key_name: Name of the API key
-
-        Returns:
-            Decrypted API key value if found, None otherwise
-        """
-        api_key = await self.find_by_name(key_name)
-        if not api_key:
-            return None
-
-        # Decrypt the API key value
-        try:
-            from src.utils.encryption_utils import EncryptionUtils
-
-            return EncryptionUtils.decrypt_value(api_key.encrypted_value)
-        except Exception:
-            return None
-
-    async def get_provider_api_key(self, provider: str) -> Optional[str]:
-        """
-        Get API key for a specific provider.
-
-        Args:
-            provider: Provider name (e.g., 'openai', 'databricks')
-
-        Returns:
-            Decrypted API key value if found, None otherwise
-        """
-        key_name = f"{provider.upper()}_API_KEY"
-        return await self.get_api_key_value(key_name)
-
     async def delete(self, id: int) -> bool:
         """
         Override delete method to ensure proper deletion of API keys.
@@ -141,7 +107,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
             await self.session.flush()
 
             # Check if any rows were deleted
-            if result.rowcount > 0:
+            if cast("CursorResult[Any]", result).rowcount > 0:
                 logger.debug(f"Successfully deleted ApiKey with ID {id}")
                 return True
             else:

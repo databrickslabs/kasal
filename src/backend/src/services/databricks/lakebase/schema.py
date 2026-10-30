@@ -14,12 +14,16 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
-from sqlalchemy import MetaData, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import MetaData, Table, text
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from src.core.base_service import BaseService
 from src.db.base import Base
+from src.services.databricks.lakebase.installation_guard import (
+    SCHEMA_DROP_REFUSED,
+    refuse_when_installation_managed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +162,7 @@ def _owner_remediation(stmt: str) -> str:
 class LakebaseSchemaService(BaseService):
     """Service for managing Lakebase database schema operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize Lakebase schema service.
 
@@ -187,6 +191,7 @@ class LakebaseSchemaService(BaseService):
 
             # Handle schema recreation if requested
             if recreate:
+                refuse_when_installation_managed(SCHEMA_DROP_REFUSED)
                 try:
                     async with engine.begin() as conn:
                         await conn.execute(
@@ -249,6 +254,32 @@ class LakebaseSchemaService(BaseService):
             logger.error(f"Error creating schema: {e}")
             raise
 
+    def drop_schema_sync(self, engine: Engine, user_email: str) -> Optional[str]:
+        """Take ownership of the kasal schema and DROP it, CASCADE.
+
+        Refused (BadRequestError, before any SQL) when the Databricks App
+        installation binds the database: that schema is the one the app runs
+        on. A drop that fails is logged and its error returned, so the caller's
+        CREATE SCHEMA IF NOT EXISTS can carry on; None means it was dropped.
+        """
+        refuse_when_installation_managed(SCHEMA_DROP_REFUSED)
+        safe_role = _quote_pg_role(user_email)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER SCHEMA kasal OWNER TO {safe_role}"))
+        except Exception:
+            pass  # Schema may not exist yet
+        try:
+            with engine.begin() as conn:
+                logger.info("Dropping existing kasal schema (if exists)...")
+                conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
+                logger.info("Dropped kasal schema")
+        except Exception as drop_error:
+            logger.warning(f"Could not drop schema: {drop_error}")
+            logger.info("Proceeding with CREATE SCHEMA IF NOT EXISTS...")
+            return str(drop_error)
+        return None
+
     def create_schema_sync(
         self, engine: Engine, user_email: str, recreate: bool = False
     ) -> None:
@@ -268,19 +299,7 @@ class LakebaseSchemaService(BaseService):
 
             # Handle schema recreation if requested
             if recreate:
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(f"ALTER SCHEMA kasal OWNER TO {safe_role}"))
-                except Exception:
-                    pass  # Schema may not exist yet
-                try:
-                    with engine.begin() as conn:
-                        logger.info("Dropping existing kasal schema (if exists)...")
-                        conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                        logger.info("Dropped kasal schema")
-                except Exception as drop_error:
-                    logger.warning(f"Could not drop schema: {drop_error}")
-                    logger.info("Proceeding with CREATE SCHEMA IF NOT EXISTS...")
+                self.drop_schema_sync(engine, user_email)
 
             # Create schema in a fresh transaction
             with engine.begin() as conn:
@@ -385,7 +404,9 @@ class LakebaseSchemaService(BaseService):
             raise
 
     @staticmethod
-    def _get_dependency_waves(tables) -> Tuple[List[List[str]], Dict[str, Any]]:
+    def _get_dependency_waves(
+        tables: List[Table],
+    ) -> Tuple[List[List[str]], Dict[str, Any]]:
         """Group tables into parallel waves based on FK dependencies.
 
         Tables in the same wave have no FK dependencies on each other,
@@ -436,7 +457,7 @@ class LakebaseSchemaService(BaseService):
         Returns:
             List of (table_name, success, error_message) tuples.
         """
-        results = []
+        results: List[Tuple[str, bool, Optional[str]]] = []
         with engine.begin() as conn:
             # Include public: `CREATE EXTENSION vector` installs the pgvector
             # `vector` type into public, so a search_path of `kasal` alone can't
@@ -482,7 +503,7 @@ class LakebaseSchemaService(BaseService):
     )
 
     @staticmethod
-    async def _exec_ddl_tolerant_async(conn, stmt: str) -> None:
+    async def _exec_ddl_tolerant_async(conn: AsyncConnection, stmt: str) -> None:
         """Run one idempotent DDL statement inside a SAVEPOINT.
 
         The savepoint keeps an orphaned-owner failure (Postgres 42501 'must be
@@ -500,7 +521,7 @@ class LakebaseSchemaService(BaseService):
             raise
 
     @staticmethod
-    def _exec_ddl_tolerant_sync(conn, stmt: str) -> None:
+    def _exec_ddl_tolerant_sync(conn: Connection, stmt: str) -> None:
         """Sync counterpart of _exec_ddl_tolerant_async (savepoint-isolated)."""
         try:
             with conn.begin_nested():
@@ -511,7 +532,7 @@ class LakebaseSchemaService(BaseService):
                 return
             raise
 
-    async def _ensure_doc_embeddings_columns_async(self, conn) -> None:
+    async def _ensure_doc_embeddings_columns_async(self, conn: AsyncConnection) -> None:
         """Bring the documentation_embeddings table up to the pgvector schema (async).
 
         Each DDL runs in its own savepoint and tolerates the orphaned-owner case
@@ -534,7 +555,7 @@ class LakebaseSchemaService(BaseService):
                 "'CREATE EXTENSION IF NOT EXISTS vector;' then re-run initialization."
             )
 
-    def _ensure_doc_embeddings_columns_sync(self, conn) -> None:
+    def _ensure_doc_embeddings_columns_sync(self, conn: Connection) -> None:
         """Bring the documentation_embeddings table up to the pgvector schema (sync)."""
         for stmt in self._DOC_EMB_PLAIN_DDL:
             self._exec_ddl_tolerant_sync(conn, stmt)
@@ -575,13 +596,6 @@ class LakebaseSchemaService(BaseService):
                 # Adds the embedding column + HNSW index IF pgvector is present.
                 self._ensure_doc_embeddings_columns_sync(conn)
         logger.info(f"Created {table_name} without its vector column")
-
-    def _create_doc_embeddings_sync(self, engine: Engine) -> None:
-        """Create documentation_embeddings and ensure its pgvector schema.
-
-        Thin wrapper kept for existing callers; the generic path does the work.
-        """
-        self._create_without_vector_sync(engine, "documentation_embeddings")
 
     def create_tables_sync_stream(
         self, engine: Engine
@@ -704,7 +718,9 @@ class LakebaseSchemaService(BaseService):
             yield {"type": "error", "message": f"Error creating tables: {e}"}
             raise
 
-    async def set_search_path_async(self, connection, schema: str = "kasal") -> None:
+    async def set_search_path_async(
+        self, connection: AsyncConnection, schema: str = "kasal"
+    ) -> None:
         """
         Set the search path for a database connection (async version).
 
@@ -719,29 +735,6 @@ class LakebaseSchemaService(BaseService):
         try:
             safe_schema = _validate_identifier(schema, "schema name")
             await connection.execute(text(f"SET search_path TO {safe_schema}, public"))
-            logger.debug(f"Set search path to {schema}")
-        except Exception as e:
-            logger.error(f"Error setting search path: {e}")
-            raise
-
-    def set_search_path_sync(self, connection, schema: str = "kasal") -> None:
-        """
-        Set the search path for a database connection (sync version).
-
-        Args:
-            connection: Sync database connection
-            schema: Schema name to set as search path (default: kasal)
-
-        Raises:
-            ValueError: If schema name is not a valid identifier
-            Exception: If setting search path fails
-        """
-        try:
-            safe_schema = _validate_identifier(schema, "schema name")
-            # Match set_search_path_async: include public so the pgvector `vector`
-            # type (installed in public by CREATE EXTENSION) resolves for callers
-            # that create/alter vector columns on this connection.
-            connection.execute(text(f"SET search_path TO {safe_schema}, public"))
             logger.debug(f"Set search path to {schema}")
         except Exception as e:
             logger.error(f"Error setting search path: {e}")

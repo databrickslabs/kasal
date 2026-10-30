@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { CrewService } from '../../../../api/workflow/CrewService';
@@ -6,8 +7,10 @@ import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCata
 import { SaveCrewProps } from '../types/dialogs';
 import { Edge } from 'reactflow';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
+import { useUnmountSafeTimeout } from '../../../../hooks/global/useUnmountSafeTimeout';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useAppStore as useChatAppStore } from '../../../chat/store/appStore';
+import { resolveCrewSaveTarget } from './crewSaveTarget';
 
 /** Refresh the chat-mode catalog rail so agent-builder saves show up there
  * immediately (the rail otherwise only reloads on mount/workspace change). */
@@ -27,8 +30,14 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [isSaving, setIsSaving] = useState(false);
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
+  // Cleared on unmount: a bare setTimeout here outlived the component (and,
+  // in tests, the jsdom window), which failed CI after every test had passed.
+  const scheduleTimeout = useUnmountSafeTimeout();
 
-  const { activeCanvasId, updateCanvasCrewInfo } = useBuilderCanvasStore();
+  const { activeCanvasId, updateCanvasCrewInfo } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    updateCanvasCrewInfo: state.updateCanvasCrewInfo,
+  })));
 
   // Get execution configuration from the store
   const {
@@ -37,7 +46,13 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     reasoningLLM,
     reasoningConfig,
     managerLLM
-  } = useCrewExecutionStore();
+  } = useCrewExecutionStore(useShallow(state => ({
+    processType: state.processType,
+    reasoningEnabled: state.reasoningEnabled,
+    reasoningLLM: state.reasoningLLM,
+    reasoningConfig: state.reasoningConfig,
+    managerLLM: state.managerLLM,
+  })));
 
   // Listen for the custom event to open the save crew dialog
   useEffect(() => {
@@ -157,7 +172,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         refreshChatCatalog();
         
         // Dispatch completion event
-        setTimeout(() => {
+        scheduleTimeout(() => {
           const completeEvent = new CustomEvent('updateCrewComplete', {
             detail: { crewId: updatedCrew.id, crewName: updatedCrew.name }
           });
@@ -257,7 +272,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         refreshChatCatalog();
         
         // Dispatch completion event
-        setTimeout(() => {
+        scheduleTimeout(() => {
           const completeEvent = new CustomEvent('updateCrewComplete', {
             detail: { crewId: updatedCrew.id, crewName: updatedCrew.name }
           });
@@ -282,7 +297,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       window.removeEventListener('updateExistingCrew', handleUpdateExistingCrew);
       window.removeEventListener('updateExistingCrewByName', handleUpdateExistingCrewByName);
     };
-  }, [disabled]);
+  }, [disabled, scheduleTimeout]);
 
   // Auto-save when name is set programmatically (via slash command)
   useEffect(() => {
@@ -307,15 +322,6 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     setOpen(false);
     setName('');
     setError('');
-  };
-
-  // Focus management with Dialog's callback
-  const _handleDialogEntered = () => {
-    setTimeout(() => {
-      if (nameInputRef.current) {
-        nameInputRef.current.focus();
-      }
-    }, 150); // Increased delay to ensure dialog is fully rendered
   };
 
   // Handle Enter key press in the name input
@@ -347,6 +353,32 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     // Prevent multiple saves while one is in progress
     if (isSaving) {
       console.log('SaveCrew: Save already in progress, ignoring request');
+      return;
+    }
+
+    // A canvas bound to a catalog crew holds that crew's own rows: never POST
+    // a second crew over them, unless that crew is gone (see crewSaveTarget).
+    const tab = activeCanvasId ? useBuilderCanvasStore.getState().getCanvas(activeCanvasId) : null;
+    setIsSaving(true);
+    const target = await resolveCrewSaveTarget(tab, name);
+    setIsSaving(false);
+    if (target.kind === 'refuse') {
+      setError(target.message);
+      pendingSave.current?.onError?.(new Error(target.message));
+      pendingSave.current = null;
+      window.dispatchEvent(new CustomEvent('saveError', { detail: { message: target.message } }));
+      // A `/save crew <name>` request has no dialog to show the error in:
+      // reset, so the next dialog does not open with this name and error.
+      if (!open) handleClose();
+      return;
+    }
+    if (target.kind === 'update') {
+      const callbacks = pendingSave.current;
+      pendingSave.current = null;
+      window.dispatchEvent(new CustomEvent('updateExistingCrew', {
+        detail: { tabId: activeCanvasId, crewId: target.crewId, onSaved: callbacks?.onSaved, onError: callbacks?.onError },
+      }));
+      handleClose();
       return;
     }
 
@@ -563,7 +595,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       handleClose();
       
       // Wait for dialog to fully close before dispatching event
-      setTimeout(() => {
+      scheduleTimeout(() => {
         console.log('SaveCrew: Dispatching saveCrewComplete event', {
           dialogOpen: document.querySelector('.MuiDialog-root') !== null
         });

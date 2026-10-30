@@ -1,4 +1,4 @@
-# CONTRIBUTING.md
+# Contributing to Kasal
 
 ## Welcome to Kasal
 
@@ -7,8 +7,9 @@ Kasal is an AI agent workflow orchestration platform that transforms complex AI 
 ## Quick Start for Contributors
 
 ### Prerequisites
-- **Python 3.11** for backend development
-- **Node.js 22+** for frontend development (optional)
+- **Python 3.11** for backend development (the backend pins `>=3.11,<3.12`)
+- **[uv](https://docs.astral.sh/uv/)** for Python dependencies
+- **Node.js 22** for frontend development (optional; CI uses 22)
 - **Git** for version control
 
 ### 5-Minute Setup
@@ -19,8 +20,8 @@ cd kasal
 
 # Backend setup (required) — Python deps are managed with uv (no requirements.txt)
 cd src/backend
-uv sync            # install dependencies (creates .venv)
-./run.sh sqlite    # SQLite for development (run.sh runs `uv sync` for you)
+uv sync --frozen   # install exactly what uv.lock pins (creates .venv)
+./run.sh sqlite    # SQLite; builds and seeds the database on first start
 
 # Frontend setup (optional - only if working on UI)
 cd ../frontend
@@ -28,31 +29,33 @@ npm ci
 npm start  # http://localhost:3000
 ```
 
-**API Access**: Backend runs at http://localhost:8000
+**API Access**: Backend runs at http://127.0.0.1:8000 (interactive docs at `/api-docs`)
+
+`run.sh` binds to loopback and sets `LOCAL_DEV_AUTH=true`, so requests without an identity header run as `LOCAL_DEV_USER_EMAIL` (default `dev@localhost`). If you start `uvicorn` yourself, export `LOCAL_DEV_AUTH=true` first or every API call returns 401. See the [developer guide](src/docs/DEVELOPER_GUIDE.md#authentication-in-local-development).
 
 ## Architecture Overview
 
 Kasal follows a clean layered architecture:
 
-```
+```text
 Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ```
 
 ### Key Characteristics
-- **AI-First Platform**: Native Kasal runtime with an optional CrewAI framework adapter
+- **AI-First Platform**: Kasal's own agent runtime, with CrewAI available as an alternative harness
 - **Clean Architecture**: Repository → Service → API pattern with clear separation of concerns
 - **Enterprise Ready**: Built for Databricks deployment with OAuth and production-grade patterns
 - **Typing**: TypeScript checks plus strict mypy diagnostics tracked by a no-new-errors baseline
 
 ### Tech Stack
-- **Backend**: FastAPI, SQLAlchemy 2.0, CrewAI, pytest
+- **Backend**: FastAPI, SQLAlchemy 2.0 (async), Alembic, Kasal agent runtime (CrewAI harness optional), pytest
 - **Frontend**: React 18, TypeScript, Zustand, Material-UI, ReactFlow
-- **Database**: SQLite (dev), PostgreSQL (prod) with Alembic migrations
+- **Database**: SQLite (dev), PostgreSQL or Databricks Lakebase (prod)
 
 ## Key Directories for Contributors
 
 ### Backend (`src/backend/src/`)
-```
+```text
 ├── api/             # FastAPI route handlers (controllers)
 ├── services/        # Business logic layer (main work area)
 ├── repositories/    # Data access layer (Repository pattern)
@@ -63,7 +66,7 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ```
 
 ### Frontend (`src/frontend/src/`)
-```
+```text
 ├── app/             # Application shell and session workspace
 ├── features/        # Chat, workflow canvas, catalog, activity and configuration
 ├── shared/          # Reusable UI, API client and types
@@ -86,9 +89,9 @@ Backend typing debt and dependency exposure are documented in [Validation and se
 
 **Backend Development:**
 ```bash
-# Start development server (run.sh runs `uv sync` for you)
+# Start development server (run.sh runs `uv sync --frozen` for you)
 cd src/backend
-./run.sh sqlite  # or ./run.sh for PostgreSQL
+./run.sh sqlite  # or ./run.sh postgres for PostgreSQL
 
 # Code quality (run before committing)
 uv run black src tests && uv run isort src tests
@@ -99,18 +102,30 @@ uv run lint-imports
 
 **Database Changes:**
 ```bash
-# Create migration for model changes
+# Create a migration for model changes. Alembic reads Settings, which defaults
+# to the same SQLite file run.sh uses (src/backend/app.db). Start run.sh once so
+# init_db() has built that file, then:
 cd src/backend
-alembic revision --autogenerate -m "description"
-alembic upgrade head
+uv run --frozen alembic stamp head     # once per database that init_db() built
+uv run --frozen alembic revision --autogenerate -m "description"
+# Review the file: on SQLite, drop the spurious type changes autogenerate reports
 ```
+
+Don't run `alembic upgrade head` to create or seed a database: there is no baseline revision, so it fails on an empty database and on one `init_db()` built. A new database gets its schema and seed data from starting the app (see [create and seed a database](src/docs/DEVELOPER_GUIDE.md#create-and-seed-a-database)).
+
+Alembic does not run at startup: the app builds its schema with `init_db()`. A column added to an existing table also needs a step in `src/backend/src/db/self_heal/columns.py` (a new table: `tables.py`), or existing installs never get it.
 
 **Testing (Required):**
 ```bash
 cd src/backend
-uv run python run_tests.py  # All tests
+uv run python run_tests.py              # All tests, then every lint step
+uv run python run_tests.py --skip-lint  # Tests only
+uv run python run_tests.py --lint-only  # black, isort, ruff, mypy baseline, import-linter
 uv run python run_tests.py --coverage --html-coverage  # With coverage report
+uv run pytest -q tests/unit/architecture  # Architecture rules and ratchets
 ```
+
+**Ratchets:** file size (800-line target, 1500 ceiling), function size (200 lines), five ruff rules (`BLE001`, `S110`, `TRY400`, `G004`, `B904`), environment reads and exception text in HTTP errors are held by shrink-only baselines in `src/backend/tests/unit/architecture/`. A count may not grow. When your change lowers one, the test fails until you record the gain with the owning test's `--update`, for example `uv run python tests/unit/architecture/test_size_ratchet.py --update`; commit the updated JSON with your change. `--update` never raises a baseline. The import-linter `ignore_imports` lists in `src/backend/pyproject.toml`, the mypy baseline and the ESLint `--max-warnings` cap work the same way: remove entries or lower the number as you fix things, never add. See [ratchets](src/docs/continuous-integration.md#ratchets).
 
 ### 3. Critical Development Standards
 
@@ -142,11 +157,19 @@ class AgentRepository(BaseRepository[Agent]):
 
 **Service Layer:**
 ```python
-class AgentService(BaseService[Agent, AgentRepository]):
+# services/agents/agent_service.py: every service lives in a domain package
+class AgentService(BaseService[Agent, AgentCreate]):
+    def __init__(self, session: AsyncSession,
+                 repository_class: Type[AgentRepository] = AgentRepository):
+        super().__init__(session)
+        self.repository = repository_class(session)  # built on the given session
+
     async def create_agent(self, agent_data: AgentCreate) -> Agent:
-        # Business logic here
-        return await self.repository.create(agent_data)
+        # Business logic here; queries and row writes stay in the repository
+        return await self.repository.create(agent_data.model_dump())
 ```
+
+A service never opens a session, never builds a query or persists a row itself, and reaches another domain's data through that domain's service. There is no Unit of Work. CI enforces these rules with `import-linter` and the AST checks in `src/backend/tests/unit/architecture/`; see `src/backend/src/services/CLAUDE.md`.
 
 **Dependency Injection:**
 ```python
@@ -211,21 +234,24 @@ uv run python run_tests.py --coverage --html-coverage
 ### Frontend Testing
 ```bash
 cd src/frontend
-npm test        # Jest + React Testing Library
-npm run test:e2e # Cypress for end-to-end testing
+npm test                  # Vitest + React Testing Library, watch mode
+npm run test:run          # Vitest, single run (what CI runs)
+npx vitest run --coverage # with a coverage report in coverage/
 ```
+
+There is no end-to-end suite (no Cypress or Playwright script).
 
 ## Common Gotchas & Important Notes
 
 ### Critical Requirements
-- **Dependencies via uv**: run `uv sync` in `src/backend` (uv manages the `.venv`); there is no `requirements.txt`. Prefix tools with `uv run`
+- **Dependencies via uv**: run `uv sync --frozen` in `src/backend` (uv manages the `.venv`; a plain `uv sync` can rewrite `uv.lock`); there is no `requirements.txt`. Prefix tools with `uv run`
 - **Database migrations**: Required for any model changes
 - **Type safety**: Use TypeScript/Python type hints extensively
 - **Async operations**: All database calls must be async
 - **Clean architecture**: Never bypass the Repository → Service → API pattern
 
 ### Development Tips
-- **SQLite for development**, PostgreSQL for production (automatic switch)
+- **SQLite for development** (the `run.sh` default), PostgreSQL or Lakebase for production. Other entry points default differently; see [Choose a database](src/docs/DEVELOPER_GUIDE.md#choose-a-database)
 - **Frontend is optional** for backend-only contributions
 - **CrewAI knowledge helpful** but not required - focus on the abstractions
 - **Visual workflow designer** is core to user experience
@@ -237,12 +263,19 @@ npm run test:e2e # Cypress for end-to-end testing
 1. **`src/docs/ARCHITECTURE_GUIDE.md`** - System architecture and patterns
 2. **`src/docs/DEVELOPER_GUIDE.md`** - Detailed setup and extension patterns
 3. **`src/docs/CODE_STRUCTURE_GUIDE.md`** - Where things live and how to navigate the repo
-4. **`src/docs/crewai-engine-refactor-proposal.md`** - CrewAI engine layout (if working on agents)
+4. **`src/docs/harnesses.md`** - The agent runtime and harness layout (if working on agents)
+5. **`src/docs/continuous-integration.md`** - What CI checks and how to run it locally
 
 ### When Contributing
 - Update relevant documentation for new features
 - Add docstrings for all public APIs
 - Update `src/docs/` files as needed (they auto-sync to frontend)
+
+## Commits and Pull Requests
+
+- Use [Conventional Commits](https://www.conventionalcommits.org/): `feat(scope): ...`, `fix(scope): ...`, `docs: ...`, `refactor: ...`, `test: ...`, `chore: ...`.
+- Keep files small: target 800 lines, never grow a file that is already over 1500, and keep functions under 200 lines. The size ratchet enforces this in CI.
+- CI runs the backend tests, backend lint, the PostgreSQL migration check, the frontend tests, lint and build, CodeQL, a secret scan and a dependency audit. See [continuous integration](src/docs/continuous-integration.md) for what gates a pull request.
 
 ## Contribution Checklist
 
@@ -251,8 +284,8 @@ Before submitting your contribution:
 - [ ] **Setup**: Development environment working correctly
 - [ ] **Architecture**: Follows established Repository → Service → API pattern
 - [ ] **Testing**: 80%+ test coverage with meaningful tests
-- [ ] **Code Quality**: Passes Black, isort, Ruff and the mypy no-new-errors gate
-- [ ] **Database**: Includes Alembic migrations for model changes
+- [ ] **Code Quality**: `run_tests.py --lint-only` passes (Black, isort, Ruff, the mypy no-new-errors gate, import-linter), and so does `pytest tests/unit/architecture` (ratchet baselines lowered with `--update` where you reduced a count)
+- [ ] **Database**: Includes an Alembic migration and a self-heal step for model changes
 - [ ] **Documentation**: Updates relevant docs and includes docstrings
 - [ ] **Type Safety**: Full type hints in Python, strict TypeScript
 - [ ] **Async**: All database operations use async/await
@@ -263,7 +296,7 @@ Before submitting your contribution:
 ### Key Resources
 - **Documentation**: Check `src/docs/` for comprehensive guides
 - **Code Examples**: Look at existing implementations in similar areas
-- **Architecture Questions**: Review `ARCHITECTURE.md` and existing patterns
+- **Architecture Questions**: Review `src/docs/ARCHITECTURE_GUIDE.md` and existing patterns
 - **Testing**: See `tests/` directory for examples
 
 ### Understanding the Domain

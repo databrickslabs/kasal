@@ -19,7 +19,6 @@ import pytest
 
 from src.core.llm.model_capabilities import (
     ReasoningStyle,
-    accepts_param,
     allowed_efforts,
     model_capability,
     reasoning_style,
@@ -43,11 +42,15 @@ class TestReasoningStyle:
             ("databricks-claude-opus-4-7", ReasoningStyle.ADAPTIVE_EFFORT),
             ("databricks-claude-opus-4-8", ReasoningStyle.ADAPTIVE_EFFORT),
             ("databricks-claude-opus-5", ReasoningStyle.ADAPTIVE_EFFORT),
+            ("databricks-claude-opus-5-5", ReasoningStyle.ADAPTIVE_EFFORT),
+            ("claude-opus-5-5", ReasoningStyle.ADAPTIVE_EFFORT),
             ("databricks-claude-fable-5", ReasoningStyle.ADAPTIVE_EFFORT),
             # reasoning_effort, no thinking block.
             ("databricks-gpt-5", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gemini-3-1-pro", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gpt-6-astra", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-gpt-6-sol", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-gpt-6-luna", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gpt-5-5-pro", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gemini-3-8-flash", ReasoningStyle.REASONING_EFFORT),
             ("databricks-grok-4-6", ReasoningStyle.REASONING_EFFORT),
@@ -57,6 +60,8 @@ class TestReasoningStyle:
             # Thinking arrives with nothing requested.
             ("databricks-inkling", ReasoningStyle.REASONING_EFFORT),
             ("databricks-kimi-k2-7-code", ReasoningStyle.UNPROMPTED),
+            # Always reasons; the endpoint rejects every reasoning control.
+            ("databricks-gemini-4-argon", ReasoningStyle.UNPROMPTED),
         ],
     )
     def test_style(self, model, expected):
@@ -88,6 +93,8 @@ class TestAllowedEfforts:
         [
             # Endpoint: "expected one of `low`, `medium`, `high`, `xhigh`, `max`".
             ("databricks-claude-opus-5", ("low", "medium", "high", "xhigh", "max")),
+            # Databricks documents the same five for Opus 5.5.
+            ("databricks-claude-opus-5-5", ("low", "medium", "high", "xhigh", "max")),
             ("databricks-claude-fable-5", ("low", "medium", "high", "xhigh", "max")),
             # "Supported values are: 'minimal', 'low', 'medium', and 'high'."
             ("databricks-gpt-5", ("minimal", "low", "medium", "high")),
@@ -102,7 +109,18 @@ class TestAllowedEfforts:
             ("databricks-gpt-5-5", ("none", "low", "medium", "high", "xhigh")),
             ("databricks-gpt-5-5-pro", ("medium", "high", "xhigh")),
             ("databricks-gpt-6-astra", ("low", "medium", "high", "xhigh", "max")),
+            # Databricks: Sol/Luna accept "none"; Astra rejects it.
+            (
+                "databricks-gpt-6-sol",
+                ("none", "low", "medium", "high", "xhigh", "max"),
+            ),
+            (
+                "databricks-gpt-6-luna",
+                ("none", "low", "medium", "high", "xhigh", "max"),
+            ),
             ("databricks-gemini-3-8-flash", ("low", "medium", "high")),
+            # Measured: the endpoint 400s on reasoning_effort at any value.
+            ("databricks-gemini-4-argon", ()),
             ("databricks-gemini-3-1-pro", ("minimal", "low", "medium", "high")),
             ("databricks-grok-4-6", ("low", "medium", "high", "xhigh")),
             ("databricks-glm-5-3", ("low", "high", "max")),
@@ -135,13 +153,6 @@ class TestAllowedEfforts:
         }
         assert len(scales) == 4
 
-    def test_supports_effort_is_case_and_space_tolerant(self):
-        capability = model_capability("databricks-claude-opus-5")
-        assert capability is not None
-        assert capability.supports_effort(" HIGH ") is True
-        assert capability.supports_effort("minimal") is False
-        assert capability.supports_effort(None) is False
-
 
 class TestRefusedParams:
     """Ordinary sampling knobs are refused per model too — the reason the Edit
@@ -155,24 +166,21 @@ class TestRefusedParams:
             "presence_penalty",
         }
 
-    def test_manual_claude_accepts_temperature_but_not_penalties(self):
-        """The case that proves refusals are not inferable from the family: same
-        provider, same generation prefix, different answer."""
-        assert accepts_param("databricks-claude-sonnet-4-5", "temperature") is True
-        assert accepts_param("databricks-claude-sonnet-4-5", "top_p") is True
-        assert (
-            accepts_param("databricks-claude-sonnet-4-5", "frequency_penalty") is False
-        )
-
     def test_gpt5_also_refuses_stop(self):
         assert "stop" in refused_params("databricks-gpt-5")
 
-    @pytest.mark.parametrize(
-        "model", ["databricks-gemini-3-1-pro", "databricks-llama-4-maverick", None]
-    )
-    def test_models_that_refuse_nothing(self, model):
-        assert refused_params(model) == ()
-        assert accepts_param(model, "temperature") is True
+    @pytest.mark.parametrize("model", ["databricks-claude-opus-5-5", "claude-opus-5-5"])
+    def test_opus_5_5_refuses_temperature(self, model):
+        """Anthropic removed temperature/top_p/top_k on Opus 5.5 (a 400)."""
+        from src.utils.model_config import model_rejects_temperature
+
+        assert set(refused_params(model)) == {
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        }
+        assert model_rejects_temperature(model) is True
 
 
 class TestNameMatching:
@@ -197,6 +205,35 @@ class TestNameMatching:
         assert "none" in allowed_efforts("databricks-gpt-5-1")
         assert "none" not in allowed_efforts("databricks-gpt-5")
 
+    def test_opus_5_5_gets_its_own_record_not_opus_5s(self):
+        """ "claude-opus-5" is a substring of "claude-opus-5-5". Opus 5.5 must hit
+        its own entry: its evidence is documented, not Opus 5's live probe."""
+        opus_5 = model_capability("databricks-claude-opus-5")
+        opus_5_5 = model_capability("databricks-claude-opus-5-5")
+        assert opus_5 is not None and opus_5_5 is not None
+        assert opus_5_5 is not opus_5
+        assert opus_5.evidence == "measured"
+        assert opus_5_5.evidence == "documented"
+        assert model_capability("claude-opus-5-5") is opus_5_5
+
+    @pytest.mark.parametrize("variant", ["sol", "luna"])
+    def test_databricks_gpt6_gets_databricks_record(self, variant):
+        """ "gpt-6-sol" is a substring of "databricks-gpt-6-sol": the Databricks
+        endpoint must hit the Databricks-sourced record, not the direct-OpenAI
+        one, and never Astra's (which rejects "none")."""
+        databricks = model_capability(f"databricks-gpt-6-{variant}")
+        direct = model_capability(f"gpt-6-{variant}")
+        astra = model_capability("databricks-gpt-6-astra")
+        assert databricks is not None and direct is not None
+        assert databricks is not direct
+        assert databricks is not astra
+        assert "docs.databricks.com" in databricks.source
+        assert "developers.openai.com" in direct.source
+        assert model_capability(f"databricks/databricks-gpt-6-{variant}") is (
+            databricks
+        )
+        assert "none" not in allowed_efforts("databricks-gpt-6-astra")
+
 
 class TestEveryEntryIsSourced:
     def test_no_entry_ships_without_evidence(self):
@@ -204,12 +241,16 @@ class TestEveryEntryIsSourced:
         and guesses here were wrong twice before the registry existed."""
         for model in (
             "databricks-claude-opus-5",
+            "databricks-claude-opus-5-5",
             "databricks-claude-sonnet-4-5",
             "databricks-gpt-5",
             "databricks-gemini-3-1-pro",
             "databricks-inkling",
             "databricks-gpt-6-astra",
+            "databricks-gpt-6-sol",
+            "databricks-gpt-6-luna",
             "databricks-gemini-3-8-flash",
+            "databricks-gemini-4-argon",
             "databricks-glm-5-3",
         ):
             capability = model_capability(model)

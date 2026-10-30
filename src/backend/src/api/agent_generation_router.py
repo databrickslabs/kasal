@@ -26,7 +26,7 @@ router = APIRouter(
 @router.post("/generate", response_model=Dict[str, Any])
 async def generate_agent(
     prompt: AgentPrompt, group_context: GroupContextDep, session: SessionDep
-):
+) -> Dict[str, Any]:
     """
     Generate agent configuration from natural language description.
 

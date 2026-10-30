@@ -4,6 +4,7 @@ Seed the tools table with default tool data.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from sqlalchemy import select
 from src.db.session import async_session_factory
 from src.models.group_tool import GroupTool
 from src.models.tool import Tool
+from src.repositories.tool_repository import TOOL_ID_FLOOR
+from src.seeds.errors import SeederIncomplete
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -181,7 +184,7 @@ tools_data = [
 ]
 
 
-def get_tool_configs():
+def get_tool_configs() -> Dict[str, Dict[str, Any]]:
     """Return the default configurations for each tool."""
     return {
         "6": {
@@ -481,14 +484,32 @@ def get_tool_configs():
     }
 
 
-async def seed_async():
-    """Seed tools into the database using async session."""
+def _refresh_global_tool(
+    tool: Tool, title: str, description: str, icon: str, tool_id: int
+) -> None:
+    """Refresh what defines a shipped tool; leave what an admin set alone.
+
+    ``enabled`` is the system admin's "Published" choice: forcing it True
+    re-published every unpublished tool on each restart. Saved config values
+    win; only keys a release adds come from the seed.
+    """
+    tool.title = title
+    tool.description = description
+    tool.icon = icon
+    # Saved values win over the seed, so a corrected default for a key a row
+    # already holds does not ship; change such a key here explicitly.
+    tool.config = {**get_tool_configs().get(str(tool_id), {}), **(tool.config or {})}
+    tool.updated_at = datetime.now().replace(tzinfo=None)
+
+
+async def seed_async() -> None:
+    """Seed the global tools (``group_id IS NULL``); workspace rows are never touched."""
     logger.info("Seeding tools table (async)...")
 
     # Get existing tool IDs to avoid duplicates
     async with async_session_factory() as session:
-        result = await session.execute(select(Tool.id))
-        existing_ids = set(result.scalars().all())
+        id_result = await session.execute(select(Tool.id))
+        existing_ids = set(id_result.scalars().all())
 
     tools_added = 0
     tools_updated = 0
@@ -514,23 +535,27 @@ async def seed_async():
                     session.add(tool)
                     tools_added += 1
                 else:
-                    # Update existing tool
                     result = await session.execute(
                         select(Tool).filter(Tool.id == tool_id)
                     )
                     existing_tool = result.scalars().first()
+                    if existing_tool and existing_tool.group_id is not None:
+                        # A workspace row created before non-seeded ids started
+                        # at ToolRepository's TOOL_ID_FLOOR holds this id. It is
+                        # theirs: never rewrite it or make it global, and never
+                        # fail startup over it.
+                        logger.warning(
+                            "Tool id %s (%r) is a workspace row; the global tool "
+                            "was not seeded",
+                            tool_id,
+                            title,
+                        )
+                        tools_skipped += 1
+                        continue
                     if existing_tool:
-                        existing_tool.title = title
-                        existing_tool.description = description
-                        existing_tool.icon = icon
-                        existing_tool.config = get_tool_configs().get(str(tool_id), {})
-                        existing_tool.enabled = (
-                            True  # All tools in this curated list are enabled
+                        _refresh_global_tool(
+                            existing_tool, title, description, icon, tool_id
                         )
-                        existing_tool.group_id = (
-                            None  # Ensure global tools are available to all groups
-                        )
-                        existing_tool.updated_at = datetime.now().replace(tzinfo=None)
                         tools_updated += 1
 
                 try:
@@ -543,15 +568,21 @@ async def seed_async():
             logger.error(f"Error processing tool {tool_id}: {str(e)}")
             tools_error += 1
 
-    # Remove rows this file no longer defines. Without this the seeder only ever
-    # ADDED, so every tool a previous version seeded stayed in the table forever
-    # — including the CrewAI tools this engine replaced, still listed and still
-    # assignable in the UI while the factory had no implementation to build.
-    # group_tools.tool_id is ON DELETE CASCADE, so per-group config for a tool
-    # that cannot be built goes with it.
+    # Remove GLOBAL rows this file no longer defines. Without this the seeder
+    # only ever ADDED, so every tool a previous version seeded stayed in the
+    # table forever — including the CrewAI tools this engine replaced, still
+    # listed and still assignable in the UI while the factory had no
+    # implementation to build. group_tools.tool_id is ON DELETE CASCADE, so
+    # per-group config for a tool that cannot be built goes with it.
+    # Workspace rows are not this seeder's: their ids are never in the seed
+    # list, so without the group filter every one was deleted on each startup.
+    # Nor are ids at or above TOOL_ID_FLOOR: those rows were made at runtime.
     seeded_ids = {row[0] for row in tools_data}
     async with async_session_factory() as session:
-        result = await session.execute(select(Tool).filter(Tool.id.notin_(seeded_ids)))
+        not_seeded = (Tool.id.notin_(seeded_ids), Tool.id < TOOL_ID_FLOOR)
+        result = await session.execute(
+            select(Tool).filter(*not_seeded, Tool.group_id.is_(None))
+        )
         stale = result.scalars().all()
         stale_ids = [tool.id for tool in stale]
         for tool in stale:
@@ -576,9 +607,11 @@ async def seed_async():
         f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, "
         f"Removed {tools_removed}, Skipped {tools_skipped}, Errors {tools_error}"
     )
+    if tools_error:
+        raise SeederIncomplete("tools", tools_error, len(tools_data))
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding tools."""
     logger.info("Tools seed function called")
     try:

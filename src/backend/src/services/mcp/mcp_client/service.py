@@ -1,7 +1,9 @@
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import (
     BadRequestError,
@@ -11,6 +13,7 @@ from src.core.exceptions import (
     NotFoundError,
 )
 from src.core.permissions import is_system_admin
+from src.models.mcp_server import MCPServer
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.schemas.mcp import (
     MCPServerCreate,
@@ -28,13 +31,41 @@ from src.utils.encryption_utils import EncryptionUtils
 logger = logging.getLogger(__name__)
 
 
+def _refuse_foreign_mcp_host(
+    server_url: str, auth_context: Any
+) -> Optional[MCPTestConnectionResponse]:
+    """A failed test result if the workspace credential must not go to ``server_url``.
+
+    Same rule as a run (``mcp_integration``): only the credential's own
+    workspace host or a Databricks App of that workspace (audit V3-2).
+    """
+    if not auth_context or not getattr(auth_context, "token", None):
+        return None
+    from src.core.exceptions import ForbiddenError
+    from src.services.databricks.workspace.host_guard import (
+        assert_mcp_credential_host,
+    )
+
+    try:
+        assert_mcp_credential_host(server_url, auth_context.workspace_url)
+    except ForbiddenError:
+        return MCPTestConnectionResponse(
+            success=False,
+            message=(
+                "Databricks authentication is only sent to this workspace's own "
+                "host or its Databricks Apps; use an API key for this server"
+            ),
+        )
+    return None
+
+
 class MCPService:
     """
     Service for MCP business logic and error handling.
     Acts as an intermediary between the API routers and the repository.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """
         Initialize service with database session.
 
@@ -43,24 +74,6 @@ class MCPService:
         """
         self.server_repository = MCPServerRepository(session)
         self.settings_repository = MCPSettingsRepository(session)
-
-    async def get_all_servers(self) -> MCPServerListResponse:
-        """
-        Get all MCP servers.
-
-        Returns:
-            MCPServerListResponse with list of all servers and count
-        """
-        servers = await self.server_repository.list()
-        server_responses = []
-
-        for server in servers:
-            server_response = MCPServerResponse.model_validate(server)
-            # Don't include API key in list response
-            server_response.api_key = ""
-            server_responses.append(server_response)
-
-        return MCPServerListResponse(servers=server_responses, count=len(servers))
 
     async def get_all_servers_effective(
         self, group_id: Optional[str], enabled_only: bool = False
@@ -107,44 +120,50 @@ class MCPService:
                 continue
             resp = MCPServerResponse.model_validate(server)
             resp.enabled = effective_enabled
-            resp.api_key = ""  # do not include in list
+            resp.api_key = ""  # do not include in list; blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(resp)
         return MCPServerListResponse(
             servers=server_responses, count=len(server_responses)
         )
 
-    async def get_enabled_servers(self) -> MCPServerListResponse:
+    async def get_enabled_servers(
+        self, group_ids: Sequence[str]
+    ) -> MCPServerListResponse:
         """
-        Get all enabled MCP servers.
+        Get the enabled MCP servers visible to ``group_ids``: base servers plus
+        those groups' own. Another group's servers are never listed.
 
         Returns:
             MCPServerListResponse with list of enabled servers and count
         """
-        servers = await self.server_repository.find_enabled()
+        servers = await self.server_repository.find_enabled(group_ids)
         server_responses = []
 
         for server in servers:
             server_response = MCPServerResponse.model_validate(server)
             # Don't include API key in list response
-            server_response.api_key = ""
+            server_response.api_key = ""  # blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(server_response)
 
         return MCPServerListResponse(servers=server_responses, count=len(servers))
 
-    async def get_global_servers(self) -> MCPServerListResponse:
+    async def get_global_servers(
+        self, group_ids: Sequence[str]
+    ) -> MCPServerListResponse:
         """
-        Get all globally enabled MCP servers.
+        Get the globally enabled MCP servers visible to ``group_ids``: base
+        servers plus those groups' own. Another group's servers are never listed.
 
         Returns:
             MCPServerListResponse with list of globally enabled servers and count
         """
-        servers = await self.server_repository.find_global_enabled()
+        servers = await self.server_repository.find_global_enabled(group_ids)
         server_responses = []
 
         for server in servers:
             server_response = MCPServerResponse.model_validate(server)
             # Don't include API key in list response
-            server_response.api_key = ""
+            server_response.api_key = ""  # blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(server_response)
 
         return MCPServerListResponse(servers=server_responses, count=len(servers))
@@ -203,7 +222,7 @@ class MCPService:
         return responses
 
     @staticmethod
-    def _decrypt_server_api_key(server) -> Optional[str]:
+    def _decrypt_server_api_key(server: MCPServer) -> Optional[str]:
         """Decrypt a server's stored API key — only when its auth mode uses one.
 
         OBO/SPN servers authenticate with tokens, not the stored key. A row can
@@ -236,17 +255,20 @@ class MCPService:
         return decrypted
 
     @staticmethod
-    def _masked_response(server) -> MCPServerResponse:
+    def _masked_response(server: Optional[MCPServer]) -> MCPServerResponse:
         """A response that says a key is stored without saying what it is.
         Keys are write-only at the API; the run that connects decrypts its own
-        (``get_servers_by_names*``)."""
+        (``get_servers_by_names*``). ``None`` — a row that vanished between a
+        read and its update — is a 404, not a validation crash."""
+        if server is None:
+            raise NotFoundError(detail="MCP server not found")
         resp = MCPServerResponse.model_validate(server)
-        resp.api_key = ""
+        resp.api_key = ""  # blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
         resp.has_api_key = bool(getattr(server, "encrypted_api_key", None))
         return resp
 
     def _group_override_payload(
-        self, base, group_id: str, enabled: bool
+        self, base: MCPServer, group_id: str, enabled: bool
     ) -> Dict[str, Any]:
         """Clone a base server's config into a workspace-scoped override row."""
         return {
@@ -324,7 +346,7 @@ class MCPService:
         server_responses: List[MCPServerResponse] = []
         for server in servers:
             resp = MCPServerResponse.model_validate(server)
-            resp.api_key = ""  # never include in list responses
+            resp.api_key = ""  # never include in list responses; blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(resp)
         return MCPServerListResponse(
             servers=server_responses, count=len(server_responses)
@@ -358,28 +380,6 @@ class MCPService:
         updated = await self.server_repository.update(server_id, {"enabled": enabled})
         return self._masked_response(updated)
 
-    async def get_effective_servers(
-        self, explicit_servers: List[str]
-    ) -> List[MCPServerResponse]:
-        """
-        Get effective MCP servers combining global and explicit selections.
-
-        Args:
-            explicit_servers: List of explicitly selected server names
-
-        Returns:
-            List of effective MCPServerResponse objects (global + explicit, deduplicated)
-        """
-        # Get global servers
-        global_response = await self.get_global_servers()
-        global_names = {server.name for server in global_response.servers}
-
-        # Combine global and explicit server names (deduplicated)
-        all_server_names = list(global_names.union(set(explicit_servers)))
-
-        # Get all servers by names
-        return await self.get_servers_by_names(all_server_names)
-
     # ── Ownership ──────────────────────────────────────────────────────────
     # Rows are workspace-owned (``group_id`` set) or base/global (``None``,
     # available to every workspace). Every API read and change goes through
@@ -393,7 +393,7 @@ class MCPService:
             getattr(group_context, "primary_group_id", None) if group_context else None
         )
 
-    async def _visible_row(self, server_id: int, group_context: Any):
+    async def _visible_row(self, server_id: int, group_context: Any) -> MCPServer:
         """The row when the caller may SEE it: a base row, or the caller's own
         workspace's row. Another workspace's row reads as not found — that it
         exists is the other workspace's business."""
@@ -406,7 +406,7 @@ class MCPService:
             raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
         return server
 
-    async def _mutable_row(self, server_id: int, group_context: Any):
+    async def _mutable_row(self, server_id: int, group_context: Any) -> MCPServer:
         """The row when the caller may CHANGE it. A base row changes for a
         system admin only — it is every workspace's server. A workspace row
         changes for its own workspace (the route has already required the
@@ -705,6 +705,9 @@ class MCPService:
 
                 # For SPN, skip OBO (user_token=None); for OBO, would pass user_token
                 auth_context = await get_auth_context(user_token=None)
+                refusal = _refuse_foreign_mcp_host(test_data.server_url, auth_context)
+                if refusal:
+                    return refusal
                 if auth_context and auth_context.token:
                     headers = {
                         "Authorization": f"Bearer {auth_context.token}",
@@ -813,6 +816,9 @@ class MCPService:
                 from src.utils.databricks_auth import get_auth_context
 
                 auth_context = await get_auth_context(user_token=None)
+                refusal = _refuse_foreign_mcp_host(test_data.server_url, auth_context)
+                if refusal:
+                    return refusal
                 if auth_context and auth_context.token:
                     headers = {"Authorization": f"Bearer {auth_context.token}"}
                     logger.debug(

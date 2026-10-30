@@ -39,114 +39,6 @@ class GroupService:
 
         self.user_repo = UserRepository(_User, session)
 
-    async def ensure_group_exists(self, group_context) -> Optional[Group]:
-        """
-        Ensure group exists, creating it automatically if needed.
-
-        This is the core auto-group creation logic for Databricks Apps deployment.
-        When a user accesses the system, we automatically create their group if needed.
-
-        Args:
-            group_context: Context with group_id
-
-        Returns:
-            Group: The existing or newly created group
-        """
-        # Support both GroupContext and legacy TenantContext during migration
-        primary_group_id = getattr(group_context, "primary_group_id", None) or getattr(
-            group_context, "primary_tenant_id", None
-        )
-        group_email = getattr(group_context, "group_email", None) or getattr(
-            group_context, "tenant_email", None
-        )
-
-        if not primary_group_id:
-            logger.warning("Cannot create group: missing primary_group_id")
-            return None
-
-        # Check if group already exists
-        group = await self.group_repo.get(primary_group_id)
-
-        if group:
-            logger.debug(f"Group {primary_group_id} already exists")
-            return group
-
-        # Generate a name based on the group_id
-        if primary_group_id.startswith("user_"):
-            # Personal (private) group — the user's Personal Space, not a teamspace
-            name = (
-                f"Personal Space - {group_email}" if group_email else "Personal Space"
-            )
-        else:
-            # Regular group - clean up the group_id for display
-            name = primary_group_id.replace("_", " ").title()
-
-        # Auto-create group
-        group = Group(
-            id=primary_group_id,
-            name=name,
-            status=GroupStatus.ACTIVE,
-            description="Auto-created group",
-            auto_created=True,
-            created_by_email=group_email,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-
-        group = await self.group_repo.add(group)
-
-        logger.info(f"Auto-created group {primary_group_id}")
-        return group
-
-    async def ensure_group_user_exists(
-        self, group_context, user_id: str
-    ) -> Optional[GroupUser]:
-        """
-        Ensure group user association exists, creating it automatically if needed.
-
-        Args:
-            group_context: Context with group information
-            user_id: User ID to associate with group
-
-        Returns:
-            GroupUser: The existing or newly created group user association
-        """
-        # Support both GroupContext and legacy TenantContext during migration
-        primary_group_id = getattr(group_context, "primary_group_id", None) or getattr(
-            group_context, "primary_tenant_id", None
-        )
-
-        if not primary_group_id:
-            return None
-
-        # Check if group user already exists
-        group_user = await self.group_user_repo.get_by_group_and_user(
-            primary_group_id, user_id
-        )
-
-        if group_user:
-            return group_user
-
-        # Auto-create group user association
-        group_user = GroupUser(
-            id=f"{primary_group_id}_{user_id}",
-            group_id=primary_group_id,
-            user_id=user_id,
-            role=GroupUserRole.OPERATOR,  # Default role
-            status=GroupUserStatus.ACTIVE,
-            joined_at=datetime.utcnow(),
-            auto_created=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-
-        group_user = await self.group_user_repo.add(group_user)
-
-        logger.info(
-            f"Auto-created group user association for {user_id} in group {primary_group_id}"
-        )
-        return group_user
-
     async def get_user_groups(self, user_id: str) -> List[Group]:
         """
         Get all groups a user belongs to.
@@ -198,26 +90,11 @@ class GroupService:
             and gu.group.status == GroupStatus.ACTIVE
         ]
 
-    async def get_user_group_memberships(self, email: str) -> List[Group]:
-        """
-        Get all groups a user belongs to by email address.
-
-        Args:
-            email: User email address to look up
-
-        Returns:
-            List[Group]: List of groups the user belongs to
-        """
-        # First get the user
-        user = await self.user_repo.get_by_email(email)
-
-        if not user:
-            return []
-
-        return await self.get_user_groups(user.id)
-
     async def create_group(
-        self, name: str, description: str = None, created_by_email: str = None
+        self,
+        name: str,
+        description: Optional[str] = None,
+        created_by_email: Optional[str] = None,
     ) -> Group:
         """
         Create a new group manually.
@@ -285,7 +162,7 @@ class GroupService:
         """
         return await self.group_repo.get(group_id)
 
-    async def update_group(self, group_id: str, **updates) -> Group:
+    async def update_group(self, group_id: str, **updates: Any) -> Group:
         """
         Update a group.
 
@@ -307,7 +184,9 @@ class GroupService:
                 setattr(group, field, value)
 
         group.updated_at = datetime.utcnow()
-        return await self.group_repo.update(group)
+        # The row is already loaded and modified in this session: flush it.
+        # (`update(id, values)` takes a key and a dict, not the object.)
+        return await self.group_repo.add(group)
 
     async def get_group_user_count(self, group_id: str) -> int:
         """
@@ -371,7 +250,7 @@ class GroupService:
         group_id: str,
         user_email: str,
         role: GroupUserRole = GroupUserRole.OPERATOR,
-        assigned_by_email: str = None,
+        assigned_by_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Assign a user to a group manually.
@@ -446,6 +325,8 @@ class GroupService:
                 updated_at=datetime.utcnow(),
             )
             group_user = await self.group_user_repo.add(group_user)
+        if group_user is None:  # the row vanished between the read and the update
+            raise ValueError(f"User {actual_user_id} not found in group {group_id}")
 
         logger.info(f"Assigned user {user_email} to group {group_id} with role {role}")
 
@@ -469,7 +350,7 @@ class GroupService:
         }
 
     async def update_group_user(
-        self, group_id: str, user_id: str, **updates
+        self, group_id: str, user_id: str, **updates: Any
     ) -> GroupUser:
         """
         Update a group user.
@@ -495,6 +376,8 @@ class GroupService:
 
         update_data["updated_at"] = datetime.utcnow()
         updated = await self.group_user_repo.update(group_user.id, update_data)
+        if updated is None:  # the row vanished between the read and the update
+            raise ValueError(f"User {user_id} not found in group {group_id}")
 
         # Role/status changed — invalidate cached memberships. We only have
         # user_id here, not email, so clear the whole (small, short-TTL) cache.
@@ -504,7 +387,7 @@ class GroupService:
 
         return updated
 
-    async def remove_user_from_group(self, group_id: str, user_id: str):
+    async def remove_user_from_group(self, group_id: str, user_id: str) -> None:
         """
         Remove a user from a group.
 
@@ -568,74 +451,6 @@ class GroupService:
             Dict: Statistics about groups and users
         """
         return await self.group_repo.get_stats()
-
-    async def get_total_group_count(self) -> int:
-        """
-        Get the total count of groups in the system.
-
-        Returns:
-            int: Total number of groups
-        """
-        stats = await self.group_repo.get_stats()
-        return stats.get("total_groups", 0)
-
-    async def create_first_admin_group_for_user(self, user) -> tuple[Group, GroupUser]:
-        """
-        Create the first admin group and assign the user as admin.
-        This is called when the first user logs in and no groups exist.
-
-        Args:
-            user: The first user logging in
-
-        Returns:
-            tuple: (created_group, group_user_membership)
-        """
-        # Create the first admin group
-        group_data = {
-            "name": "Admin Group",
-            "description": "First admin group - automatically created",
-            "created_by_email": user.email,
-        }
-
-        # Generate unique ID for the group using email username part
-        username_part = user.email.split("@")[0] if "@" in user.email else "admin"
-        group_id = f"admin_group_{username_part.replace('.', '_').replace('-', '_')}"
-
-        group = Group(
-            id=group_id,
-            name=group_data["name"],
-            status=GroupStatus.ACTIVE,
-            description=group_data["description"],
-            auto_created=True,
-            created_by_email=group_data["created_by_email"],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-
-        # Use repository to add the group
-        group = await self.group_repo.add(group)
-
-        # Create group user membership with ADMIN role
-        group_user = GroupUser(
-            id=f"{group.id}_{user.id}",
-            group_id=group.id,
-            user_id=user.id,
-            role=GroupUserRole.ADMIN,  # Set as ADMIN role
-            status=GroupUserStatus.ACTIVE,
-            joined_at=datetime.utcnow(),
-            auto_created=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-
-        # Use repository to add the group user
-        group_user = await self.group_user_repo.add(group_user)
-
-        logger.info(
-            f"Created first admin group {group.id} and assigned user {user.email} as ADMIN"
-        )
-
-        return group, group_user
 
     async def get_user_group_membership(
         self, user_id: str, group_id: str

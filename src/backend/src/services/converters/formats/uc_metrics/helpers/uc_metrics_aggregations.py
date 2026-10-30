@@ -4,11 +4,28 @@ Provides Spark SQL aggregation support for Unity Catalog Metrics Store
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ....base.models import KPI
 
 logger = logging.getLogger(__name__)
+
+# KPI formulas and filter conditions are interpolated into metric-view SQL that
+# is deployed and executed. They must stay expressions: no statement separator,
+# comment, dollar-quote or subquery (a SELECT could read another table under the
+# deployer's identity). Checked outside string literals, so 'a; b' is fine.
+# FROM alone is allowed: EXTRACT(YEAR FROM d) and TRIM(BOTH ' ' FROM c) are
+# expressions.
+_STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.|'')*'")
+_NOT_AN_EXPRESSION = re.compile(r";|--|/\*|\*/|\$\$|\bSELECT\b", re.IGNORECASE)
+
+
+def require_safe_expression(expr: str, what: str = "expression") -> str:
+    """``expr`` when it is a plain SQL expression; raises ``ValueError`` otherwise."""
+    if _NOT_AN_EXPRESSION.search(_STRING_LITERAL.sub("''", expr or "")):
+        raise ValueError(f"Unsafe {what} in KPI definition: {expr!r}")
+    return expr
 
 
 class UCMetricsAggregationBuilder:
@@ -34,7 +51,7 @@ class UCMetricsAggregationBuilder:
         aggregation_type = (
             kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
         )
-        formula = kpi.formula or "1"
+        formula = require_safe_expression(kpi.formula or "1", "formula")
 
         # Map aggregation types to UC metrics expressions
         if aggregation_type == "SUM":
@@ -86,6 +103,7 @@ class UCMetricsAggregationBuilder:
         exceptions = getattr(kpi, "exceptions", None)
         if exceptions:
             formula = self.apply_exceptions_to_formula(formula, exceptions)
+        formula = require_safe_expression(formula, "formula")
 
         # Build base aggregation
         if aggregation_type == "SUM":
@@ -113,7 +131,8 @@ class UCMetricsAggregationBuilder:
 
         # Add FILTER clause if there are specific filters
         if specific_filters:
-            filtered_expr = f"{base_expr} FILTER (WHERE {specific_filters})"
+            require_safe_expression(specific_filters, "filter")
+            filtered_expr = f"{base_expr} FILTER (WHERE {specific_filters})"  # filter passed require_safe_expression — nosemgrep: tmp.databricks.sql-injection.fstring-where
         else:
             filtered_expr = base_expr
 
@@ -231,65 +250,6 @@ class UCMetricsAggregationBuilder:
                 window_config.append(window_entry)
 
         return main_expr, window_config
-
-    def build_constant_selection_measure(
-        self, kpi: KPI, kbi_specific_filters: List[str]
-    ) -> Tuple[str, List[Dict[str, str]]]:
-        """Build measure with constant selection (SAP BW pattern)
-
-        Constant selection fields are used for semi-additive measures where
-        aggregation should use the last value in a time period.
-
-        Args:
-            kpi: KPI with constant selection configuration
-            kbi_specific_filters: KBI-specific filter conditions
-
-        Returns:
-            Tuple of (measure_expression, window_config_list)
-
-        Example:
-            For inventory with constant_selection on fiscal_period:
-            - Takes last inventory value per period
-            - Window: {"order": "fiscal_period", "semiadditive": "last", "range": "current"}
-        """
-        aggregation_type = (
-            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
-        )
-        formula = kpi.formula or "1"
-        display_sign = getattr(kpi, "display_sign", 1)
-
-        # Build base aggregation
-        if aggregation_type == "SUM":
-            base_expr = f"SUM({formula})"
-        elif aggregation_type == "COUNT":
-            base_expr = f"COUNT({formula})"
-        elif aggregation_type == "AVERAGE":
-            base_expr = f"AVG({formula})"
-        elif aggregation_type == "MIN":
-            base_expr = f"MIN({formula})"
-        elif aggregation_type == "MAX":
-            base_expr = f"MAX({formula})"
-        else:
-            base_expr = f"SUM({formula})"
-
-        # Add FILTER clause if there are KBI-specific filters
-        if kbi_specific_filters:
-            filter_conditions = " AND ".join(kbi_specific_filters)
-            measure_expr = f"{base_expr} FILTER (\n            WHERE {filter_conditions}\n          )"
-        else:
-            measure_expr = base_expr
-
-        # Apply display_sign if it's -1
-        if display_sign == -1:
-            measure_expr = f"(-1) * {measure_expr}"
-
-        # Build window configuration for constant selection fields
-        window_config = []
-        for field in kpi.fields_for_constant_selection:
-            window_entry = {"order": field, "semiadditive": "last", "range": "current"}
-            window_config.append(window_entry)
-
-        return measure_expr, window_config
 
 
 # Convenience function for simple cases

@@ -771,9 +771,12 @@ class TestDatabricksAppExporter:
         files = _files(await exporter.export(crew_data, {}))
         agents_cfg = yaml.safe_load(files["config/agents.yaml"])
         assert agents_cfg["researcher"]["tools"] == ["SerperDevTool"]
+        # The exported (single-tenant) app passes its own env key explicitly;
+        # the Kasal tool itself never reads the environment.
         assert (
-            '"SerperDevTool": lambda: SerperDevTool()' in files["agent_server/agent.py"]
-        )
+            '"SerperDevTool": lambda: SerperDevTool('
+            'api_key=os.environ.get("SERPER_API_KEY"))'
+        ) in files["agent_server/agent.py"]
 
     @pytest.mark.asyncio
     async def test_tasks_yaml_maps_agent(self, exporter, crew_data):

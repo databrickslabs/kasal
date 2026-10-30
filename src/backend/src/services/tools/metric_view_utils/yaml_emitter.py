@@ -3,6 +3,11 @@
 Exact port of emit_yaml() from the monolith generate_metric_views.py
 (lines 4570-5038) plus its helper functions (_yaml_scalar, _yaml_val,
 _yaml_needs_quoting, _clean_filter_prefixes).
+
+The scalar formatting lives in ``yaml_scalars``, the measure comment
+annotations in ``yaml_annotations`` and the per-bucket measure blocks in
+``yaml_measure_render``; they are re-exported here so existing imports keep
+resolving against this module.
 """
 
 from __future__ import annotations
@@ -12,9 +17,28 @@ import logging
 import re
 
 from .data_classes import MetricViewSpec
-from .drift.fingerprint import dax_fingerprint
 from .metadata_generator import MetadataGenerator
-from .utils import col_to_readable, spark_sql_compat
+from .utils import spark_sql_compat
+from .yaml_annotations import _MAX_EXPLANATION as _MAX_EXPLANATION
+from .yaml_annotations import _categorize_untranslatable as _categorize_untranslatable
+from .yaml_annotations import (
+    _indirect_visual_usage_suffix as _indirect_visual_usage_suffix,
+)
+from .yaml_annotations import _provenance_suffix as _provenance_suffix
+from .yaml_annotations import _usage_suffix as _usage_suffix
+from .yaml_annotations import _visual_usage_suffix as _visual_usage_suffix
+from .yaml_measure_render import (
+    render_base_measures,
+    render_dax_measures,
+    render_implicit_measures,
+    render_switch_measures,
+    render_untranslatable_comments,
+)
+from .yaml_scalars import _yaml_needs_quoting as _yaml_needs_quoting
+from .yaml_scalars import (
+    _yaml_scalar,
+    _yaml_val,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,302 +125,6 @@ def _fit_comment(comment: str) -> str:
     return head.rstrip() + marker
 
 
-# ─── YAML formatting helpers ─────────────────────────────────────────────────
-
-
-def _yaml_scalar(value: str, indent: int = 0) -> str:
-    """Format a string value for safe YAML emission.
-
-    - Plain text with no special chars -> bare scalar
-    - Single-line with YAML-special chars -> double-quoted
-    - Multi-line -> block scalar (|-)
-    """
-    if not value:
-        return "''"
-    if "\n" in value:
-        prefix = " " * indent
-        block_lines = value.split("\n")
-        return "|-\n" + "\n".join(
-            f"{prefix}  {item_value}" for item_value in block_lines
-        )
-    if any(
-        c in value
-        for c in ("{", "}", ":", "#", "'", "[", "]", "*", "&", "!", "%", "@", "`")
-    ):
-        # Prefer single quotes for values with backticks (no escaping needed)
-        if "`" in value and "'" not in value:
-            return f"'{value}'"
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    return value
-
-
-def _categorize_untranslatable(measure) -> tuple[str, str]:
-    """Classify an untranslatable measure into a human-readable CATEGORY + why.
-
-    Turns the raw internal skip_reason / DAX shape into one of a few clear buckets
-    so the emitted comment explains to a reviewer WHY a measure was not emitted:
-      - display artifact (color/label/format — not data)
-      - slicer/scalar helper (SELECTEDVALUE date pickers etc. — not aggregatable)
-      - dynamic KPI selector (SWITCH mega-wrapper — picks a KPI by slicer)
-      - prior-year time-intelligence (not expressible in a static metric view)
-      - complex DAX needing manual translation (the residual)
-    Returns (category, explanation).
-    """
-    name = (getattr(measure, "original_name", "") or "").lower()
-    dax = getattr(measure, "dax_expression", "") or ""
-    reason = getattr(measure, "skip_reason", "") or ""
-    du = dax.upper()
-
-    if (
-        name.endswith("_color")
-        or "color" in name
-        or "format" in reason.lower()
-        or "display" in reason.lower()
-    ):
-        return ("display artifact", "formatting/label only — not a data measure")
-    if (
-        re.search(r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|PREVIOUSYEAR", du)
-        or "prior-year" in reason.lower()
-    ):
-        return (
-            "prior-year time-intelligence",
-            "period-shift not expressible in a static UC metric view "
-            "(supply a calendar date_py column or compute in the source view)",
-        )
-    if "SWITCH" in du and "SELECTEDVALUE" in du:
-        return (
-            "dynamic KPI selector",
-            "SWITCH(SELECTEDVALUE(...)) picks a KPI by slicer — no static "
-            "metric-view equivalent; expand per-branch or handle in the report",
-        )
-    # Construct-specific guidance — state the ACTUAL unlock (or honest skip) so a
-    # reviewer knows the next step, not just "needs manual translation". These run
-    # BEFORE the generic SELECTEDVALUE/scalar catch below because these constructs
-    # frequently co-occur with a SELECTEDVALUE arg (a slicer feeding the pattern),
-    # and the specific construct is the actionable signal, not the SELECTEDVALUE.
-    if "TREATAS" in du:
-        return (
-            "disconnected-slicer dispatch (TREATAS)",
-            "slicer picks which KPI to show — display-layer, not a metric; "
-            "define each underlying KPI as its own measure, no source-view unlock",
-        )
-    if "LOOKUPVALUE" in du:
-        return (
-            "parameter/label lookup (LOOKUPVALUE)",
-            "builds a display string or reads a slicer parameter table — not a "
-            "metric; a real attribute lookup is a join (RELATED), not this",
-        )
-    if "TOPN" in du:
-        return (
-            "top-N row selection (TOPN)",
-            "ranks-and-slices rows — needs a source-view ROW_NUMBER()/QUALIFY "
-            "precompute; do not approximate with MAX",
-        )
-    if "ALLEXCEPT" in du:
-        return (
-            "fixed-LOD (ALLEXCEPT)",
-            "aggregate at the kept-column grain — 1 kept col → window range:all; "
-            "2+ kept cols → source-view SUM(...) OVER (PARTITION BY ...)",
-        )
-    if "SUMMARIZE" in du or "CALCULATETABLE" in du or "ADDCOLUMNS" in du:
-        return (
-            "group-then-aggregate (SUMMARIZE/CALCULATETABLE)",
-            "builds a grouped virtual table — materialize the GROUP BY in the "
-            "source SELECT as an identity dimension, then SUM it",
-        )
-    if "SELECTEDVALUE" in du or re.search(
-        r"\bF_(START|END)_DATE\b|CUR_MONTH|CUR_YR", du
-    ):
-        return (
-            "slicer/scalar helper",
-            "returns a single slicer-driven scalar (e.g. a date picker) — "
-            "not an aggregatable measure",
-        )
-    if "DISTINCTCOUNT" in du:
-        return ("distinct-count pattern", reason or "DISTINCTCOUNT not translated")
-    return ("complex DAX — needs manual translation", reason or "no matching pattern")
-
-
-def _usage_suffix(referenced_by: int) -> str:
-    """Human-readable usage annotation for a measure comment.
-
-    Counts measure→measure references only (not dashboard/visual usage), so the
-    wording is deliberately "referenced by N measure(s)". Empty string when the
-    measure is referenced by nothing (avoids noise on the many leaf measures).
-    """
-    if not referenced_by or referenced_by < 1:
-        return ""
-    noun = "measure" if referenced_by == 1 else "measures"
-    return f" — referenced by {referenced_by} {noun}"
-
-
-def _visual_usage_suffix(measure) -> str:
-    """Business-usage annotation for a measure comment: HOW OFTEN, HOW and
-    WHERE this measure is actually used in the report (PROP-8).
-
-    Distinct from `_usage_suffix` (measure→measure DAX references) — this is
-    dashboard/visual usage, from `TranslationResult.used_in_visuals`
-    (`visual_usage_annotator.annotate_visual_usage`), a list of
-    `{page, visual_type, role}` occurrences. Empty when the field wasn't found
-    in any visual (common — many measures exist only as intermediate building
-    blocks for other measures) or when no visual_usage_index was supplied at
-    all (report_id omitted, or the run predates this feature) — both cases are
-    silent, not flagged as an error.
-
-    Emits a single readable, machine-parseable line (the review UI's "Used on"
-    column parses it back out):
-
-        · Used on 3 visuals: OTC Scorecard (card/tableEx·drawn), OTC NPS (slicer·filter) (+1 more)
-
-    - the leading count is HOW OFTEN — the number of visual occurrences;
-    - per page: the visual type(s) (WHERE) and whether the field is drawn
-      (shown) or only used as a filter (HOW), as `<types>·<role>`;
-    - caps at 3 pages named explicitly, then "+N more" (remaining PAGES) so a
-      measure used everywhere doesn't produce an unreadable comment line.
-
-    Annotations never contain a comma (types are `/`-joined, role after `·`) so
-    the comma stays a clean page separator for the parser. Defensive against
-    occurrences missing `visual_type`/`role`.
-    """
-    usage = getattr(measure, "used_in_visuals", None)
-    if not usage:
-        return ""
-    # Aggregate occurrences per page, preserving first-seen order. Each
-    # occurrence is one visual the field appears in, so per-page `count` is the
-    # number of visuals on that page (reconciles the total with the page list:
-    # "7 visuals" all on one page shows as that page ×7).
-    per_page: dict[str, dict] = {}
-    order: list[str] = []
-    for occ in usage:
-        page = occ.get("page")
-        if not page:
-            continue
-        if page not in per_page:
-            per_page[page] = {"types": [], "drawn": False, "count": 0}
-            order.append(page)
-        per_page[page]["count"] += 1
-        vt = occ.get("visual_type")
-        if vt and vt not in per_page[page]["types"]:
-            per_page[page]["types"].append(vt)
-        # "drawn" (or a missing role) means the field is shown; only "filter"
-        # occurrences alone keep a page marked filter-only.
-        if occ.get("role") != "filter":
-            per_page[page]["drawn"] = True
-    if not order:
-        return ""
-    # HOW OFTEN — total visuals across the report (sum of the per-page counts,
-    # so it always equals the sum of the "×N" tallies shown below).
-    total = sum(info["count"] for info in per_page.values())
-    shown = order[:3]
-    parts: list[str] = []
-    for page in shown:
-        info = per_page[page]
-        role = "drawn" if info["drawn"] else "filter"
-        types = "/".join(info["types"])
-        annot = f"{types}·{role}" if types else role
-        # Per-page visual count, shown only when >1 (a lone visual needs no ×1).
-        tally = f" ×{info['count']}" if info["count"] > 1 else ""
-        parts.append(f"{page}{tally} ({annot})")
-    suffix = f"Used on {total} visual{'s' if total != 1 else ''}: " + ", ".join(parts)
-    remaining = len(order) - len(shown)
-    if remaining > 0:
-        suffix += f" (+{remaining} more)"
-    return f" · {suffix}"
-
-
-def _indirect_visual_usage_suffix(measure) -> str:
-    """Indirect (backtraced) visual usage: this measure isn't drawn/filtered in
-    a visual itself, but a visual-placed measure references it (transitively) in
-    its DAX. Kept SEPARATE from ``_visual_usage_suffix`` (direct usage) so the
-    two never blur — a sub-KPI feeding a slicer KPI is real usage, but inherited.
-
-    From ``TranslationResult.indirect_visual_usage`` ([{page, visual_type, role,
-    via}], stamped by ``annotate_indirect_visual_usage``). Emits e.g.
-        · Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary
-    Groups by the ``via`` measure (what a reviewer traces back through), lists
-    that parent's pages, caps parents at 2 then "+N more". Empty when there is
-    no indirect usage (the common case).
-    """
-    usage = getattr(measure, "indirect_visual_usage", None)
-    if not usage:
-        return ""
-    # Group pages per `via` measure, preserving first-seen order.
-    per_via: dict[str, list[str]] = {}
-    order: list[str] = []
-    for occ in usage:
-        via = occ.get("via")
-        page = occ.get("page")
-        if not via:
-            continue
-        if via not in per_via:
-            per_via[via] = []
-            order.append(via)
-        if page and page not in per_via[via]:
-            per_via[via].append(page)
-    if not order:
-        return ""
-    shown = order[:2]
-    parts: list[str] = []
-    for via in shown:
-        pages = ", ".join(per_via[via]) if per_via[via] else ""
-        parts.append(f"[{via}] on: {pages}" if pages else f"[{via}]")
-    suffix = "Indirectly used via " + "; ".join(parts)
-    remaining = len(order) - len(shown)
-    if remaining > 0:
-        suffix += f" (+{remaining} more)"
-    return f" · {suffix}"
-
-
-_MAX_EXPLANATION = 140
-
-
-def _provenance_suffix(measure) -> str:
-    """Provenance annotation for an LLM-translated measure comment.
-
-    Makes best-effort output auditable: a reviewer sees the confidence, the
-    7-category dax_class, and the LLM's one-line justification for every measure
-    the LLM produced — so high-confidence ones can be trusted and lower-confidence
-    ones triaged. Empty for non-LLM (deterministic regex) measures, which are
-    exact by construction and need no justification.
-    """
-    if getattr(measure, "category", None) != "llm_translated":
-        return ""
-    conf = getattr(measure, "confidence", "") or "medium"
-    dax_class = getattr(measure, "dax_class", "") or "llm"
-    parts = f"LLM[{conf}/{dax_class}]"
-    explanation = (getattr(measure, "explanation", "") or "").strip()
-    if explanation:
-        if len(explanation) > _MAX_EXPLANATION:
-            explanation = explanation[: _MAX_EXPLANATION - 1].rstrip() + "…"
-        parts += f": {explanation}"
-    return f" · {parts}"
-
-
-def _yaml_needs_quoting(val: str) -> bool:
-    """Check if a YAML scalar value needs quoting."""
-    if not val:
-        return True
-    # Characters that require quoting in YAML
-    if any(
-        c in val
-        for c in (":", "#", "{", "}", "[", "]", "&", "*", "!", "|", ">", "%", "@")
-    ):
-        return True
-    # Leading/trailing whitespace
-    if val != val.strip():
-        return True
-    return False
-
-
-def _yaml_val(val: str) -> str:
-    """Format a YAML scalar value, quoting only when necessary."""
-    if _yaml_needs_quoting(val):
-        escaped = val.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    return val
-
-
 # ─── FILTER prefix cleaning ──────────────────────────────────────────────────
 
 
@@ -430,7 +158,7 @@ def _clean_filter_prefixes(
             pbi_to_alias[low] = cfg["alias"]
 
     # Process each FILTER clause independently
-    def _strip_in_filter(m: re.Match) -> str:
+    def _strip_in_filter(m: re.Match[str]) -> str:
         filter_body = m.group(1)
         # 1. Strip source-table prefixes -> bare column names
         for pfx in strip_prefixes:
@@ -454,12 +182,9 @@ def _clean_filter_prefixes(
                 seen.append(p)
                 seen_norm.add(norm)
         filter_body = " AND ".join(seen)
-        return f"FILTER (WHERE {filter_body})"
+        return f"FILTER (WHERE {filter_body})"  # de-duplicates predicates already in expr — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
     return re.sub(r"FILTER\s*\(WHERE\s+(.*?)\)", _strip_in_filter, expr)
-
-
-# ─── Main YAML emitter ───────────────────────────────────────────────────────
 
 
 def emit_yaml(
@@ -992,280 +717,27 @@ def emit_yaml(
 
     _mm = measure_metadata or {}
     if base_measures:
-        lines.append(
-            f"# \u2500\u2500\u2500 Base Measures ({len(base_measures)}) "
-            + "\u2500" * (58 - len(str(len(base_measures))))
-        )
-        lines.append("")
-        lines.append("measures:")
-        for m in base_measures:
-            lines.append(f"  - name: {m.measure_name}")
-            expr = m.sql_expr
-            if expr is None:
-                continue
-            lines.append(f"    expr: {expr}")
-            # Use per-table metadata override, fall back to generated
-            m_override = _mm.get(m.measure_name, {})
-            if m_override.get("comment"):
-                comment = m_override["comment"]  # human override wins verbatim
-            else:
-                comment = (
-                    m.skip_reason or col_to_readable(m.measure_name)
-                ) + _provenance_suffix(m)
-            comment += _usage_suffix(m.referenced_by)
-            comment += _visual_usage_suffix(m)
-            comment += _indirect_visual_usage_suffix(m)
-            lines.append(f"    comment: {_yaml_val(comment)}")
-            m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
-            display_name = m_override.get("display_name") or m_meta.get(
-                "display_name", ""
-            )
-            if display_name:
-                lines.append(f"    display_name: {_yaml_val(display_name)}")
-            # Format BEFORE synonyms (matching customer target style)
-            if m_meta.get("format"):
-                fmt = m_meta["format"]
-                lines.append("    format:")
-                lines.append(f'      type: {fmt["type"]}')
-                if "currency_code" in fmt:
-                    lines.append(f'      currency_code: {fmt["currency_code"]}')
-                if "decimal_places" in fmt:
-                    lines.append("      decimal_places:")
-                    lines.append("        type: exact")
-                    lines.append(f'        places: {fmt["decimal_places"]["places"]}')
-            synonyms = m_override.get("synonyms", [])
-            if synonyms:
-                lines.append("    synonyms:")
-                for syn in synonyms:
-                    lines.append(f"      - {_yaml_val(syn)}")
-            lines.append("")
+        render_base_measures(lines, base_measures, _mm, _meta_gen)
     else:
         lines.append("measures:")
 
     if dax_measures:
-        lines.append(
-            f"  # \u2500\u2500\u2500 DAX-Translated Measures ({len(dax_measures)}) "
-            + "\u2500" * (50 - len(str(len(dax_measures))))
+        render_dax_measures(
+            lines,
+            dax_measures,
+            _mm,
+            _meta_gen,
+            budget_suffix,
+            percentage_multiplier_patterns,
         )
-        lines.append("")
-        for m in dax_measures:
-            if not m.sql_expr:
-                continue  # safety: skip measures with no SQL
-            lines.append(f"  - name: {m.measure_name}")
-            expr = m.sql_expr
-            # Apply percentage multiplier only if explicitly configured via patterns
-            if percentage_multiplier_patterns and "/" in expr:
-                for _pmp in percentage_multiplier_patterns:
-                    if re.search(_pmp, m.measure_name, re.IGNORECASE):
-                        expr = f"100*{expr}"
-                        break
-            if (
-                any(c in expr for c in ("'", '"', ":", "#", "{", "}", "[", "]"))
-                or "FILTER" in expr
-            ):
-                if len(expr) > 120 or "\n" in expr or ('"' in expr and "'" in expr):
-                    # Use the shared scalar formatter: multi-line values become a
-                    # properly-indented block scalar (|-). Writing a raw multi-line
-                    # string after 'expr: >-' left continuation lines unindented and
-                    # broke YAML parsing ("while scanning a simple key").
-                    lines.append(f"    expr: {_yaml_scalar(expr, indent=4)}")
-                elif '"' in expr:
-                    lines.append(f"    expr: '{expr}'")
-                else:
-                    lines.append(f'    expr: "{expr}"')
-            else:
-                lines.append(f"    expr: {expr}")
-            if m.window_spec:
-                lines.append("    window:")
-                lines.append(f"      - order: {m.window_spec['order']}")
-                lines.append(f"        range: {m.window_spec['range']}")
-                lines.append(
-                    f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
-                )
-            # Comment and metadata from per-table overrides or auto-generated
-            m_override = _mm.get(m.measure_name, {})
-            dax_comment = m_override.get("comment", "")
-            if not dax_comment:
-                if m.original_name != m.measure_name:
-                    dax_comment = f"PBI: {m.original_name}"
-                # Source-DAX fingerprint, early in the comment so UC's 4000-char
-                # truncation never drops it — the drift monitor compares it with
-                # today's DAX to detect a measure changed in Power BI.
-                _fp = dax_fingerprint(getattr(m, "dax_expression", "") or "")
-                if _fp:
-                    dax_comment = f"{dax_comment} · {_fp}" if dax_comment else _fp
-                dax_comment += _provenance_suffix(m)
-                # M11: a semi-additive (latest-period) measure is NOT additive over
-                # its order column — flag it so a reviewer/Genie doesn't sum it
-                # across periods. The `window: semiadditive: last` below enforces it;
-                # the caveat explains why the value is a point-in-time snapshot.
-                if m.window_spec and m.window_spec.get("semiadditive"):
-                    dax_comment += (
-                        f" · CAVEAT: non-additive — value taken at the "
-                        f"{m.window_spec.get('semiadditive', 'last')} "
-                        f"{m.window_spec.get('order', 'period')} of the selected "
-                        f"period (semi-additive snapshot; do not sum across periods)"
-                    )
-            dax_comment += _usage_suffix(m.referenced_by)
-            dax_comment += _visual_usage_suffix(m)
-            dax_comment += _indirect_visual_usage_suffix(m)
-            if dax_comment:
-                lines.append(f"    comment: {_yaml_val(dax_comment)}")
-            # Display name
-            m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
-            dax_display = m_override.get("display_name", "")
-            if not dax_display:
-                dax_display = m_meta.get("display_name", "")
-                if dax_display:
-                    if m.measure_name.endswith(budget_suffix):
-                        dax_display += " (Budget)"
-                    elif any(
-                        m.measure_name.replace(budget_suffix, "") == m2.measure_name
-                        for m2 in dax_measures
-                        if m2.measure_name.endswith(budget_suffix)
-                    ):
-                        dax_display += " (Actual)"
-            if dax_display:
-                lines.append(f"    display_name: {_yaml_val(dax_display)}")
-            # Format BEFORE synonyms (matching customer target style)
-            if m_meta.get("format"):
-                fmt = m_meta["format"]
-                lines.append("    format:")
-                lines.append(f'      type: {fmt["type"]}')
-                if "currency_code" in fmt:
-                    lines.append(f'      currency_code: {fmt["currency_code"]}')
-                if "decimal_places" in fmt:
-                    lines.append("      decimal_places:")
-                    lines.append("        type: exact")
-                    lines.append(f'        places: {fmt["decimal_places"]["places"]}')
-            # Synonyms AFTER format
-            synonyms = m_override.get("synonyms", [])
-            if synonyms:
-                lines.append("    synonyms:")
-                for syn in synonyms:
-                    lines.append(f"      - {_yaml_val(syn)}")
-            lines.append("")
-
     if switch_measures:
-        lines.append(
-            f"  # \u2500\u2500\u2500 SWITCH-Decomposed Measures ({len(switch_measures)}) "
-            + "\u2500" * (46 - len(str(len(switch_measures))))
-        )
-        lines.append("")
-        for m in switch_measures:
-            lines.append(f"  - name: {m.measure_name}")
-            expr = m.sql_expr
-            if expr is None:
-                continue
-            if len(expr) > 120 or "FILTER" in expr or "\n" in expr:
-                # Shared scalar formatter → multi-line becomes an indented block
-                # scalar (|-); avoids the unindented-continuation YAML parse error.
-                lines.append(f"    expr: {_yaml_scalar(expr, indent=4)}")
-            else:
-                lines.append(f"    expr: {expr}")
-            if m.window_spec:
-                lines.append("    window:")
-                lines.append(f"      - order: {m.window_spec['order']}")
-                lines.append(f"        range: {m.window_spec['range']}")
-                lines.append(
-                    f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
-                )
-            lines.append(
-                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
-            )
-            lines.append("")
-
+        render_switch_measures(lines, switch_measures)
     if implicit_measures:
-        # Its own labeled section \u2014 never folded into "DAX-Translated" \u2014 so a
-        # reviewer sees at a glance that these came from a raw column PBI
-        # itself aggregates, not from a named measure's DAX. The comment
-        # (built in table_processor.py's Step 6d) always states that, and
-        # `_visual_usage_suffix` always appends "Used on: <pages>" since a
-        # column only reaches this bucket by being found in a visual.
-        lines.append(
-            f"  # \u2500\u2500\u2500 Aggregated Column Measures ({len(implicit_measures)}) "
-            + "\u2500" * (44 - len(str(len(implicit_measures))))
-        )
-        lines.append("")
-        for m in implicit_measures:
-            lines.append(f"  - name: {m.measure_name}")
-            expr = m.sql_expr
-            if expr is None:
-                continue
-            lines.append(f"    expr: {expr}")
-            lines.append(
-                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
-            )
-            lines.append("")
+        render_implicit_measures(lines, implicit_measures)
 
-    # Untranslatable measures as comments \u2014 sorted highest-usage-first so the
-    # gaps that block the most downstream measures surface at the top for
-    # reviewers with scarce time.
+    # Untranslatable measures as comments (see render_untranslatable_comments).
     if spec.untranslatable:
-        lines.append(
-            f"  # \u2500\u2500\u2500 Not emitted as measures ({len(spec.untranslatable)}) \u2014 grouped by reason \u2500\u2500\u2500"
-        )
-        # Group by human category so a reviewer sees WHY each measure was skipped
-        # (display artifact / slicer-scalar / dynamic selector / prior-year /
-        # complex-DAX-needs-manual). Within a group, highest-usage first.
-        _by_cat: dict[str, list] = {}
-        _cat_why: dict[str, str] = {}
-        for m in spec.untranslatable:
-            cat, why = _categorize_untranslatable(m)
-            _by_cat.setdefault(cat, []).append(m)
-            _cat_why.setdefault(cat, why)
-        # Stable, informative order: the "not-a-measure-by-nature" buckets first
-        # (expected, no action), then the ones that need work.
-        _order = [
-            "display artifact",
-            "slicer/scalar helper",
-            "dynamic KPI selector",
-            "disconnected-slicer dispatch (TREATAS)",
-            "parameter/label lookup (LOOKUPVALUE)",
-            "prior-year time-intelligence",
-            "distinct-count pattern",
-            # translatable-with-source-view-work buckets last (actionable):
-            "fixed-LOD (ALLEXCEPT)",
-            "top-N row selection (TOPN)",
-            "group-then-aggregate (SUMMARIZE/CALCULATETABLE)",
-            "complex DAX \u2014 needs manual translation",
-        ]
-        for cat in _order + [c for c in _by_cat if c not in _order]:
-            ms = _by_cat.get(cat)
-            if not ms:
-                continue
-            lines.append("  #")
-            lines.append(f"  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}")
-            for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
-                lines.append(
-                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}{_visual_usage_suffix(m)}{_indirect_visual_usage_suffix(m)}"
-                )
-                # Preserve the full original DAX so a reviewer can hand-translate
-                # without re-opening the PBIX. Each DAX line is emitted as its own
-                # comment line (multi-line DAX would otherwise break YAML). Indented
-                # under the measure name for readability.
-                dax = (getattr(m, "dax_expression", "") or "").strip()
-                if dax:
-                    lines.append("  #       DAX:")
-                    for dax_line in dax.split("\n"):
-                        lines.append(f"  #         {dax_line}")
-                # Best-effort, UNVERIFIED source-view SQL scaffold for the cross-fact /
-                # multi-stage cases — a starting point to build a new view + UCMV on it.
-                # Never an emitted measure; the reviewer completes + verifies it.
-                try:
-                    from .recovery_recommender import draft_source_view
-
-                    _draft = draft_source_view(
-                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key
-                    )
-                except Exception:
-                    _draft = None
-                if _draft:
-                    lines.append(
-                        "  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):"
-                    )
-                    for _dl in _draft.split("\n"):
-                        lines.append(f"  #         {_dl}")
+        render_untranslatable_comments(lines, spec)
 
     lines.append("")
     return "\n".join(lines)

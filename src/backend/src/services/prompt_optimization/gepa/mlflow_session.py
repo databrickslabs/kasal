@@ -3,11 +3,11 @@
 Judges (MLflow scorers) used to be local-server-only. This lets them work on
 whichever backend is actually configured:
 
-* **Local MLflow server** (dev): ``MCP_SERVER_ENABLED=true`` + a non-databricks
-  ``MLFLOW_TRACKING_URI``. Judges register on that server.
+* **Local MLflow server** (dev): the workspace's local server URL in
+  Configuration → MLflow. Judges register on that server.
 * **Databricks managed MLflow** (deployed): a workspace is configured. Judges
-  register through ``databricks`` auth (the app SP), the same env-swap the
-  tracing + prompt-registry paths use, so they show up in the Databricks MLflow
+  register through ``databricks`` auth (the app SP), the same scoped
+  credential (``mlflow.sp_auth``) the tracing + prompt-registry paths use, so they show up in the Databricks MLflow
   UI under the crew-traces experiment.
 
 Split in two so the async DB/auth work happens on the event loop and only the
@@ -15,7 +15,7 @@ blocking MLflow calls run in a worker thread:
 
 * :func:`resolve_mlflow_backend` (async) — decide local vs databricks, resolving
   auth + experiment name. Returns ``None`` when neither backend is available
-  (callers then no-op / raise, exactly as the old ``_local_mlflow_uri`` gate did).
+  (callers then no-op / raise).
 * :func:`mlflow_session` (sync context manager) — set the tracking URI and pin
   the experiment for the chosen backend, restoring both afterwards. Runs inside
   the ``asyncio.to_thread`` body.
@@ -54,6 +54,23 @@ class MLflowBackend:
     warehouse_id: Optional[str] = None
 
 
+async def configured_experiment(session: Any, group_id: Optional[str]) -> str:
+    """The experiment Configuration → MLflow resolves to for this workspace.
+
+    The configured name, else the per-teamspace default — the one crew traces
+    land in. Never a launch env var or an invented "kasal".
+    """
+    if not group_id:
+        from src.services.mlflow import local
+
+        return local.local_experiment_name(None, None)
+    from src.services.mlflow.service import MLflowService
+
+    return await MLflowService(
+        session, group_id=group_id
+    ).configured_crew_traces_experiment()
+
+
 async def resolve_mlflow_backend(
     session: Any, group_context: Optional[Any]
 ) -> Optional[MLflowBackend]:
@@ -63,30 +80,32 @@ async def resolve_mlflow_backend(
     configured Databricks workspace is used. Auth + experiment resolution for
     the Databricks path reuse :class:`MLflowService`.
     """
-    # 1. Local server (dev): MCP_SERVER_ENABLED + a non-databricks tracking URI.
-    if os.getenv("MCP_SERVER_ENABLED", "").lower() == "true":
-        uri = os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI") or os.getenv(
-            "MLFLOW_TRACKING_URI"
-        )
-        if uri and not uri.startswith("databricks"):
-            from src.services.mlflow import local as _local
-
-            # Same "fail soft" rule the tracing path applies (mlflow_setup): a
-            # dev box with no server listening must fail in the 2 s TCP probe,
-            # not in mlflow's ~4-minute retry storm — which parked one worker
-            # thread per Optimize-dialog poll.
-            if not await asyncio.to_thread(_local.is_reachable, uri):
-                logger.info(
-                    "[judges] no MLflow server at %s; judge operation skipped", uri
-                )
-                return None
-            exp = os.environ.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
-            return MLflowBackend(kind="local", experiment=exp, uri=uri)
-
-    # 2. Databricks managed MLflow: a workspace is configured for this group.
+    # 1. Local server (dev): the workspace's local server in Configuration → MLflow.
     group_id = (
         getattr(group_context, "primary_group_id", None) if group_context else None
     )
+    uri = None
+    if group_id:
+        from src.services.mlflow.service import MLflowService
+
+        try:
+            uri = await MLflowService(session, group_id=group_id).configured_local_uri()
+        except Exception as exc:  # noqa: BLE001 — fall through to Databricks
+            logger.debug("[judges] local MLflow server not resolved: %s", exc)
+    if uri:
+        from src.services.mlflow import local as _local
+
+        # Same "fail soft" rule the tracing path applies (mlflow_setup): a
+        # dev box with no server listening must fail in the 2 s TCP probe,
+        # not in mlflow's ~4-minute retry storm — which parked one worker
+        # thread per Optimize-dialog poll.
+        if not await asyncio.to_thread(_local.is_reachable, uri):
+            logger.info("[judges] no MLflow server at %s; judge operation skipped", uri)
+            return None
+        exp = await configured_experiment(session, group_id)
+        return MLflowBackend(kind="local", experiment=exp, uri=uri)
+
+    # 2. Databricks managed MLflow: a workspace is configured for this group.
     if not group_id:
         return None
     try:
@@ -127,9 +146,9 @@ async def resolve_mlflow_backend(
 def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
     """Set tracking URI + experiment for ``backend`` for one op, then restore.
 
-    Blocking — run inside ``asyncio.to_thread``. For databricks it swaps
-    ``DATABRICKS_HOST``/``DATABRICKS_TOKEN`` (MLflow reads them from the env),
-    mirroring the tracing + prompt-registry auth.
+    Blocking — run inside ``asyncio.to_thread``. For databricks it scopes the
+    host + token to this call (``sp_auth.single_auth_env``; nothing is written
+    to the process env), mirroring the tracing + prompt-registry auth.
     """
     import mlflow
 
@@ -137,16 +156,18 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
 
     prev_uri = mlflow.get_tracking_uri()
     # On databricks, authenticate with the SP-derived bearer token as the SINGLE
-    # method (set DATABRICKS_TOKEN, remove the OAuth env vars) — otherwise the SDK
-    # errors "more than one authorization method configured: oauth and pat" and
-    # MLflow falls back to legacy auth, so the call is NOT made as the SP that
-    # holds the UC grant. backend.auth.token is the SP's own bearer, derived in
-    # _setup_mlflow_auth. The shared single_auth_env owns the env save/restore.
+    # method — otherwise the SDK errors "more than one authorization method
+    # configured: oauth and pat" and MLflow falls back to legacy auth, so the
+    # call is NOT made as the SP that holds the UC grant. backend.auth.token is
+    # the SP's own bearer, derived in _setup_mlflow_auth; single_auth_env scopes
+    # it to this context without touching os.environ.
     if backend.kind == "databricks":
         # Reading traces from a UC-backed experiment needs the SQL warehouse id
         # in the env; without it search_traces/get_trace raise "Could not resolve
         # a SQL warehouse ID" (list_crew_evals 500s every poll). Set it for the
         # window and restore after.
+        # Every databricks backend is built with its auth (see above).
+        assert backend.auth is not None
         prev_wh = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID")
         if backend.warehouse_id:
             os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(backend.warehouse_id)
@@ -167,6 +188,8 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
                 elif "MLFLOW_TRACING_SQL_WAREHOUSE_ID" in os.environ:
                     del os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"]
     else:
+        # Every local backend is built with its server URL.
+        assert backend.uri is not None
         try:
             mlflow.set_tracking_uri(backend.uri)
             try:

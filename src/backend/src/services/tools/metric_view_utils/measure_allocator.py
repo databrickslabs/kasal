@@ -35,6 +35,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .data_classes import TableInfo
+
 # ── Regexes ───────────────────────────────────────────────────────────────
 # A COLUMN reference is `Table[Col]` or `'Table Name'[Col]` — a table token
 # immediately precedes the bracket.
@@ -83,7 +85,7 @@ def extract_measure_refs(dax: str) -> set[str]:
 
 
 # ── Index builders ──────────────────────────────────────────────────────────
-def _table_columns(tinfo) -> set[str]:
+def _table_columns(tinfo: TableInfo) -> set[str]:
     """All known column keys exposed by a TableInfo (aggregate outputs + their
     inner source columns + group-by + calculated columns)."""
     cols: set[str] = set()
@@ -314,16 +316,18 @@ def _current_home(m: dict) -> str | None:
     """The fact a measure is currently allocated to (primary), if any."""
     for alloc in m.get("all_allocations", []) or []:
         if alloc.get("role") == "primary" and alloc.get("table"):
-            return alloc["table"]
+            return str(alloc["table"])
     # Fall back to first allocation, then proposed_allocation.
     allocs = m.get("all_allocations") or []
     if allocs and allocs[0].get("table"):
-        return allocs[0]["table"]
+        return str(allocs[0]["table"])
     prop = m.get("proposed_allocation")
-    return prop if prop and prop != UNASSIGNED else None
+    if prop and prop != UNASSIGNED:
+        return str(prop)
+    return None
 
 
-def _set_home(m: dict, fact: str) -> None:
+def _set_home(m: dict, fact: str | None) -> None:
     m["all_allocations"] = [{"table": fact, "role": "primary"}]
     m["proposed_allocation"] = fact
 

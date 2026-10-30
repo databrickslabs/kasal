@@ -14,13 +14,14 @@ Two gates, mirroring MCP servers exactly:
 """
 
 import logging
-from typing import Annotated, Any, Dict
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, status
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-from src.core.permissions import check_role_in_context, get_effective_role
+from src.core.permissions import check_role_in_context, is_system_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.a2a_agent import A2AAgent
 from src.schemas.a2a_agent import (
     A2AAgentCreate,
     A2AAgentListResponse,
@@ -30,6 +31,7 @@ from src.schemas.a2a_agent import (
 )
 from src.services.a2a.a2a_client import client as a2a_client
 from src.services.a2a.a2a_client.agent_service import A2AAgentService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(
     prefix="/a2a-agents",
@@ -47,32 +49,22 @@ def get_service(session: SessionDep) -> A2AAgentService:
 ServiceDep = Annotated[A2AAgentService, Depends(get_service)]
 
 
-def _is_global_admin(group_context) -> bool:
-    """Whether the caller may manage GLOBAL remote agents.
+def _is_global_admin(group_context: Optional[GroupContext]) -> bool:
+    """Whether the caller may manage GLOBAL remote agents: system admins only.
 
     The same gate ``mcp_router`` uses, and the same reasoning: a global row is
     available to every workspace, so changing one is system administration.
+    A workspace admin's role does not reach it.
     """
-    try:
-        role = get_effective_role(group_context) if group_context else None
-        if role and role.lower() == "admin":
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    return bool(
-        group_context is not None
-        and getattr(
-            getattr(group_context, "current_user", None), "is_system_admin", False
-        )
-    )
+    return is_system_admin(group_context) if group_context is not None else False
 
 
-def _require_global_admin(group_context) -> None:
+def _require_global_admin(group_context: Optional[GroupContext]) -> None:
     if not _is_global_admin(group_context):
         raise ForbiddenError("Only Kasal admins can manage global remote agents.")
 
 
-def _to_response(agent) -> A2AAgentResponse:
+def _to_response(agent: A2AAgent) -> A2AAgentResponse:
     """Row -> response. Skills come from the cached card, the key never does."""
     return A2AAgentResponse(
         id=agent.id,
@@ -101,7 +93,9 @@ def _enabled_flag(payload: Dict[str, Any]) -> bool:
 
 
 @router.get("", response_model=A2AAgentListResponse)
-async def list_agents(service: ServiceDep, group_context: GroupContextDep):
+async def list_agents(
+    service: ServiceDep, group_context: GroupContextDep
+) -> A2AAgentListResponse:
     """What this workspace sees: globally-available agents plus its own rows.
 
     A row with no ``group_id`` is an inherited global one — toggleable here,
@@ -114,7 +108,9 @@ async def list_agents(service: ServiceDep, group_context: GroupContextDep):
 
 
 @router.get("/base", response_model=A2AAgentListResponse)
-async def list_base_agents(service: ServiceDep, group_context: GroupContextDep):
+async def list_base_agents(
+    service: ServiceDep, group_context: GroupContextDep
+) -> A2AAgentListResponse:
     """The Kasal admin catalogue. Registered here, offered to workspaces."""
     _require_global_admin(group_context)
     agents = await service.list_base_agents()
@@ -126,7 +122,7 @@ async def list_base_agents(service: ServiceDep, group_context: GroupContextDep):
 @router.post("", response_model=A2AAgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     body: A2AAgentCreate, service: ServiceDep, group_context: GroupContextDep
-):
+) -> A2AAgentResponse:
     """Register a remote agent globally. Its card is fetched immediately.
 
     A 201 with ``last_error`` set is the normal outcome for a URL that does not
@@ -147,7 +143,7 @@ async def update_agent(
     body: A2AAgentUpdate,
     service: ServiceDep,
     group_context: GroupContextDep,
-):
+) -> A2AAgentResponse:
     _require_global_admin(group_context)
     try:
         agent = await service.update_agent(agent_id, body, group_context)
@@ -161,10 +157,10 @@ async def update_agent(
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: int, service: ServiceDep, group_context: GroupContextDep
-):
+) -> None:
     """Remove a global agent, and every workspace's opt-in along with it."""
     _require_global_admin(group_context)
-    if not await service.delete_agent(agent_id):
+    if not await service.delete_agent(agent_id, group_context):
         raise NotFoundError(f"No global remote agent {agent_id}.")
 
 
@@ -174,13 +170,15 @@ async def set_global_availability(
     service: ServiceDep,
     group_context: GroupContextDep,
     payload: Annotated[Dict[str, Any], Body()],
-):
+) -> A2AAgentResponse:
     """Kasal admin: offer a remote agent to all workspaces, or withdraw it.
 
     Withdrawing cascades immediately, whatever workspaces had enabled.
     """
     _require_global_admin(group_context)
-    agent = await service.set_global_availability(agent_id, _enabled_flag(payload))
+    agent = await service.set_global_availability(
+        agent_id, _enabled_flag(payload), group_context
+    )
     if not agent:
         raise NotFoundError(f"No global remote agent {agent_id}.")
     return _to_response(agent)
@@ -192,7 +190,7 @@ async def set_workspace_enabled(
     service: ServiceDep,
     group_context: GroupContextDep,
     payload: Annotated[Dict[str, Any], Body()],
-):
+) -> A2AAgentResponse:
     """Workspace admin: turn an agent on or off for THIS workspace only.
 
     Toggling an inherited global agent creates a workspace-scoped copy carrying
@@ -218,7 +216,7 @@ async def set_workspace_enabled(
 @router.post("/{agent_id}/test", response_model=A2AConnectionTest)
 async def test_agent(
     agent_id: int, service: ServiceDep, group_context: GroupContextDep
-):
+) -> A2AConnectionTest:
     """Fetch the card now and report what happened.
 
     Answers 200 with ``connected: false`` rather than an error status: an

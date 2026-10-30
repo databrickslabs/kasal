@@ -4,13 +4,11 @@ FastAPI routes for converter management (history, jobs, saved configurations)
 """
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import get_db
-from src.dependencies.providers import GroupContextDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.conversion import (  # History; Jobs; Saved Configs
     ConversionHistoryCreate,
     ConversionHistoryFilter,
@@ -37,8 +35,8 @@ router = APIRouter(prefix="/api/converters", tags=["converters"])
 
 
 def get_converter_service(
-    session: Annotated[AsyncSession, Depends(get_db)],
-    group_context: GroupContextDep = None,
+    session: SessionDep,
+    group_context: GroupContextDep,
 ) -> ConverterService:
     """
     Dependency to get converter service with session and group context.
@@ -329,13 +327,14 @@ async def update_config(
 
 @router.delete(
     "/configs/{config_id}",
+    response_model=None,
     summary="Delete Saved Configuration",
     description="Delete a saved converter configuration",
 )
 async def delete_config(
     config_id: int,
     service: Annotated[ConverterService, Depends(get_converter_service)],
-):
+) -> Dict[str, str]:
     """
     Delete saved configuration.
 
@@ -404,10 +403,11 @@ async def use_config(
 
 @router.get(
     "/health",
+    response_model=None,
     summary="Converter Health Check",
     description="Check if converter service is healthy",
 )
-async def health_check():
+async def health_check() -> Dict[str, Any]:
     """Health check endpoint."""
     return {
         "status": "healthy",

@@ -29,6 +29,7 @@ vi.mock('../../../../api/execution/ExecutionHistoryService', () => ({
     getRunByJobId: vi.fn().mockResolvedValue(null),
   },
 }));
+vi.mock('../utils/runLookup', () => ({ isRunGone: vi.fn(async () => false) }));
 
 vi.mock('../../../../store/taskExecutionStore', () => ({
   useTaskExecutionStore: Object.assign(
@@ -53,7 +54,10 @@ vi.mock('../store/chatMessagesStore', () => {
     messagesBySession: {}, setMessages: vi.fn(), addMessage: vi.fn(),
     removeMessage: vi.fn(), getMessagesForSession: vi.fn().mockReturnValue([]),
   };
-  return { useChatMessagesStore: Object.assign(() => state, { getState: () => state }) };
+  return { useChatMessagesStore: Object.assign(
+    (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state),
+    { getState: () => state },
+  ) };
 });
 
 describe('useExecutionMonitoring', () => {

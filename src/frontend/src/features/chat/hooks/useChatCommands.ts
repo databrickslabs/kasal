@@ -6,16 +6,9 @@
  * claim falls through to the dispatcher as a normal turn.
  */
 import React, { useCallback } from 'react';
-import { SkillService } from '../../../api/tools/SkillService';
 import type { ImageRef } from '../types/chat';
-import {
-  buildTranscript,
-  draftFailedStep,
-  draftMessage,
-  draftedStep,
-  draftingStep,
-  parseSkillCommand,
-} from '../utils/skillCommand';
+import { buildTranscript, parseSkillCommand } from '../utils/skillCommand';
+import { runSkillDraft } from '../utils/skillDraftRun';
 import { stopExecution, listExecutions } from '../api/executions';
 import { latestDeck, parseSlideEdit } from '../utils/slideRefine';
 import { splitSlides } from '../utils/htmlDeck';
@@ -24,6 +17,7 @@ import { GenerationCompleteData } from '../types/dispatcher';
 import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';
+import { concreteModel } from '../utils/autoModel';
 
 interface UseChatCommandsArgs {
   dispatcher: ReturnType<typeof import('./useDispatcher').useDispatcher>;
@@ -35,6 +29,9 @@ interface UseChatCommandsArgs {
 }
 
 export function useChatCommands({ dispatcher, executionStream, handleRefine, lastGeneratedRef, lastUserPromptRef, setPendingRun }: UseChatCommandsArgs) {
+  // Only the stable members: the dispatcher object also changes when a
+  // dispatch starts and ends, and handleSend must not churn with it.
+  const { sendMessage, isDispatching } = dispatcher;
 
   const addMessage = useSessionStore((s) => s.addMessage);
   const clearMessages = useSessionStore((s) => s.clearMessages);
@@ -126,35 +123,17 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
             : sessionStore.addMessage('assistant', content, extra);
         const transcript =
           skillCmd.mode === 'capture' ? buildTranscript(sessionStore.messages) : undefined;
-        const model = selectedModel || undefined;
-        const startedAt = Date.now();
         execStore.startGeneration(owner);
-        const stepId = post('', {
-          resultType: 'trace',
-          resultData: draftingStep(skillCmd, transcript?.length ?? 0, model),
-        });
-        // The draft is recorded as a run; carrying its id on the step is what
-        // lets the activity open the run's trace (the LLM calls) and the pane.
-        const setStep = (resultData: unknown, executionId?: string) => {
-          const updates = { resultType: 'trace', resultData, ...(executionId ? { executionId } : {}) };
-          if (owner) sessionStore.updateMessageInTargetSession(owner, stepId, updates);
-          else sessionStore.updateMessage(stepId, updates);
-        };
         try {
-          const draft = await SkillService.draft(skillCmd.request, transcript, model);
-          setStep(draftedStep(draft, startedAt), draft.job_id || undefined);
-          post(draftMessage(draft));
-        } catch (error) {
-          const detail = (error as { response?: { data?: { detail?: unknown } } })?.response
-            ?.data?.detail;
-          const errMsg =
-            typeof detail === 'string'
-              ? detail
-              : error instanceof Error
-                ? error.message
-                : 'Failed to draft the skill';
-          setStep(draftFailedStep(errMsg, startedAt));
-          post(`Could not draft the skill: ${errMsg}`);
+          // The draft is a run: its job id lands on the step before the model
+          // is called, so the activity opens the run's trace while it drafts.
+          await runSkillDraft(skillCmd, transcript, concreteModel(selectedModel), {
+            post,
+            update: (id, updates) =>
+              owner
+                ? sessionStore.updateMessageInTargetSession(owner, id, updates)
+                : sessionStore.updateMessage(id, updates),
+          });
         } finally {
           execStore.completeGeneration(owner);
         }
@@ -263,7 +242,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
       try {
         // Send the picker selection; when none is set the backend falls back to a
         // working default (gpt-5.3-codex), so we don't force a model here.
-        await dispatcher.sendMessage(
+        await sendMessage(
           message,
           selectedModel || undefined,
           meta?.tools,
@@ -277,7 +256,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
         useExecutionStore.getState().setIsLoading(false);
       }
     },
-    [dispatcher, handleLocalCommand, selectedModel],
+    [sendMessage, handleLocalCommand, selectedModel],
   );
 
   // Load a saved crew/flow from the rail library into a FRESH chat session (so it
@@ -285,6 +264,14 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
   // command under the hood but shows a friendly label in the transcript.
   const handleLoadFromLibrary = useCallback(
     async (kind: 'crew' | 'flow', name: string) => {
+      // The load is a dispatch, and one is in flight: say so here rather than
+      // open a new chat that the load can then never reach.
+      if (isDispatching.current) {
+        useSessionStore.getState().addNotice(
+          `Your last message is still being sent. Open the ${kind} "${name}" again once it has gone.`,
+        );
+        return;
+      }
       if (currentSessionId) {
         useExecutionStore.getState().saveSessionState(currentSessionId);
       }
@@ -292,7 +279,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
       useExecutionStore.getState().restoreSessionState(newId);
       void handleSend(`/load ${kind} ${name}`, { displayAs: `Open ${kind}: ${name}` });
     },
-    [handleSend, currentSessionId],
+    [handleSend, currentSessionId, isDispatching],
   );
 
   const handleStopExecution = useCallback(async () => {

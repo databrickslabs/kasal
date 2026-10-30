@@ -193,10 +193,10 @@ class TestGating:
         _fact(memory, "The deadline is 30 July.")
         assert supersede_outdated_facts(memory)["superseded"] == 0
 
-    def test_env_kill_switch(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_SUPERSESSION", "false")
+    def test_tuning_kill_switch(self, tmp_path):
         llm = _FakeLLM('[{"current": 0, "outdated": [1]}]')
         memory = _memory(tmp_path, llm=llm)
+        memory.supersession_enabled = False  # Memory Tuning
         _fact(memory, "The deadline moved to 30 July.")
         _fact(memory, "The project deadline is 15 June.", age_days=10)
 

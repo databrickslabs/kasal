@@ -34,6 +34,10 @@ def source_tree(tmp_path):
         "docs/powerbi/foo.md": "# Foo\n",
         "docs/powerbi/diagram.png": "image bytes",
         "docs/archive/bar.md": "# Bar\n",
+        "docs/reviews/nested/review.md": "# Review\n",
+        "docs/dual-harness-backlog.md": "# Backlog\n",
+        "docs/powerbi/ucmv-coverage-evaluation-and-roadmap.md": "# Customer eval\n",
+        "docs/new-plan.md": "# Plan\n\n> [!NOTE]\n> **Status: internal / proposal.** Not built.\n",
         "docs/assets/logo.SVG": "<svg/>\n",
         "docs/examples/workflow.json": '{"nodes": []}',
         "docs/css/extra.css": "body {}",
@@ -54,7 +58,6 @@ EXPECTED_DOCS = {
     "index.md",
     "powerbi/foo.md",
     "powerbi/diagram.png",
-    "archive/bar.md",
     "assets/logo.SVG",
     "examples/workflow.json",
     "css/extra.css",
@@ -94,6 +97,61 @@ def test_staging_preserves_nested_docs_assets_and_bytes(source_tree):
     assert (staged / "favicon.ico").read_text() == "icon bytes"
     # No generated docs leak back into the tracked public assets directory.
     assert _files(source_tree / "frontend/public") == {"favicon.ico"}
+
+
+def test_internal_docs_are_not_staged(source_tree):
+    _node("preparePublic", source_tree)
+    staged = _files(source_tree / "frontend/.generated/public/docs")
+    for name in (
+        "archive/bar.md",
+        "reviews/nested/review.md",
+        "dual-harness-backlog.md",
+        "powerbi/ucmv-coverage-evaluation-and-roadmap.md",
+        "new-plan.md",
+    ):
+        assert name not in staged
+    assert not any(name.startswith(("archive/", "reviews/")) for name in staged)
+
+
+def test_real_docs_tree_stages_without_internal_docs(tmp_path):
+    # The real src/docs must pass the link check and keep internal pages out.
+    shutil.copytree(_REPO_SRC_DIR / "docs", tmp_path / "docs")
+    (tmp_path / "frontend/public").mkdir(parents=True)
+    _node("preparePublic", tmp_path)
+    staged = _files(tmp_path / "frontend/.generated/public/docs")
+    assert "README.md" in staged
+    for name in (
+        "crewai-engine-refactor-proposal.md",
+        "conversational-flow-state-proposal.md",
+        "dual-harness-backlog.md",
+        "internal-dbu-tagging-plan.md",
+        "kasal-platform-feedback-for-product-teams.md",
+        "powerbi/ucmv-coverage-evaluation-and-roadmap.md",
+        "deployment/lakebase-persistence-across-redeploys.md",
+    ):
+        assert name not in staged
+    assert not any(name.startswith(("archive/", "reviews/")) for name in staged)
+
+
+def test_link_from_shipped_to_internal_doc_fails_the_build(source_tree):
+    (source_tree / "docs/index.md").write_text(
+        "See [backlog](./dual-harness-backlog.md).\n"
+    )
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        _node("preparePublic", source_tree)
+    assert "dual-harness-backlog.md" in error.value.stderr
+    # Validation runs before the previous generated tree is replaced.
+    assert (source_tree / "frontend/.generated/public/docs/deleted.md").is_file()
+
+
+def test_publish_refuses_a_dist_containing_internal_docs(source_tree):
+    dist = source_tree / "frontend/dist"
+    (dist / "docs/archive").mkdir(parents=True)
+    (dist / "index.html").write_text("<html></html>")
+    (dist / "docs/archive/old.md").write_text("# Old\n")
+    with pytest.raises(subprocess.CalledProcessError):
+        _node("publishFrontend", source_tree)
+    assert (source_tree / "frontend_static/docs/deleted.md").is_file()
 
 
 def test_rebuilding_removes_deleted_pages(source_tree):

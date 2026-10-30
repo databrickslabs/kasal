@@ -9,9 +9,11 @@ just two independently-named measures.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Optional
 
-from .mapping import UCMVMapping
+from ..raw_fields import DimensionValue
+from .mapping import Measure, UCMVMapping
 
 
 def _quote_ident(name: str) -> str:
@@ -20,21 +22,25 @@ def _quote_ident(name: str) -> str:
     return f"`{name}`"
 
 
-def _quote_sql_string(value) -> str:
+def _quote_sql_string(value: object) -> str:
     return "'{}'".format(str(value).replace("'", "''"))
 
 
 def build_ucmv_query(
     mapping: UCMVMapping,
     dimension_name: str,
-    dimension_values: list,
-    reference_years: list,
-    measures: Optional[list] = None,
+    dimension_values: list[DimensionValue],
+    reference_years: Sequence[object],
+    measures: Optional[list[Measure]] = None,
 ) -> str:
     binding = mapping.binding
     td = binding.time_dimension
     dim = binding.dimensions[dimension_name]
     measures = measures if measures is not None else mapping.resolved_measures()
+    if td.ucmv_mode == "column" and td.ucmv_column is None:
+        raise ValueError("time_dimension.ucmv.mode='column' requires ucmv.name")
+    if td.ucmv_mode != "column" and not td.ucmv_reconstruct_from:
+        raise ValueError("time_dimension.ucmv.mode='reconstruct' requires ucmv.from")
 
     if dim.include_values is not None or dim.exclude_values:
         dimension_values = dim.select_values(
@@ -49,10 +55,11 @@ def build_ucmv_query(
     group_cols = [_quote_ident(dim.ucmv_column)]
 
     if td.ucmv_mode == "column":
-        select_cols.append(f"{_quote_ident(td.ucmv_column)} AS period")
-        group_cols.append(_quote_ident(td.ucmv_column))
+        time_col = _quote_ident(str(td.ucmv_column))
+        select_cols.append(f"{time_col} AS period")
+        group_cols.append(time_col)
     else:  # "reconstruct"
-        cols = td.ucmv_reconstruct_from
+        cols = td.ucmv_reconstruct_from or []
         quoted_cols = [_quote_ident(c) for c in cols]
         concat_parts = [f"CAST({quoted_cols[0]} AS STRING)"] + quoted_cols[1:]
         select_cols.append(f"CONCAT({', '.join(concat_parts)}) AS period")
@@ -67,12 +74,12 @@ def build_ucmv_query(
     # all years (no year predicate) — reconciliation can run without the operator
     # pinning specific fiscal years (closed-period filtering in compare() still
     # applies).
-    where_clauses = []
+    where_clauses: list[str] = []
     if reference_years:
         years_sql = ", ".join(_quote_sql_string(y) for y in reference_years)
         if td.grain == "snapshot":
             where_clauses.append(
-                f"YEAR({_quote_ident(td.ucmv_column)}) IN ({years_sql})"
+                f"YEAR({_quote_ident(str(td.ucmv_column))}) IN ({years_sql})"
             )
         else:
             where_clauses.append(

@@ -26,11 +26,12 @@ Example:
 
 import asyncio
 import concurrent.futures
-import copy
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import BadRequestError, KasalError
 from src.core.logger import LoggerManager
@@ -41,14 +42,16 @@ from src.schemas.execution import (
 )
 from src.services.execution.flow_name_inputs import extract_flow_name_inputs
 from src.services.execution.kasal_service import KasalExecutionService
-from src.services.execution.naming import ExecutionNameService
+from src.services.execution.naming import ExecutionNameService, run_name_model
 from src.services.execution.serialization import sanitize_for_database
 from src.services.execution.status import ExecutionStatusService
+from src.services.execution.stored_inputs import (
+    mask_run_inputs,
+    strip_run_credentials,
+)
 from src.utils.asyncio_utils import create_and_run_loop, run_in_thread_with_loop
-from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
-# Configure logging
 logger = logging.getLogger(__name__)
 crew_logger = LoggerManager.get_instance().crew
 exec_logger = LoggerManager.get_instance().crew
@@ -73,13 +76,12 @@ class ExecutionService:
         enabling centralized execution tracking in a multi-threaded environment.
     """
 
-    # Initialize the executions dictionary as a class attribute
-    executions = {}
+    executions: Dict[str, Any] = {}
 
     # Initialize the thread pool executor
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
-    def __init__(self, session=None):
+    def __init__(self, session: Optional[AsyncSession] = None) -> None:
         """Initialize the ExecutionService with required dependencies.
 
         Args:
@@ -102,52 +104,11 @@ class ExecutionService:
         self.kasal_execution_service = KasalExecutionService()
 
     def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Execution inputs as the API returns them and the run row stores them.
+
+        One rule for every launch path: see ``stored_inputs.mask_run_inputs``.
         """
-        Mask sensitive fields in execution inputs before returning to API or storing to database.
-
-        This method processes the inputs dictionary which may contain:
-        - agents_yaml: Dict of agent configs with tool_configs containing secrets
-        - tasks_yaml: Dict of task configs with tool_configs containing secrets
-        - inputs: Dict of user-provided inputs that may contain secrets (client_secret, etc.)
-
-        Args:
-            inputs: The raw inputs dictionary from execution
-
-        Returns:
-            A copy of inputs with sensitive fields masked
-        """
-        if not inputs:
-            return inputs
-
-        # Create a deep copy to avoid modifying the original
-        masked_inputs = copy.deepcopy(inputs)
-
-        # Mask tool_configs in agents_yaml
-        if "agents_yaml" in masked_inputs and isinstance(
-            masked_inputs["agents_yaml"], dict
-        ):
-            for agent_key, agent_config in masked_inputs["agents_yaml"].items():
-                if isinstance(agent_config, dict) and "tool_configs" in agent_config:
-                    agent_config["tool_configs"] = mask_sensitive_fields(
-                        agent_config["tool_configs"]
-                    )
-
-        # Mask tool_configs in tasks_yaml
-        if "tasks_yaml" in masked_inputs and isinstance(
-            masked_inputs["tasks_yaml"], dict
-        ):
-            for task_key, task_config in masked_inputs["tasks_yaml"].items():
-                if isinstance(task_config, dict) and "tool_configs" in task_config:
-                    task_config["tool_configs"] = mask_sensitive_fields(
-                        task_config["tool_configs"]
-                    )
-
-        # Mask sensitive fields in the nested 'inputs' dictionary (user-provided values)
-        # This catches fields like client_secret, password, token, api_key, etc.
-        if "inputs" in masked_inputs and isinstance(masked_inputs["inputs"], dict):
-            masked_inputs["inputs"] = mask_sensitive_fields(masked_inputs["inputs"])
-
-        return masked_inputs
+        return mask_run_inputs(inputs)
 
     async def execute_flow(
         self,
@@ -320,30 +281,6 @@ class ExecutionService:
             limit=limit, status=status
         )
 
-    async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
-        """Most recent run whose ``checkpoint_data`` holds ``key``.
-
-        For the UCMV tools, which look for edits a user saved in an earlier step of
-        a multi-step flow.
-        """
-        from src.repositories.execution_history_repository import (
-            ExecutionHistoryRepository,
-        )
-
-        session = self._require_session("latest_checkpoint_containing")
-        return await ExecutionHistoryRepository(session).latest_checkpoint_containing(
-            key
-        )
-
-    async def latest_result_with_keys(self, keys: List[str]) -> Optional[dict]:
-        """Most recent run whose ``result`` dict holds ALL of ``keys``."""
-        from src.repositories.execution_history_repository import (
-            ExecutionHistoryRepository,
-        )
-
-        session = self._require_session("latest_result_with_keys")
-        return await ExecutionHistoryRepository(session).latest_result_with_keys(keys)
-
     async def get_run_of_type(
         self, execution_id: int, execution_type: str
     ) -> Optional[Any]:
@@ -401,7 +338,7 @@ class ExecutionService:
         session = self._require_session("delete_run")
         await ExecutionHistoryRepository(session).remove(run, commit=commit)
 
-    def _require_session(self, method: str):
+    def _require_session(self, method: str) -> AsyncSession:
         """The session this service was constructed with, or a clear error."""
         if self.session is None:
             raise ValueError(
@@ -411,7 +348,7 @@ class ExecutionService:
 
     @staticmethod
     async def create_run_record(
-        session,
+        session: AsyncSession,
         *,
         job_id: str,
         run_name: str,
@@ -446,7 +383,7 @@ class ExecutionService:
             session: the caller's session — see above.
             job_id: the run's external identifier.
             run_name: human-readable name, already generated by the caller.
-            inputs: the stored config for the run.
+            inputs: the stored config for the run, minus its credentials.
             execution_type: ``"crew"``, ``"flow"`` or ``"agent"``.
             group_id / group_email: tenant stamps.
             flow_id: set only for a flow with a saved definition.
@@ -471,7 +408,7 @@ class ExecutionService:
         run = ExecutionHistory(
             job_id=job_id,
             status=status or ExecutionStatus.PENDING.value,
-            inputs=inputs or {},
+            inputs=strip_run_credentials(inputs or {}),
             run_name=run_name,
             execution_type=execution_type,
             group_id=group_id,
@@ -590,9 +527,9 @@ class ExecutionService:
     def add_execution_to_memory(
         execution_id: str,
         status: str,
-        run_name: str,
-        created_at: datetime = None,
-        group_id: Optional[int] = None,
+        run_name: Optional[str],
+        created_at: Optional[datetime] = None,
+        group_id: Optional[str] = None,
         group_email: Optional[str] = None,
     ) -> None:
         """
@@ -609,7 +546,7 @@ class ExecutionService:
         ExecutionService.executions[execution_id] = {
             "execution_id": execution_id,
             "status": status,
-            "created_at": created_at or datetime.now(),  # Use timezone-naive datetime
+            "created_at": created_at or datetime.utcnow(),  # naive UTC, like the row
             "run_name": run_name,
             "output": "",
             "group_id": group_id,
@@ -644,7 +581,8 @@ class ExecutionService:
         execution_id: str,
         agents_yaml: Dict[str, Any],
         tasks_yaml: Dict[str, Any],
-        model: str,
+        model: Optional[str],
+        group_context: Optional[GroupContext] = None,
     ) -> None:
         """Generate the descriptive run name OFF the critical path and apply it.
 
@@ -659,7 +597,9 @@ class ExecutionService:
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml, tasks_yaml=tasks_yaml, model=model
             )
-            response = await name_service.generate_execution_name(request)
+            response = await name_service.generate_execution_name(
+                request, group_context
+            )
             new_name = (response.name or "").strip()
             if not new_name:
                 return
@@ -705,8 +645,8 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -920,10 +860,11 @@ class ExecutionService:
 
     async def list_executions(
         self,
-        group_ids: List[str] = None,
-        user_email: str = None,
+        group_ids: Optional[List[str]] = None,
+        user_email: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        include_payload: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         List executions from both database and in-memory storage with group and user filtering.
@@ -933,134 +874,59 @@ class ExecutionService:
             user_email: User email for user-level filtering
             limit: Maximum number of executions to return
             offset: Number of executions to skip
+            include_payload: Also return each run's full ``result``, masked
+                ``inputs`` and ``agents_yaml``/``tasks_yaml``. Off by default:
+                list rows are summaries with a ``result_preview`` (see
+                ``services/execution/listing.py``).
 
         Returns:
             List of execution data dictionaries
         """
         try:
-            # Get executions from database using ExecutionRepository
             from src.repositories.execution_repository import ExecutionRepository
-
-            logger.debug(
-                f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}"
+            from src.services.execution.listing import (
+                full_row,
+                summary_row,
+                unpersisted_memory_rows,
             )
 
             if self.session:
-                logger.debug(
-                    f"[list_executions] Using injected database session: {self.session}"
-                )
                 repo = ExecutionRepository(self.session)
-                logger.debug(f"[list_executions] Created repository: {repo}")
-
-                # Get executions with group and user filtering using the correct repository method
-                logger.debug(
-                    f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}"
-                )
-                db_executions_list, total_count = await repo.get_execution_history(
-                    limit=limit,
-                    offset=offset,
-                    group_ids=group_ids,
-                    user_email=user_email,
-                )
-                logger.debug(
-                    f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}"
-                )
-
-                logger.debug(
-                    f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}"
-                )
-
-                # Debug what we got
-                if db_executions_list:
-                    logger.debug(
-                        f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}"
+                if include_payload:
+                    runs, _ = await repo.get_execution_history(
+                        limit=limit,
+                        offset=offset,
+                        group_ids=group_ids,
+                        user_email=user_email,
                     )
+                    db_executions = [
+                        full_row(run, self._mask_inputs_sensitive_data) for run in runs
+                    ]
                 else:
-                    logger.warning(
-                        f"[list_executions] No executions found for group_ids: {group_ids}"
+                    rows = await repo.get_execution_summaries(
+                        limit=limit,
+                        offset=offset,
+                        group_ids=group_ids,
+                        user_email=user_email,
                     )
-
-                # Convert to list of dicts, including inputs with agents_yaml and tasks_yaml
-                import json
-
-                db_executions = []
-                for e in db_executions_list:
-                    # Mask sensitive data in inputs before returning to API
-                    masked_inputs = (
-                        self._mask_inputs_sensitive_data(e.inputs) if e.inputs else None
-                    )
-
-                    exec_dict = {
-                        "execution_id": e.job_id,
-                        "status": e.status,
-                        "created_at": e.created_at,
-                        "completed_at": e.completed_at,
-                        "run_name": e.run_name,
-                        "result": e.result,
-                        "error": e.error,
-                        "group_email": e.group_email,
-                        "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
-                        "inputs": masked_inputs,  # Include the masked inputs field (sensitive data redacted)
-                        # Flow scheduling support - include execution_type and flow_id
-                        "execution_type": getattr(e, "execution_type", None)
-                        or (
-                            masked_inputs.get("execution_type")
-                            if masked_inputs
-                            else None
-                        )
-                        or "crew",
-                        # Which runtime ran it, so the run list can say so. The
-                        # column is added by the startup self-heal, hence
-                        # getattr: a row that predates it still lists.
-                        "harness": getattr(e, "harness", None),
-                        "flow_id": (
-                            str(e.flow_id)
-                            if getattr(e, "flow_id", None)
-                            else (
-                                masked_inputs.get("flow_id") if masked_inputs else None
-                            )
-                        ),
-                        "crew_id": (
-                            str(e.crew_id) if getattr(e, "crew_id", None) else None
-                        ),
-                    }
-
-                    # Also extract agents_yaml and tasks_yaml from masked inputs for direct access
-                    if masked_inputs and isinstance(masked_inputs, dict):
-                        if "agents_yaml" in masked_inputs:
-                            exec_dict["agents_yaml"] = (
-                                json.dumps(masked_inputs["agents_yaml"])
-                                if isinstance(masked_inputs["agents_yaml"], dict)
-                                else masked_inputs.get("agents_yaml", "")
-                            )
-                        if "tasks_yaml" in masked_inputs:
-                            exec_dict["tasks_yaml"] = (
-                                json.dumps(masked_inputs["tasks_yaml"])
-                                if isinstance(masked_inputs["tasks_yaml"], dict)
-                                else masked_inputs.get("tasks_yaml", "")
-                            )
-
-                    db_executions.append(exec_dict)
+                    db_executions = [summary_row(row) for row in rows]
+                logger.debug(
+                    f"[list_executions] {len(db_executions)} executions for "
+                    f"group_ids={group_ids} (include_payload={include_payload})"
+                )
             else:
                 logger.error("[list_executions] No database session available")
                 db_executions = []
 
-            # Get in-memory executions that might not be in the database yet
-            memory_executions = {}
-            for execution_id, execution_data in ExecutionService.executions.items():
-                # Check if this execution is already in the list from the database
-                if not any(
-                    e.get("execution_id") == execution_id for e in db_executions
-                ):
-                    memory_executions[execution_id] = execution_data
-
-            # Combine results
-            results = db_executions.copy()
-            for execution_id, data in memory_executions.items():
-                execution_data = data.copy()
-                if "execution_id" not in execution_data:
-                    execution_data["execution_id"] = execution_id
-                results.append(execution_data)
+            memory_executions = await unpersisted_memory_rows(
+                self.session,
+                ExecutionService.executions,
+                db_executions,
+                group_ids,
+                user_email,
+                include_payload,
+            )
+            results = db_executions + memory_executions
 
             logger.debug(
                 f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)"
@@ -1162,7 +1028,7 @@ class ExecutionService:
             from src.services.execution.status import ExecutionStatusService
 
             # Sanitize result for database storage if needed
-            update_data = {"status": status}
+            update_data: Dict[str, Any] = {"status": status}
             if result:
                 update_data["result"] = ExecutionService.sanitize_for_database(result)
 
@@ -1200,8 +1066,8 @@ class ExecutionService:
             exec_logger.error(f"Error updating execution status: {str(e)}")
 
     async def get_execution_status(
-        self, execution_id: str, group_ids: List[str] = None
-    ) -> Dict[str, Any]:
+        self, execution_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Get the current status of an execution from the database with group filtering.
 
@@ -1279,7 +1145,7 @@ class ExecutionService:
                 "STOPPING",
             }
             result_value = None
-            full_row = None
+            full_row: Any = None  # ExecutionHistory; getattr-guarded below
             if (execution.status or "").upper() not in in_flight:
                 full_row = await repository.get_execution_by_job_id(
                     execution_id, group_ids=group_ids
@@ -1337,7 +1203,7 @@ class ExecutionService:
             return None
 
     async def get_execution_status_detail(
-        self, execution_id: str, group_ids: List[str] = None
+        self, execution_id: str, group_ids: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get detailed execution status including task progress for the status endpoint.
@@ -1399,8 +1265,8 @@ class ExecutionService:
     async def create_execution(
         self,
         config: CrewConfig,
-        background_tasks=None,
-        group_context: GroupContext = None,
+        background_tasks: Optional[Any] = None,  # fastapi.BackgroundTasks
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """
         Create a new execution and start it in the background.
@@ -1445,11 +1311,14 @@ class ExecutionService:
                 execution_id, getattr(group_context, "primary_group_id", None)
             )
 
-            # Generate a descriptive run name
-            # Determine model safely
-            model = (
-                config.model if config.model else "default-model"
-            )  # Provide a default if model can be None
+            # Freeze the config first ("auto" becomes one enabled model, saved
+            # agent settings are snapshot): history and worker see only this.
+            from src.services.execution.config import run_freeze
+
+            auto = await run_freeze.freeze(config, self.session, group_context)
+            model = await run_name_model(
+                config, self.session, getattr(group_context, "primary_group_id", None)
+            )
             # Ensure agents_yaml and tasks_yaml are dictionaries
             agents_yaml = (
                 config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
@@ -1471,13 +1340,6 @@ class ExecutionService:
                     f"[ExecutionService.create_execution] Extracted {len(agents_yaml)} agents and {len(tasks_yaml)} tasks from flow config for name generation"
                 )
 
-            # Snapshot agent settings before history persistence and worker launch.
-            from src.services.execution.config.agent_settings_snapshot import (
-                snapshot_agent_settings,
-            )
-
-            await snapshot_agent_settings(config, self.session, group_context)
-
             # Ensure GroupContext is available in UserContext for authentication
             # This is critical for both OBO (user_token) and PAT (group_id) authentication
             if group_context:
@@ -1489,10 +1351,7 @@ class ExecutionService:
                 )
 
                 # Also set user_token if available for OBO authentication
-                if (
-                    hasattr(group_context, "access_token")
-                    and group_context.access_token
-                ):
+                if group_context.access_token:
                     UserContext.set_user_token(group_context.access_token)
                     logger.info(
                         "[ExecutionService.create_execution] Set user_token for OBO authentication"
@@ -1511,8 +1370,7 @@ class ExecutionService:
             )
 
             # Add run_name to config inputs for crew consistency
-            if not config.inputs:
-                config.inputs = {}
+            config.inputs = config.inputs or {}
             config.inputs["run_name"] = run_name
             logger.info(
                 "[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation"
@@ -1549,14 +1407,13 @@ class ExecutionService:
                         and config.nodes is not None
                         and len(config.nodes) > 0
                     )
-                    hasattr(config, "edges") and config.edges is not None
 
                     if has_nodes:
                         # Ad-hoc flow execution with nodes from canvas (no database save required)
                         # Edges may be empty for single-crew flows - that's valid
                         edge_count = len(config.edges) if config.edges else 0
                         exec_logger.info(
-                            f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution"
+                            f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(cast(list, config.nodes))}) and edges ({edge_count}) present - allowing ad-hoc flow execution"
                         )
                     else:
                         raise BadRequestError(
@@ -1567,7 +1424,8 @@ class ExecutionService:
                     from src.services.flow_builder.flow_service import FlowService
 
                     # Resolve authorization before persisting inputs or queuing work.
-                    await FlowService(self.session).get_flow_for_execution(
+                    flow_session = cast(AsyncSession, self.session)  # router-injected
+                    await FlowService(flow_session).get_flow_for_execution(
                         flow_id, group_context, allow_unsaved=bool(config.nodes)
                     )
 
@@ -1637,7 +1495,7 @@ class ExecutionService:
             sanitized_inputs = ExecutionService.sanitize_for_database(masked_inputs)
 
             # Create execution data with RUNNING status for immediate visibility
-            execution_data = {
+            execution_data: Dict[str, Any] = {
                 "job_id": execution_id,
                 "status": ExecutionStatus.RUNNING.value,  # Start with RUNNING status for immediate visibility
                 "inputs": sanitized_inputs,
@@ -1645,7 +1503,7 @@ class ExecutionService:
                 # no longer populated from the request — Kasal has no planner, so the
                 # column default (False) applies to every new row.
                 "run_name": run_name,
-                "created_at": datetime.now(),  # Remove timezone to match database column type
+                "created_at": datetime.utcnow(),  # naive UTC, like the column default
                 "execution_type": (
                     execution_type.lower() if execution_type else "crew"
                 ),  # Track execution type
@@ -1683,39 +1541,29 @@ class ExecutionService:
                 import uuid as uuid_module
 
                 # Ensure flow_id is a UUID object for the database
-                if isinstance(flow_id, str):
-                    flow_id = uuid_module.UUID(flow_id)
-                execution_data["flow_id"] = flow_id
+                execution_data["flow_id"] = (
+                    uuid_module.UUID(flow_id) if isinstance(flow_id, str) else flow_id
+                )
                 logger.info(
                     f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
                 )
 
-            # The crew equivalent: which saved crew this run was built from, so a
-            # later resume can rebuild from the current definition instead of the
-            # snapshot stored above. Malformed ids are dropped rather than
-            # raised on — the run itself does not need the link, and failing a
-            # kickoff over a bad optional reference would be a worse trade.
+            # The saved crew this run was built from, which a resume rebuilds from
+            # (unless trigger_type is "chat", resume_config.py). Only a crew of the
+            # run's workspace is linked; any other or malformed id records None.
             crew_id = getattr(config, "crew_id", None)
             if execution_type != "flow" and crew_id:
-                import uuid as uuid_module
+                from src.services.catalog.run_lookup import crew_id_to_record
 
-                try:
-                    execution_data["crew_id"] = (
-                        uuid_module.UUID(crew_id)
-                        if isinstance(crew_id, str)
-                        else crew_id
-                    )
-                except (TypeError, ValueError):
-                    logger.warning(
-                        f"[ExecutionService.create_execution] Ignoring unparseable "
-                        f"crew_id {crew_id!r}; this run will resume from its "
-                        f"stored inputs instead of the saved crew"
-                    )
+                execution_data["crew_id"] = await crew_id_to_record(
+                    self.session, crew_id, group_context
+                )
+            if getattr(config, "trigger_type", None):
+                execution_data["trigger_type"] = config.trigger_type
 
-            # A flow resume has always created a new execution; it just never
-            # recorded WHICH run it came from. Stamping the same link the crew
-            # path uses means one resume chain shape for both, so the run detail
-            # view does not need two ways to ask "what was this resumed from?".
+            # A flow resume creates a new execution; stamping the same link the
+            # crew path uses gives one resume chain shape for both, so the run
+            # detail view has one way to ask "what was this resumed from?".
             resumed_from = getattr(config, "resume_from_execution_id", None)
             if resumed_from:
                 try:
@@ -1754,6 +1602,7 @@ class ExecutionService:
             logger.info(
                 f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING"
             )
+            run_freeze.record(auto, execution_id, group_context)
 
             # Add to in-memory storage with RUNNING status. Carry the group so a
             # status lookup that falls back to this entry (see get_execution_status)
@@ -1762,7 +1611,7 @@ class ExecutionService:
                 execution_id=execution_id,
                 status=ExecutionStatus.RUNNING.value,
                 run_name=run_name,
-                created_at=datetime.now(),  # Remove timezone to match database column type
+                created_at=datetime.utcnow(),  # naive UTC, like the column default
                 group_id=group_context.primary_group_id if group_context else None,
                 group_email=group_context.group_email if group_context else None,
             )
@@ -1778,10 +1627,7 @@ class ExecutionService:
             # routes its own fresh session — no explicit detach needed.
             asyncio.create_task(
                 ExecutionService._generate_run_name_async(
-                    execution_id=execution_id,
-                    agents_yaml=agents_yaml,
-                    tasks_yaml=tasks_yaml,
-                    model=model,
+                    execution_id, agents_yaml, tasks_yaml, model, group_context
                 )
             )
 
@@ -1792,7 +1638,7 @@ class ExecutionService:
 
             if background_tasks:
 
-                async def run_execution_task():
+                async def run_execution_task() -> None:
                     # Use context-aware logger based on execution type
                     task_logger = (
                         LoggerManager.get_instance().flow
@@ -1811,10 +1657,10 @@ class ExecutionService:
                             config=config,
                             execution_type=execution_type,
                             group_context=group_context,
-                            # NOT self.session: this runs after the response, when
-                            # the request session is closed. None makes the run
-                            # route its own fresh session (dispatch_session →
-                            # routed_scoped_session) instead of reusing a dead one.
+                            # A BackgroundTask runs in the request's task, with the
+                            # request session still OPEN: None goes through
+                            # routed_scoped_session, which reuses it, and the router
+                            # commits the run's writes when the request ends.
                             session=None,
                         )
                         task_logger.info(
@@ -1888,6 +1734,7 @@ class ExecutionService:
                 execution_id=execution_id,
                 status=ExecutionStatus.RUNNING.value,  # Return RUNNING status for immediate visibility
                 run_name=run_name,
+                model_selection=auto.to_response() if auto else None,
             ).model_dump()  # Return as dict
 
         except KasalError:
@@ -1905,9 +1752,9 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        group_context: GroupContext = None,
-        session=None,
-    ):
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> None:
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
@@ -1954,7 +1801,7 @@ class ExecutionService:
     async def resume_execution(
         self,
         execution_id: str,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
         from_unit: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -1990,6 +1837,7 @@ class ExecutionService:
         from src.repositories.execution_history_repository import (
             ExecutionHistoryRepository,
         )
+        from src.services.catalog.run_lookup import scope_to_run
         from src.services.execution.checkpointing import (
             lifecycle,
             normalize,
@@ -2009,6 +1857,8 @@ class ExecutionService:
         source = await repo.get_execution_by_job_id(execution_id, group_ids=group_ids)
         if not source:
             raise ValueError(f"Execution {execution_id} not found")
+        # Rebuilt and filed in the source run's own workspace from here on.
+        group_context = scope_to_run(group_context, source)
 
         execution_type = (source.execution_type or "crew").lower()
         if execution_type not in ("crew", "flow"):
@@ -2055,18 +1905,17 @@ class ExecutionService:
             f"(source status: {source.status}, restored units: {restored_units})"
         )
 
-        execution_data = {
+        execution_data: Dict[str, Any] = {
             "job_id": new_execution_id,
             "status": ExecutionStatus.RUNNING.value,
-            # The definition that will actually RUN, which is the rebuilt one
-            # when there was a saved crew/flow to rebuild from. Storing the old
-            # snapshot here would make the new run's record describe work it
-            # did not do, and send a second resume back to the stale text.
+            # The definition that will actually RUN (the rebuilt one when there
+            # was a saved crew/flow). The old snapshot here would describe work
+            # the run did not do, and send a second resume back to stale text.
             "inputs": ExecutionService.sanitize_for_database(
                 self._mask_inputs_sensitive_data(resume_inputs)
             ),
             "run_name": run_name,
-            "created_at": datetime.now(),
+            "created_at": datetime.utcnow(),
             "execution_type": execution_type,
             "resumed_from_execution_id": source.id,
         }
@@ -2074,12 +1923,13 @@ class ExecutionService:
             execution_data["flow_id"] = source.flow_id
         if source.flow_uuid:
             execution_data["flow_uuid"] = source.flow_uuid
-        # Carry the crew link down the resume chain. Without it the SECOND
-        # resume of a run would have nothing to rebuild from and would fall
-        # back to a snapshot — which is not stale here, but would freeze at the
-        # first resume and stop picking up later edits.
+        # Carry the crew link down the resume chain, so a SECOND resume still
+        # rebuilds from the saved crew instead of freezing at the first one.
         if getattr(source, "crew_id", None):
             execution_data["crew_id"] = source.crew_id
+        # A chat run, and each resume of it, resumes from its snapshot.
+        if getattr(source, "trigger_type", None) == "chat":
+            execution_data["trigger_type"] = "chat"
 
         created = await ExecutionStatusService.create_execution(
             execution_data, group_context=group_context
@@ -2122,7 +1972,7 @@ class ExecutionService:
             execution_id=new_execution_id,
             status=ExecutionStatus.RUNNING.value,
             run_name=run_name,
-            created_at=datetime.now(),
+            created_at=datetime.utcnow(),
             group_id=group_context.primary_group_id if group_context else None,
             group_email=group_context.group_email if group_context else None,
         )
@@ -2149,76 +1999,15 @@ class ExecutionService:
             "restored_tasks": restored_units,
         }
 
-    async def _check_for_running_jobs(self, group_context: GroupContext = None) -> None:
-        """
-        Check for running jobs to enforce single job execution constraint.
-
-        Args:
-            group_context: Group context for filtering (ensures users can only see their own group's jobs)
-
-        Raises:
-            ValueError: If there are any running jobs
-        """
-        try:
-            # Get active statuses that should block new executions
-            active_statuses = [
-                ExecutionStatus.PENDING.value,
-                ExecutionStatus.PREPARING.value,
-                ExecutionStatus.RUNNING.value,
-            ]
-
-            # Use ExecutionRepository to check for active executions
-            from src.db.session import routed_scoped_session
-            from src.repositories.execution_repository import ExecutionRepository
-
-            async with routed_scoped_session() as db:
-                repo = ExecutionRepository(db)
-
-                # Get executions with group filtering
-                group_ids = group_context.group_ids if group_context else None
-                active_executions, _ = await repo.get_execution_history(
-                    limit=1,  # We only need to know if any exist
-                    offset=0,
-                    group_ids=group_ids,
-                    status_filter=active_statuses,  # Filter for active statuses
-                )
-
-                if active_executions:
-                    active_execution = active_executions[0]
-                    error_msg = (
-                        f"Cannot start new job. Another job is currently running: "
-                        f"'{active_execution.run_name}' (Status: {active_execution.status}). "
-                        f"Please wait for it to complete. "
-                        f"Note: In future releases, we plan to add support for concurrent job execution."
-                    )
-                    crew_logger.warning(
-                        f"[ExecutionService._check_for_running_jobs] {error_msg}"
-                    )
-                    raise ValueError(error_msg)
-
-        except ValueError:
-            # Re-raise ValueError (our constraint violation)
-            raise
-        except Exception as e:
-            # Log other errors but don't block execution creation
-            crew_logger.error(
-                f"[ExecutionService._check_for_running_jobs] Error checking for running jobs: {str(e)}"
-            )
-            # We don't raise here to avoid blocking execution if the check fails for technical reasons
-
     async def generate_execution_name(
-        self, request: ExecutionNameGenerationRequest
+        self,
+        request: ExecutionNameGenerationRequest,
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, str]:
-        """
-        Generate a descriptive name for an execution based on agents and tasks configuration.
-
-        Args:
-            request: The execution name generation request
-
-        Returns:
-            Dict containing the generated name
-        """
-        response = await self.execution_name_service.generate_execution_name(request)
+        """``{"name": ...}`` for a run, from the workspace's naming template."""
+        response = await self.execution_name_service.generate_execution_name(
+            request, group_context
+        )
         return {"name": response.name}
 
     def _extract_agents_tasks_from_flow_config(self, config: CrewConfig) -> tuple:
@@ -2259,6 +2048,7 @@ class ExecutionService:
             f"[STOP] execution_id: {execution_id}, stop_type: {stop_type}, reason: {reason}"
         )
 
+        partial_results = None
         try:
             # Update execution status to STOPPING
             if db:
@@ -2271,7 +2061,6 @@ class ExecutionService:
                 # Get current execution state for partial results
                 execution = await history_repo.get_execution_by_job_id(execution_id)
 
-                partial_results = None
                 if preserve_partial_results and execution:
                     partial_results = execution.result
 
@@ -2315,42 +2104,28 @@ class ExecutionService:
                     )
                 else:
                     crew_logger.info(
-                        f"[STOP] Execution {execution_id} not found in ProcessFlowExecutor tracking - trying psutil fallback"
+                        f"[STOP] Execution {execution_id} not found in ProcessFlowExecutor tracking - checking this server's own subprocesses"
                     )
-                    # Fallback: Use psutil to find and kill processes by execution_id
-                    try:
-                        import psutil
+                    # Only this server's descendants whose KASAL_EXECUTION_ID
+                    # equals the id exactly; an empty id matches nothing. Never
+                    # a command-line substring (an empty id is in every one).
+                    from src.services.execution.process_tree import (
+                        terminate_owned_processes,
+                    )
 
-                        current_process = psutil.Process()
-                        children = current_process.children(recursive=True)
-                        killed_count = 0
-                        for child in children:
-                            try:
-                                # Check if this process is related to our execution
-                                cmdline = " ".join(child.cmdline())
-                                if (
-                                    execution_id in cmdline
-                                    or execution_id[:8] in cmdline
-                                ):
-                                    crew_logger.info(
-                                        f"[STOP] Found process {child.pid} matching execution {execution_id}, terminating..."
-                                    )
-                                    child.terminate()
-                                    killed_count += 1
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                        if killed_count > 0:
-                            crew_logger.info(
-                                f"[STOP] Terminated {killed_count} processes via psutil fallback"
-                            )
-                            flow_terminated = True
-                        else:
-                            crew_logger.info(
-                                f"[STOP] No matching processes found via psutil for {execution_id}"
-                            )
-                    except Exception as psutil_error:
-                        crew_logger.warning(
-                            f"[STOP] psutil fallback failed: {psutil_error}"
+                    killed_count = await asyncio.to_thread(
+                        terminate_owned_processes,
+                        execution_id,
+                        graceful=(stop_type == "graceful"),
+                    )
+                    if killed_count > 0:
+                        crew_logger.info(
+                            f"[STOP] Terminated {killed_count} owned processes for {execution_id}"
+                        )
+                        flow_terminated = True
+                    else:
+                        crew_logger.info(
+                            f"[STOP] No owned processes found for {execution_id}"
                         )
 
             except Exception as flow_error:

@@ -111,6 +111,25 @@ class TestCrewRebuild:
         assert config.tasks_yaml["task_1"]["description"] == "the OLD text"
 
     @pytest.mark.asyncio
+    async def test_a_chat_run_of_a_saved_crew_resumes_from_its_snapshot(self):
+        # The chat changed the crew for this run only (memory off, endpoints,
+        # the request added to the first task). The saved crew has none of it,
+        # so rebuilding would resume a different run; crew_id stays for
+        # completion rules and trigger chains.
+        with patch_projection(CURRENT) as projection:
+            config, _, resume_inputs = await build_crew_resume_config(
+                MagicMock(),
+                source(crew_id="crew-1", trigger_type="chat"),
+                SNAPSHOT,
+                None,
+                None,
+            )
+
+        projection.assert_not_awaited()
+        assert config.tasks_yaml["task_1"]["description"] == "the OLD text"
+        assert resume_inputs["tasks_yaml"] == SNAPSHOT["tasks_yaml"]
+
+    @pytest.mark.asyncio
     async def test_a_run_with_no_definition_at_all_is_rejected(self):
         with pytest.raises(ValueError, match="no stored crew configuration"):
             await build_crew_resume_config(

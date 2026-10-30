@@ -13,49 +13,36 @@ from .constants import (
     RE_SIMPLE_SUMX,
     RE_SUMX_FILTER,
 )
-from .data_classes import TranslationResult
+from .data_classes import TranslateFn, TranslationResult
+from .dax_condition_sql import (
+    DaxConditionMixin,
+    _sql_in_list,
+    _sql_str_literal,
+    split_top_level_args,
+)
+from .dax_preclean import preclean_dax
 from .join_detector import _sanitize_alias
 from .sql_measure_sanitizer import sanitize_measure_name
 from .utils import to_snake_case
 
 
-def _sql_str_literal(value: str) -> str:
-    """Return a safe, single-quoted SQL string literal for a DAX-sourced value.
-
-    SECURITY: DAX filter values (measure predicates, IN-lists) are attacker-
-    influenceable (a semantic model author controls them) and get interpolated
-    into generated SQL that is deployed as a UC Metric View. Without escaping, a
-    value like ``x' OR '1'='1`` forges the predicate — and the deployer's
-    dangerous-SQL deny-list does NOT catch quote-breakout. Escape by doubling
-    single quotes (SQL standard) and stripping NULs. Always returns the value
-    wrapped in single quotes.
-    """
-    s = str(value).replace("\x00", "")
-    return "'" + s.replace("'", "''") + "'"
-
-
-def _sql_in_list(values) -> str:
-    """Build a safe ``'a', 'b', 'c'`` IN-list from DAX-sourced values (escaped)."""
-    return ", ".join(_sql_str_literal(v) for v in values)
-
-
-class DaxTranslator:
+class DaxTranslator(DaxConditionMixin):
     """Pattern-based DAX→SQL translator with ordered registry."""
 
     def __init__(self, config: dict | None = None):
         cfg = config or {}
         self.filter_sets = cfg.get("filter_sets", {})
-        self.column_overrides = cfg.get("column_overrides", {})
+        self.column_overrides: dict[str, str] = cfg.get("column_overrides", {})
         self._fact_join_map_cfg = cfg.get("fact_join_map", {})
-        self._measure_resolutions = cfg.get("measure_resolutions", {})
+        self._measure_resolutions: dict[str, dict] = cfg.get("measure_resolutions", {})
         self._dim_alias_map: dict[str, str] = cfg.get("dim_alias_map", {})
         self._cwc_filter_column: str = cfg.get("cwc_filter_column", "")
         self._fact_joins: list[dict] = []
         self._source_col_map: dict[str, str] = {}
-        self._patterns: list[tuple[str, Callable, Callable]] = []
+        self._patterns: list[tuple[str, Callable, TranslateFn]] = []
         self._register_patterns()
 
-    def _register_patterns(self):
+    def _register_patterns(self) -> None:
         """Register translation patterns in priority order. First match wins."""
         # ── Defect-class matchers (IDOR/DQA post-mortem M1–M5, M9, M11) ──
         # Prepended FIRST so they win over the generic catch-alls AND before
@@ -142,11 +129,11 @@ class DaxTranslator:
             ),
         ]
 
-    def set_fact_joins(self, fact_joins: list[dict]):
+    def set_fact_joins(self, fact_joins: list[dict]) -> None:
         """Set current fact joins for cross-table resolution."""
         self._fact_joins = fact_joins
 
-    def set_source_col_map(self, col_map: dict[str, str]):
+    def set_source_col_map(self, col_map: dict[str, str]) -> None:
         """Map a same-fact physical column to the source SELECT's OUTPUT column.
 
         A pre-aggregating source (``SUM(kbi_value) AS value``) exposes the column
@@ -696,13 +683,8 @@ class DaxTranslator:
     ) -> tuple[str | None, str]:
         if match.get("type") != "sumx_filter":
             return None, match.get("reason", "SAMEPERIODLASTYEAR (requires window)")
-        col = match["column"]
-        cond_sql = self._dax_condition_to_sql(match.get("condition", ""), table_key)
-        if cond_sql:
-            sql = f"SUM(source.{col}) FILTER (WHERE {cond_sql})"
-        else:
-            sql = f"SUM(source.{col})"
-        return sql, "__SAMEPERIODLASTYEAR__"
+        sql, reason = self._filtered_agg("SUM", match, table_key)
+        return (sql, "__SAMEPERIODLASTYEAR__") if sql else (None, reason)
 
     def _translate_simple_sum(
         self, match: dict, dax: str, table_key: str
@@ -719,20 +701,12 @@ class DaxTranslator:
     def _translate_countx(
         self, match: dict, dax: str, table_key: str
     ) -> tuple[str | None, str]:
-        col = match["column"]
-        cond_sql = self._dax_condition_to_sql(match.get("condition", ""), table_key)
-        if cond_sql:
-            return f"COUNT(source.{col}) FILTER (WHERE {cond_sql})", ""
-        return f"COUNT(source.{col})", ""
+        return self._filtered_agg("COUNT", match, table_key)
 
     def _translate_averagex(
         self, match: dict, dax: str, table_key: str
     ) -> tuple[str | None, str]:
-        col = match["column"]
-        cond_sql = self._dax_condition_to_sql(match.get("condition", ""), table_key)
-        if cond_sql:
-            return f"AVG(source.{col}) FILTER (WHERE {cond_sql})", ""
-        return f"AVG(source.{col})", ""
+        return self._filtered_agg("AVG", match, table_key)
 
     def _translate_userelationship(
         self, match: dict, dax: str, table_key: str
@@ -1002,11 +976,15 @@ class DaxTranslator:
         if len(refs) == 1:
             r = refs[0]
             extra = self._parse_calculate_filters(r["filter_text"], table_key)
+            if extra is None:
+                return None, f'Untranslatable CALCULATE filter: {r["filter_text"]}'
             sql = self._resolve_measure_ref(r["ref_name"], extra)
             return (sql, "") if sql else (None, f'Cannot resolve [{r["ref_name"]}]')
         result = match["cleaned"]
         for r in reversed(refs):
             extra = self._parse_calculate_filters(r["filter_text"], table_key)
+            if extra is None:
+                return None, f'Untranslatable CALCULATE filter: {r["filter_text"]}'
             sql = self._resolve_measure_ref(r["ref_name"], extra)
             if not sql:
                 return None, f'Cannot resolve [{r["ref_name"]}]'
@@ -1022,6 +1000,8 @@ class DaxTranslator:
         result = cleaned
         for r in reversed(refs):
             extra = self._parse_calculate_filters(r["filter_text"], table_key)
+            if extra is None:
+                return None, f'Untranslatable CALCULATE filter: {r["filter_text"]}'
             sql = self._resolve_measure_ref(r["ref_name"], extra)
             if not sql:
                 return None, f'Cannot resolve [{r["ref_name"]}]'
@@ -1075,7 +1055,7 @@ class DaxTranslator:
         ):
             p = parts[0]
             alias, col_map = self._resolve_table_alias(p["table"], table_key)
-            physical_col = col_map.get(p["column"], p["column"])
+            physical_col = _sanitize_alias(col_map.get(p["column"], p["column"]))
             filter_parts = []
             filter_sql = self._build_filter_clause(p, table_key, dax)
             if filter_sql:
@@ -1086,7 +1066,7 @@ class DaxTranslator:
             self._extend_with_implicit_filters(filter_parts, alias)
             combined = " AND ".join(filter_parts) if filter_parts else None
             if combined:
-                return f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})", ""
+                return f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})", ""  # identifiers validated; filters escaped or pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where  # fmt: skip
             return f"SUM({alias}.{physical_col})", ""
         var_map = {}
         for p in parts:
@@ -1094,7 +1074,7 @@ class DaxTranslator:
             if var_name is None:
                 continue
             alias, col_map = self._resolve_table_alias(p["table"], table_key)
-            physical_col = col_map.get(p["column"], p["column"])
+            physical_col = _sanitize_alias(col_map.get(p["column"], p["column"]))
             filter_parts = []
             filter_sql = self._build_filter_clause(p, table_key, dax)
             if filter_sql:
@@ -1105,7 +1085,7 @@ class DaxTranslator:
             combined = " AND ".join(filter_parts) if filter_parts else None
             if combined:
                 var_map[var_name] = (
-                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})"
+                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})"  # identifiers validated; filters escaped or pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 )
             else:
                 var_map[var_name] = f"SUM({alias}.{physical_col})"
@@ -1126,7 +1106,7 @@ class DaxTranslator:
         var_map: dict[str, str] = {}
         for p in parts:
             alias, col_map = self._resolve_table_alias(p["table"], table_key)
-            physical_col = col_map.get(p["column"], p["column"])
+            physical_col = _sanitize_alias(col_map.get(p["column"], p["column"]))
             filter_parts = []
             inner_filter = self._build_filter_clause(p, table_key, dax)
             if inner_filter:
@@ -1149,7 +1129,7 @@ class DaxTranslator:
             combined_filter = " AND ".join(filter_parts) if filter_parts else None
             if combined_filter:
                 var_map[p["var"]] = (
-                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined_filter})"
+                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined_filter})"  # identifiers validated; filters escaped or pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 )
             else:
                 var_map[p["var"]] = f"SUM({alias}.{physical_col})"
@@ -1228,9 +1208,10 @@ class DaxTranslator:
         if not condition:
             return ""
 
-        # Check for variable reference: Table[col] in varName
-        var_ref_match = re.search(
-            r"(\w+)\[(\w+)\]\s+in\s+(\w+)\s*$", condition, re.IGNORECASE
+        # Variable reference: Table[col] in varName (the WHOLE condition, so no
+        # other conjunct is dropped)
+        var_ref_match = re.fullmatch(
+            r"\s*(\w+)\[(\w+)\]\s+in\s+(\w+)\s*", condition, re.IGNORECASE
         )
         if var_ref_match:
             dim_table = var_ref_match.group(1)
@@ -1244,8 +1225,10 @@ class DaxTranslator:
 
         # Check for CWC_Filter=1 pattern (only if CWC_FILTER filter set is configured)
         if self.filter_sets.get("CWC_FILTER"):
-            cwc_match = re.search(
-                r"(\w+)\[CWC_Filter\]\s*=\s*1", condition, re.IGNORECASE
+            cwc_match = re.fullmatch(
+                r"\s*\(?\s*(\w+)\[CWC_Filter\]\s*=\s*1\s*\)?\s*",
+                condition,
+                re.IGNORECASE,
             )
             if cwc_match:
                 dim_table = cwc_match.group(1)
@@ -1283,216 +1266,7 @@ class DaxTranslator:
                 return values
         return None
 
-    def _dim_table_to_alias(self, dim_table: str) -> str:
-        """Map a PBI dimension table name to its SQL join alias."""
-        if dim_table in self._dim_alias_map:
-            return self._dim_alias_map[dim_table]
-        return dim_table.lower()
-
-    def _resolve_filter_alias(self, dax_table: str, dax_col: str) -> tuple[str, str]:
-        """Resolve a filter column reference that may target a cross-table fact.
-
-        Returns (alias, physical_col).
-        """
-        if dax_table in self._fact_join_map_cfg:
-            for fj in self._fact_joins:
-                if fj.get("_pbi_name") == dax_table:
-                    cfg = fj["_fact_join_config"]
-                    fc = cfg.get("filter_columns", {})
-                    if dax_col in fc:
-                        return fj["name"], fc[dax_col]
-        return self._dim_table_to_alias(dax_table), dax_col
-
-    def _dax_condition_to_sql(self, condition: str, table_key: str) -> str:
-        """Translate a DAX filter condition to SQL with proper formatting."""
-        if not condition or not condition.strip():
-            return ""
-        condition = condition.strip()
-        parts = self._split_conditions(condition)
-        sql_parts = []
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-            sql_part = self._translate_single_condition(part, table_key)
-            if sql_part:
-                sql_parts.append(sql_part)
-        return " AND ".join(sql_parts) if sql_parts else ""
-
-    def _dax_condition_to_sql_cross_table(
-        self, condition: str, filter_table: str
-    ) -> str:
-        """Translate DAX conditions that reference a cross-table fact's columns."""
-        parts = self._split_conditions(condition)
-        sql_parts = []
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-            m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', part)
-            if m:
-                alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
-                sql_parts.append(
-                    f"{alias}.{phys_col} {m.group(3)} {_sql_str_literal(m.group(4))}"
-                )
-                continue
-            m = re.match(r"(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}", part, re.IGNORECASE)
-            if m:
-                alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
-                vals = re.findall(r'"([^"]*)"', m.group(3))
-                in_list = _sql_in_list(vals)
-                sql_parts.append(f"{alias}.{phys_col} IN ({in_list})")
-                continue
-            m = re.match(r"(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)", part)
-            if m:
-                alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
-                sql_parts.append(f"{alias}.{phys_col} {m.group(3)} {m.group(4)}")
-                continue
-        return " AND ".join(sql_parts) if sql_parts else ""
-
-    def _dax_condition_to_sql_qualified(
-        self, condition: str, filter_table: str, table_key: str
-    ) -> str:
-        """Translate DAX conditions with qualified dim table references."""
-        parts = self._split_conditions(condition)
-        sql_parts = []
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-            m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', part)
-            if m:
-                alias = self._dim_table_to_alias(m.group(1))
-                sql_parts.append(
-                    f"{alias}.{m.group(2)} {m.group(3)} {_sql_str_literal(m.group(4))}"
-                )
-                continue
-            m = re.match(r"(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}", part, re.IGNORECASE)
-            if m:
-                alias = self._dim_table_to_alias(m.group(1))
-                vals = re.findall(r'"([^"]*)"', m.group(3))
-                in_list = _sql_in_list(vals)
-                sql_parts.append(f"{alias}.{m.group(2)} IN ({in_list})")
-                continue
-            m = re.match(r"(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)", part)
-            if m:
-                alias = self._dim_table_to_alias(m.group(1))
-                sql_parts.append(f"{alias}.{m.group(2)} {m.group(3)} {m.group(4)}")
-                continue
-        return " AND ".join(sql_parts) if sql_parts else ""
-
-    @staticmethod
-    def _split_conditions(condition: str) -> list[str]:
-        """Split DAX condition on && (AND)."""
-        return re.split(r"\s*&&\s*", condition)
-
-    def _translate_single_condition(self, cond: str, table_key: str) -> str | None:
-        """Translate a single DAX condition to SQL."""
-        cond = cond.strip()
-
-        # Strip a single layer of wrapping parens: CALCULATE([M], (table[col] in {...}))
-        # delivers the predicate parenthesized, and every branch below uses an
-        # anchored re.match — a leading '(' makes them ALL miss, silently dropping
-        # the filter (the num==denom collapse bug on measure-ref ratios). Only
-        # strip when the parens wrap the WHOLE condition (balanced at the ends).
-        while len(cond) >= 2 and cond[0] == "(" and cond[-1] == ")":
-            depth = 0
-            wraps_all = True
-            for i, ch in enumerate(cond):
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                    if depth == 0 and i != len(cond) - 1:
-                        wraps_all = False
-                        break
-            if not wraps_all:
-                break
-            cond = cond[1:-1].strip()
-
-        # Handle OR conditions (|| → OR): split, translate each side, join with OR
-        if "||" in cond:
-            or_parts = re.split(r"\s*\|\|\s*", cond)
-            sql_or_parts = []
-            for op in or_parts:
-                sql_op = self._translate_single_condition(op.strip(), table_key)
-                if sql_op is None:
-                    return None
-                sql_or_parts.append(sql_op)
-            return "(" + " OR ".join(sql_or_parts) + ")"
-
-        # NOT Table[col] IN {…}
-        m = re.match(r"NOT\s+(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}", cond, re.IGNORECASE)
-        if m:
-            col = self._resolve_column(m.group(1), m.group(2), table_key)
-            vals = re.findall(r'"([^"]*)"', m.group(3))
-            in_list = _sql_in_list(vals)
-            return f"source.{col} NOT IN ({in_list})"
-
-        # Table[col] = "val"
-        m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
-        if m:
-            col = self._resolve_column(m.group(1), m.group(2), table_key)
-            return f"source.{col} {m.group(3)} {_sql_str_literal(m.group(4))}"
-        # Table[col] = 'val' (single-quoted)
-        m = re.match(r"(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*'([^']*)'", cond)
-        if m:
-            col = self._resolve_column(m.group(1), m.group(2), table_key)
-            return f"source.{col} {m.group(3)} {_sql_str_literal(m.group(4))}"
-        # Table[col] in {"a","b","c"}
-        m = re.match(r"(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}", cond, re.IGNORECASE)
-        if m:
-            col = self._resolve_column(m.group(1), m.group(2), table_key)
-            vals = re.findall(r'"([^"]*)"', m.group(3))
-            if not vals:
-                vals = re.findall(r"'([^']*)'", m.group(3))
-            in_list = _sql_in_list(vals)
-            return f"source.{col} IN ({in_list})"
-        # Table[col] = 123
-        m = re.match(r"(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)", cond)
-        if m:
-            col = self._resolve_column(m.group(1), m.group(2), table_key)
-            return f"source.{col} {m.group(3)} {m.group(4)}"
-
-        # ── Bare column patterns (no Table prefix): [col] = "val" ──
-        m = re.match(r'\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
-        if m:
-            return f"source.{m.group(1)} {m.group(2)} {_sql_str_literal(m.group(3))}"
-        # [col] = 'val' (single-quoted)
-        m = re.match(r"\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*'([^']*)'", cond)
-        if m:
-            return f"source.{m.group(1)} {m.group(2)} {_sql_str_literal(m.group(3))}"
-        # [col] IN {"a","b"}
-        m = re.match(r"\[(\w+)\]\s+in\s+\{([^}]+)\}", cond, re.IGNORECASE)
-        if m:
-            vals = re.findall(r'"([^"]*)"', m.group(2))
-            if not vals:
-                vals = re.findall(r"'([^']*)'", m.group(2))
-            in_list = _sql_in_list(vals)
-            return f"source.{m.group(1)} IN ({in_list})"
-        # NOT [col] IN {…}
-        m = re.match(r"NOT\s+\[(\w+)\]\s+in\s+\{([^}]+)\}", cond, re.IGNORECASE)
-        if m:
-            vals = re.findall(r'"([^"]*)"', m.group(2))
-            if not vals:
-                vals = re.findall(r"'([^']*)'", m.group(2))
-            in_list = _sql_in_list(vals)
-            return f"source.{m.group(1)} NOT IN ({in_list})"
-        # [col] = 123
-        m = re.match(r"\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)", cond)
-        if m:
-            return f"source.{m.group(1)} {m.group(2)} {m.group(3)}"
-
-        return None
-
-    def _resolve_column(self, pbi_table: str, pbi_col: str, table_key: str) -> str:
-        """Resolve a PBI column name to physical column (with overrides)."""
-        override_key = f"{pbi_table}.{pbi_col}"
-        if override_key in self.column_overrides:
-            return self.column_overrides[override_key]
-        return pbi_col
-
-    def _extend_with_implicit_filters(self, filter_parts: list[str], alias: str):
+    def _extend_with_implicit_filters(self, filter_parts: list, alias: str) -> None:
         """Add MQuery implicit filters for a fact join alias."""
         safe_alias = _sanitize_alias(alias)
         for fj in self._fact_joins:
@@ -1505,64 +1279,8 @@ class DaxTranslator:
 
     @staticmethod
     def _preclean_dax(dax: str) -> str:
-        """PROP-6: strip DAX comments and normalize BLANK() before translation.
-
-        - Remove ``//`` and ``--`` line comments (DAX allows both); left in, an
-          inline ``-- Denominator`` leaks into the emitted SQL and comments out the
-          rest of the line.
-        - Remove ``/* ... */`` block comments.
-        - Replace standalone ``BLANK()`` with ``NULL`` (emitted literally it is not
-          valid Spark SQL).
-        """
-        if not dax:
-            return dax
-        dax = re.sub(r"/\*.*?\*/", " ", dax, flags=re.DOTALL)
-        cleaned_lines = []
-        for line in dax.split("\n"):
-            line = re.sub(r"//.*$", "", line)
-            line = re.sub(r"--.*$", "", line)
-            cleaned_lines.append(line)
-        dax = "\n".join(cleaned_lines)
-        # BLANK() → NULL, but ONLY when it's part of a larger expression. A measure
-        # that is *only* BLANK() is a display placeholder — leave it for the
-        # quick-reject matcher to drop (converting it to bare NULL would hide it).
-        if dax.strip().upper() not in ("BLANK()", "BLANK ()"):
-            dax = re.sub(r"\bBLANK\s*\(\s*\)", "NULL", dax, flags=re.IGNORECASE)
-
-        # Strip slicer-scalar date-window scaffolding vars. Many real-world ratio
-        # measures prefix the real formula with:
-        #     var std = CALCULATE([F_Start_date])
-        #     var etd = CALCULATE([F_End_date])
-        # These reference dynamic date-picker measures ([F_Start_date] etc.) that
-        # are NOT translatable and NOT used by the ratio aggregation — but left in,
-        # they poison the LLM translation (leftover [F_Start_date] trips the
-        # DAX-construct validator) and block the ~36 ratios underneath. Drop any
-        # `var <n> = ...` line whose body references only these window pickers,
-        # AND drop bare references to them elsewhere. Only touches measures that
-        # actually contain the window-picker names, so normal DAX is untouched.
-        if re.search(r"F_Start_date|F_End_date|PY_Start_date|PY_End_date", dax, re.I):
-            _picker = re.compile(
-                r"F_Start_date|F_End_date|PY_Start_date|PY_End_date", re.I
-            )
-            kept = []
-            dropped_vars: set[str] = set()
-            for line in dax.split("\n"):
-                vm = re.match(r"\s*var\s+(\w+)\s*=\s*(.+)$", line, re.IGNORECASE)
-                if (
-                    vm
-                    and _picker.search(vm.group(2))
-                    and not re.search(
-                        r"\b(SUM|SUMX|COUNT|AVERAGE|MIN|MAX)\s*\(", vm.group(2), re.I
-                    )
-                ):
-                    dropped_vars.add(vm.group(1))  # e.g. std, etd
-                    continue  # drop the scaffolding var line
-                kept.append(line)
-            dax = "\n".join(kept)
-            # remove now-dangling references to the dropped vars (bare tokens)
-            for v in dropped_vars:
-                dax = re.sub(rf"(?<![\w.])\b{re.escape(v)}\b(?![\w.(])", "", dax)
-        return dax
+        """PROP-6: strip DAX comments and normalize BLANK() before translation."""
+        return preclean_dax(dax)
 
     @staticmethod
     def _extract_divide_args(text: str) -> tuple[str, str] | None:
@@ -1677,32 +1395,30 @@ class DaxTranslator:
             )
         return refs
 
-    def _parse_calculate_filters(self, filter_text: str, table_key: str) -> list[str]:
-        """Parse CALCULATE filter arguments into SQL conditions."""
+    def _parse_calculate_filters(
+        self, filter_text: str, table_key: str
+    ) -> list[str] | None:
+        """Parse CALCULATE filter arguments into SQL conditions.
+
+        ``None`` when any filter argument cannot be translated in full: the
+        measure is then a gap, never the same measure with a filter missing.
+        """
         if not filter_text:
             return []
         conditions = []
-        for part in re.split(
-            r",\s*(?=FILTER\b|ALL\b|\w+\[)", filter_text, flags=re.IGNORECASE
-        ):
+        for part in split_top_level_args(filter_text):
             part = part.strip()
-            if not part:
-                continue
-            if part.upper().startswith("ALL("):
+            if not part or part.upper().startswith("ALL("):
                 continue
             fm = re.match(
                 r"FILTER\s*\(\s*(\w+)\s*,\s*(.+)\s*\)\s*$",
                 part,
                 re.IGNORECASE | re.DOTALL,
             )
-            if fm:
-                cond = self._dax_condition_to_sql(fm.group(2), table_key)
-                if cond:
-                    conditions.append(cond)
-            else:
-                cond = self._dax_condition_to_sql(part, table_key)
-                if cond:
-                    conditions.append(cond)
+            cond = self._dax_condition_to_sql(fm.group(2) if fm else part, table_key)
+            if not cond:
+                return None
+            conditions.append(cond)
         return conditions
 
     def _resolve_measure_ref(
@@ -1712,11 +1428,11 @@ class DaxTranslator:
         resolution = self._measure_resolutions.get(ref_name)
         if not resolution:
             return None
-        base_expr = resolution.get("base_expr", "")
+        base_expr: str = resolution.get("base_expr", "")
         base_filters = list(resolution.get("base_filters", []))
         all_filters = base_filters + extra_filters
         if all_filters:
-            return f"{base_expr} FILTER (WHERE {' AND '.join(all_filters)})"
+            return f"{base_expr} FILTER (WHERE {' AND '.join(all_filters)})"  # joins resolved predicates (escaped literals) — nosemgrep: tmp.databricks.sql-injection.fstring-where
         return base_expr
 
     @staticmethod
@@ -1741,16 +1457,16 @@ class DaxTranslator:
     def _resolve_remaining_dax(self, sql: str) -> str:
         """Post-process SQL to resolve bare [MeasureRef] and remaining DIVIDE()."""
 
-        def _resolve_ref(m: re.Match) -> str:
+        def _resolve_ref(m: re.Match[str]) -> str:
             ref_name = m.group(1)
             resolution = self._measure_resolutions.get(ref_name)
             if resolution:
-                base = resolution["base_expr"]
+                base: str = resolution["base_expr"]
                 filters = resolution.get("base_filters", [])
                 if filters:
-                    return f"{base} FILTER (WHERE {' AND '.join(filters)})"
+                    return f"{base} FILTER (WHERE {' AND '.join(filters)})"  # joins resolved predicates (escaped literals) — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 return base
-            return f"1 /* UNRESOLVED: [{ref_name}] */"
+            return f"1 /* UNRESOLVED: [{ref_name.replace('*/', '* /').replace('/*', '/ *')}] */"
 
         sql = re.sub(r"(?<!\w)\[([^\]]+)\]", _resolve_ref, sql)
         for _ in range(5):

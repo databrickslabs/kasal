@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { getDefaultModel } from '../../../../config/defaultModel';
 import React, { useState, useEffect } from 'react';
 import {
@@ -49,7 +50,10 @@ const AgentGenerationDialog: React.FC<AgentGenerationDialogProps> = ({
   // API key related state
   const [isApiKeyError, setIsApiKeyError] = useState<boolean>(false);
   const [missingProvider, setMissingProvider] = useState<string>('');
-  const { secrets: _apiKeys, fetchAPIKeys } = useAPIKeysStore();
+  const { secrets: _apiKeys, fetchAPIKeys } = useAPIKeysStore(useShallow(state => ({
+    secrets: state.secrets,
+    fetchAPIKeys: state.fetchAPIKeys,
+  })));
 
   // Initialize localTools from props once on mount or when tools prop changes
   useEffect(() => {

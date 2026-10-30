@@ -40,10 +40,12 @@ Typical caller flow::
 
 from __future__ import annotations
 
+import logging
 import textwrap
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Input dataclasses
@@ -87,7 +89,7 @@ class FilterStep:
 
     column: str
     operator: str
-    value: Any = None
+    value: object = None
 
 
 @dataclass
@@ -123,7 +125,7 @@ class AppendRowsStep:
     """
 
     columns: List[tuple]  # [(name, sql_type), ...]
-    rows: List[Dict[str, Any]]
+    rows: list[dict[str, object]]
 
 
 @dataclass
@@ -162,8 +164,8 @@ MStep = Union[FilterStep, ReplaceStep, DeduplicateStep, AppendRowsStep, GroupByS
 class ViewSpec:
     """Complete specification for one PBI-table → UC-view mapping."""
 
-    table_name: str          # PBI table name (informational label only)
-    target_view: str         # DDL target, e.g. "`cat`.`sch`.`view_name`"
+    table_name: str  # PBI table name (informational label only)
+    target_view: str  # DDL target, e.g. "`cat`.`sch`.`view_name`"
     source: TableSource
     m_steps: List[MStep] = field(default_factory=list)
     calc_columns: List[CalcColumn] = field(default_factory=list)
@@ -184,7 +186,7 @@ class EmittedView:
 
     table_name: str
     target_view: str
-    ddl: str         # complete, executable CREATE [MATERIALIZED] VIEW DDL
+    ddl: str  # complete, executable CREATE [MATERIALIZED] VIEW DDL
     todo_steps: List[str]  # descriptions of steps emitted as TODO comments
     error: Optional[str] = None  # non-None when fail-open triggered on exception
 
@@ -194,7 +196,7 @@ class EmittedView:
 # ---------------------------------------------------------------------------
 
 
-def _sql_lit(value: Any) -> str:
+def _sql_lit(value: object) -> str:
     """Convert a Python value to a Databricks SQL literal."""
     if value is None:
         return "NULL"
@@ -205,6 +207,15 @@ def _sql_lit(value: Any) -> str:
     return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def _in_values(value: object) -> list[object]:
+    """The value list of an IN / NOT IN filter (``None`` means no values)."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    raise ValueError(f"IN / NOT IN needs a list of values, got {value!r}")
+
+
 def _filter_condition(step: FilterStep) -> str:
     """Build the SQL condition for a FilterStep."""
     op = step.operator.strip().upper()
@@ -212,22 +223,22 @@ def _filter_condition(step: FilterStep) -> str:
     if op in ("IS NULL", "IS NOT NULL"):
         return f"{col} {op}"
     if op == "IN":
-        vals = ", ".join(_sql_lit(v) for v in (step.value or []))
+        vals = ", ".join(_sql_lit(v) for v in _in_values(step.value))
         return f"{col} IN ({vals})"
     if op == "NOT IN":
-        vals = ", ".join(_sql_lit(v) for v in (step.value or []))
+        vals = ", ".join(_sql_lit(v) for v in _in_values(step.value))
         return f"{col} NOT IN ({vals})"
     return f"{col} {op} {_sql_lit(step.value)}"
 
 
-def _values_clause(columns: List[tuple], rows: List[Dict[str, Any]]) -> str:
+def _values_clause(columns: list[tuple], rows: list[dict[str, object]]) -> str:
     """Build the VALUES ... AS t(...) fragment for AppendRowsStep."""
     if not rows:
         return ""
     col_casts = ",\n    ".join(f"CAST({c} AS {t}) AS {c}" for c, t in columns)
     col_names = ", ".join(c for c, _ in columns)
 
-    def _row(r: Dict[str, Any]) -> str:
+    def _row(r: dict[str, object]) -> str:
         return "  (" + ", ".join(_sql_lit(r.get(c)) for c, _ in columns) + ")"
 
     rows_sql = ",\n".join(_row(r) for r in rows)
@@ -249,7 +260,7 @@ class _Builder:
 
     def __init__(self, spec: ViewSpec) -> None:
         self._spec = spec
-        self._ctes: List[tuple] = []   # [(alias, sql_body), ...]
+        self._ctes: List[tuple] = []  # [(alias, sql_body), ...]
         self._ctr = 0
         self.todo_steps: List[str] = []
 
@@ -328,11 +339,7 @@ class _Builder:
             f"         ORDER BY {step.order_expr}) AS _rn\n"
             f"FROM {self._current()}"
         )
-        body_dedup = (
-            f"SELECT * EXCEPT (_rn)\n"
-            f"FROM {ranked}\n"
-            f"WHERE _rn = 1"
-        )
+        body_dedup = f"SELECT * EXCEPT (_rn)\n" f"FROM {ranked}\n" f"WHERE _rn = 1"
         self._ctes.append((ranked, body_ranked))
         self._ctes.append((deduped, body_dedup))
 
@@ -343,11 +350,7 @@ class _Builder:
             body = f"SELECT *\nFROM {self._current()}"
         else:
             values_sql = _values_clause(step.columns, step.rows)
-            body = (
-                f"SELECT *\nFROM {self._current()}\n"
-                f"UNION ALL\n"
-                f"{values_sql}"
-            )
+            body = f"SELECT *\nFROM {self._current()}\n" f"UNION ALL\n" f"{values_sql}"
         self._ctes.append((alias, body))
 
     def _groupby(self, step: GroupByStep) -> None:
@@ -370,8 +373,12 @@ class _Builder:
 
     def final_select(self) -> str:
         current = self._current()
-        translated = [c for c in self._spec.calc_columns if c.translation_status == "translated"]
-        todo = [c for c in self._spec.calc_columns if c.translation_status != "translated"]
+        translated = [
+            c for c in self._spec.calc_columns if c.translation_status == "translated"
+        ]
+        todo = [
+            c for c in self._spec.calc_columns if c.translation_status != "translated"
+        ]
 
         for c in todo:
             desc = c.comment or c.sql_expr
@@ -457,6 +464,12 @@ def emit_view(spec: ViewSpec) -> EmittedView:
             todo_steps=builder.todo_steps,
         )
     except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(
+            "[source_layer] emit failed for %s: %s",
+            spec.table_name,
+            exc,
+            exc_info=True,
+        )
         error_msg = str(exc)
         placeholder = (
             f"-- ERROR emitting view for '{spec.table_name}': {error_msg}\n"

@@ -2,7 +2,7 @@
 Extended tests for mcp_integration.py to push coverage to 90%+.
 
 Covers missing lines:
-- FLOW_SUBPROCESS_MODE logger selection (line 27)
+- flow-subprocess logger selection
 - resolve_effective_mcp_servers - explicit servers deduplication, group_id preference
 - create_mcp_tools_for_agent - servers found, tool creation, loop error handling
 - create_mcp_tools_for_task - servers found, tool creation, loop error handling
@@ -492,40 +492,6 @@ class TestCreateToolsForServerExtended:
         assert any("generic error" in w for w in warnings)
 
 
-class TestValidateMcpConfigurationExtended:
-    """Extended coverage for validate_mcp_configuration."""
-
-    def test_invalid_agent_not_dict_returns_false(self):
-        """Agent that is not a dict should return False."""
-        config = {"agents": ["not_a_dict"], "tasks": []}
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-    def test_invalid_task_not_dict_returns_false(self):
-        """Task that is not a dict should return False."""
-        config = {"agents": [], "tasks": ["not_a_dict"]}
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-    def test_agent_tool_configs_not_dict_returns_false(self):
-        """Agent tool_configs that is not a dict should return False."""
-        config = {
-            "agents": [{"id": "a1", "tool_configs": "not_a_dict"}],
-            "tasks": [],
-        }
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-    def test_task_tool_configs_not_dict_returns_false(self):
-        """Task tool_configs that is not a dict should return False."""
-        config = {
-            "agents": [],
-            "tasks": [{"id": "t1", "tool_configs": ["list_not_dict"]}],
-        }
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-
 class TestResolveAgentReferenceEdgeCases:
     """Edge cases for _resolve_agent_reference."""
 
@@ -546,7 +512,7 @@ class TestFlowSubprocessModeLogger:
     """Test that flow logger is selected in subprocess mode."""
 
     def test_flow_logger_selected_when_env_set(self):
-        """Module should use flow logger when FLOW_SUBPROCESS_MODE=true."""
+        """Module should use the flow logger inside a flow subprocess."""
         # We test indirectly by checking that the module loaded correctly.
         # The logger selection happens at module import time.
         import src.services.tools.mcp_integration as mcp_mod
@@ -554,7 +520,7 @@ class TestFlowSubprocessModeLogger:
         assert mcp_mod.logger is not None
 
     def test_crew_logger_selected_by_default(self):
-        """By default (no FLOW_SUBPROCESS_MODE), crew logger should be used."""
+        """Outside a flow subprocess, the crew logger should be used."""
         import src.services.tools.mcp_integration as mcp_mod
 
         # Logger should be set (either crew or flow depending on env)

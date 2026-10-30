@@ -19,37 +19,28 @@ fix it, and all three are about giving the model a reason to stop:
 """
 
 import logging
-import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+from src.services.settings import engine_settings
 
 logger = logging.getLogger(__name__)
 
 
-def _env_float(name: str, default: float) -> float:
-    try:
-        return float(os.getenv(name, "") or default)
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, "") or default)
-    except (TypeError, ValueError):
-        return default
-
-
-#: Cosine similarity a chunk must reach to be shown.
+#: Cosine similarity a chunk must reach to be shown, and the distinct searches
+#: one tool instance serves for one agent's turn (0 = unlimited). Configuration →
+#: Engines → Advanced (were KNOWLEDGE_MIN_SCORE / KNOWLEDGE_MAX_SEARCHES).
 #:
-#: Deliberately low. The cost of dropping a marginal chunk is an agent that says
-#: "not in the knowledge base"; the cost of keeping noise is the loop above. It
-#: is applied ONLY when the search actually produced scores, so a scoring
-#: regression degrades to today's behaviour instead of silently returning nothing.
-MIN_SCORE = _env_float("KNOWLEDGE_MIN_SCORE", 0.35)
+#: The floor is deliberately low. The cost of dropping a marginal chunk is an
+#: agent that says "not in the knowledge base"; the cost of keeping noise is the
+#: loop above. It is applied ONLY when the search actually produced scores, so a
+#: scoring regression degrades to today's behaviour instead of returning nothing.
+def configured_min_score() -> float:
+    return float(engine_settings.setting(engine_settings.KNOWLEDGE_MIN_SCORE))
 
-#: Distinct searches one tool instance will serve for one agent's turn.
-MAX_SEARCHES = _env_int("KNOWLEDGE_MAX_SEARCHES", 8)
+
+def configured_max_searches() -> int:
+    return int(engine_settings.setting(engine_settings.KNOWLEDGE_MAX_SEARCHES))
 
 
 def normalize_query(query: str) -> str:
@@ -66,7 +57,7 @@ def _score_of(result: Dict[str, Any]) -> float:
 
 
 def filter_by_relevance(
-    results: List[Dict[str, Any]], min_score: float = MIN_SCORE
+    results: List[Dict[str, Any]], min_score: Optional[float] = None
 ) -> Tuple[List[Dict[str, Any]], float, bool]:
     """Drop results below the floor.
 
@@ -83,6 +74,8 @@ def filter_by_relevance(
     if best <= 0.0:
         return results, 0.0, False
 
+    if min_score is None:
+        min_score = configured_min_score()
     kept = [r for r, s in zip(results, scores) if s >= min_score]
     return kept, best, True
 
@@ -95,8 +88,10 @@ class KnowledgeSearchBudget:
     looping is the one that gets stopped.
     """
 
-    def __init__(self, max_searches: int = MAX_SEARCHES):
-        self.max_searches = max_searches
+    def __init__(self, max_searches: Optional[int] = None):
+        self.max_searches = (
+            configured_max_searches() if max_searches is None else max_searches
+        )
         self._answers: Dict[str, str] = {}
         self._order: List[str] = []
 
@@ -136,13 +131,15 @@ class KnowledgeSearchBudget:
 
 
 def no_relevant_results_notice(
-    query: str, best_score: float, min_score: float = MIN_SCORE
+    query: str, best_score: float, min_score: Optional[float] = None
 ) -> str:
     """The answer when the index returned only distant matches.
 
     Says what was searched, how close the best match came, and — the part that
     ends the loop — that rephrasing is not expected to help.
     """
+    if min_score is None:
+        min_score = configured_min_score()
     closeness = (
         f"The closest match scored {best_score:.2f}, below the {min_score:.2f} "
         "relevance threshold."

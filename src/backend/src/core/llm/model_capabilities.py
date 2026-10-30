@@ -55,7 +55,7 @@ assuming a family default.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 #: Verified 2026-09-07 against current Databricks and provider documentation;
@@ -83,7 +83,7 @@ class ReasoningStyle(str, Enum):
     """How this model is ASKED to think."""
 
     #: `thinking: {"type": "enabled", "budget_tokens": N}` — a token budget.
-    TOKEN_BUDGET = "token_budget"
+    TOKEN_BUDGET = "token_budget"  # reasoning-style name, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
     #: `thinking: {"type": "adaptive"}` + `output_config: {"effort": ...}`. The
     #: model decides depth; effort steers it. Rejects a budget.
     ADAPTIVE_EFFORT = "adaptive_effort"
@@ -140,12 +140,6 @@ class ModelCapability:
     source: str = ""
     note: str = ""
 
-    def supports_effort(self, value: str | None) -> bool:
-        """Whether ``value`` is an effort this model actually accepts."""
-        if not value:
-            return False
-        return str(value).strip().lower() in self.efforts
-
     def accepts(self, param: str) -> bool:
         """Whether this model accepts sampling parameter ``param``."""
         return param not in self.refuses
@@ -199,6 +193,28 @@ _ADAPTIVE = ModelCapability(
         "this codebase reached and shipped before opting in. With "
         'display: "summarized": opus-5 1,629 chars, fable-5 255. Effort visibly '
         "changes depth on fable-5: low 48 chars, max 140."
+    ),
+)
+
+#: Claude Opus 5.5 — the same request shape as _ADAPTIVE, kept as its own record
+#: because its evidence is documentation, not a live probe, and because it is
+#: stricter than Opus 5: thinking cannot be disabled at any effort, and a forced
+#: `tool_choice` ("any"/"tool") is a 400. Kasal sends neither (adaptive requests
+#: never carry `disabled`; only the Responses handler forces tool_choice).
+_ADAPTIVE_OPUS_5_5 = ModelCapability(
+    style=ReasoningStyle.ADAPTIVE_EFFORT,
+    efforts=_ANTHROPIC_ADAPTIVE_EFFORTS,
+    returns_text=True,
+    text_requires='display: "summarized"',
+    refuses=("temperature", "top_p", "frequency_penalty", "presence_penalty"),
+    evidence="documented",
+    source=(
+        "https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/"
+        f"supported-models + {ANTHROPIC_EFFORT_DOC}"
+    ),
+    note=(
+        "Databricks: accepts low/medium/high/xhigh/max, defaults to medium, "
+        "reasoning cannot be disabled. Anthropic: temperature/top_p/top_k removed."
     ),
 )
 
@@ -332,6 +348,27 @@ _GPT6_ASTRA = ModelCapability(
     note="GPT-6 Astra always reasons; none and minimal are rejected.",
 )
 
+# Direct GPT-6 Sol/Luna support disabling reasoning, unlike Astra.
+_GPT6_SOL_LUNA = replace(
+    _GPT6_ASTRA,
+    efforts=("none", "low", "medium", "high", "xhigh", "max"),
+    source="https://developers.openai.com/api/docs/models/gpt-6-sol",
+    note="Direct GPT-6 Sol/Luna: use Responses for tool calls with reasoning.",
+)
+
+#: Databricks-served Sol/Luna. Databricks documents its own scale for these
+#: endpoints; it happens to equal the direct API's today, but it is sourced
+#: separately so a divergence on either side is a one-record change.
+_DATABRICKS_GPT6_SOL_LUNA = replace(
+    _GPT6_ASTRA,
+    efforts=("none", "low", "medium", "high", "xhigh", "max"),
+    source=DATABRICKS_REASON_DOC,
+    note=(
+        "Databricks GPT-6 Sol/Luna: reasoning_effort none..max, defaults to "
+        "medium when omitted. Served through the Responses API."
+    ),
+)
+
 # ── Gemini 3.x on Databricks ────────────────────────────────────────────────
 
 #: Gemini 3.7 rejects "none", "minimal", "xhigh" and "max".
@@ -360,6 +397,28 @@ _GEMINI_38 = ModelCapability(
     note=(
         "Gemini 3.8 defaults to medium, exposes low/medium/high, and rejects "
         "the temperature parameter."
+    ),
+)
+
+#: Gemini 4 Argon always reasons, and its Databricks endpoint accepts no request
+#: to steer it, whatever the reasoning doc says. Measured on 2026-10-23, every
+#: value of ``reasoning_effort`` returned 400 ``Unknown name "reasoning_effort"
+#: at 'generation_config'`` (so did ``reasoning``); a thinking budget returned
+#: "not supported for this model. Use thinking level instead", every
+#: thinking-level form then failed on "budget_tokens field is missing", and
+#: ``thinking: disabled`` returned "Thinking can't be turned off". Only the
+#: endpoint default works, so there is nothing to send. Temperature 400s with
+#: "does not support the temperature parameter".
+_GEMINI_4_ARGON = ModelCapability(
+    style=ReasoningStyle.UNPROMPTED,
+    returns_text=False,
+    text_requires="reasoning-text availability is not documented",
+    refuses=("temperature",),
+    evidence="measured",
+    source="live endpoint (Databricks reasoning doc lists efforts it rejects)",
+    note=(
+        "Gemini 4 Argon always reasons at the endpoint default; its Databricks "
+        "endpoint rejects reasoning_effort, thinking and temperature."
     ),
 )
 
@@ -441,6 +500,25 @@ _UNPROMPTED = ModelCapability(
 )
 
 
+# ── Routers ─────────────────────────────────────────────────────────────────
+
+#: TypeSafe's Jev Router on OpenRouter: it picks the model AND the reasoning
+#: effort per request, so there is nothing to steer and no sampling knob to set.
+#: OpenRouter lists it with `supported_parameters: []`.
+_JEV_ROUTER = ModelCapability(
+    style=ReasoningStyle.UNPROMPTED,
+    returns_text=False,
+    text_requires="depends on the model the router picks",
+    refuses=SAMPLING_PARAMS,
+    evidence="documented",
+    source="https://openrouter.ai/api/v1/models (typesafe/jev-router)",
+    note=(
+        "A router, not a model: the effort and sampling settings belong to the "
+        "model it chooses. OpenRouter ignores parameters the chosen model does "
+        "not support, but Kasal sends none of these."
+    ),
+)
+
 #: Model-name fragment -> capability. Ordered MOST SPECIFIC FIRST and matched in
 #: order, because the names nest: "gpt-5-1" contains "gpt-5", and matching the
 #: shorter one first would hand gpt-5-1 an enum that rejects its values.
@@ -449,6 +527,8 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     # would otherwise never be reached).
     ("claude-opus-4-7", _ADAPTIVE),
     ("claude-opus-4-8", _ADAPTIVE),
+    # Before "claude-opus-5", which is a substring of it.
+    ("claude-opus-5-5", _ADAPTIVE_OPUS_5_5),
     ("claude-opus-5", _ADAPTIVE),
     ("claude-sonnet-5", _ADAPTIVE),
     ("claude-fable-5", _ADAPTIVE),
@@ -461,7 +541,13 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("claude-sonnet-4-6", _MANUAL),
     ("claude-haiku-4-5", _MANUAL),
     # OpenAI reasoning models, longest fragment first.
+    # Databricks keys before the bare names they contain ("gpt-6-sol" is a
+    # substring of "databricks-gpt-6-sol").
+    ("databricks-gpt-6-sol", _DATABRICKS_GPT6_SOL_LUNA),
+    ("databricks-gpt-6-luna", _DATABRICKS_GPT6_SOL_LUNA),
     ("gpt-6-astra", _GPT6_ASTRA),
+    ("gpt-6-sol", _GPT6_SOL_LUNA),
+    ("gpt-6-luna", _GPT6_SOL_LUNA),
     ("gpt-5-5-pro", _GPT55_PRO),
     ("gpt-5.5-pro", _GPT55_PRO),
     ("gpt-5-5", _GPT55),
@@ -477,8 +563,11 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("gpt-5-mini", _GPT5_MINIMAL),
     ("gpt-5-nano", _GPT5_MINIMAL),
     ("gpt-5", _GPT5_MINIMAL),
-    # Gemini 3.7/3.8 reject minimal; earlier Gemini 3 endpoints accept it.
+    # Gemini 4 Argon takes no effort at all; 3.7/3.8 reject minimal; earlier
+    # Gemini 3 endpoints accept it.
+    ("gemini-4-argon", _GEMINI_4_ARGON),
     ("gemini-3-8", _GEMINI_38),
+    ("gemini-3.8", _GEMINI_38),
     ("gemini-3-7", _GEMINI_37),
     ("gemini-3", _GEMINI_3),
     # Other documented Databricks reasoning endpoints.
@@ -498,6 +587,7 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("inkling", _INKLING),
     # Legacy unprompted model.
     ("kimi-k2-7", _UNPROMPTED),
+    ("jev-router", _JEV_ROUTER),
 )
 
 
@@ -549,8 +639,3 @@ def refused_params(model_name: str | None) -> tuple[str, ...]:
     """
     capability = model_capability(model_name)
     return capability.refuses if capability else ()
-
-
-def accepts_param(model_name: str | None, param: str) -> bool:
-    """Whether ``model_name`` accepts sampling parameter ``param``."""
-    return param not in refused_params(model_name)

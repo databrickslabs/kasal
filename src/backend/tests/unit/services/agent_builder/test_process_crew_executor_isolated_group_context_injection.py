@@ -15,14 +15,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_executor(max_concurrent=4):
+def _make_executor():
     with patch(
         "src.services.agent_builder.process_executor.mp.get_context"
     ) as mock_ctx:
         mock_ctx.return_value = MagicMock()
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
-        executor = ProcessCrewExecutor(max_concurrent=max_concurrent)
+        executor = ProcessCrewExecutor()
     # Override the context's Queue so tests don't need real MP
     executor._ctx = MagicMock()
     return executor
@@ -34,28 +34,12 @@ def _make_executor(max_concurrent=4):
 
 
 class TestProcessCrewExecutorInitExtra:
-    def test_default_max_concurrent(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        with patch("src.services.agent_builder.process_executor.mp.get_context"):
-            ex = ProcessCrewExecutor()
-        assert ex._max_concurrent == 4
-
-    def test_custom_max_concurrent(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        with patch("src.services.agent_builder.process_executor.mp.get_context"):
-            ex = ProcessCrewExecutor(max_concurrent=10)
-        assert ex._max_concurrent == 10
-
     def test_empty_tracking_structures(self):
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             ex = ProcessCrewExecutor()
         assert len(ex._running_processes) == 0
-        assert len(ex._running_futures) == 0
-        assert len(ex._running_executors) == 0
 
     def test_initial_metrics_all_zero(self):
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
@@ -79,25 +63,6 @@ class TestProcessCrewExecutorInitExtra:
         ) as mock_ctx:
             ProcessCrewExecutor()
             mock_ctx.assert_called_once_with("spawn")
-
-
-# ---------------------------------------------------------------------------
-# _subprocess_initializer
-# ---------------------------------------------------------------------------
-
-
-class TestSubprocessInitializer:
-    def test_subprocess_initializer_is_static_callable(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        assert callable(ProcessCrewExecutor._subprocess_initializer)
-
-    def test_subprocess_initializer_runs_without_error(self):
-        """Calling the method should complete without raising."""
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        # Should not raise
-        ProcessCrewExecutor._subprocess_initializer()
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +268,10 @@ class TestTerminateExecution:
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             ex = ProcessCrewExecutor()
         # No running process with this ID — search orphaned processes too
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("nonexistent-id")
         assert result is False
 
@@ -315,18 +283,44 @@ class TestTerminateExecution:
             ex = ProcessCrewExecutor()
 
         mock_process = MagicMock()
-        mock_process.is_alive.return_value = True
+        # alive; dead after the graceful join; still dead when re-checked
+        mock_process.is_alive.side_effect = [True, False, False]
         mock_process.terminate = MagicMock()
         mock_process.join = MagicMock()
         mock_process.pid = 5555
         ex._running_processes["exec-stop"] = mock_process
 
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("exec-stop")
 
         mock_process.terminate.assert_called()
         assert result is True
         assert "exec-stop" not in ex._running_processes
+
+    @pytest.mark.asyncio
+    async def test_process_that_survives_sigkill_is_not_reported_stopped(self):
+        """A stop that did not happen must not look successful."""
+        from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
+        with patch("src.services.agent_builder.process_executor.mp.get_context"):
+            ex = ProcessCrewExecutor()
+
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = True  # outlives SIGKILL
+        mock_process.pid = 5556
+        ex._running_processes["exec-stuck"] = mock_process
+
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
+            result = await ex.terminate_execution("exec-stuck")
+
+        mock_process.kill.assert_called()
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_terminate_force_kills_if_still_alive(self):
@@ -337,14 +331,17 @@ class TestTerminateExecution:
 
         mock_process = MagicMock()
         # Still alive after terminate, then dead after kill
-        mock_process.is_alive.side_effect = [True, True]
+        mock_process.is_alive.side_effect = [True, True, False]
         mock_process.terminate = MagicMock()
         mock_process.kill = MagicMock()
         mock_process.join = MagicMock()
         mock_process.pid = 6666
         ex._running_processes["exec-kill"] = mock_process
 
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("exec-kill")
 
         mock_process.terminate.assert_called()
@@ -363,7 +360,10 @@ class TestTerminateExecution:
         mock_process.pid = 7777
         ex._running_processes["exec-dead"] = mock_process
 
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("exec-dead")
         assert result is True
 

@@ -7,9 +7,10 @@ engine service instances.
 
 import asyncio
 import logging
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Optional
 
-from src.services.execution.base import BaseEngineService
+if TYPE_CHECKING:
+    from src.services.execution.engine_service import KasalEngineService
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,9 @@ class EngineFactory:
     async def get_engine(
         engine_type: str,
         initialize: bool = True,
-        llm_provider: str = None,
-        model: str = None,
-    ) -> Optional[Any]:
+        llm_provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Optional["KasalEngineService"]:
         """
         Get an engine instance.
 
@@ -55,17 +56,3 @@ class EngineFactory:
         except Exception as e:
             logger.error(f"Error creating engine: {str(e)}")
             return None
-
-    @classmethod
-    def register_engine(
-        cls, engine_type: str, engine_class: Type[BaseEngineService]
-    ) -> None:
-        """
-        Register a new engine type with the factory.
-
-        Args:
-            engine_type: Type of engine (e.g., "kasal")
-            engine_class: Class implementing BaseEngineService
-        """
-        # This method is no longer used in the new implementation
-        pass

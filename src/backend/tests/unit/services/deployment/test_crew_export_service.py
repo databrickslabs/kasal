@@ -603,7 +603,7 @@ class TestGetDatabricksCatalogSchema:
 
         # Built by alias 'schema' exactly like DatabricksService.get_databricks_config
         config = DatabricksConfigResponse(
-            catalog="nemotemo_catalog",
+            catalog="example_catalog",
             schema="kasal",
             warehouse_id="w",
             workspace_url="",
@@ -616,7 +616,7 @@ class TestGetDatabricksCatalogSchema:
             catalog, schema, warehouse = await service._get_databricks_catalog_schema(
                 mock_group_context
             )
-        assert catalog == "nemotemo_catalog"
+        assert catalog == "example_catalog"
         assert schema == "kasal"  # not "<bound method BaseModel.schema ...>"
         assert warehouse == "w"
 

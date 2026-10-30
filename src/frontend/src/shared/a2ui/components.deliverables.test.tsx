@@ -317,26 +317,85 @@ describe('Album', () => {
   };
 
   it('shows one image at a time and advances with Next', () => {
-    render(<A2UIRenderer payload={album} />);
+    const local: Surface = { ...album, dataModel: { pics: [{ src: '/1.jpg', caption: 'First' }, { src: '/2.jpg', caption: 'Second' }] } };
+    render(<A2UIRenderer payload={local} />);
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
-    expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/1.jpg');
+    expect(screen.getByRole('img')).toHaveAttribute('src', '/1.jpg');
     fireEvent.click(screen.getByLabelText('Next image'));
     expect(screen.getByText('2 / 2')).toBeInTheDocument();
-    expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/2.jpg');
+    expect(screen.getByRole('img')).toHaveAttribute('src', '/2.jpg');
     // Wraps around.
     fireEvent.click(screen.getByLabelText('Next image'));
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
   });
 
+  it('holds remote images back until the reader asks for one; captions still link', () => {
+    const { container } = render(<A2UIRenderer payload={{ ...album, dataModel: { pics: [{ src: 'https://example.com/1.jpg', caption: 'First', href: 'https://example.com/story' }] } }} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Load image' })).toHaveAttribute('href', 'https://example.com/1.jpg');
+    expect(screen.getByRole('link', { name: 'Load image' })).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('link', { name: 'First' })).toHaveAttribute('href', 'https://example.com/story');
+  });
+
+  it('links a caption only to http(s) or mailto; any other href leaves plain text', () => {
+    const pics = [
+      { src: '/1.jpg', caption: 'Web', href: 'https://example.com/story' },
+      { src: '/2.jpg', caption: 'Mail', href: 'mailto:team@example.com' },
+      { src: '/3.jpg', caption: 'Script', href: 'javascript:alert(1)' },
+      { src: '/4.jpg', caption: 'Data', href: 'data:text/html,<b>x</b>' },
+    ];
+    render(<A2UIRenderer payload={{ ...album, dataModel: { pics } }} />);
+    expect(screen.getByRole('link', { name: 'Web' })).toHaveAttribute('href', 'https://example.com/story');
+    fireEvent.click(screen.getByLabelText('Next image'));
+    expect(screen.getByRole('link', { name: 'Mail' })).toHaveAttribute('href', 'mailto:team@example.com');
+    for (const caption of ['Script', 'Data']) {
+      fireEvent.click(screen.getByLabelText('Next image'));
+      expect(screen.queryByRole('link', { name: caption })).toBeNull();
+      expect(screen.getByText(caption).tagName).toBe('SPAN');
+    }
+  });
+
   it('accepts bare string URLs and renders nothing when empty', () => {
-    const bare: Surface = { ...album, dataModel: { pics: ['https://example.com/x.jpg'] } };
+    const bare: Surface = { ...album, dataModel: { pics: ['data:image/png;base64,iVBORw0KGgo='] } };
     const { rerender } = render(<A2UIRenderer payload={bare} />);
-    expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/x.jpg');
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'data:image/png;base64,iVBORw0KGgo=');
     // No nav for a single image.
     expect(screen.queryByLabelText('Next image')).toBeNull();
     const empty: Surface = { ...album, dataModel: { pics: [] } };
     rerender(<A2UIRenderer payload={empty} />);
     expect(screen.queryByText('Gallery')).toBeNull();
+  });
+});
+
+// ---- Image + Markdown: the same image policy as the chat answer ----
+describe('Image and Markdown', () => {
+  const surface = (src: string): Surface => ({
+    surfaceKind: 'document',
+    root: 'col',
+    components: [
+      { id: 'col', component: 'Column', children: ['im', 'md'] },
+      { id: 'im', component: 'Image', src, caption: 'Figure 1' },
+      { id: 'md', component: 'Markdown', content: `![inline](${src}) and [a link](https://example.com/page)` },
+    ],
+  });
+
+  it('shows a remote image as a placeholder and makes no request for it', () => {
+    const { container } = render(<A2UIRenderer payload={surface('https://images.example.org/c.png?d=1')} />);
+    expect(container.querySelector('img')).toBeNull();
+    const loads = screen.getAllByRole('link', { name: 'Load image' });
+    expect(loads).toHaveLength(2);
+    for (const a of loads) expect(a).toHaveAttribute('href', 'https://images.example.org/c.png?d=1');
+    expect(screen.getByText('Figure 1')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'a link' })).toHaveAttribute('href', 'https://example.com/page');
+  });
+
+  it('renders a same-origin image directly', () => {
+    const { container } = render(<A2UIRenderer payload={surface('/assets/figure.png')} />);
+    expect(Array.from(container.querySelectorAll('img')).map((i) => i.getAttribute('src'))).toEqual([
+      '/assets/figure.png',
+      '/assets/figure.png',
+    ]);
+    expect(screen.queryByRole('link', { name: 'Load image' })).toBeNull();
   });
 });
 

@@ -258,7 +258,7 @@ class DatabricksLLM(LLM):
                 )
             except LLMContextLengthExceededError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 error = str(exc).lower()
                 if self._is_auth_error(error) and not refreshed:
                     refreshed = True

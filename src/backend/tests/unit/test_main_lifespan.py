@@ -125,46 +125,19 @@ class TestLocalDevAuthMiddlewareEdgeCases:
         assert b"x-forwarded-email" in injected
 
     @pytest.mark.asyncio
-    async def test_email_header_uses_settings_value(self):
-        """Injected email should match LOCAL_DEV_USER_EMAIL setting."""
-        from src.main import LocalDevAuthMiddleware, settings
+    async def test_the_fallback_identity_is_dev_at_localhost(self, monkeypatch):
+        """A constant: LOCAL_DEV_USER_EMAIL is no longer an environment variable
+        (the dev frontend sends its own identity header, which always wins)."""
+        from src.main import LocalDevAuthMiddleware
 
+        monkeypatch.setenv("LOCAL_DEV_USER_EMAIL", "custom@example.com")
         received = []
 
         async def mock_app(scope, receive, send):
             received.append(scope)
 
         middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
-        scope = {"type": "http", "headers": []}
-
-        original = settings.LOCAL_DEV_USER_EMAIL
-        settings.LOCAL_DEV_USER_EMAIL = "custom@example.com"
-        try:
-            await middleware(scope, None, None)
-        finally:
-            settings.LOCAL_DEV_USER_EMAIL = original
-
-        headers = dict(received[0]["headers"])
-        assert headers.get(b"x-forwarded-email") == b"custom@example.com"
-
-    @pytest.mark.asyncio
-    async def test_none_email_falls_back_to_dev_at_localhost(self):
-        from src.main import LocalDevAuthMiddleware, settings
-
-        received = []
-
-        async def mock_app(scope, receive, send):
-            received.append(scope)
-
-        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
-        scope = {"type": "http", "headers": []}
-
-        original = settings.LOCAL_DEV_USER_EMAIL
-        settings.LOCAL_DEV_USER_EMAIL = None
-        try:
-            await middleware(scope, None, None)
-        finally:
-            settings.LOCAL_DEV_USER_EMAIL = original
+        await middleware({"type": "http", "headers": []}, None, None)
 
         headers = dict(received[0]["headers"])
         assert headers.get(b"x-forwarded-email") == b"dev@localhost"
@@ -215,7 +188,6 @@ def _make_lifespan_patches(settings_overrides: dict, extra_patches: dict = None)
     """
     patches = {
         "src.main.LoggerManager": None,  # handled separately as MagicMock
-        "src.main.DatabricksURLUtils.validate_and_fix_environment": AsyncMock(),
         "src.db.session.init_db": AsyncMock(),
         "src.db.session.set_main_event_loop": MagicMock(),
         "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(
@@ -224,7 +196,6 @@ def _make_lifespan_patches(settings_overrides: dict, extra_patches: dict = None)
         "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
             return_value=0
         ),
-        "src.main.get_db": None,  # handled separately
         "src.main.async_session_factory": None,  # handled separately
         "src.main.start_hitl_timeout_service": AsyncMock(),
         "src.main.trace_broadcast_service": None,
@@ -266,7 +237,6 @@ class TestLifespanStartup:
 
         return {
             "src.main.LoggerManager": MagicMock(),
-            "src.main.DatabricksURLUtils.validate_and_fix_environment": AsyncMock(),
             "src.db.session.init_db": AsyncMock(),
             "src.db.session.set_main_event_loop": MagicMock(),
             "src.db.session.dispose_engines": AsyncMock(),
@@ -328,7 +298,6 @@ class TestLifespanStartup:
                     ),
                     "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
                     "src.main.SchedulerService": None,
-                    "src.main.get_db": None,
                     "src.main.async_session_factory": None,
                     "src.main.os.path.exists": MagicMock(return_value=True),
                     "src.main.os.path.getsize": MagicMock(return_value=1024),
@@ -356,11 +325,6 @@ class TestLifespanStartup:
 
             mock_sched = AsyncMock()
             mocks["src.main.SchedulerService"].return_value = mock_sched
-
-            async def fake_db_gen():
-                yield MagicMock()
-
-            mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_sess = self._make_session_mock()
             mocks["src.main.async_session_factory"].return_value = mock_sess
@@ -466,8 +430,24 @@ class TestLifespanStartup:
                 pass
 
     @pytest.mark.asyncio
-    async def test_lifespan_seeding_enabled(self):
-        """When AUTO_SEED_DATABASE=True, seeders are triggered in background."""
+    @pytest.mark.parametrize(
+        "seed_error",
+        [None, "failure"],
+        ids=["seeding-succeeds", "seeding-fails-startup-continues"],
+    )
+    async def test_lifespan_seeding_enabled(self, seed_error):
+        """When AUTO_SEED_DATABASE=True, seeders are triggered in background.
+
+        A seeding failure is logged by the background task and never reaches
+        startup: the app still comes up (see src/seeds/startup.py).
+        """
+        from src.seeds.errors import SeedingError
+
+        side_effect = (
+            SeedingError({"example_crews": "no such table: agents"})
+            if seed_error
+            else None
+        )
         from fastapi import FastAPI
 
         from src.main import lifespan
@@ -485,9 +465,10 @@ class TestLifespanStartup:
                     "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
                         return_value=0
                     ),
-                    "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
+                    "src.seeds.seed_runner.run_all_seeders": AsyncMock(
+                        side_effect=side_effect
+                    ),
                     "src.main.SchedulerService": None,
-                    "src.main.get_db": None,
                     "src.main.async_session_factory": None,
                     "src.main.os.path.exists": MagicMock(return_value=True),
                     "src.main.os.path.getsize": MagicMock(return_value=1024),
@@ -516,11 +497,6 @@ class TestLifespanStartup:
             mock_sched = AsyncMock()
             mocks["src.main.SchedulerService"].return_value = mock_sched
 
-            async def fake_db_gen():
-                yield MagicMock()
-
-            mocks["src.main.get_db"].return_value = fake_db_gen()
-
             mock_sess = self._make_session_mock()
             mocks["src.main.async_session_factory"].return_value = mock_sess
 
@@ -540,7 +516,10 @@ class TestLifespanStartup:
 
             ctx = lifespan(fake_app)
             async with ctx:
-                pass
+                # Startup finished; the background task swallows (and logs)
+                # a seeding failure instead of raising it.
+                await fake_app.state.seeder_task
+            mocks["src.seeds.seed_runner.run_all_seeders"].assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_lifespan_sqlite_table_check_exception(self):
@@ -606,7 +585,6 @@ class TestLifespanStartup:
                         return_value=0
                     ),
                     "src.main.SchedulerService": None,
-                    "src.main.get_db": None,
                     "src.repositories.engine_config_repository.EngineConfigRepository": None,
                     "src.db.database_router.is_lakebase_enabled": AsyncMock(
                         return_value=False
@@ -627,11 +605,6 @@ class TestLifespanStartup:
 
             mock_sched = AsyncMock()
             mocks["src.main.SchedulerService"].return_value = mock_sched
-
-            async def fake_db_gen():
-                yield MagicMock()
-
-            mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_repo = AsyncMock()
             mock_repo.get_otel_app_telemetry_enabled = AsyncMock(return_value=False)
@@ -667,3 +640,49 @@ class TestMainGuard:
             import uvicorn
 
             assert callable(uvicorn.run)
+
+
+def _heal_session_factory() -> MagicMock:
+    session = AsyncMock()
+    session.connection = AsyncMock(return_value=MagicMock())
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=ctx)
+
+
+class TestActiveLakebaseHealLogging:
+    """The boot heal of an active Lakebase says "complete" only when it was.
+
+    The self-heal logs an ERROR naming the steps that did not apply; this line
+    used to follow it with "Lakebase schema self-heal complete" regardless.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "gaps,level,phrase",
+        [((), "info", "complete"), ((object(),), "warning", "incomplete")],
+    )
+    async def test_complete_is_logged_only_without_gaps(self, gaps, level, phrase):
+        from src.main import _heal_activated_lakebase
+
+        log = MagicMock()
+        heal = AsyncMock(return_value=gaps)
+        with patch("src.db.session.run_schema_self_heal", heal):
+            await _heal_activated_lakebase(_heal_session_factory(), log)
+
+        assert phrase in getattr(log, level).call_args.args[0]
+        if gaps:
+            assert not any("complete" in c.args[0] for c in log.info.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_a_heal_that_cannot_run_is_logged_as_skipped(self):
+        from src.main import _heal_activated_lakebase
+
+        log = MagicMock()
+        heal = AsyncMock(side_effect=RuntimeError("connection reset"))
+        with patch("src.db.session.run_schema_self_heal", heal):
+            await _heal_activated_lakebase(_heal_session_factory(), log)
+
+        assert "skipped" in log.warning.call_args.args[0]
+        log.info.assert_not_called()

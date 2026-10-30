@@ -13,7 +13,7 @@ endpoint cannot reach a tool without it.
 """
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional, Union
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
@@ -30,6 +30,7 @@ from src.services.external.identity import (
 from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp.mcp_server import server as mcp_server
 from src.services.mcp.mcp_server.tools import UnknownCapabilityError, UnknownRunError
+from src.utils.request_identity import resolve_request_identity
 
 router = APIRouter(
     prefix="/mcp/v1",
@@ -70,16 +71,23 @@ async def get_external_caller(
 ) -> ExternalCaller:
     """Resolve the caller, or refuse the request.
 
-    Same header chain as ``core/dependencies.get_group_context`` — OAuth2-Proxy
-    headers preferred, Databricks Apps headers as fallback. An external surface
-    that authenticated differently from the rest of the app would be a second
-    security model to reason about.
+    Same header chain as ``dependencies.providers.get_group_context``, through
+    the shared ``resolve_request_identity``: inside Databricks Apps only the
+    ``X-Forwarded-*`` headers are trusted; elsewhere OAuth2-Proxy headers are
+    preferred. An external surface that authenticated differently from the
+    rest of the app would be a second security model to reason about.
     """
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email,
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_email=x_auth_request_email,
+        auth_request_access_token=x_auth_request_access_token,
+    )
     try:
         return await resolve_caller(
             protocol="mcp",
-            email=x_auth_request_email or x_forwarded_email,
-            access_token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            access_token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:
@@ -90,8 +98,8 @@ async def get_external_caller(
 CallerDep = Annotated[ExternalCaller, Depends(get_external_caller)]
 
 
-@router.get("/tools")
-async def list_tools(caller: CallerDep, session: SessionDep):
+@router.get("/tools", response_model=None)
+async def list_tools(caller: CallerDep, session: SessionDep) -> Dict[str, Any]:
     """The tools this caller may use.
 
     Group-scoped: the fixed control tools plus one per crew this caller's
@@ -105,13 +113,13 @@ async def list_tools(caller: CallerDep, session: SessionDep):
     }
 
 
-@router.post("/tools/call")
+@router.post("/tools/call", response_model=None)
 async def call_tool(
     request: ToolCallRequest,
     caller: CallerDep,
     session: SessionDep,
     accept: Annotated[Optional[str], Header()] = None,
-):
+) -> Union[Dict[str, Any], StreamingResponse]:
     """Invoke a tool as the resolved caller.
 
     ``stream: true`` asks for progress; the ``Accept`` header chooses the
@@ -164,7 +172,7 @@ async def call_tool(
         # A tool with no run to follow (list_crews is not a run at all). Emit
         # the single result as one frame so a streaming caller gets the same
         # shape whichever tool it called.
-        async def _single():
+        async def _single() -> AsyncIterator[Dict[str, Any]]:
             yield result
 
         frames = _single()

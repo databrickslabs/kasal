@@ -18,6 +18,10 @@ from src.dependencies.admin_auth import (
     get_authenticated_user,
     require_authenticated_user,
 )
+from src.dependencies.providers import get_group_context
+from src.utils.user_context import GroupContext
+
+TEST_GROUP_IDS = ["g1"]
 
 
 @pytest.fixture
@@ -58,6 +62,13 @@ def client(app, mock_current_user):
     app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_admin_user] = lambda: mock_current_user
+    # The router takes GroupContextDep, which fails closed (401) with no
+    # resolved identity; give every request a resolved tenant context.
+    app.dependency_overrides[get_group_context] = lambda: GroupContext(
+        group_ids=list(TEST_GROUP_IDS),
+        group_email="test@example.com",
+        email_domain="example.com",
+    )
 
     return TestClient(app)
 
@@ -202,7 +213,9 @@ class TestFlowExecutionRouter:
         assert data["status"] == "completed"
         assert data["execution_id"] == 123
         # group_ids derived from caller's group context (multi-tenant isolation)
-        mock_service.get_flow_execution.assert_called_once_with(123, group_ids=ANY)
+        mock_service.get_flow_execution.assert_called_once_with(
+            123, group_ids=TEST_GROUP_IDS
+        )
 
     @patch("src.api.flow_execution_router.KasalFlowService")
     def test_get_flow_execution_with_execution_key(self, mock_service_class, client):
@@ -316,7 +329,7 @@ class TestFlowExecutionRouter:
         assert data["data"][0]["execution_id"] == 1
         assert data["data"][1]["execution_id"] == 2
         mock_service.get_flow_executions_by_flow.assert_called_once_with(
-            "flow-123", group_ids=ANY
+            "flow-123", group_ids=TEST_GROUP_IDS
         )
 
     @patch("src.api.flow_execution_router.KasalFlowService")

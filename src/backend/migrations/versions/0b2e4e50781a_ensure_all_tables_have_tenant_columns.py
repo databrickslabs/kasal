@@ -41,7 +41,7 @@ def upgrade() -> None:
         
         # Check if tenant_id column exists
         result = conn.execute(
-            sa.text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='tenant_id'")
+            sa.text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='tenant_id'")  # table_name comes from the hard-coded tables_to_update list — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
         )
         if not result.fetchone():
             print(f"Adding tenant_id column to {table_name}")
@@ -56,7 +56,7 @@ def upgrade() -> None:
         
         # Check if created_by_email column exists
         result = conn.execute(
-            sa.text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='created_by_email'")
+            sa.text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='created_by_email'")  # table_name comes from the hard-coded tables_to_update list — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
         )
         if not result.fetchone():
             print(f"Adding created_by_email column to {table_name}")
@@ -72,7 +72,7 @@ def upgrade() -> None:
         # Also add tenant_email for execution tracking tables
         if table_name in ['executionhistory', 'execution_trace', 'flow_executions']:
             result = conn.execute(
-                sa.text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='tenant_email'")
+                sa.text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND column_name='tenant_email'")  # table_name comes from the hard-coded tables_to_update list — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
             )
             if not result.fetchone():
                 print(f"Adding tenant_email column to {table_name}")

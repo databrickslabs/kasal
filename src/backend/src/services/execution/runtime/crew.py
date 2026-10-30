@@ -23,7 +23,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -219,7 +219,7 @@ class Crew(BaseModel):
             self.kickoff, inputs, input_files, from_checkpoint
         )
 
-    def copy(self) -> "Crew":
+    def copy(self) -> "Crew":  # type: ignore[override]  # CrewAI API: shadows pydantic copy()
         cloned_agents = [
             agent.model_copy(update={"id": uuid.uuid4()}) for agent in self.agents
         ]
@@ -299,7 +299,7 @@ class Crew(BaseModel):
         for provider in self.context_providers:
             try:
                 extra = provider(task=task, agent=task.agent, context=base)
-            except Exception:  # noqa: BLE001 — providers must never break a run
+            except Exception:  # providers must never break a run
                 logger.exception("context provider %r failed; skipping", provider)
                 continue
             if extra:
@@ -319,7 +319,7 @@ class Crew(BaseModel):
         for sink in self.output_sinks:
             try:
                 sink(task=task, output=output)
-            except Exception:  # noqa: BLE001 — sinks must never break a run
+            except Exception:  # sinks must never break a run
                 logger.exception("output sink %r failed; skipping", sink)
 
     def _load_checkpoint(self, from_checkpoint: Any) -> dict[int, TaskOutput] | None:
@@ -573,7 +573,9 @@ class Crew(BaseModel):
     def _aggregate_token_usage(self) -> UsageMetrics:
         total = UsageMetrics()
         seen: set[int] = set()
-        candidates = [agent.llm for agent in self.agents if getattr(agent, "llm", None)]
+        candidates = [
+            cast(Any, agent).llm for agent in self.agents if getattr(agent, "llm", None)
+        ]
         if self.manager_agent is not None and self.manager_agent is not None:
             candidates.append(getattr(self.manager_agent, "llm", None))
         for llm in candidates:

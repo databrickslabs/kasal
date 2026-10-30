@@ -295,6 +295,3 @@ export class HITLService {
     await apiClient.delete(`/hitl/webhooks/${webhookId}`);
   }
 }
-
-// Export singleton instance for convenience
-export const hitlService = new HITLService();

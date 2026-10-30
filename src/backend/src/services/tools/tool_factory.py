@@ -1,7 +1,6 @@
 import asyncio
 import logging
-import os
-from typing import Any, Dict, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, TypeVar, Union
 
 from src.services.tools.a2a_agent_tool import A2AAgentTool
 from src.services.tools.async_bridge import run_async_with_context
@@ -9,192 +8,64 @@ from src.services.tools.base import BaseTool
 
 # Import only the CrewAI tools we're keeping
 from src.services.tools.image_generation import ImageGenerationTool
+
+# Optional tool classes (None when their module failed to import) — see optional_tools.
+from src.services.tools.optional_tools import (  # tests patch these names here
+    AgentBricksTool,
+    DatabricksDashboardCreatorTool,
+    DatabricksJobsTool,
+    DatabricksKnowledgeSearchTool,
+    GenieSpaceGeneratorTool,
+    GenieTool,
+    GmailTool,
+    MCPTool,
+    MeasureConversionPipelineTool,
+    MetricViewDeployerTool,
+    MetricViewValidatorTool,
+    PBIVisualUCMVMapperTool,
+    PerplexitySearchTool,
+    PipelineConfigGeneratorTool,
+    PowerBIConnectorTool,
+    PowerBIDaxExecutorTool,
+    PowerBIFieldParametersCalculationGroupsTool,
+    PowerBIHierarchiesTool,
+    PowerBIReportReferencesTool,
+    UCMetricViewGeneratorTool,
+    UCMVDriftMonitorTool,
+    UCMVGenieConfigGeneratorTool,
+)
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
-from src.services.tools.tool_policies import extract_tool_policies, stamp_tool_policies
+from src.services.tools.tool_policies import (
+    merge_tool_config_override,
+    stamp_tool_policies,
+)
 
 # SECURITY: mask decrypted secrets (PATs, client_secret, api_key, password,
 # access_token, ...) before they are written to logs / the volume log sink.
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 
-# Import custom tools - Using proper import paths
-try:
-    from .perplexity_tool import PerplexitySearchTool
-except ImportError:
-    try:
-        from .perplexity_tool import PerplexitySearchTool
-    except ImportError:
-        PerplexitySearchTool = None
-        logging.warning("Could not import PerplexitySearchTool")
-
-try:
-    from .genie_tool import GenieTool
-except ImportError:
-    try:
-        from .genie_tool import GenieTool
-    except ImportError:
-        GenieTool = None
-        logging.warning("Could not import GenieTool")
-
-try:
-    from .agentbricks_tool import AgentBricksTool
-except ImportError:
-    try:
-        from .agentbricks_tool import AgentBricksTool
-    except ImportError:
-        AgentBricksTool = None
-        logging.warning("Could not import AgentBricksTool")
-
-try:
-    from .databricks_jobs_tool import DatabricksJobsTool
-except ImportError:
-    try:
-        from .databricks_jobs_tool import DatabricksJobsTool
-    except ImportError:
-        DatabricksJobsTool = None
-        logging.warning("Could not import DatabricksJobsTool")
-
-try:
-    from .databricks_knowledge_search_tool import DatabricksKnowledgeSearchTool
-except ImportError:
-    try:
-        from .databricks_knowledge_search_tool import DatabricksKnowledgeSearchTool
-    except ImportError:
-        DatabricksKnowledgeSearchTool = None
-        logging.warning("Could not import DatabricksKnowledgeSearchTool")
-
-try:
-    from .gmail_tool import GmailTool
-except ImportError:
-    GmailTool = None
-    logging.warning("Could not import GmailTool")
-
-# MCPTool - Import from mcp_adapter
-try:
-    from src.services.tools.mcp_adapter import MCPTool
-except ImportError:
-    MCPTool = None
-    logging.warning("Could not import MCPTool - MCP integration may not be available")
-
-# Converter tools - Power BI connector and universal pipeline
-try:
-    from .measure_conversion_pipeline_tool import MeasureConversionPipelineTool
-    from .powerbi_connector_tool import PowerBIConnectorTool
-except ImportError as e:
-    PowerBIConnectorTool = None
-    MeasureConversionPipelineTool = None
-    logging.warning(f"Could not import converter tools: {e}")
-
-# Power BI Hierarchies Tool
-try:
-    from .powerbi_hierarchies_tool import PowerBIHierarchiesTool
-except ImportError as e:
-    PowerBIHierarchiesTool = None
-    logging.warning(f"Could not import PowerBIHierarchiesTool: {e}")
-
-# Power BI Field Parameters & Calculation Groups Tool
-try:
-    from .powerbi_field_parameters_calculation_groups_tool import (
-        PowerBIFieldParametersCalculationGroupsTool,
-    )
-except ImportError as e:
-    PowerBIFieldParametersCalculationGroupsTool = None
-    logging.warning(
-        f"Could not import PowerBIFieldParametersCalculationGroupsTool: {e}"
-    )
-
-# Power BI Report References Tool
-try:
-    from .powerbi_report_references_tool import PowerBIReportReferencesTool
-except ImportError as e:
-    PowerBIReportReferencesTool = None
-    logging.warning(f"Could not import PowerBIReportReferencesTool: {e}")
-
-# Power BI DAX Executor Tool
-try:
-    from .powerbi_dax_executor_tool import PowerBIDaxExecutorTool
-except Exception as e:
-    PowerBIDaxExecutorTool = None
-    logging.warning(f"Could not import PowerBIDaxExecutorTool: {e}")
-
-# UC Metric View Tools
-try:
-    from .uc_metric_view_generator_tool import UCMetricViewGeneratorTool
-except ImportError as e:
-    UCMetricViewGeneratorTool = None
-    logging.warning(f"Could not import UCMetricViewGeneratorTool: {e}")
-
-try:
-    from .metric_view_deployer_tool import MetricViewDeployerTool
-except ImportError as e:
-    MetricViewDeployerTool = None
-    logging.warning(f"Could not import MetricViewDeployerTool: {e}")
-
-try:
-    from .metric_view_validator_tool import MetricViewValidatorTool
-except ImportError as e:
-    MetricViewValidatorTool = None
-    logging.warning(f"Could not import MetricViewValidatorTool: {e}")
-
-try:
-    from .ucmv_reevaluation_tool import UCMVReevaluationTool
-except ImportError as e:
-    UCMVReevaluationTool = None
-    logging.warning(f"Could not import UCMVReevaluationTool: {e}")
-
-try:
-    from .ucmv_drift_monitor_tool import UCMVDriftMonitorTool
-except ImportError as e:
-    UCMVDriftMonitorTool = None
-    logging.warning(f"Could not import UCMVDriftMonitorTool: {e}")
-
-# Pipeline Config Generator Tool (API-direct, no LLM)
-try:
-    from .pipeline_config_generator_tool import PipelineConfigGeneratorTool
-except ImportError as e:
-    PipelineConfigGeneratorTool = None
-    logging.warning(f"Could not import PipelineConfigGeneratorTool: {e}")
-
-# Genie Space Generator Tool
-try:
-    from .genie_space_generator_tool import GenieSpaceGeneratorTool
-except ImportError as e:
-    GenieSpaceGeneratorTool = None
-    logging.warning(f"Could not import GenieSpaceGeneratorTool: {e}")
-
-# UCMV Genie Space Config Generator Tool
-try:
-    from .ucmv_genie_config_generator_tool import UCMVGenieConfigGeneratorTool
-except ImportError as e:
-    UCMVGenieConfigGeneratorTool = None
-    logging.warning(f"Could not import UCMVGenieConfigGeneratorTool: {e}")
-
-# PBI Visual-UCMV Mapper Tool (94)
-try:
-    from .pbi_visual_ucmv_mapper_tool import PBIVisualUCMVMapperTool
-except ImportError as e:
-    PBIVisualUCMVMapperTool = None
-    logging.warning(f"Could not import PBIVisualUCMVMapperTool: {e}")
-
-# Databricks Dashboard Creator Tool (95)
-try:
-    from .databricks_dashboard_creator_tool import DatabricksDashboardCreatorTool
-except ImportError as e:
-    DatabricksDashboardCreatorTool = None
-    logging.warning(f"Could not import DatabricksDashboardCreatorTool: {e}")
-
 # Setup logger
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+# What create_tool returns: a tool, a list of tools (MCP / A2A fan-out), the
+# ``(True, [])`` MCPTool marker, or None when nothing could be built.
+ToolBuildResult = Optional[Union[BaseTool, list, Tuple[bool, list]]]
+# A registered tool class, as the factory calls it. MCPTool is registered only as
+# a marker and never instantiated through this.
+_ToolCtor = Callable[..., BaseTool]
+
+# Tools built through the generic branch of ``create_tool`` that need a provider
+# key. The key is read from the workspace's ApiKeysService and passed as
+# ``api_key`` — never through os.environ, which every workspace shares.
+_TOOL_API_KEY_NAMES: Dict[str, str] = {
+    "Image Generation Tool": "OPENAI_API_KEY",
+}
 
 # Import request-scoped session helper
-from src.db.session import (  # noqa: E402 - import follows module initialization
-    routed_scoped_session,
-)
 from src.schemas.tool import (  # noqa: E402 - import follows module initialization
-    ToolUpdate,
-)
-from src.services.tools.tool_service import (  # noqa: E402 - import follows module initialization
-    ToolService,
+    ToolResponse,
 )
 from src.utils.encryption_utils import (  # noqa: E402 - import follows module initialization
     EncryptionUtils,
@@ -202,7 +73,12 @@ from src.utils.encryption_utils import (  # noqa: E402 - import follows module i
 
 
 class ToolFactory:
-    def __init__(self, config, api_keys_service=None, user_token=None):
+    def __init__(
+        self,
+        config: Any,
+        api_keys_service: Optional[Any] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
         """
         Initialize the tool factory with configuration
 
@@ -215,8 +91,8 @@ class ToolFactory:
         self.api_keys_service = api_keys_service
         self.user_token = user_token
         # Store tools by both ID and title for easy lookup
-        self._available_tools: Dict[str, object] = {}
-        self._tool_implementations = {}
+        self._available_tools: Dict[str, ToolResponse] = {}
+        self._tool_implementations: Dict[str, Any] = {}
 
         # Map tool names to their implementations - ONLY THE TOOLS WE'RE KEEPING
         self._tool_implementations = {
@@ -275,8 +151,12 @@ class ToolFactory:
             self._tool_implementations["Metric View Validator"] = (
                 MetricViewValidatorTool
             )
-        if UCMVReevaluationTool is not None:
+        try:  # imported here so a failed import needs no None-typed module name
+            from .ucmv_reevaluation_tool import UCMVReevaluationTool
+
             self._tool_implementations["UCMV Re-evaluation"] = UCMVReevaluationTool
+        except ImportError as e:
+            logging.warning(f"Could not import UCMVReevaluationTool: {e}")
         if UCMVDriftMonitorTool is not None:
             self._tool_implementations["UCMV Drift Monitor"] = UCMVDriftMonitorTool
         if PipelineConfigGeneratorTool is not None:
@@ -394,7 +274,12 @@ class ToolFactory:
             return (False, f"Authentication validation error: {str(e)}")
 
     @classmethod
-    async def create(cls, config, api_keys_service=None, user_token=None):
+    async def create(
+        cls,
+        config: Any,
+        api_keys_service: Optional[Any] = None,
+        user_token: Optional[str] = None,
+    ) -> "ToolFactory":
         """
         Async factory method to create and initialize a ToolFactory instance.
 
@@ -410,83 +295,23 @@ class ToolFactory:
         await instance.initialize()
         return instance
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the tool factory asynchronously"""
         if not self._initialized:
             try:
                 await self._load_available_tools_async()
 
-                # Setup API keys if we have the service
-                if self.api_keys_service:
-                    # Pre-load common API keys into environment
-                    api_keys_to_load = [
-                        "SERPER_API_KEY",
-                        "PERPLEXITY_API_KEY",
-                        "OPENAI_API_KEY",
-                        "DATABRICKS_API_KEY",
-                    ]
-                    for key_name in api_keys_to_load:
-                        try:
-                            # Use utility function to avoid event loop issues.
-                            # _smart, NOT _with_fresh_engine: the latter is pinned
-                            # to the local engine (it imports nullpool_engine
-                            # directly), so on Lakebase it queries a DB that has
-                            # no apikey row and every key silently pre-loads as
-                            # absent.
-                            from src.utils.asyncio_utils import (
-                                execute_db_operation_smart,
-                            )
-
-                            # Get group_id from config or api_keys_service
-                            group_id = None
-                            try:
-                                group_id = (
-                                    self.config.get("group_id")
-                                    if isinstance(self.config, dict)
-                                    else None
-                                )
-                            except Exception:
-                                pass
-
-                            # If not in config, try to get from api_keys_service
-                            if not group_id and self.api_keys_service:
-                                group_id = getattr(
-                                    self.api_keys_service, "group_id", None
-                                )
-
-                            async def _get_key_operation(session):
-                                # SECURITY: Re-use the api_keys_service with group_id for multi-tenant isolation
-                                from src.services.settings.api_keys import (
-                                    ApiKeysService,
-                                )
-
-                                api_keys_service = ApiKeysService(
-                                    session, group_id=group_id
-                                )
-                                return await api_keys_service.find_by_name(key_name)
-
-                            api_key_obj = await execute_db_operation_smart(
-                                _get_key_operation
-                            )
-
-                            if api_key_obj and api_key_obj.encrypted_value:
-                                # Decrypt the value
-                                api_key = EncryptionUtils.decrypt_value(
-                                    api_key_obj.encrypted_value
-                                )
-                                os.environ[key_name] = api_key
-                                logger.info(
-                                    f"Pre-loaded {key_name} from ApiKeysService"
-                                )
-                        except Exception as e:
-                            logger.error(f"Error pre-loading {key_name}: {str(e)}")
+                # API keys are NOT pre-loaded into os.environ: the process
+                # environment is shared by every workspace a request serves, so a
+                # key written there leaks across tenants. Each tool that needs a
+                # key receives it explicitly at construction (see _get_api_key).
 
                 self._initialized = True
             except Exception as e:
                 logger.error(f"Error during async initialization: {e}")
                 raise
 
-    def _sync_load_available_tools(self):
+    def _sync_load_available_tools(self) -> None:
         """
         Synchronous method to load available tools
         This uses a new event loop - DO NOT CALL from inside an async context
@@ -513,30 +338,6 @@ class ToolFactory:
                 try:
                     asyncio.set_event_loop(loop)
                     loop.run_until_complete(self._load_available_tools_async())
-
-                    # Also pre-load API keys if we have the service
-                    if self.api_keys_service:
-                        # Pre-load common API keys into environment
-                        api_keys_to_load = [
-                            "SERPER_API_KEY",
-                            "PERPLEXITY_API_KEY",
-                            "OPENAI_API_KEY",
-                            "DATABRICKS_API_KEY",
-                        ]
-                        for key_name in api_keys_to_load:
-                            try:
-                                api_key = loop.run_until_complete(
-                                    self._get_api_key_async(key_name)
-                                )
-                                if api_key:
-                                    os.environ[key_name] = api_key
-                                    logger.info(
-                                        f"Pre-loaded {key_name} from ApiKeysService (sync)"
-                                    )
-                            except Exception as e:
-                                logger.error(
-                                    f"Error pre-loading {key_name} (sync): {str(e)}"
-                                )
                 finally:
                     loop.close()
         except Exception as e:
@@ -545,7 +346,7 @@ class ToolFactory:
 
             logger.error(traceback.format_exc())
 
-    async def _load_available_tools_async(self):
+    async def _load_available_tools_async(self) -> None:
         """Load all available tools from the service asynchronously"""
         try:
             # Get services using session factory
@@ -595,7 +396,7 @@ class ToolFactory:
 
             logger.error(traceback.format_exc())
 
-    def get_tool_info(self, tool_identifier: Union[str, int]) -> Optional[object]:
+    def get_tool_info(self, tool_identifier: Union[str, int]) -> Optional[ToolResponse]:
         """
         Get tool information by ID or title
 
@@ -635,15 +436,7 @@ class ToolFactory:
                             api_key.encrypted_value
                         )
 
-                        # Log first and last 4 characters of the key for debugging
-                        key_preview = (
-                            f"{decrypted_value[:4]}...{decrypted_value[-4:]}"
-                            if len(decrypted_value) > 8
-                            else "***"
-                        )
-                        logger.info(
-                            f"Using {key_name} from service directly: {key_preview}"
-                        )
+                        logger.info(f"Using {key_name} from service directly")
                         return decrypted_value
                     else:
                         logger.warning(f"{key_name} not found via service")
@@ -684,7 +477,7 @@ class ToolFactory:
             if not group_id and self.api_keys_service:
                 group_id = getattr(self.api_keys_service, "group_id", None)
 
-            async def _get_key_on_own_session(session):
+            async def _get_key_on_own_session(session: Any) -> Optional[str]:
                 from src.services.settings.api_keys import ApiKeysService
 
                 # SECURITY: Create service with group_id for multi-tenant isolation
@@ -697,19 +490,13 @@ class ToolFactory:
                 return None
 
             # Own session (router-selected) to avoid transaction conflicts
-            decrypted_value = await execute_db_operation_smart(_get_key_on_own_session)
+            own_session_value = await execute_db_operation_smart(
+                _get_key_on_own_session
+            )
 
-            if decrypted_value:
-                # Log first and last 4 characters of the key for debugging
-                key_preview = (
-                    f"{decrypted_value[:4]}...{decrypted_value[-4:]}"
-                    if len(decrypted_value) > 8
-                    else "***"
-                )
-                logger.info(
-                    f"Using {key_name} from isolated database operation: {key_preview}"
-                )
-                return decrypted_value
+            if own_session_value:
+                logger.info(f"Using {key_name} from isolated database operation")
+                return own_session_value
             else:
                 logger.warning(f"{key_name} not found via isolated database operation")
                 return None
@@ -759,7 +546,9 @@ class ToolFactory:
             logger.warning(f"Continuing without {key_name}")
             return None
 
-    def _run_in_new_loop(self, async_func, *args, **kwargs):
+    def _run_in_new_loop(
+        self, async_func: Callable[..., Awaitable[_T]], *args: Any, **kwargs: Any
+    ) -> _T:
         """Run an async function in a new event loop in a separate thread"""
         loop = asyncio.new_event_loop()
         try:
@@ -768,119 +557,12 @@ class ToolFactory:
         finally:
             loop.close()
 
-    def update_tool_config(
-        self, tool_identifier: Union[str, int], config_update: Dict[str, any]
-    ) -> bool:
-        """
-        Update a tool's configuration through the service layer
-
-        Args:
-            tool_identifier: Either the tool's ID (int or str) or title (str)
-            config_update: Dictionary with configuration updates
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Get tool info
-            tool_info = self.get_tool_info(tool_identifier)
-            if not tool_info:
-                logger.error(
-                    f"Tool '{tool_identifier}' not found. Cannot update config."
-                )
-                return False
-
-            # Check if we're already in an event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're here, we're already in an event loop
-                logger.warning(
-                    "Already in event loop, using a workaround to update tool config"
-                )
-                # Create a new thread to run a new event loop
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        self._run_in_new_loop,
-                        self._update_tool_config_async,
-                        tool_identifier,
-                        tool_info,
-                        config_update,
-                    )
-                    return future.result()
-            except RuntimeError:
-                # No running event loop, safe to create a new one
-                loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(loop)
-                    return loop.run_until_complete(
-                        self._update_tool_config_async(
-                            tool_identifier, tool_info, config_update
-                        )
-                    )
-                finally:
-                    loop.close()
-        except Exception as e:
-            logger.error(f"Error updating tool configuration: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return False
-
-    async def _update_tool_config_async(
-        self, tool_identifier, tool_info, config_update
-    ):
-        """Async implementation of tool config update"""
-        # Get services using session factory
-
-        async with routed_scoped_session() as session:
-            # Create tool service with session
-            tool_service = ToolService(session)
-
-            # If we found by ID, use ID for update, otherwise use title
-            if (
-                isinstance(tool_identifier, (int, str))
-                and str(tool_identifier).isdigit()
-            ):
-                # Update by ID
-                tool_id = int(tool_identifier)
-
-                # Prepare update data
-                if hasattr(tool_info, "config") and isinstance(tool_info.config, dict):
-                    # Merge existing config with updates
-                    updated_config = {**tool_info.config, **config_update}
-                else:
-                    updated_config = config_update
-
-                update_data = ToolUpdate(config=updated_config)
-
-                # Update the tool using the service instance
-                await tool_service.update_tool(tool_id, update_data)
-                logger.info(f"Updated tool {tool_id} configuration via ToolService")
-
-                # Refresh available tools
-                await self._load_available_tools_async()
-                return True
-            else:
-                # Update by title
-                title = tool_info.title
-                # Update the tool using the service instance
-                await tool_service.update_tool_configuration_by_title(
-                    title, config_update
-                )
-                logger.info(f"Updated tool '{title}' configuration via ToolService")
-
-                # Refresh available tools
-                await self._load_available_tools_async()
-                return True
-
     def create_tool(
         self,
         tool_identifier: Union[str, int],
         result_as_answer: bool = False,
         tool_config_override: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Union[BaseTool, list]]:
+    ) -> ToolBuildResult:
         """
         Create a tool instance based on its identifier.
 
@@ -896,7 +578,7 @@ class ToolFactory:
         # must not reach `tool_class(**tool_config)`) and stashes them here;
         # stamp them on the instance(s) so the engine hooks read one attribute
         # regardless of which branch built the tool.
-        self._pending_policies = {}
+        self._pending_policies: Dict[str, Dict[str, Any]] = {}
         result = self._create_tool_impl(
             tool_identifier, result_as_answer, tool_config_override
         )
@@ -927,7 +609,7 @@ class ToolFactory:
         tool_identifier: Union[str, int],
         result_as_answer: bool = False,
         tool_config_override: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Union[BaseTool, list]]:
+    ) -> ToolBuildResult:
         # Get tool info from our cached tools obtained from the service
         tool_info = self.get_tool_info(tool_identifier)
         if not tool_info:
@@ -947,7 +629,7 @@ class ToolFactory:
             return None
 
         tool_name = tool_info.title
-        tool_class = self._tool_implementations.get(tool_name)
+        tool_class: Optional[_ToolCtor] = self._tool_implementations.get(tool_name)
 
         if not tool_class:
             logger.warning(f"No implementation found for tool '{tool_name}'")
@@ -961,6 +643,14 @@ class ToolFactory:
                 else {}
             )
 
+            # The override (agent/task/run tool_configs) wins the merge, minus the
+            # keys it may not set and any teamspace credential for an endpoint it
+            # moved (tool_policies). Policies are popped here and stamped by
+            # `create_tool`. Every branch below sees only the cleaned override.
+            tool_config_override, tool_config, self._pending_policies = (
+                merge_tool_config_override(tool_name, base_config, tool_config_override)
+            )
+
             # Log what we're merging — MASK sensitive fields (client_secret, tokens,
             # passwords) so they never land in crew.log / flow.log in cleartext.
             logger.info(
@@ -969,17 +659,6 @@ class ToolFactory:
             logger.info(
                 f"[ToolFactory] {tool_name} - tool_config_override received: {mask_sensitive_fields(tool_config_override or {})}"
             )
-
-            # Merge with override config if provided
-            # The override takes precedence over base_config
-            tool_config = {**base_config, **(tool_config_override or {})}
-
-            # Policies (human approval, the replay cassette) are NOT constructor
-            # kwargs — popped here, before the per-tool `tool_class(**tool_config)`
-            # branches (some splat into non-pydantic clients), and stamped on the
-            # instance by `create_tool` once it exists. See tool_policies.py for
-            # the accepted shapes.
-            self._pending_policies = extract_tool_policies(tool_config)
 
             # Inject execution inputs if available in the main config (for dynamic parameter resolution)
             # Handle both direct inputs and nested inputs structure
@@ -1131,72 +810,9 @@ class ToolFactory:
                 # Use parameters directly from tool config
                 api_key = tool_config.get("api_key", "")
 
-                # Try to get the key from environment first
-                perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
-
-                # If not found in environment, try to get it from the service
-                if not perplexity_api_key and not api_key:
-                    # Use the API keys service if provided, otherwise use the normal methods
-                    if self.api_keys_service is not None:
-                        logger.info("Using ApiKeysService to get PERPLEXITY_API_KEY")
-                        try:
-                            # Check if we're in an async context
-                            asyncio.get_running_loop()
-                            # Use ThreadPoolExecutor to call async method from sync context
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "PERPLEXITY_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # Not in async context
-                            loop = asyncio.new_event_loop()
-                            try:
-                                asyncio.set_event_loop(loop)
-                                db_api_key = loop.run_until_complete(
-                                    self._get_api_key_async("PERPLEXITY_API_KEY")
-                                )
-                            finally:
-                                loop.close()
-
-                        # Assign the retrieved key to perplexity_api_key
-                        if db_api_key:
-                            os.environ["PERPLEXITY_API_KEY"] = db_api_key
-                            perplexity_api_key = db_api_key
-                            logger.info(
-                                "Retrieved PERPLEXITY_API_KEY from ApiKeysService"
-                            )
-                    else:
-                        # Fallback to original method
-                        logger.info(
-                            "No ApiKeysService provided, using fallback method for PERPLEXITY_API_KEY"
-                        )
-                        try:
-                            # Check if we're already in an event loop
-                            asyncio.get_running_loop()
-                            # We're in an async context, use ThreadPoolExecutor
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "PERPLEXITY_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # We're not in an async context, use direct method
-                            db_api_key = self._get_api_key("PERPLEXITY_API_KEY")
-
-                        if db_api_key:
-                            # Set in environment for tools that read from there
-                            os.environ["PERPLEXITY_API_KEY"] = db_api_key
-                            perplexity_api_key = db_api_key
-
-                # Use tool configuration or environment
-                final_api_key = api_key or perplexity_api_key
+                # The key comes from THIS workspace's ApiKeysService, never the
+                # process environment (shared by every tenant).
+                final_api_key = api_key or self._get_api_key("PERPLEXITY_API_KEY")
 
                 # Add api key to config and create with all parameters from config
                 tool_config_with_key = {**tool_config}
@@ -1239,64 +855,9 @@ class ToolFactory:
                 # Get API key from tool config
                 api_key = tool_config.get("serper_api_key", "")
 
-                # Try to get the key from environment first
-                serper_api_key = os.environ.get("SERPER_API_KEY")
-
-                # If not found in environment, try to get it from the service
-                if not serper_api_key and not api_key:
-                    # Use the API keys service if provided, otherwise use the normal methods
-                    if self.api_keys_service is not None:
-                        logger.info("Using ApiKeysService to get SERPER_API_KEY")
-                        try:
-                            # Check if we're in an async context
-                            asyncio.get_running_loop()
-                            # Use ThreadPoolExecutor to call async method from sync context
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "SERPER_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # Not in async context
-                            loop = asyncio.new_event_loop()
-                            try:
-                                asyncio.set_event_loop(loop)
-                                db_api_key = loop.run_until_complete(
-                                    self._get_api_key_async("SERPER_API_KEY")
-                                )
-                            finally:
-                                loop.close()
-                    else:
-                        # Fallback to original method
-                        logger.info(
-                            "No ApiKeysService provided, using fallback method for SERPER_API_KEY"
-                        )
-                        try:
-                            # Check if we're already in an event loop
-                            asyncio.get_running_loop()
-                            # We're in an async context, use ThreadPoolExecutor
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "SERPER_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # We're not in an async context, use direct method
-                            db_api_key = self._get_api_key("SERPER_API_KEY")
-
-                        if db_api_key:
-                            # Set in environment for tools that read from there
-                            os.environ["SERPER_API_KEY"] = db_api_key
-                            serper_api_key = db_api_key
-
-                # Use tool configuration or environment
-                final_api_key = api_key or serper_api_key
+                # The key comes from THIS workspace's ApiKeysService, never the
+                # process environment (shared by every tenant).
+                final_api_key = api_key or self._get_api_key("SERPER_API_KEY")
 
                 # Add api key to config and create with all parameters from config
                 tool_config_with_key = {**tool_config}
@@ -1335,9 +896,7 @@ class ToolFactory:
 
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(
-                                f"Extracted user token from context for DatabricksJobsTool: {user_token[:10]}..."
-                            )
+                            logger.info("Extracted user token for DatabricksJobsTool")
                         else:
                             logger.warning(
                                 "No user token found in context for DatabricksJobsTool"
@@ -1458,14 +1017,16 @@ class ToolFactory:
                     # If not in environment, try to get from DatabricksService
                     if not databricks_host:
                         try:
-                            from src.services.databricks.workspace.config_provider import (  # noqa: E501
+                            from src.services.databricks.workspace.config_provider import (
                                 DatabricksConfigProvider,
                             )
 
-                            async def get_databricks_config():
+                            async def get_databricks_config() -> Optional[str]:
                                 config = await DatabricksConfigProvider.get()
                                 if config and config.workspace_url:
-                                    workspace_url = config.workspace_url.rstrip("/")
+                                    workspace_url = str(config.workspace_url).rstrip(
+                                        "/"
+                                    )
                                     if not workspace_url.startswith("https://"):
                                         workspace_url = f"https://{workspace_url}"
                                     return workspace_url
@@ -1535,7 +1096,7 @@ class ToolFactory:
                     f"GenieTool raw tool_config: {mask_sensitive_fields(tool_config)}"
                 )
                 logger.info(
-                    f"GenieTool tool_config_override: {mask_sensitive_fields(tool_config_override)}"
+                    f"GenieTool tool_config_override: {mask_sensitive_fields(tool_config_override or {})}"
                 )
 
                 # Create a copy of the config
@@ -1565,9 +1126,7 @@ class ToolFactory:
 
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(
-                                f"Extracted user token from context for GenieTool OBO authentication: {user_token[:10]}..."
-                            )
+                            logger.info("Extracted user token for GenieTool OBO")
                         else:
                             logger.warning(
                                 "No user token found in context for GenieTool"
@@ -1576,9 +1135,7 @@ class ToolFactory:
                             group_context = UserContext.get_group_context()
                             if group_context and group_context.access_token:
                                 user_token = group_context.access_token
-                                logger.info(
-                                    f"Found user token in group context: {user_token[:10]}..."
-                                )
+                                logger.info("Found user token in group context")
                             else:
                                 logger.warning("No user token in group context either")
                     except Exception as e:
@@ -1753,7 +1310,7 @@ class ToolFactory:
                 # Create the GenieTool instance
                 try:
                     logger.info(
-                        f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}"
+                        f"Creating GenieTool with config, OBO: {bool(user_token)}, group_id: {group_id}"
                     )
                     logger.info(
                         f"GenieTool config being passed: {mask_sensitive_fields(genie_tool_config)}"
@@ -1835,7 +1392,7 @@ class ToolFactory:
                     f"AgentBricksTool raw tool_config: {mask_sensitive_fields(tool_config)}"
                 )
                 logger.info(
-                    f"AgentBricksTool tool_config_override: {mask_sensitive_fields(tool_config_override)}"
+                    f"AgentBricksTool tool_config_override: {mask_sensitive_fields(tool_config_override or {})}"
                 )
 
                 # Create a copy of the config
@@ -1865,9 +1422,7 @@ class ToolFactory:
 
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(
-                                f"Extracted user token from context for AgentBricksTool OBO authentication: {user_token[:10]}..."
-                            )
+                            logger.info("Extracted user token for AgentBricksTool OBO")
                         else:
                             logger.warning(
                                 "No user token found in context for AgentBricksTool"
@@ -1876,9 +1431,7 @@ class ToolFactory:
                             group_context = UserContext.get_group_context()
                             if group_context and group_context.access_token:
                                 user_token = group_context.access_token
-                                logger.info(
-                                    f"Found user token in group context: {user_token[:10]}..."
-                                )
+                                logger.info("Found user token in group context")
                             else:
                                 logger.warning("No user token in group context either")
                     except Exception as e:
@@ -1931,7 +1484,7 @@ class ToolFactory:
                 # Create the AgentBricksTool instance
                 try:
                     logger.info(
-                        f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}"
+                        f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, group_id: {group_id}"
                     )
                     logger.info(
                         f"AgentBricksTool config being passed: {mask_sensitive_fields(agentbricks_tool_config)}"
@@ -1997,39 +1550,26 @@ class ToolFactory:
                         "[TOOL_FACTORY] Proceeding with tool creation despite validation error"
                     )
 
-                # CRITICAL DEBUG: Print to stdout
-                print("[TOOL_FACTORY] ========================================")
-                print("[TOOL_FACTORY] Creating DatabricksKnowledgeSearchTool")
-                print(f"[TOOL_FACTORY]   - tool_config received: {tool_config}")
-                print(f"[TOOL_FACTORY]   - tool_config type: {type(tool_config)}")
-
+                # Tool-specific config first (file_paths, agent_id from task
+                # tool_configs), then the run's identity, which no config replaces.
                 tool_args = {
+                    **(tool_config if isinstance(tool_config, dict) else {}),
                     "group_id": self.config.get("group_id", "default"),
                     # DO NOT PASS execution_id - we want to search all documents!
-                    # "execution_id": self.config.get('execution_id') or self.config.get('run_id'),
                     "user_token": self.user_token,
-                    # Per-user knowledge isolation: search only returns chunks
-                    # uploaded by the executing user (set by the engine from
-                    # the group context).
+                    # Per-user isolation where the engine sets user_email (crew runs);
+                    # chat and flow leave it unset and search the whole group.
                     "user_email": self.config.get("user_email"),
                 }
-                # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
-                if tool_config and isinstance(tool_config, dict):
-                    print("[TOOL_FACTORY]   - Merging tool_config into tool_args")
-                    tool_args.update(tool_config)
-                else:
-                    print(
-                        "[TOOL_FACTORY]   - tool_config is empty or not a dict, NOT merging"
-                    )
+                # Keys only: tool_args carries the user's token (audit H6/N4).
+                logger.debug(
+                    "[TOOL_FACTORY] DatabricksKnowledgeSearchTool args: %s",
+                    sorted(tool_args),
+                )
 
-                print(f"[TOOL_FACTORY] Final tool_args: {tool_args}")
-                print(f"[TOOL_FACTORY]   - group_id: {tool_args.get('group_id')}")
-                print(f"[TOOL_FACTORY]   - file_paths: {tool_args.get('file_paths')}")
-                print(f"[TOOL_FACTORY]   - agent_id: {tool_args.get('agent_id')}")
-                print("[TOOL_FACTORY] ========================================")
-
-                tool = DatabricksKnowledgeSearchTool(**tool_args)
-                return tool
+                if DatabricksKnowledgeSearchTool is None:  # its module failed to import
+                    return None
+                return DatabricksKnowledgeSearchTool(**tool_args)
 
             elif tool_name in ("A2AAgentTool", "Remote Agent"):
                 # One entry can produce several tools (one per attached remote),
@@ -2062,7 +1602,7 @@ class ToolFactory:
             elif tool_name == "PowerBIConnectorTool":
                 # PowerBIConnectorTool accepts configuration directly
                 tool_config["result_as_answer"] = result_as_answer
-                logger.info(f"Creating PowerBIConnectorTool with config: {tool_config}")
+                logger.info(f"PowerBIConnectorTool config keys: {sorted(tool_config)}")
                 return tool_class(**tool_config)
 
             # Universal Measure Conversion Pipeline
@@ -2235,6 +1775,13 @@ class ToolFactory:
 
             # For all other tools (ScrapeWebsiteTool, ImageGenerationTool, etc.)
             else:
+                # A tool that needs a provider key gets THIS workspace's key,
+                # passed explicitly, never through the shared process env.
+                key_name = _TOOL_API_KEY_NAMES.get(tool_name)
+                if key_name:
+                    tool_config = dict(tool_config or {})
+                    if not tool_config.get("api_key"):
+                        tool_config["api_key"] = self._get_api_key(key_name)
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):
                     # Prefer result_as_answer from DB/merged config over the parameter default
@@ -2261,69 +1808,12 @@ class ToolFactory:
             logger.error(traceback.format_exc())
             return None
 
-    def register_tool_implementation(self, tool_name: str, tool_class):
-        """Register a tool implementation class for a given tool name"""
-        self._tool_implementations[tool_name] = tool_class
-        logger.info(f"Registered tool implementation for {tool_name}")
-
-    def register_tool_implementations(self, implementations_dict: Dict[str, object]):
-        """Register multiple tool implementations at once"""
-        self._tool_implementations.update(implementations_dict)
-        logger.info(f"Registered {len(implementations_dict)} tool implementations")
-
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Clean up resources used by the factory
         """
         logger.info("Cleaning up tool factory resources")
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup resources when the object is garbage collected"""
         self.cleanup()
-
-    async def cleanup_after_crew_execution(self):
-        """
-        Clean up resources after a crew execution.
-        This is intended to be called after a crew has finished its work.
-        """
-        logger.info("Cleaning up resources after crew execution")
-
-        # Make sure we run the cleanup safely with respect to event loops
-        try:
-            # Check if we're already in an event loop
-            try:
-                # We're in an event loop, need to run cleanup carefully
-                asyncio.get_running_loop()
-                logger.info("Running cleanup in existing event loop")
-
-                # Run cleanup in a way that won't block the current event loop
-                from concurrent.futures import ThreadPoolExecutor
-
-                with ThreadPoolExecutor() as pool:
-
-                    def run_cleanup():
-                        try:
-                            self.cleanup()
-                            logger.info("Cleanup completed in background thread")
-                        except Exception as e:
-                            logger.error(
-                                f"Error during cleanup in background thread: {str(e)}"
-                            )
-
-                    # Submit the cleanup task to run in a separate thread
-                    pool.submit(run_cleanup)
-
-            except RuntimeError:
-                # No running event loop, can clean up directly
-                logger.info("Running cleanup directly (no event loop)")
-                self.cleanup()
-
-            # Refresh available tools
-            await self._load_available_tools_async()
-
-            logger.info("Cleanup after crew execution completed")
-        except Exception as e:
-            logger.error(f"Error during cleanup after crew execution: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())

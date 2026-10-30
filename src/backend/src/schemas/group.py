@@ -4,9 +4,8 @@ Pydantic schemas for group management API.
 These schemas define the request and response models for group-related endpoints.
 """
 
-import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import (
     BaseModel,
@@ -17,17 +16,14 @@ from pydantic import (
     field_validator,
 )
 
+from src.core.databricks_app import is_local_dev
 from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
 
 
 def _is_local_dev() -> bool:
     """Local-dev environments issue synthetic emails (e.g. dev@localhost) that
-    have no TLD. Mirror the ENVIRONMENT convention used in admin_auth."""
-    return os.getenv("ENVIRONMENT", "development").lower() in (
-        "development",
-        "dev",
-        "local",
-    )
+    have no TLD. Never true inside Databricks Apps (see core.databricks_app)."""
+    return is_local_dev()
 
 
 class GroupBase(BaseModel):
@@ -180,7 +176,7 @@ class GroupUserResponse(GroupUserBase):
 
     @field_validator("role", mode="before")
     @classmethod
-    def migrate_legacy_roles(cls, v):
+    def migrate_legacy_roles(cls, v: Any) -> Any:
         """Automatically migrate legacy role values to new 3-tier system."""
         if isinstance(v, str):
             # Map old roles to new roles

@@ -10,7 +10,7 @@ from src.services.flow_builder.modules.flow_processors import (
     recover_mcp_from_current_tasks,
 )
 
-MCP = {"MCP_SERVERS": {"servers": ["nemotemoyou"]}}
+MCP = {"MCP_SERVERS": {"servers": ["example-mcp"]}}
 
 
 def test_recovers_when_single_current_task_has_mcp():
@@ -18,7 +18,7 @@ def test_recovers_when_single_current_task_has_mcp():
     out = recover_mcp_from_current_tasks(
         {}, "stale", "Gather", [("cur", "Gather", MCP)]
     )
-    assert out["MCP_SERVERS"] == {"servers": ["nemotemoyou"]}
+    assert out["MCP_SERVERS"] == {"servers": ["example-mcp"]}
 
 
 def test_recovers_by_name_match_when_multiple_tasks():

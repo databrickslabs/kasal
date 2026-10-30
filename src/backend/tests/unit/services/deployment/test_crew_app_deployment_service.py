@@ -3,13 +3,16 @@ Unit tests for CrewAppDeploymentService (one-click Databricks Apps deploy).
 """
 
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 
 from src.schemas.crew_export import AppDeploymentConfig
 from src.services.deployment.app import (
+    DESIRED_OAUTH_SCOPES,
     STATUS_FAILED,
     STATUS_PENDING,
     STATUS_SUCCEEDED,
@@ -52,7 +55,7 @@ def _export_result():
 
 
 @contextmanager
-def _patch_deploy_pat(pat_groups, capture=None):
+def _patch_deploy_pat(pat_groups, capture=None, existing_app=None):
     """Patch the deploy's DIRECT PAT-resolution chain (bypasses get_auth_context).
 
     Deploy looks the PAT up straight from the DB on the request session, then
@@ -61,12 +64,26 @@ def _patch_deploy_pat(pat_groups, capture=None):
         the group_ids in ``pat_groups``;
       - EncryptionUtils.decrypt_value → returns a fake token;
       - the workspace-host lookup;
-      - WorkspaceClient (so no real SDK client is built).
+      - WorkspaceClient (so no real SDK client is built). Its ``apps.get``
+        returns ``existing_app``, raises it when it is an exception, or raises
+        NotFound when it is None.
 
-    ``capture`` (optional dict) receives ``groups`` = the group_ids tried, in order.
+    ``capture`` (optional dict) receives ``groups`` = the group_ids tried, in
+    order, and ``run`` = the patched ``_run_deployment``.
     """
+    from databricks.sdk.errors import NotFound
+
     tried = capture if capture is not None else {}
     tried.setdefault("groups", [])
+    workspace_client = MagicMock()
+    if existing_app is None:
+        workspace_client.return_value.apps.get.side_effect = NotFound("no such app")
+    elif isinstance(existing_app, BaseException):
+        workspace_client.return_value.apps.get.side_effect = existing_app
+    else:
+        workspace_client.return_value.apps.get.return_value = existing_app
+    run = AsyncMock()
+    tried["run"] = run
 
     class _FakeApiKeysService:
         def __init__(self, session, group_id=None):
@@ -91,8 +108,8 @@ def _patch_deploy_pat(pat_groups, capture=None):
             side_effect=lambda v: f"pat-token-{v}",
         ),
         patch("src.utils.databricks_auth._databricks_auth", dbx),
-        patch("databricks.sdk.WorkspaceClient", MagicMock()),
-        patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
+        patch("databricks.sdk.WorkspaceClient", workspace_client),
+        patch.object(CrewAppDeploymentService, "_run_deployment", new=run),
     ):
         yield tried
 
@@ -144,7 +161,7 @@ class TestStartDeployment:
         found — deploy adds the allocated personal workspace ID."""
         ctx = GroupContext(
             group_ids=["shared_ws"],
-            group_email="alice@acme.com",
+            group_email="alice@example.com",
             access_token=None,
             current_user=SimpleNamespace(personal_group_id="user_alice_acme_com"),
         )
@@ -222,6 +239,126 @@ class TestStartDeployment:
                 "crew-1", AppDeploymentConfig(), obo_context
             )
         assert resp.app_name == "research-crew"
+
+
+# A schema name that would close the quoted identifier and name its own grantee.
+_BAD_NAME = "sales` TO `someone@example.com` --"
+
+
+class TestUnityCatalogNames:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "fields",
+        [{"catalog": "main", "schema_name": _BAD_NAME}, {"catalog": _BAD_NAME}],
+    )
+    async def test_invalid_catalog_or_schema_is_refused_before_deploy(
+        self, service, obo_context, fields
+    ):
+        from src.core.exceptions import BadRequestError
+
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        with _patch_deploy_pat({"g1"}) as tried:
+            with pytest.raises(BadRequestError, match="Unity Catalog"):
+                await service.start_deployment(
+                    "crew-1", AppDeploymentConfig(**fields), obo_context
+                )
+        tried["run"].assert_not_called()
+
+    def test_grant_with_invalid_schema_runs_no_sql(self, service):
+        """The workspace's own configuration can also supply the names."""
+        client = MagicMock()
+        client.apps.get.return_value.service_principal_client_id = "sp-abc"
+
+        service._grant_trace_permissions(
+            "d-1", client, "research-crew", "main", _BAD_NAME, "wh-1"
+        )
+
+        client.statement_execution.execute_statement.assert_not_called()
+
+    def test_grant_statements_quote_every_name(self):
+        from src.services.deployment.app_guards import trace_grant_statements
+
+        assert trace_grant_statements("main", "agent-traces", "sp-abc") == [
+            "GRANT USE CATALOG ON CATALOG `main` TO `sp-abc`",
+            "GRANT USE SCHEMA, CREATE TABLE, MODIFY, SELECT ON SCHEMA "
+            "`main`.`agent-traces` TO `sp-abc`",
+        ]
+
+    def test_quoting_escapes_backticks(self):
+        from src.services.deployment.app_guards import quote_uc_ident
+
+        assert quote_uc_ident("a`b") == "`a``b`"
+
+
+class TestExistingAppIsNotReplaced:
+    async def _start(self, service, obo_context, description):
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        app = SimpleNamespace(description=description)
+        with _patch_deploy_pat({"g1"}, existing_app=app) as tried:
+            await service.start_deployment("crew-1", AppDeploymentConfig(), obo_context)
+        return tried["run"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "description", ["kasal application", None, "Deployed from Kasal (crew crew-2)"]
+    )
+    async def test_refuses_an_app_this_crew_did_not_deploy(
+        self, service, obo_context, description
+    ):
+        from src.core.exceptions import ConflictError
+
+        with pytest.raises(ConflictError, match="research-crew"):
+            await self._start(service, obo_context, description)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("make_error", ["databricks", "network"])
+    async def test_refuses_when_the_app_cannot_be_read(
+        self, service, obo_context, make_error
+    ):
+        """Only NotFound means "new app"; any other failure must not deploy."""
+        from databricks.sdk.errors import PermissionDenied
+
+        from src.core.exceptions import KasalError
+
+        error = (
+            PermissionDenied("not allowed")
+            if make_error == "databricks"
+            else ConnectionError("reset by peer")
+        )
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        with _patch_deploy_pat({"g1"}, existing_app=error) as tried:
+            with pytest.raises(KasalError, match="Could not check") as raised:
+                await service.start_deployment(
+                    "crew-1", AppDeploymentConfig(), obo_context
+                )
+        assert raised.value.status_code == 503
+        tried["run"].assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "description", ["Deployed from Kasal (crew crew-1)", "Deployed from Kasal"]
+    )
+    async def test_redeploys_an_app_from_this_crew_or_an_older_kasal_deploy(
+        self, service, obo_context, description
+    ):
+        run = await self._start(service, obo_context, description)
+        run.assert_called_once()
+
+    def test_a_new_app_records_the_crew_that_deployed_it(self, service):
+        client = MagicMock()
+        client.apps.get.side_effect = [
+            Exception("not found"),
+            MagicMock(resources=[]),
+            MagicMock(url="https://research-crew.example.com"),
+        ]
+        client.apps.deploy.return_value.result.return_value.deployment_id = "dep-1"
+
+        service._deploy_blocking("d-1", client, "research-crew", [], crew_id="crew-1")
+
+        created = client.apps.create_and_wait.call_args.kwargs["app"]
+        updated = client.apps.update.call_args.kwargs["app"]
+        assert created.description == "Deployed from Kasal (crew crew-1)"
+        assert updated.description == "Deployed from Kasal (crew crew-1)"
 
 
 class TestDeployBlocking:
@@ -365,7 +502,7 @@ class TestDeployBlocking:
         client.apps.get.return_value.service_principal_client_id = "sp-abc"
 
         service._grant_trace_permissions(
-            "d-1", client, "research-crew", "nemotemo_catalog", "kasal", "wh-1"
+            "d-1", client, "research-crew", "example_catalog", "kasal", "wh-1"
         )
 
         stmts = [
@@ -458,3 +595,12 @@ class TestNormalizeAppName:
     )
     def test_normalize(self, raw, expected):
         assert CrewAppDeploymentService._normalize_app_name(raw) == expected
+
+
+def test_app_deploys_request_the_marketplace_manifest_scopes():
+    """The in-app deploy keeps its own scope list; it must match the manifest
+    (which tests/unit/test_deploy_scopes.py ties to deploy.py)."""
+    manifest = Path(__file__).resolve().parents[5] / "manifest.yaml"
+    scopes = yaml.safe_load(manifest.read_text())["user_api_scopes"]
+
+    assert sorted(DESIRED_OAUTH_SCOPES) == sorted(scopes)

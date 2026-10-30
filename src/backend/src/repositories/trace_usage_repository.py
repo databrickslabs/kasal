@@ -1,6 +1,10 @@
 """Read just the attribution and usage fields, without prompt/response bodies."""
 
+from datetime import datetime
+from typing import Any, AsyncIterator, Collection, Dict, Optional
+
 from sqlalchemy import and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.execution_history import ExecutionHistory
 from src.models.execution_trace import ExecutionTrace
@@ -16,10 +20,16 @@ _FIELDS = (
 
 
 class TraceUsageRepository:
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def iter_calls(self, group_id, start, end, execution_ids=None):
+    async def iter_calls(
+        self,
+        group_id: str,
+        start: datetime,
+        end: datetime,
+        execution_ids: Optional[Collection[str]] = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
         trace, run = ExecutionTrace, ExecutionHistory
         query = (
             select(

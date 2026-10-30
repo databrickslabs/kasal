@@ -17,11 +17,15 @@ import json
 import logging
 import re
 import urllib.parse
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.sql_guard import is_read_only_select
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -96,31 +100,18 @@ class DatabricksDashboardCreatorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain AuthContext synchronously."""
-        import asyncio
-        import concurrent.futures
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        from src.utils.databricks_auth import get_auth_context
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
+        """
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        def _run_in_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        return resolve_tool_auth(host_override)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Visual mappings parsing
@@ -133,17 +124,21 @@ class DatabricksDashboardCreatorTool(BaseTool):
         Same DB-fallback pattern as the UCMV validator / Genie config generator:
         covers resumed flows and runs where flow-state injection did not deliver
         the mapper output. Returns the raw JSON string ('' if none found).
+        Scoped to the run's workspace; it used to read any tenant's (audit V3-1).
         """
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        group_ids = ToolSessionProvider.run_group_ids()
 
         async def _query() -> str:
-            from src.services.tools.tool_session_provider import ToolSessionProvider
-
             async with ToolSessionProvider.session() as session:
                 from src.services.trace.service import ExecutionTraceService
 
                 raw = await ExecutionTraceService(
                     session
-                ).latest_output_for_span_prefix("PBI Visual-UCMV Mapper")
+                ).latest_output_for_span_prefix(
+                    "PBI Visual-UCMV Mapper", group_ids=group_ids
+                )
                 if not raw:
                     return ""
                 data = json.loads(raw)
@@ -155,7 +150,10 @@ class DatabricksDashboardCreatorTool(BaseTool):
         from src.services.tools.async_bridge import run_sync_with_context
         from src.utils.asyncio_utils import create_and_run_loop
 
-        return run_sync_with_context(lambda: create_and_run_loop(_query()), timeout=15)
+        found: str = run_sync_with_context(
+            lambda: create_and_run_loop(_query()), timeout=15
+        )
+        return found
 
     def _parse_visual_mappings(self, raw: Any) -> tuple[list, str, str, str]:
         """Parse visual_mappings_json — may be a string with the full tool 94 output.
@@ -257,7 +255,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 if measures
                 else (fields[-1]["name"] if fields else "value")
             )
-            spec = {
+            spec: dict[str, Any] = {
                 "version": version,
                 "widgetType": widget_type,
                 "encodings": {
@@ -341,8 +339,18 @@ class DatabricksDashboardCreatorTool(BaseTool):
     def _build_dataset(
         self, view_name: str, sql: Optional[str], dataset_name: str
     ) -> dict:
-        """Build a Lakeview dataset entry."""
-        query_sql = sql or f"SELECT * FROM {view_name} LIMIT 1000"
+        """Build a Lakeview dataset entry.
+
+        The query is stored and runs whenever the dashboard opens, and the
+        mappings can come straight from agent input: only a single read-only
+        SELECT is kept, and the default query back-quotes the view name.
+        """
+        if sql and not is_read_only_select(sql):
+            logger.warning("Dropping non-read-only dataset SQL for %s", view_name)
+            sql = None
+        view = ".".join("`" + p.replace("`", "``") + "`" for p in view_name.split("."))
+        default_sql = f"SELECT * FROM {view} LIMIT 1000"  # view back-quoted above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+        query_sql = sql or default_sql
         display = view_name.split(".")[-1].replace("_", " ").title()
         return {
             "name": dataset_name,
@@ -364,7 +372,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
             pages_map.setdefault(page, []).append(m)
 
         # Build datasets: one per unique UCMV view
-        datasets = []
+        datasets: list[dict[str, Any]] = []
         view_to_dataset: dict[str, str] = {}
         view_to_sql: dict[str, Optional[str]] = {}
         for m in visual_mappings:
@@ -455,7 +463,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
         """Make an HTTP request and return (status_code, json_body)."""
         import requests as _requests
 
-        resp = _requests.request(
+        resp = _requests.request(  # host allow-listed in _run before any call — nosemgrep: tmp.databricks.ssrf.requests-user-url
             method, url, json=payload, headers=headers, timeout=timeout
         )
         try:
@@ -542,8 +550,8 @@ class DatabricksDashboardCreatorTool(BaseTool):
     # Main _run
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _run(self, **kwargs: Any) -> str:  # noqa: C901
-        def _get(key):
+    def _run(self, **kwargs: Any) -> str:
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val

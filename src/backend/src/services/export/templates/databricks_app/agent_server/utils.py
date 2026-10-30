@@ -55,7 +55,7 @@ def get_databricks_host(
     workspace_client = workspace_client or WorkspaceClient()
     try:
         return workspace_client.config.host
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logging.exception(f"Error getting databricks host from env: {e}")
         return None
 

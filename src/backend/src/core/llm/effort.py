@@ -140,7 +140,7 @@ def agent_effort_defaults(spec: dict) -> dict:
     return result
 
 
-def apply_manager_limits(agent, settings):
+def apply_manager_limits(agent: Any, settings: EffortSettings | dict | None) -> None:
     """Managers may be created lazily, after the crew stamped worker limits."""
     if agent is None or not settings:
         return

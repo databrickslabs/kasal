@@ -20,8 +20,10 @@ Both tables are created at runtime by the ``_ensure_*`` self-heal helpers in
 """
 
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -29,32 +31,36 @@ from src.db.base import Base
 class EventSubscription(Base):
     """Inbound: an ``event_type`` triggers a target crew/flow."""
 
-    id = Column(Integer, primary_key=True)
-    group_id = Column(String(100), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     #: The event name this subscription listens for (the glue string).
-    event_type = Column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False)
     #: What to run: {"kind": "crew"|"flow", "id": ...}.
-    target = Column(JSON, nullable=False)
+    target: Mapped[Any] = mapped_column(JSON, nullable=False)
     #: Optional per-run engine override ("kasal" | "crewai").
-    harness = Column(String(20), nullable=True)
+    harness: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     #: Optional STATIC input overrides for the triggered run (a plain dict used
     #: as-is — NOT a payload projection; a JSONPath-style mapping is future
     #: work). Null = pass the whole payload through as inputs.
-    input_mapping = Column(JSON, nullable=True)
+    input_mapping: Mapped[Any] = mapped_column(JSON, nullable=True)
     #: Optional Object Management schema name the payload is expected to match.
-    schema_ref = Column(String(255), nullable=True)
-    enabled = Column(Boolean, default=True, nullable=False)
+    schema_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     __table_args__ = (
         Index("ix_eventsubscription_event_type", "event_type"),
         Index("ix_eventsubscription_group_id", "group_id"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if self.enabled is None:
             self.enabled = True
@@ -67,28 +73,32 @@ class EventSubscription(Base):
 class EmitRule(Base):
     """Outbound: a target crew/flow's completion emits an ``event_type``."""
 
-    id = Column(Integer, primary_key=True)
-    group_id = Column(String(100), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     #: Whose completion fires this rule: {"kind": "crew"|"flow", "id": ...}.
-    on_target = Column(JSON, nullable=False)
+    on_target: Mapped[Any] = mapped_column(JSON, nullable=False)
     #: The event name to emit.
-    event_type = Column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False)
     #: Optional Object Management schema name the emitted payload matches.
-    schema_ref = Column(String(255), nullable=True)
+    schema_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     #: Optional guard expression over the run's structured output; null = always.
-    condition = Column(String, nullable=True)
-    enabled = Column(Boolean, default=True, nullable=False)
+    condition: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     __table_args__ = (
         Index("ix_emitrule_event_type", "event_type"),
         Index("ix_emitrule_group_id", "group_id"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if self.enabled is None:
             self.enabled = True

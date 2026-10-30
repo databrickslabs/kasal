@@ -18,13 +18,18 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, cast
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
 from sqlalchemy import event
 from sqlalchemy.exc import IllegalStateChangeError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from src.core.exceptions import KasalError, LakebaseInstanceUnavailableError
 from src.core.logger import LoggerManager
@@ -58,7 +63,8 @@ def _is_disposed_connection_error(exc: Exception) -> bool:
 
     Deliberately phrase-based: the drivers do not share an exception type for
     this, and asyncpg's ``InterfaceError`` also covers genuine protocol misuse
-    that must NOT be swallowed.
+    that must NOT be swallowed. Used by ``utils.asyncio_utils`` (dispose-and-retry)
+    and the flow runner's soft-complete path.
     """
     message = str(exc).lower()
     return any(phrase in message for phrase in _DISPOSED_CONNECTION_PHRASES)
@@ -74,7 +80,7 @@ def _is_not_found(err: Exception) -> bool:
     return "not found" in text or "not_found" in text
 
 
-def _unavailable_message(instance_name: str, w, orig: Exception) -> str:
+def _unavailable_message(instance_name: str, w: Any, orig: Exception) -> str:
     """Build an actionable message for a Lakebase instance that resolves nowhere."""
     host = None
     try:
@@ -104,10 +110,10 @@ def _unavailable_message(instance_name: str, w, orig: Exception) -> str:
 # sees None, skips SPN, and the run fails to reach Lakebase ("Failed to create
 # workspace client"). Caching the creds once makes Lakebase auth immune to that
 # transient race.
-_SPN_CREDS_CACHE: dict = {}
+_SPN_CREDS_CACHE: Dict[str, str] = {}
 
 
-def _resolve_spn_creds() -> tuple:
+def _resolve_spn_creds() -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Return (client_id, client_secret, host), preferring live env but falling
     back to the cached snapshot when a concurrent strip window blanked them."""
     client_id = os.getenv("DATABRICKS_CLIENT_ID")
@@ -142,11 +148,11 @@ class LakebaseSessionFactory:
 
     def __init__(
         self,
-        instance_name: str = "kasal-lakebase",
+        instance_name: Optional[str] = None,
         user_token: Optional[str] = None,
         user_email: Optional[str] = None,
         group_id: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize Lakebase session factory.
 
@@ -157,15 +163,17 @@ class LakebaseSessionFactory:
             group_id: Optional group_id for PAT lookup in background threads
                      where UserContext is not available.
         """
-        self.instance_name = instance_name
+        from src.core.databricks_app import resolve_lakebase_instance_name
+
+        self.instance_name = resolve_lakebase_instance_name(instance_name)
         self.user_token = user_token
         self.user_email = user_email
         self.group_id = group_id
-        self._workspace_client = None
-        self._engine = None
-        self._session_factory = None
-        self._token_holder: dict = {"token": "", "refreshed_at": 0.0}
-        self._refresh_task: Optional[asyncio.Task] = None
+        self._workspace_client: Optional[WorkspaceClient] = None
+        self._engine: Optional[AsyncEngine] = None
+        self._session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+        self._token_holder: Dict[str, Any] = {"token": "", "refreshed_at": 0.0}
+        self._refresh_task: Optional[asyncio.Task[None]] = None
         self._engine_loop_id: Optional[int] = (
             None  # Track which event loop owns the engine
         )
@@ -309,12 +317,14 @@ class LakebaseSessionFactory:
             cred = w.database.generate_database_credential(
                 request_id=str(uuid.uuid4()), instance_names=[self.instance_name]
             )
-            self._token_holder["token"] = cred.token
+            # SDK types token Optional; a credential without one is not valid.
+            db_token = cast(str, cred.token)
+            self._token_holder["token"] = db_token
             self._token_holder["refreshed_at"] = time.time()
             logger.info(
-                f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(cred.token)})"
+                f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(db_token)})"
             )
-            return cred.token
+            return db_token
         except Exception as e:
             if not _is_not_found(e):
                 raise
@@ -338,15 +348,18 @@ class LakebaseSessionFactory:
             raise
         if not endpoints:
             raise ValueError(f"No endpoints found for project {self.instance_name}")
-        cred = w.postgres.generate_database_credential(endpoint=endpoints[0].name)
-        self._token_holder["token"] = cred.token
+        pg_cred = w.postgres.generate_database_credential(
+            endpoint=cast(str, endpoints[0].name)  # SDK: Optional, always set on list
+        )
+        pg_token = cast(str, pg_cred.token)  # SDK types token Optional
+        self._token_holder["token"] = pg_token
         self._token_holder["refreshed_at"] = time.time()
         logger.info(
-            f"Refreshed Lakebase token for project {self.instance_name} (length: {len(cred.token)})"
+            f"Refreshed Lakebase token for project {self.instance_name} (length: {len(pg_token)})"
         )
-        return cred.token
+        return pg_token
 
-    async def _schedule_token_refresh(self):
+    async def _schedule_token_refresh(self) -> None:
         """Background task that refreshes the token every 50 minutes."""
         while True:
             try:
@@ -443,7 +456,7 @@ class LakebaseSessionFactory:
             logger.error(f"Error getting Lakebase connection string: {e}")
             raise
 
-    async def create_engine(self):
+    async def create_engine(self) -> None:
         """Create or refresh the SQLAlchemy engine with do_connect token injection."""
         try:
             # Dispose of old engine if exists
@@ -469,7 +482,7 @@ class LakebaseSessionFactory:
             # Check if NullPool is requested (crew threads set USE_NULLPOOL=true)
             use_nullpool = os.environ.get("USE_NULLPOOL", "").lower() == "true"
 
-            pool_kwargs = {}
+            pool_kwargs: Dict[str, Any] = {}
             if use_nullpool:
                 from sqlalchemy.pool import NullPool
 
@@ -505,7 +518,9 @@ class LakebaseSessionFactory:
             token_holder = self._token_holder
 
             @event.listens_for(self._engine.sync_engine, "do_connect")
-            def inject_token(dialect, conn_rec, cargs, cparams):
+            def inject_token(
+                dialect: Any, conn_rec: Any, cargs: Any, cparams: Dict[str, Any]
+            ) -> None:
                 cparams["password"] = token_holder["token"]
 
             # Create session factory
@@ -550,12 +565,11 @@ class LakebaseSessionFactory:
 
     def _is_token_stale(self) -> bool:
         """True when the holder's credential is older than the refresh window."""
-        return (
-            time.time() - self._token_holder.get("refreshed_at", 0.0)
-        ) >= TOKEN_REFRESH_INTERVAL_SECONDS
+        refreshed_at: float = self._token_holder.get("refreshed_at", 0.0)
+        return (time.time() - refreshed_at) >= TOKEN_REFRESH_INTERVAL_SECONDS
 
     @asynccontextmanager
-    async def get_session(self):
+    async def get_session(self) -> AsyncIterator[AsyncSession]:
         """
         Get a database session with Lakebase as an async context manager.
         Transaction management should be handled by the caller.
@@ -597,6 +611,8 @@ class LakebaseSessionFactory:
         # raises IllegalStateChangeError ("_connection_for_bind() is already in
         # progress") out of the context manager, crashing the whole request
         # teardown. Managing the close ourselves lets us degrade gracefully.
+        # create_engine() above always sets it (or raises).
+        assert self._session_factory is not None
         session = self._session_factory()
         try:
             try:
@@ -661,7 +677,7 @@ class LakebaseSessionFactory:
                 # InterfaceError during concurrent cleanup).
                 logger.debug(f"[LAKEBASE SESSION] Session close skipped: {close_err}")
 
-    async def dispose(self):
+    async def dispose(self) -> None:
         """Dispose of the engine, cancel refresh task, and clean up resources."""
         if self._refresh_task and not self._refresh_task.done():
             try:
@@ -743,9 +759,22 @@ def _is_crew_thread() -> bool:
     return os.environ.get("USE_NULLPOOL", "").lower() == "true"
 
 
+async def dispose_current_lakebase_factory() -> None:
+    """Dispose the Lakebase factory this caller uses, so the next session reconnects.
+
+    In crew/flow subprocess threads only THIS thread's factory is disposed; the
+    shared global factory is touched only off those threads, where no concurrent
+    traffic can be disrupted mid-flight.
+    """
+    if _is_crew_thread():
+        await dispose_thread_local_lakebase_factory()
+    else:
+        await dispose_lakebase_factory()
+
+
 @asynccontextmanager
 async def get_lakebase_session(
-    instance_name: str = None,
+    instance_name: Optional[str] = None,
     user_token: Optional[str] = None,
     user_email: Optional[str] = None,
     group_id: Optional[str] = None,
@@ -777,9 +806,11 @@ async def get_lakebase_session(
     if installed:
         instance_name = installed.endpoint or installed.host
 
-    # Get instance name from config if not provided
-    if not instance_name:
-        instance_name = os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+    else:
+        # The configured name, else the Apps binding; never an invented one.
+        from src.core.databricks_app import resolve_lakebase_instance_name
+
+        instance_name = resolve_lakebase_instance_name(instance_name)
 
     # Crew threads: use thread-local factory to avoid event loop conflicts
     if _is_crew_thread():

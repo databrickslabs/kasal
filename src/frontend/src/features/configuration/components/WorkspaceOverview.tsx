@@ -28,11 +28,13 @@ import { DatabricksService, DatabricksConfig } from '../../../api/databricks/Dat
 import { MemoryBackendService } from '../../../api/memory/MemoryBackendService';
 import { MemoryBackendConfig } from '../../../types/config/memoryBackend';
 import { usePermissionStore } from '../../../store/permissions';
+import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../store/user';
 import { ToolService, Tool as ServiceTool } from '../../../api/tools/ToolService';
 import { MCPService } from '../../../api/tools/MCPService';
 import type { MCPServerConfig } from '../../../types/config/mcp';
 import { apiClient } from '../../../shared/api/client';
 import type { MLflowSettings } from '../../../types/config/mlflow';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 interface WorkspaceInfo {
   name: string;
@@ -57,8 +59,9 @@ function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOv
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedGroupId = localStorage.getItem('selectedGroupId');
-  const isPersonalWorkspace = selectedGroupId?.startsWith('user_');
+  const selectedGroupId = getTabGroupId();
+  const personalGroupId = usePersonalGroupId();
+  const isPersonalWorkspace = isPersonalWorkspaceId(selectedGroupId, personalGroupId);
   const userRole = usePermissionStore(state => state.userRole);
 
   useEffect(() => {

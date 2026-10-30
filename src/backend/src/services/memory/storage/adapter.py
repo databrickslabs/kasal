@@ -9,7 +9,8 @@ that mismatch in one place:
 
 * embeds the query (with a small LRU cache — repeated asks cost nothing),
 * maps kwarg names (``scope`` → ``scope_prefix``, ``score_threshold`` →
-  ``min_score``),
+  ``min_semantic`` — the recall floor is a cosine floor, so recency and
+  importance never gate a record; ``min_score`` for a backend without one),
 * unwraps ``(record, score)`` tuples into records (score kept in metadata),
 * normalizes ``save`` to return the saved records (backends return ``None``),
 * maps the record-id oriented ``update``/``delete`` onto the filter-oriented
@@ -27,7 +28,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Optional
 
 from src.services.memory.engine import MemoryRecord, ScopeInfo
 from src.services.memory.engine.memory import StorageBackend
@@ -66,7 +67,45 @@ def embed_text(embedder: Any, text: str) -> list[float]:
     return list(vector)
 
 
-def build_litellm_embedder(provider_config: dict) -> Any:
+#: Texts per embedding request. A transport limit, not a cap on facts:
+#: embedding endpoints bound the size of one request, so a large write is sent
+#: in several requests and every text is still embedded.
+EMBED_BATCH = 64
+
+
+def embed_texts(embedder: object, texts: list[str]) -> list[list[float]]:
+    """Embed ``texts`` in as few requests as the endpoint allows — every shape
+    ``embed_text`` accepts takes a list."""
+    if len(texts) > EMBED_BATCH:
+        return [
+            vector
+            for start in range(0, len(texts), EMBED_BATCH)
+            for vector in embed_texts(embedder, texts[start : start + EMBED_BATCH])
+        ]
+    if not texts:
+        return []
+    if embedder is None:
+        raise ValueError("No embedder available to embed text")
+    target = (
+        embedder.get("config", {}).get("embedder", embedder)
+        if isinstance(embedder, dict)
+        else embedder
+    )
+    if callable(target):
+        result = target(list(texts))
+    elif hasattr(target, "embed_documents"):
+        result = target.embed_documents(list(texts))
+    else:
+        raise TypeError(f"Unsupported embedder type: {type(target).__name__}")
+    vectors = [list(vector) for vector in (result or [])]
+    if len(vectors) != len(texts):
+        raise RuntimeError(
+            f"Embedder returned {len(vectors)} vectors for {len(texts)} texts"
+        )
+    return vectors
+
+
+def build_litellm_embedder(provider_config: Optional[dict]) -> Any:
     """Turn an EmbedderConfigBuilder provider dict into an embedding callable.
 
     The DEFAULT memory backend historically relied on crewAI to materialize an
@@ -97,6 +136,13 @@ def build_litellm_embedder(provider_config: dict) -> Any:
         if value and dst_key not in call_kwargs:
             call_kwargs[dst_key] = value
 
+    # litellm reads the provider's *_API_KEY from os.environ when none is
+    # passed. That environment is shared by every workspace, so an absent key
+    # is sent as an explicit placeholder rather than resolved from there.
+    from src.core.llm.transport.completion import NO_API_KEY
+
+    call_kwargs.setdefault("api_key", NO_API_KEY)
+
     def _embed(texts: list[str]) -> list[list[float]]:
         import litellm
 
@@ -121,13 +167,13 @@ class EngineStorageAdapter(StorageBackend):
         self._query_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._cache_lock = threading.Lock()
         # Hybrid backends (Lakebase/local) accept the raw query text for
-        # keyword scoring; older ones (Databricks VS) don't — detect once.
+        # keyword scoring and a similarity floor; older ones don't — detect once.
         try:
-            self._backend_takes_query_text = (
-                "query_text" in inspect.signature(backend.search).parameters
-            )
+            params = set(inspect.signature(backend.search).parameters)
         except (TypeError, ValueError):
-            self._backend_takes_query_text = False
+            params = set()
+        self._backend_takes_query_text = "query_text" in params
+        self._backend_takes_min_semantic = "min_semantic" in params
         # scope → (expires_at_monotonic, has_records). Lets recall skip the
         # embedding round-trip entirely on scopes with no memories yet.
         self._scope_probe_cache: dict[str, tuple[float, bool]] = {}
@@ -219,12 +265,14 @@ class EngineStorageAdapter(StorageBackend):
         vector = self._embed_query(query)
         if vector is None:
             return []
+        floor = score_threshold if score_threshold is not None else 0.0
         search_kwargs: dict[str, Any] = dict(
-            query_embedding=vector,
-            scope_prefix=scope,
-            limit=limit,
-            min_score=score_threshold if score_threshold is not None else 0.0,
+            query_embedding=vector, scope_prefix=scope, limit=limit
         )
+        if self._backend_takes_min_semantic:
+            search_kwargs["min_semantic"] = floor
+        else:
+            search_kwargs["min_score"] = floor
         if self._backend_takes_query_text:
             search_kwargs["query_text"] = query
         raw = self._backend.search(**search_kwargs)
@@ -247,12 +295,14 @@ class EngineStorageAdapter(StorageBackend):
     def list_records(
         self, scope: str | None = None, limit: int = 100, offset: int = 0
     ) -> list[MemoryRecord]:
-        return self._backend.list_records(
+        result: list[MemoryRecord] = self._backend.list_records(
             scope_prefix=scope, limit=limit, offset=offset
         )
+        return result
 
     def list_scopes(self, path: str = "/") -> list[str]:
-        return self._backend.list_scopes(parent=path)
+        result: list[str] = self._backend.list_scopes(parent=path)
+        return result
 
     def list_categories(self, path: str = "/") -> list[str]:
         categories = self._backend.list_categories(scope_prefix=path)
@@ -261,13 +311,15 @@ class EngineStorageAdapter(StorageBackend):
         return list(categories or [])
 
     def get_scope_info(self, path: str) -> ScopeInfo:
-        return self._backend.get_scope_info(path)
+        result: ScopeInfo = self._backend.get_scope_info(path)
+        return result
 
     def get_record(self, record_id: str) -> MemoryRecord | None:
-        return self._backend.get_record(record_id)
+        result: MemoryRecord | None = self._backend.get_record(record_id)
+        return result
 
     def update(self, record_id: str, **changes: Any) -> MemoryRecord | None:
-        record = self._backend.get_record(record_id)
+        record: MemoryRecord | None = self._backend.get_record(record_id)
         if record is None:
             return None
         for key, value in changes.items():

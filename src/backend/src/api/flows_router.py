@@ -68,7 +68,7 @@ async def generate_flow(
     request: FlowGenerationRequest,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> FlowGenerationResponse:
     """Draft a flow from this teamspace's crews without saving or running it."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can build flows")
@@ -82,7 +82,7 @@ async def generate_flow(
 async def get_all_flows(
     service: Annotated[FlowService, Depends(get_flow_service)],
     group_context: GroupContextDep,
-):
+) -> List[FlowResponse]:
     """
     Retrieve all flows for the current group.
 
@@ -114,7 +114,7 @@ async def get_flow(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to get")],
     service: Annotated[FlowService, Depends(get_flow_service)],
     group_context: GroupContextDep,
-):
+) -> FlowResponse:
     """
     Get a specific flow by ID with group isolation.
 
@@ -147,7 +147,7 @@ async def create_flow(
     flow_in: FlowCreate,
     service: Annotated[FlowService, Depends(get_flow_service)],
     group_context: GroupContextDep,
-):
+) -> FlowResponse:
     """
     Create a new flow with group isolation.
     Only Editors and Admins can create flows.
@@ -181,7 +181,7 @@ async def debug_flow_data(
     flow_in: FlowCreate,
     service: Annotated[FlowService, Depends(get_flow_service)],
     group_context: GroupContextDep,
-):
+) -> Dict:
     """
     Debug endpoint to validate flow data without saving.
 
@@ -202,7 +202,7 @@ async def update_flow(
     flow_in: FlowUpdate,
     service: Annotated[FlowService, Depends(get_flow_service)],
     group_context: GroupContextDep,
-):
+) -> FlowResponse:
     """
     Update a flow with group isolation.
     Only Editors and Admins can update flows.
@@ -235,7 +235,7 @@ async def update_flow(
     )
 
 
-@router.delete("/{flow_id}", status_code=status.HTTP_200_OK)
+@router.delete("/{flow_id}", response_model=None, status_code=status.HTTP_200_OK)
 async def delete_flow(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to delete")],
     service: Annotated[FlowService, Depends(get_flow_service)],
@@ -243,7 +243,7 @@ async def delete_flow(
     force: Annotated[
         bool, Query(title="Force delete and remove associated executions")
     ] = False,
-):
+) -> Dict[str, Any]:
     """
     Delete a flow with group isolation.
     Only Editors and Admins can delete flows.
@@ -281,11 +281,11 @@ async def delete_flow(
         raise
 
 
-@router.delete("", status_code=status.HTTP_200_OK)
+@router.delete("", response_model=None, status_code=status.HTTP_200_OK)
 async def delete_all_flows(
     service: Annotated[FlowService, Depends(get_flow_service)],
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Delete all flows for the current group.
     Only Admins can delete all flows (mirrors delete_all_crews).
@@ -304,7 +304,7 @@ async def delete_all_flows(
     return {"status": "success", "message": "All flows deleted successfully"}
 
 
-def _parse_completed_at(value):
+def _parse_completed_at(value: Any) -> Any:
     """Coerce a stored ISO timestamp to a datetime, tolerating a trailing Z."""
     if not isinstance(value, str):
         return value
@@ -325,7 +325,7 @@ async def get_flow_checkpoints(
     status_filter: Annotated[
         Optional[str], Query(title="Filter by checkpoint status")
     ] = "active",
-):
+) -> CheckpointListResponse:
     """
     Get available checkpoints for a flow.
 
@@ -387,7 +387,11 @@ async def get_flow_checkpoints(
     )
 
 
-@router.delete("/{flow_id}/checkpoints/{execution_id}", status_code=status.HTTP_200_OK)
+@router.delete(
+    "/{flow_id}/checkpoints/{execution_id}",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+)
 async def delete_checkpoint(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow")],
     execution_id: Annotated[
@@ -398,7 +402,7 @@ async def delete_checkpoint(
         ExecutionHistoryService, Depends(get_execution_history_service)
     ],
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Delete/expire a specific checkpoint.
 
@@ -446,7 +450,7 @@ async def publish_flow(
     flow_service: Annotated[FlowService, Depends(get_flow_service)],
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> CrewPublicationResponse:
     """Expose a flow over the listed external protocols.
 
     Idempotent: publishing an already-published flow updates its record.
@@ -475,7 +479,7 @@ async def get_flow_publication(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow")],
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> CrewPublicationResponse:
     """The flow's publication record, or 404 if it is not published."""
     row = await service.repository.find_by_entity(
         entity_type="flow",
@@ -493,7 +497,7 @@ async def update_flow_publication(
     publication: CrewPublicationUpdate,
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> CrewPublicationResponse:
     """Adjust an existing publication. Omitted fields are left alone."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can change a publication")
@@ -511,7 +515,7 @@ async def unpublish_flow(
     flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to unpublish")],
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> None:
     """Withdraw a flow from every external surface."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can unpublish flows")

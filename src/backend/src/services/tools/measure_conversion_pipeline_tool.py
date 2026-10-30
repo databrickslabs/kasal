@@ -4,7 +4,7 @@ Universal converter: Any source (Power BI, Tableau, YAML) → Any target (DAX, S
 """
 
 import logging
-from typing import Any, Dict, Literal, Optional, Type
+from typing import Any, Dict, List, Literal, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -13,6 +13,7 @@ from src.services.converters.base.connectors import ConnectorType
 # Import converters
 from src.services.converters.pipeline import ConversionPipeline, OutboundFormat
 from src.services.tools.base import BaseTool
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +299,7 @@ class MeasureConversionPipelineTool(BaseTool):
         self._pipeline = ConversionPipeline()
 
         logger.info(
-            f"[MeasureConversionPipelineTool.__init__] Instance {instance_id} initialized with config: {default_config}"
+            f"[MeasureConversionPipelineTool.__init__] Instance {instance_id} initialized with config: {mask_sensitive_fields(default_config)}"
         )
 
     def _resolve_parameter(self, value: Any, execution_inputs: Dict[str, Any]) -> Any:
@@ -741,8 +742,7 @@ class MeasureConversionPipelineTool(BaseTool):
             )
 
             if not result["success"]:
-                error_msgs = ", ".join(result["errors"])
-                return f"Error: Conversion failed - {error_msgs}"
+                return f"Error: Conversion failed - {', '.join(result['errors'])}"
 
             # ===== FORMAT OUTPUT =====
             return self._format_output(
@@ -751,6 +751,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 outbound_format=outbound_format,
                 measure_count=result["measure_count"],
                 source_id=inbound_params.get("semantic_model_id", "source"),
+                gaps=result.get("gaps") or [],
             )
 
         except Exception as e:
@@ -793,7 +794,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".yaml", delete=False
                 ) as f:
-                    f.write(yaml_content)
+                    f.write(yaml_content or "")
                     temp_path = f.name
                 print(f"[YAML DEBUG] Wrote YAML to temp file: {temp_path}")
                 definition = parser.parse_file(temp_path)
@@ -818,7 +819,7 @@ class MeasureConversionPipelineTool(BaseTool):
                             "description": dax_measure.description,
                         }
                     )
-                output = measures
+                output: Any = measures
 
             elif outbound_format == "sql":
                 # Use the same pattern as DAX - process each KPI individually
@@ -826,7 +827,7 @@ class MeasureConversionPipelineTool(BaseTool):
 
                 dialect = kwargs.get("sql_dialect", "databricks")
                 sql_dialect = SQLDialect[dialect.upper()]
-                generator = SQLGenerator(dialect=sql_dialect)
+                sql_generator = SQLGenerator(dialect=sql_dialect)
 
                 print(
                     f"[SQL DEBUG] Starting SQL generation for {len(definition.kpis)} KPIs with dialect {dialect}"
@@ -841,7 +842,7 @@ class MeasureConversionPipelineTool(BaseTool):
                         target_dialect=sql_dialect, separate_measures=True
                     )
 
-                    result = generator.generate_sql_from_kbi_definition(
+                    result = sql_generator.generate_sql_from_kbi_definition(
                         definition, options
                     )
                     print(
@@ -894,19 +895,23 @@ class MeasureConversionPipelineTool(BaseTool):
                     output = []
 
             elif outbound_format == "uc_metrics":
-                generator = UCMetricsGenerator()
+                uc_generator = UCMetricsGenerator()
                 metadata = {
                     "name": definition_name or "yaml_measures",
                     "catalog": kwargs.get("uc_catalog", "main"),
                     "schema": kwargs.get("uc_schema", "default"),
                 }
-                uc_metrics = generator.generate_consolidated_uc_metrics(
+                uc_metrics = uc_generator.generate_consolidated_uc_metrics(
                     definition.kpis, metadata
                 )
-                output = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
+                output = uc_generator.format_consolidated_uc_metrics_yaml(uc_metrics)
 
             elif outbound_format == "yaml":
-                output = parser.export_to_yaml(definition)
+                # YAMLKPIParser has no export_to_yaml (YAML export was removed from
+                # the converters); this branch used to fail with an AttributeError.
+                return (
+                    "Error: YAML -> YAML is not supported; use dax, sql or uc_metrics"
+                )
 
             return self._format_output(
                 output=output,
@@ -927,8 +932,13 @@ class MeasureConversionPipelineTool(BaseTool):
         outbound_format: str,
         measure_count: int,
         source_id: str,
+        gaps: Optional[List[Dict[str, str]]] = None,
     ) -> str:
-        """Format output based on target format."""
+        """Format output based on target format.
+
+        ``gaps``: measures that got no SQL. They are listed in the header so a
+        partial conversion never reads as a complete one.
+        """
         source_name = {
             "powerbi": "Power BI",
             "yaml": "YAML",
@@ -944,7 +954,17 @@ class MeasureConversionPipelineTool(BaseTool):
         }.get(outbound_format, outbound_format)
 
         header = f"# {source_name} Measures → {format_name}\n\n"
-        header += f"Converted {measure_count} measures from {source_name} source '{source_id}'\n\n"
+        if gaps:
+            header += (
+                f"**Partial conversion:** {measure_count - len(gaps)} of "
+                f"{measure_count} measures from {source_name} source '{source_id}' "
+                f"were translated. {len(gaps)} gap(s) have no SQL and need a "
+                "manual translation:\n"
+            )
+            header += "".join(f"- {g['name']}: {g['reason']}\n" for g in gaps)
+            header += "\n"
+        else:
+            header += f"Converted {measure_count} measures from {source_name} source '{source_id}'\n\n"
 
         if outbound_format == "dax":
             formatted = header
@@ -988,10 +1008,10 @@ class MeasureConversionPipelineTool(BaseTool):
                     # Dictionary with transpiled SQL (from PowerBI → SQL transpilation path)
                     # Check for dict type OR dict-like behavior (has 'get' but not 'to_sql')
                     measure_name = sql_query.get("name", f"SQL Measure {i+1}")
-                    sql_text = sql_query.get("sql", "")
-                    # Add transpilability info as a comment if available
-                    if not sql_query.get("is_transpilable", True):
-                        sql_text = f"-- WARNING: Not fully transpilable\n{sql_text}"
+                    sql_text = sql_query.get("sql") or ""
+                    if not sql_text or not sql_query.get("is_transpilable", True):
+                        reason = sql_query.get("gap_reason") or "no SQL produced"
+                        sql_text = f"-- GAP: not translated ({reason}). No SQL emitted."
                 elif hasattr(sql_query, "to_sql"):
                     # SQLQuery object with metadata (from direct generator)
                     # Get measure name from the original KBI

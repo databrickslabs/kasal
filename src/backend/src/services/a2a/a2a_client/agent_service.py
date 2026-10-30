@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import ForbiddenError
+from src.core.permissions import is_system_admin
 from src.repositories.a2a_agent_repository import A2AAgentRepository
 from src.schemas.a2a_agent import (
     AUTH_TYPES,
@@ -88,6 +90,7 @@ class A2AAgentService:
         ``enabled``. There is no workspace-scoped create — a remote agent's URL
         and credential are a system-administration concern.
         """
+        self._require_system_admin(group_context)
         self._validate_auth_type(data.auth_type)
 
         if await self.repository.find_base_by_name(data.name):
@@ -125,6 +128,7 @@ class A2AAgentService:
         editing one would leave a workspace silently calling a different remote
         than the catalogue says it is.
         """
+        self._require_system_admin(group_context)
         agent = await self.repository.get(agent_id)
         if not agent or agent.group_id is not None:
             return None
@@ -157,12 +161,13 @@ class A2AAgentService:
             await self._refresh_card(agent, group_context)
         return agent
 
-    async def delete_agent(self, agent_id: int) -> bool:
-        """Remove a base row and every workspace override of it.
+    async def delete_agent(self, agent_id: int, group_context: GroupContext) -> bool:
+        """Remove a base row and every workspace override of it. Kasal admins only.
 
         Leaving the overrides behind would keep the agent callable in workspaces
         that had enabled it, long after the row defining it was gone.
         """
+        self._require_system_admin(group_context)
         agent = await self.repository.get(agent_id)
         if not agent or agent.group_id is not None:
             return False
@@ -172,13 +177,16 @@ class A2AAgentService:
         await self.repository.save()
         return True
 
-    async def set_global_availability(self, agent_id: int, enabled: bool) -> Any:
+    async def set_global_availability(
+        self, agent_id: int, enabled: bool, group_context: GroupContext
+    ) -> Any:
         """Kasal admin: offer a base agent to workspaces, or withdraw it.
 
         Withdrawing cascades — the repository hides workspace overrides of a
         disabled base — so this is the one switch that stops an agent being
         called everywhere at once.
         """
+        self._require_system_admin(group_context)
         agent = await self.repository.get(agent_id)
         if not agent or agent.group_id is not None:
             return None
@@ -314,6 +322,13 @@ class A2AAgentService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not decrypt key for A2A agent %s: %s", agent.id, exc)
             return None
+
+    @staticmethod
+    def _require_system_admin(group_context: GroupContext) -> None:
+        """Base rows are every workspace's agents: system admins only. Checked
+        here as well as at the router, so every caller gets it."""
+        if not is_system_admin(group_context):
+            raise ForbiddenError("Only Kasal admins can manage global remote agents.")
 
     @staticmethod
     def _validate_auth_type(auth_type: str) -> None:

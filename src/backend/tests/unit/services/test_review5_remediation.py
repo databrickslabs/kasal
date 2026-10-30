@@ -116,6 +116,7 @@ async def test_foreign_or_unowned_saved_flow_rejected_even_with_inline_nodes(
 @pytest.mark.asyncio
 async def test_unsaved_canvas_uuid_still_executes(caller):
     runner = FlowRunnerService.__new__(FlowRunnerService)
+    runner.db = None  # the constructor sets it; run_flow resolves "auto" on it
     runner.flow_repo = NS(get=AsyncMock(return_value=None))
     runner.flow_execution_service = NS(
         create_execution=AsyncMock(return_value=NS(id=1))
@@ -173,18 +174,14 @@ async def test_saved_flow_load_authorizes_before_content_is_forwarded(
 async def test_missing_flow_id_never_selects_global_latest(caller):
     service = ExecutionService.__new__(ExecutionService)
     service.session = NS()
-    with (
-        patch.object(FlowService, "get_most_recent_flow", new=AsyncMock()) as latest,
-        patch(
-            "src.services.execution.status.ExecutionStatusService.create_execution",
-            new=AsyncMock(),
-        ) as write,
-    ):
+    with patch(
+        "src.services.execution.status.ExecutionStatusService.create_execution",
+        new=AsyncMock(),
+    ) as write:
         with pytest.raises(BadRequestError, match="Either flow_id or nodes"):
             await service.create_execution(
                 CrewConfig(execution_type="flow"), BackgroundTasks(), caller
             )
-        latest.assert_not_awaited()
         write.assert_not_awaited()
 
 
@@ -385,6 +382,7 @@ async def test_owned_saved_flow_preserves_workspace_through_api_and_runner(calle
         yield session
 
     runner = FlowRunnerService.__new__(FlowRunnerService)
+    runner.db = session
     runner.flow_repo = NS(get=AsyncMock(return_value=flow))
     runner.flow_execution_service = FlowExecutionService(session)
     runner._run_flow_execution = AsyncMock(return_value={"success": True})

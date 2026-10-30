@@ -79,34 +79,17 @@ class MetricViewValidatorTool(BaseTool):
         yaml_raw = _get("yaml_content") or "{}"
         measures_raw = _get("measures_json") or "[]"
 
-        # HIGHEST PRIORITY: check /tmp/ucmv_user_edits.json written by the API
-        # when the user saves edits from the UI. This file is accessible to the
-        # subprocess (shared /tmp in the container) unlike the DB.
+        # Edits the user saved on THIS run (Save, or approving its review gate)
+        # win over the run's raw output. Another run's edits are never read.
         try:
-            _user_edits_path = "/tmp/ucmv_user_edits.json"
-            if os.path.exists(_user_edits_path):
-                with open(_user_edits_path) as _f:
-                    _user_edits = json.load(_f)
-                if isinstance(_user_edits, dict) and "yaml" in _user_edits:
-                    logger.info(
-                        f"[Validator] Found user-saved UCMV edits in {_user_edits_path} — using over flow output"
-                    )
-                    ucmv_raw = json.dumps(_user_edits)
-        except Exception as _ue:
-            logger.debug(f"[Validator] Could not read user edits from /tmp: {_ue}")
-
-        # Also check DB for user-saved edits (works locally, fails in deployed env).
-        # Only try DB if the /tmp user-edits file wasn't found.
-        if not os.path.exists("/tmp/ucmv_user_edits.json"):
-            try:
-                saved = self._fetch_saved_ucmv_edits_from_db()
-                if saved and isinstance(saved, dict) and "yaml" in saved:
-                    logger.info(
-                        "[Validator] Found user-saved UCMV edits in DB — using edited YAML instead of flow-passed output"
-                    )
-                    ucmv_raw = json.dumps(saved)
-            except Exception as _e:
-                logger.debug(f"[Validator] Could not check for saved edits: {_e}")
+            saved = self._fetch_saved_ucmv_edits_from_db()
+            if saved and isinstance(saved, dict) and "yaml" in saved:
+                logger.info(
+                    "[Validator] Found this run's saved UCMV edits — using edited YAML instead of flow-passed output"
+                )
+                ucmv_raw = json.dumps(saved)
+        except Exception as _e:
+            logger.debug("[Validator] Could not check for saved edits: %s", _e)
 
         try:
             # If ucmv_output is provided, extract yaml from it
@@ -136,13 +119,13 @@ class MetricViewValidatorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
-        # Fallback: if no YAML provided, fetch from the latest UCMV Generator execution trace
+        # Fallback: no YAML handed in — read THIS run's UCMV Generator output.
         if not yaml_tables:
             logger.info(
-                "[Validator] No YAML in args — attempting to fetch from latest UCMV execution trace"
+                "[Validator] No YAML in args — fetching this run's UCMV Generator output"
             )
             try:
-                _db_result = self._fetch_latest_ucmv_from_db()
+                _db_result = self._fetch_run_ucmv_from_db()
                 if isinstance(_db_result, dict) and "yaml" in _db_result:
                     # Full UCMV output — extract yaml and keep the rest for validation
                     yaml_tables = _db_result["yaml"]
@@ -156,44 +139,6 @@ class MetricViewValidatorTool(BaseTool):
                     yaml_tables = _db_result
             except Exception as db_err:
                 logger.warning(f"[Validator] DB fallback failed: {db_err}")
-
-        # Fallback: if no measures, fetch from the latest UCMV Generator execution
-        if not measures or measures == []:
-            logger.info(
-                "[Validator] No measures in args — fetching from latest UCMV execution trace"
-            )
-            try:
-                measures = self._fetch_measures_from_db()
-                logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
-            except Exception as db_err:
-                logger.warning(f"[Validator] Measures DB fallback failed: {db_err}")
-
-        # Final fallback: read from /tmp file written by the UCMV Generator tool
-        # (covers the edge case where flow injection into _default_config failed)
-        if not yaml_tables:
-            logger.info(
-                "[Validator] No YAML after DB fallback — checking /tmp for Generator output"
-            )
-            try:
-                import glob as _glob
-
-                _tmp_files = sorted(
-                    _glob.glob("/tmp/ucmv_latest_*.json"),
-                    key=lambda p: os.path.getmtime(p),
-                    reverse=True,
-                )
-                if _tmp_files:
-                    with open(_tmp_files[0]) as _f:
-                        _tmp_data = json.load(_f)
-                    if isinstance(_tmp_data, dict) and "yaml" in _tmp_data:
-                        yaml_tables = _tmp_data["yaml"]
-                        if not ucmv_raw:
-                            ucmv_raw = json.dumps(_tmp_data)
-                        logger.info(
-                            f"[Validator] Loaded UCMV output from {_tmp_files[0]} ({len(yaml_tables)} tables)"
-                        )
-            except Exception as _tmp_err:
-                logger.warning(f"[Validator] /tmp fallback failed: {_tmp_err}")
 
         if not yaml_tables:
             return json.dumps(
@@ -268,8 +213,9 @@ class MetricViewValidatorTool(BaseTool):
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+        # Last: the measures THIS run's UCMV Generator recorded in its trace.
         if not measures or measures == []:
-            logger.info("[Validator] No measures — fetching from latest UCMV execution")
+            logger.info("[Validator] No measures — fetching this run's UCMV output")
             try:
                 measures = self._fetch_measures_from_db()
                 logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
@@ -283,7 +229,7 @@ class MetricViewValidatorTool(BaseTool):
             if table and table != "__unassigned__":
                 table_mapping[table] = "source"
 
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
         total_evaluated = 0
         total_valid = 0
         total_equivalent = 0
@@ -508,13 +454,26 @@ class MetricViewValidatorTool(BaseTool):
         )
         return json.dumps(output, indent=2, default=str)
 
-    @staticmethod
-    def _fetch_measures_from_db() -> list:
-        """Fetch measures from the latest UCMV Generator execution's stats/migration_report."""
+    def _run_scope(self) -> tuple[Optional[str], list[str]]:
+        """This run's job id (trace context) and group (GroupContext).
 
-        async def _query():
-            from src.services.tools.tool_session_provider import ToolSessionProvider
+        Every DB lookup below reads only this run's own rows: another run's
+        generator output or edits, in this workspace or another, are never used.
+        """
+        from src.services.tools.tool_session_provider import ToolSessionProvider
 
+        job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+        return job_id, ToolSessionProvider.run_group_ids()
+
+    def _fetch_measures_from_db(self) -> list:
+        """Measures recorded by THIS run's UCMV Generator, or an empty list."""
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        job_id, group_ids = self._run_scope()
+        if not job_id or not group_ids:
+            return []
+
+        async def _query() -> list:
             async with ToolSessionProvider.session() as session:
                 # The UCMV tool output contains the full result with yaml/sql/stats
                 # The stats section has per-table measure info, but we need the raw
@@ -523,7 +482,9 @@ class MetricViewValidatorTool(BaseTool):
 
                 raw = await ExecutionTraceService(
                     session
-                ).latest_output_for_span_prefix("UC Metric View Generator")
+                ).latest_output_for_span_prefix(
+                    "UC Metric View Generator", group_ids=group_ids, job_id=job_id
+                )
                 if not raw:
                     return []
                 data = json.loads(raw)
@@ -533,14 +494,15 @@ class MetricViewValidatorTool(BaseTool):
                     return []
                 # PREFERRED: resolved_measures_by_table (fact-table-keyed, with DAX)
                 if inner.get("resolved_measures_by_table"):
-                    flat = []
+                    flat: list = []
                     for _rows in inner["resolved_measures_by_table"].values():
                         flat.extend(_rows)
                     if flat:
                         return flat
                 # Fallback: measures_with_dax (raw, holder-table-keyed)
                 if "measures_with_dax" in inner and inner["measures_with_dax"]:
-                    return inner["measures_with_dax"]
+                    with_dax: list = inner["measures_with_dax"]
+                    return with_dax
                 return []
 
         import time
@@ -548,12 +510,12 @@ class MetricViewValidatorTool(BaseTool):
         from src.services.tools.async_bridge import run_sync_with_context
         from src.utils.asyncio_utils import create_and_run_loop
 
-        def _run_with_retry():
+        def _run_with_retry() -> list:
             """Retry up to 5x to handle the race condition where the UCMV
             Generator's DB write hasn't committed yet when the validator starts."""
             for attempt in range(5):
                 try:
-                    result = create_and_run_loop(_query())
+                    result: list = create_and_run_loop(_query())
                     if result:  # _query returns a (possibly empty) list of measures
                         return result
                     if attempt < 4:
@@ -574,64 +536,75 @@ class MetricViewValidatorTool(BaseTool):
         except Exception:
             return []
 
-    @staticmethod
-    def _fetch_saved_ucmv_edits_from_db() -> dict:
+    def _fetch_saved_ucmv_edits_from_db(self) -> dict:
+        """The UCMV edits a user saved on THIS run, or an empty dict.
+
+        Read from the run's own row (``checkpoint_data.ucmv_yaml_edits``, written
+        by the result Save and by approving the run's review gate), found by the
+        run's job id and only if that run is in the run's own group. A run with
+        no job id or no group context reads nothing.
         """
-        Check executionhistory for the most recent UCMV Generator result that has
-        user-saved edits (stored in checkpoint_data.edited_config or result field).
+        from src.services.tools.tool_session_provider import ToolSessionProvider
 
-        Returns the edited UCMV result dict if found, otherwise empty dict.
-        """
+        job_id, group_ids = self._run_scope()
+        if not job_id or not group_ids:
+            return {}
 
-        async def _query():
-            from src.services.tools.tool_session_provider import ToolSessionProvider
-
-            async with ToolSessionProvider.session() as session:
-                # Look for the dedicated UCMV yaml edits key written by the
-                # save button in the UI (separate from Config Generator's
-                # edited_config to avoid collisions in a multi-step flow).
-                from src.services.execution.service import ExecutionService
-
-                cp = await ExecutionService(session).latest_checkpoint_containing(
-                    "ucmv_yaml_edits"
-                )
-                if cp:
-                    try:
-                        edits = cp.get("ucmv_yaml_edits", {})
-                        if isinstance(edits, dict) and "yaml" in edits:
-                            logger.info(
-                                "[Validator] Using user-edited UCMV YAML from checkpoint_data.ucmv_yaml_edits"
-                            )
-                            return edits
-                    except Exception:
-                        pass
-                return {}
+        async def _query() -> dict:
+            async with ToolSessionProvider.execution_history_service() as history:
+                edits = await history.saved_ucmv_edits(job_id, group_ids=group_ids)
+            return edits if isinstance(edits, dict) and "yaml" in edits else {}
 
         from src.services.tools.async_bridge import run_sync_with_context
         from src.utils.asyncio_utils import create_and_run_loop
 
         try:
-            return run_sync_with_context(
+            saved: dict = run_sync_with_context(
                 lambda: create_and_run_loop(_query()), timeout=15
             )
+            return saved
         except Exception:
             return {}
 
+    def _fetch_run_ucmv_from_db(self) -> dict:
+        """THIS run's UCMV Generator output, for a flow whose injection missed it.
+
+        The validator never falls back to another run's output: no job id, nothing.
+        """
+        job_id, _ = self._run_scope()
+        return self._fetch_latest_ucmv_from_db(job_id) if job_id else {}
+
     @staticmethod
-    def _fetch_latest_ucmv_from_db() -> dict:
-        """Fetch YAML from the latest UCMV Generator execution trace in the DB."""
+    def _fetch_latest_ucmv_from_db(
+        job_id: Optional[str] = None, attempts: int = 5
+    ) -> dict:
+        """The latest UCMV Generator output in this workspace (YAML and all).
 
-        async def _query():
-            from src.services.tools.tool_session_provider import ToolSessionProvider
+        With ``job_id``, from that run only (the validator's own lookup). The
+        Genie config generator and visual mapper call it without one, to run
+        standalone after an earlier UCMV run in the same workspace.
 
+        ``attempts`` bounds the retries (3s apart) that wait for a generator's
+        write to commit. The Genie config generator and visual mapper pass 1
+        for their own-run lookup: a flow's crews share its job id, so a run's
+        own output is there on the first read or not at all.
+        """
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        group_ids = ToolSessionProvider.run_group_ids()
+        if not group_ids:
+            return {}
+
+        async def _query() -> dict:
             async with ToolSessionProvider.session() as session:
-                from src.services.execution.service import ExecutionService
                 from src.services.trace.service import ExecutionTraceService
 
-                # Strategy 1: the latest UCMV Generator run span.
+                # Strategy 1: the latest UCMV Generator span (of run job_id, if set).
                 raw = await ExecutionTraceService(
                     session
-                ).latest_output_for_span_prefix("UC Metric View Generator")
+                ).latest_output_for_span_prefix(
+                    "UC Metric View Generator", group_ids=group_ids, job_id=job_id
+                )
                 if raw:
                     try:
                         data = json.loads(raw)
@@ -647,10 +620,11 @@ class MetricViewValidatorTool(BaseTool):
                     except Exception:
                         pass
 
-                # Strategy 2: the latest run whose result carries a full UCMV payload
-                # (written by the safety-net status update after the queue-drain fix).
-                inner2 = await ExecutionService(session).latest_result_with_keys(
-                    ["yaml", "sql", "stats"]
+            # Strategy 2: the latest result (of run job_id) with a full UCMV payload
+            # (written by the safety-net status update after the queue-drain fix).
+            async with ToolSessionProvider.execution_history_service() as history:
+                inner2 = await history.latest_result_with_keys(
+                    ["yaml", "sql", "stats"], group_ids=group_ids, job_id=job_id
                 )
                 if inner2:
                     try:
@@ -672,21 +646,22 @@ class MetricViewValidatorTool(BaseTool):
 
         from src.utils.asyncio_utils import create_and_run_loop
 
-        for attempt in range(5):
+        for attempt in range(attempts):
+            last = attempt == attempts - 1
             try:
-                result = create_and_run_loop(_query())
+                result: Optional[dict] = create_and_run_loop(_query())
                 if result and isinstance(result, dict) and "yaml" in result:
                     logger.info(
                         f"[Validator] Found UCMV YAML in DB (attempt {attempt + 1})"
                     )
                     return result
-                if attempt < 4:
+                if not last:
                     logger.info(
-                        f"[Validator] UCMV not in DB yet (attempt {attempt+1}/5), retrying in 3s..."
+                        f"[Validator] UCMV not in DB yet (attempt {attempt+1}/{attempts}), retrying in 3s..."
                     )
                     time.sleep(3)
             except Exception as e:
                 logger.warning(f"[Validator] DB query attempt {attempt+1} failed: {e}")
-                if attempt < 4:
+                if not last:
                     time.sleep(2)
         return {}

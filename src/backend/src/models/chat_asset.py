@@ -10,30 +10,38 @@ else, with no dependency on app-local disk.
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import Column, DateTime, Integer, LargeBinary, String
+from sqlalchemy import DateTime, Integer, LargeBinary, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
 class ChatAsset(Base):
     __tablename__ = "chat_assets"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    group_id = Column(String(100), nullable=True, index=True)
-    created_by_email = Column(String(255), nullable=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    created_by_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     #: The chat session it was attached in — for listing and cleanup.
-    session_id = Column(String(255), nullable=True, index=True)
-    name = Column(String(255), nullable=False)
-    mime = Column(String(100), nullable=False)
-    size = Column(Integer, nullable=False)
+    session_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
     #: Pixel dimensions, reported by the uploader (the browser measures them);
     #: what the prompt tells the model so it can size the image in a layout.
-    width = Column(Integer, nullable=True)
-    height = Column(Integer, nullable=True)
-    data = Column(LargeBinary, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )

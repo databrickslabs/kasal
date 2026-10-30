@@ -15,15 +15,17 @@ The output JSON keys match the GenieSpaceGeneratorTool schema fields so they
 are automatically injected by the flow engine into the next crew step.
 """
 
-import asyncio
 import json
 import logging
 import re
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -94,30 +96,18 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain AuthContext synchronously."""
-        import concurrent.futures
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        from src.utils.databricks_auth import get_auth_context
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
+        """
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        def _run_in_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        return resolve_tool_auth(host_override)
 
     # ──────────────────────────────────────────────────────────────────────────
     # UCMV parsing helpers
@@ -195,7 +185,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
         from src.services.tools.async_bridge import run_async_with_context
         from src.utils.telemetry import KasalProduct, get_user_agent_header
 
-        async def _run():
+        async def _run() -> str:
             return await LLMManager.completion(
                 messages=[
                     {
@@ -260,13 +250,15 @@ Rules:
         text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
         text = text.strip()
         try:
-            return json.loads(text)
+            parsed: dict = json.loads(text)
+            return parsed
         except json.JSONDecodeError:
             # Try to extract JSON object
             match = re.search(r"\{[\s\S]+\}", text)
             if match:
                 try:
-                    return json.loads(match.group())
+                    extracted: dict = json.loads(match.group())
+                    return extracted
                 except Exception:
                     pass
         return {}
@@ -275,8 +267,8 @@ Rules:
     # Main _run
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _run(self, **kwargs: Any) -> str:  # noqa: C901
-        def _get(key):
+    def _run(self, **kwargs: Any) -> str:
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val
@@ -315,18 +307,35 @@ Rules:
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get("ucmv_output")
         if not ucmv_raw:
-            # DB fallback (same as the UCMV Validator): allows running the
-            # Genie-space flow standalone after a previous UCMV Generator run.
+            # DB fallback: this run's own UCMV Generator output first, in one
+            # read (a flow's crews share its job id). Only a run with none of
+            # its own (the Genie-space flow run standalone after an earlier
+            # UCMV run) takes the latest in the teamspace.
             try:
                 from src.services.tools.metric_view_validator_tool import (
                     MetricViewValidatorTool,
                 )
 
-                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+                latest = (
+                    MetricViewValidatorTool._fetch_latest_ucmv_from_db(
+                        job_id, attempts=1
+                    )
+                    if job_id
+                    else {}
+                )
                 if isinstance(latest, dict) and latest.get("yaml"):
                     logger.info(
-                        "[GenieConfigGen] ucmv_output not injected — using latest UCMV Generator output from DB"
+                        "[GenieConfigGen] ucmv_output not injected — using this run's UCMV Generator output from DB"
                     )
+                else:
+                    latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                    if isinstance(latest, dict) and latest.get("yaml"):
+                        logger.info(
+                            "[GenieConfigGen] ucmv_output not injected and run %s has no UCMV output of its own — using the latest UCMV Generator output in this teamspace",
+                            job_id,
+                        )
+                if isinstance(latest, dict) and latest.get("yaml"):
                     ucmv_raw = json.dumps(latest)
             except Exception as e:
                 logger.warning(
@@ -402,17 +411,6 @@ Rules:
                         }
                     )
 
-        # Dimension tables from joins — exclude any that look like sanitised UCMV table names
-        # (those are already embedded in the metric view definition, not extra tables)
-        real_dim_tables = [
-            t
-            for t in dim_tables
-            if not any(
-                skip in t
-                for skip in ["dc_datalake_prod_001__", "udm_cchbc", "udm_datamart"]
-            )
-        ]
-
         output = {
             # Connection params
             "space_title": space_title,
@@ -425,7 +423,8 @@ Rules:
             "example_sqls_json": generated.get("example_sqls_json", "[]"),
             # Structural content derived from UCMVs
             "join_specs_json": json.dumps(join_specs) if join_specs else "[]",
-            "additional_tables": "\n".join(real_dim_tables) if real_dim_tables else "",
+            # Every table the metric views join to, so Genie can query it too.
+            "additional_tables": "\n".join(dim_tables) if dim_tables else "",
             # Pass ucmv_output through so the Genie Space Generator knows
             # which metric views to add to the space
             "ucmv_output": ucmv_raw,

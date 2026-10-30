@@ -14,19 +14,24 @@ and is enforced by
 """
 
 import uuid
-from typing import Generic, List, Optional, Type, TypeVar, Union
+from typing import Any, Generic, List, Optional, Type, TypeVar, Union, cast
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypeVar as DefaultedTypeVar
 
 from src.db.base import Base
 
 # Define generic type for models
 ModelType = TypeVar("ModelType", bound=Base)
-IdType = Union[int, uuid.UUID]  # Support both int and UUID primary keys
+IdType = Union[int, str, uuid.UUID]  # int, string and UUID primary keys all occur
+# The primary-key type of one repository's model. A repository whose model has a
+# `str` key declares `BaseRepository[Model, str]`; the default accepts any key.
+IdT = DefaultedTypeVar("IdT", default=IdType)
 
 
-class BaseRepository(Generic[ModelType]):
+class BaseRepository(Generic[ModelType, IdT]):
     """
     Base class for all repositories implementing common CRUD operations.
     """
@@ -42,7 +47,7 @@ class BaseRepository(Generic[ModelType]):
         self.model = model
         self.session = session
 
-    async def get(self, id: IdType) -> Optional[ModelType]:
+    async def get(self, id: IdT) -> Optional[ModelType]:
         """
         Get a single record by ID.
 
@@ -94,7 +99,10 @@ class BaseRepository(Generic[ModelType]):
         logger = logging.getLogger(__name__)
 
         try:
-            logger.debug(f"Creating new {self.model.__name__} with data: {obj_in}")
+            # Field names only: values can carry credentials (tool configs).
+            logger.debug(
+                "Creating new %s with fields: %s", self.model.__name__, sorted(obj_in)
+            )
             db_obj = self.model(**obj_in)
             self.session.add(db_obj)
 
@@ -168,7 +176,7 @@ class BaseRepository(Generic[ModelType]):
             await self.session.rollback()
             raise
 
-    async def update(self, id: IdType, obj_in: dict) -> Optional[ModelType]:
+    async def update(self, id: IdT, obj_in: dict) -> Optional[ModelType]:
         """
         Update an existing record.
 
@@ -195,7 +203,10 @@ class BaseRepository(Generic[ModelType]):
                 return None
 
             logger.debug(
-                f"Found {self.model.__name__} with ID {id}, updating with: {obj_in}"
+                "Found %s with ID %s, updating fields: %s",
+                self.model.__name__,
+                id,
+                sorted(obj_in),
             )
 
             # Use SQLAlchemy's update statement instead of ORM-style updates
@@ -222,7 +233,7 @@ class BaseRepository(Generic[ModelType]):
             await self.session.rollback()
             raise
 
-    async def delete(self, id: IdType) -> bool:
+    async def delete(self, id: IdT) -> bool:
         """
         Delete a record by ID.
 
@@ -250,7 +261,8 @@ class BaseRepository(Generic[ModelType]):
                 from sqlalchemy import delete as sql_delete
 
                 stmt = sql_delete(self.model).where(self.model.id == id)
-                result = await self.session.execute(stmt)
+                # A DML statement returns a CursorResult (typed as plain Result).
+                result = cast(CursorResult[Any], await self.session.execute(stmt))
                 logger.info(
                     f"[BASE REPO DELETE] Executed SQL DELETE for {self.model.__name__} ID={id}, rows affected: {result.rowcount}"
                 )

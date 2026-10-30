@@ -19,12 +19,10 @@ from src.services.otel_tracing.event_bridge import OTelEventBridge
 from src.services.otel_tracing.mlflow_exporter import KasalMLflowSpanExporter
 from src.services.otel_tracing.otel_config import (
     create_kasal_tracer_provider,
-    is_otel_tracing_enabled,
     shutdown_provider,
 )
 
 __all__ = [
-    "is_otel_tracing_enabled",
     "create_kasal_tracer_provider",
     "shutdown_provider",
     "OTelEventBridge",

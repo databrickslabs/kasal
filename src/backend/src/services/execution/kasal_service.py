@@ -9,20 +9,31 @@ import asyncio
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.services.catalog.agents import AgentService
+from src.services.catalog.run_lookup import (
+    agent_for_run,
+    require_run_workspace,
+    task_for_run,
+)
 from src.services.catalog.tasks import TaskService
 
 # Sync flow repository removed - use async FlowRepository instead
 from src.services.execution.engine_factory import EngineFactory
 from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
+
+if TYPE_CHECKING:
+    from src.services.execution.engine_service import KasalEngineService
 
 #: Per-agent LLM overrides stored on the agent row. NULL = inherit the model.
 _AGENT_LLM_OVERRIDE_FIELDS = (
@@ -40,7 +51,7 @@ crew_logger = LoggerManager.get_instance().crew
 _active_tasks = set()
 
 # Global in-memory storage of executions
-executions = {}
+executions: Dict[str, Dict[str, Any]] = {}
 
 
 class JobStatus(Enum):
@@ -57,7 +68,7 @@ class JobStatus(Enum):
 class KasalExecutionService:
     """Service for managing CrewAI executions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the service.
         """
@@ -67,8 +78,8 @@ class KasalExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         Prepare and run a crew execution.
@@ -82,10 +93,10 @@ class KasalExecutionService:
             Dictionary with execution results
         """
         try:
-            # Execution is already created with RUNNING status, just log the progress
-            crew_logger.info(
-                f"Starting crew execution {execution_id} (already has RUNNING status)"
-            )
+            # No workspace is not a legitimate run: FAIL it (except below) rather
+            # than run it with the catalog's settings and approval gates left out.
+            require_run_workspace(group_context)
+            crew_logger.info("Starting crew execution %s", execution_id)
 
             # Log the configuration inputs
             if config.inputs:
@@ -147,50 +158,31 @@ class KasalExecutionService:
                                         f"  Knowledge source {idx}: {source}"
                                     )
 
-                            # Try to fetch the agent from database to get tool_configs.
-                            # ID FIRST: the YAML key embeds the DB UUID
-                            # (agent_<uuid>), so the id lookup virtually always
-                            # hits. The old name-first order was a guaranteed
-                            # miss (find_by_name is exact-equality and YAML has
-                            # no 'name' key, so the role sentence was used),
-                            # doubling DB round trips for every agent.
+                            # Fill in from the stored agent (tool_configs, LLM
+                            # overrides). The YAML key embeds the DB id
+                            # (agent_<uuid>). The id is the caller's, so the read
+                            # is group-checked; a miss (absent, or another
+                            # workspace's) skips the fill-in and the run goes on
+                            # with the payload. There is no name fallback: a
+                            # name is not unique across workspaces.
                             db_agent = None
                             db_agent_id = agent_config.get(
                                 "id", agent_config.get("db_id", agent_id)
                             )
-                            # Strip the 'agent_' prefix if it exists (common in YAML keys)
-                            if db_agent_id.startswith("agent_"):
-                                db_agent_id = db_agent_id[6:]  # Remove 'agent_' prefix
-                            # Also strip 'agent-' prefix if it still exists
-                            if db_agent_id.startswith("agent-"):
-                                db_agent_id = db_agent_id[6:]  # Remove 'agent-' prefix
-                            crew_logger.info(
-                                f"Attempting to fetch agent by ID: {db_agent_id}"
-                            )
+                            db_agent_id = db_agent_id.removeprefix(
+                                "agent_"
+                            ).removeprefix("agent-")
                             try:
-                                db_agent = await agent_service.get(db_agent_id)
+                                db_agent = await agent_for_run(
+                                    agent_service,
+                                    db_agent_id,
+                                    group_context,
+                                    crew_logger,
+                                )
                             except Exception as e:
                                 crew_logger.debug(
                                     f"Could not fetch agent by ID {db_agent_id}: {e}"
                                 )
-
-                            # Fall back to name/role lookup only when the id missed
-                            if not db_agent:
-                                agent_name = agent_config.get(
-                                    "name", agent_config.get("role", "")
-                                )
-                                if agent_name:
-                                    crew_logger.info(
-                                        f"Attempting to fetch agent by name: {agent_name}"
-                                    )
-                                    try:
-                                        db_agent = await agent_service.find_by_name(
-                                            agent_name
-                                        )
-                                    except Exception as e:
-                                        crew_logger.debug(
-                                            f"Could not fetch agent by name {agent_name}: {e}"
-                                        )
 
                             try:
                                 if db_agent:
@@ -220,7 +212,7 @@ class KasalExecutionService:
                                     )
                                     if hasattr(db_agent, "tool_configs"):
                                         crew_logger.info(
-                                            f"Agent tool_configs value from DB: {db_agent.tool_configs}"
+                                            f"Agent tool_configs value from DB: {mask_sensitive_fields(db_agent.tool_configs)}"
                                         )
                                         # The payload wins when it CARRIES tool_configs, {} included: the canvas
                                         # sends {} for a node whose MCP servers were removed, and reading the
@@ -230,11 +222,11 @@ class KasalExecutionService:
                                                 db_agent.tool_configs or {}
                                             )
                                             crew_logger.info(
-                                                f"Using tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}"
+                                                f"Using tool_configs from database for agent {agent_id}: {sorted(agent_config['tool_configs'] or {})}"
                                             )
                                         else:
                                             crew_logger.info(
-                                                f"Keeping tool_configs from YAML for agent {agent_id}: {agent_config['tool_configs']}"
+                                                f"Keeping tool_configs from YAML for agent {agent_id}: {sorted(agent_config['tool_configs'] or {})}"
                                             )
                                     else:
                                         crew_logger.warning(
@@ -242,10 +234,6 @@ class KasalExecutionService:
                                         )
                                         if "tool_configs" not in agent_config:
                                             agent_config["tool_configs"] = {}
-                                else:
-                                    crew_logger.warning(
-                                        f"Agent {agent_id} not found in database"
-                                    )
                             except Exception as e:
                                 crew_logger.debug(
                                     f"Could not fetch agent {agent_id} from database: {e}"
@@ -287,49 +275,25 @@ class KasalExecutionService:
                             if "id" not in task_config:
                                 task_config["id"] = task_id
 
-                            # Try to fetch the task from database to get tool_configs.
-                            # ID FIRST: the YAML key embeds the DB UUID
-                            # (task_<uuid>), so the id lookup virtually always
-                            # hits — the old name-first order missed every time
-                            # (exact-equality match against the multi-sentence
-                            # description) and doubled DB round trips per task.
+                            # Same rule as agents: the stored task (by the id in
+                            # its task_<uuid> key) fills in tool_configs only
+                            # from the run's workspace, with no name fallback;
+                            # a miss leaves the payload as it is.
                             db_task = None
                             db_task_id = task_config.get(
                                 "id", task_config.get("db_id", task_id)
                             )
-                            # Strip the 'task_' prefix if it exists (common in YAML keys)
-                            if db_task_id.startswith("task_"):
-                                db_task_id = db_task_id[5:]  # Remove 'task_' prefix
-                            # Also strip 'task-' prefix if it still exists
-                            if db_task_id.startswith("task-"):
-                                db_task_id = db_task_id[5:]  # Remove 'task-' prefix
-                            crew_logger.info(
-                                f"Attempting to fetch task by ID: {db_task_id}"
+                            db_task_id = db_task_id.removeprefix("task_").removeprefix(
+                                "task-"
                             )
                             try:
-                                db_task = await task_service.get(db_task_id)
+                                db_task = await task_for_run(
+                                    task_service, db_task_id, group_context, crew_logger
+                                )
                             except Exception as e:
                                 crew_logger.debug(
                                     f"Could not fetch task by ID {db_task_id}: {e}"
                                 )
-
-                            # Fall back to name lookup only when the id missed
-                            if not db_task:
-                                task_name = task_config.get(
-                                    "name", task_config.get("description", "")
-                                )
-                                if task_name:
-                                    crew_logger.info(
-                                        f"Attempting to fetch task by name: {task_name}"
-                                    )
-                                    try:
-                                        db_task = await task_service.find_by_name(
-                                            task_name
-                                        )
-                                    except Exception as e:
-                                        crew_logger.debug(
-                                            f"Could not fetch task by name {task_name}: {e}"
-                                        )
 
                             try:
                                 if db_task:
@@ -342,7 +306,7 @@ class KasalExecutionService:
                                     )
                                     if hasattr(db_task, "tool_configs"):
                                         crew_logger.info(
-                                            f"Task tool_configs value from DB: {db_task.tool_configs}"
+                                            f"Task tool_configs value from DB: {mask_sensitive_fields(db_task.tool_configs)}"
                                         )
                                         # Same rule as agents: an explicit {} is a decision, not an omission.
                                         if task_config.get("tool_configs") is None:
@@ -350,11 +314,11 @@ class KasalExecutionService:
                                                 db_task.tool_configs or {}
                                             )
                                             crew_logger.info(
-                                                f"Using tool_configs from database for task {task_id}: {task_config['tool_configs']}"
+                                                f"Using tool_configs from database for task {task_id}: {sorted(task_config['tool_configs'] or {})}"
                                             )
                                         else:
                                             crew_logger.info(
-                                                f"Keeping tool_configs from YAML for task {task_id}: {task_config['tool_configs']}"
+                                                f"Keeping tool_configs from YAML for task {task_id}: {sorted(task_config['tool_configs'] or {})}"
                                             )
                                     else:
                                         crew_logger.warning(
@@ -367,10 +331,6 @@ class KasalExecutionService:
                                     # The frontend controls whether llm_guardrail is active via
                                     # the user's toggle. If enabled, it's sent in tasks_yaml.
                                     # The DB stores it as a suggestion for the UI only.
-                                else:
-                                    crew_logger.warning(
-                                        f"Task {task_id} not found in database"
-                                    )
                             except Exception as e:
                                 crew_logger.debug(
                                     f"Could not fetch task {task_id} from database: {e}"
@@ -523,8 +483,8 @@ class KasalExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """Thin service-layer delegate for the "chat" (light) single-agent path.
 
@@ -571,7 +531,7 @@ class KasalExecutionService:
             session=session,
         )
 
-    async def _prepare_engine(self, config: CrewConfig) -> Any:
+    async def _prepare_engine(self, config: CrewConfig) -> "KasalEngineService":
         """
         Prepare the engine for execution.
 
@@ -595,8 +555,8 @@ class KasalExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -630,7 +590,7 @@ class KasalExecutionService:
         executions[execution_id] = {
             "task": task,
             "status": ExecutionStatus.PENDING.value,
-            "created_at": datetime.now(),
+            "created_at": datetime.utcnow(),
         }
 
         # Return immediate response
@@ -655,7 +615,10 @@ class KasalExecutionService:
 
     @staticmethod
     def add_execution_to_memory(
-        execution_id: str, status: str, run_name: str, created_at: datetime = None
+        execution_id: str,
+        status: str,
+        run_name: str,
+        created_at: Optional[datetime] = None,
     ) -> None:
         """
         Add execution to in-memory storage.
@@ -670,7 +633,7 @@ class KasalExecutionService:
             "execution_id": execution_id,
             "status": status,
             "run_name": run_name,
-            "created_at": created_at or datetime.now(),
+            "created_at": created_at or datetime.utcnow(),
         }
 
     async def update_execution_status(
@@ -745,7 +708,7 @@ class KasalExecutionService:
         # Cancel execution through engine
         return await engine.cancel_execution(execution_id)
 
-    async def get_execution_status(self, execution_id: str) -> Dict[str, Any]:
+    async def get_execution_status(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """
         Get the status of an execution.
 
@@ -788,7 +751,7 @@ class KasalExecutionService:
         edges: Optional[List[Dict[str, Any]]] = None,
         job_id: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """
         Run a flow execution with the provided configuration.

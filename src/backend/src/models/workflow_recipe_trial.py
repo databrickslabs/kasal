@@ -25,7 +25,11 @@ recognition, or never run at all.
 Everything here is descriptive. Nothing in this table claims a recipe is good.
 """
 
-from sqlalchemy import JSON, Column, DateTime, Float, Index, Integer, String, Text
+from datetime import datetime
+from typing import Any, Optional
+
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from src.db.base import Base
@@ -46,45 +50,51 @@ class WorkflowRecipeTrial(Base):
 
     __tablename__ = "workflow_recipe_trials"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
-    group_id = Column(String(100), index=True, nullable=True)
-    group_email = Column(String(255), nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    group_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # --- The request -------------------------------------------------------
     # The prompt is kept truncated: this is a measurement ledger, not a second
     # copy of the user's input, and llmlog already stores the full prompt.
-    prompt_hash = Column(String(64), index=True, nullable=False)
-    prompt_text = Column(Text, nullable=True)
+    prompt_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    prompt_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # --- What retrieval found ---------------------------------------------
     # Full candidate list with scores, so a disappointing report can be
     # diagnosed (was the threshold wrong, or was nothing curated?) without
     # re-running retrieval against a library that has since changed.
-    candidates = Column(JSON, nullable=False, default=list)
-    candidate_count = Column(Integer, nullable=False, default=0)
-    blessed_count = Column(Integer, nullable=False, default=0)
-    best_similarity = Column(Float, nullable=True)
+    candidates: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blessed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    best_similarity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # --- What was done with it --------------------------------------------
-    arm = Column(String(16), index=True, nullable=False)
-    injected_recipe_ids = Column(JSON, nullable=False, default=list)
+    arm: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    injected_recipe_ids: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
 
     # --- What came out -----------------------------------------------------
-    agent_ids = Column(JSON, nullable=False, default=list)
-    task_ids = Column(JSON, nullable=False, default=list)
-    agent_count = Column(Integer, nullable=True)
-    task_count = Column(Integer, nullable=True)
+    agent_ids: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    task_ids: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    agent_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    task_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # --- How the resulting run went (filled by the linker, often never) -----
-    linked_job_id = Column(String(255), index=True, nullable=True)
-    linked_at = Column(DateTime, nullable=True)
-    outcome_status = Column(String(32), nullable=True)
-    outcome_duration_ms = Column(Integer, nullable=True)
-    outcome_error_spans = Column(Integer, nullable=True)
-    outcome_tool_calls = Column(Integer, nullable=True)
+    linked_job_id: Mapped[Optional[str]] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    outcome_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    outcome_duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    outcome_error_spans: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    outcome_tool_calls: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    created_at = Column(DateTime, default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=func.now(), nullable=False
+    )
 
     __table_args__ = (
         # The report groups by (group, arm) over a time window, and the linker

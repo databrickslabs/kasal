@@ -35,7 +35,7 @@ class KasalProduct:
     MCP = "mcp"
     LAKEBASE = "lakebase"
     MLFLOW = "mlflow"
-    SECRET = "secret"
+    SECRET = "secret"  # product tag — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
     # LLM call types (for distinguishing agent vs guardrail vs generation calls)
     AGENT = "agent"
@@ -61,6 +61,8 @@ class KasalProduct:
     # Model serving
     AGENTBRICKS = "agentbricks"
     DEPLOYMENT = "deployment"
+    #: The decision model (Jev) on the Databricks AI Gateway.
+    DECISIONS = "decisions"
 
     # Storage
     VOLUME = "volume"
@@ -73,7 +75,7 @@ class KasalProduct:
     SKILL = "skill"
 
 
-def get_user_agent(product: str = None) -> str:
+def get_user_agent(product: Optional[str] = None) -> str:
     """
     Generate User-Agent string for Databricks REST API calls.
 
@@ -94,7 +96,7 @@ def get_user_agent(product: str = None) -> str:
     return f"{KASAL_BASE}/{VERSION}"
 
 
-def get_user_agent_header(product: str = None) -> dict:
+def get_user_agent_header(product: Optional[str] = None) -> dict:
     """
     Get User-Agent as a header dictionary for REST API calls.
 
@@ -224,7 +226,7 @@ async def send_logfood_telemetry(
         logger.warning(f"Failed to send logfood telemetry: {str(e)}")
 
 
-def _extract_token(token_value: str) -> str:
+def _extract_token(token_value: Optional[str]) -> str:
     """Extract access token from either plain token or JSON format."""
     if not token_value:
         return ""
@@ -236,7 +238,8 @@ def _extract_token(token_value: str) -> str:
             import json
 
             token_data = json.loads(token_value)
-            return token_data.get("access_token", token_value)
+            token: str = token_data.get("access_token", token_value)
+            return token
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -247,8 +250,8 @@ def send_logfood_telemetry_sync(
     usage: Dict[str, Any],
     model: str,
     product_context: str,
-    workspace_url: str,
-    token: str,
+    workspace_url: Optional[str],
+    token: Optional[str],
     execution_id: Optional[str] = None,
 ) -> None:
     """
@@ -268,8 +271,8 @@ def send_logfood_telemetry_sync(
         # Extract actual token if it's in JSON format (Databricks CLI format)
         actual_token = _extract_token(token)
 
-        if not actual_token:
-            logger.debug("No valid token found, skipping telemetry")
+        if not actual_token or not workspace_url:
+            logger.debug("No valid token or workspace URL, skipping telemetry")
             return
 
         # Generate execution ID if not provided
@@ -293,7 +296,7 @@ def send_logfood_telemetry_sync(
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", 0)
 
-        response = requests.get(telemetry_url, headers=telemetry_headers, timeout=5)
+        response = requests.get(telemetry_url, headers=telemetry_headers, timeout=5)  # fmt: skip  # the run's own workspace host — nosemgrep: tmp.databricks.ssrf.requests-user-url
 
         if response.status_code == 200:
             logger.info(

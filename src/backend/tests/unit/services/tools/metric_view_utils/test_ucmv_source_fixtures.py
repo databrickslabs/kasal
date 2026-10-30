@@ -65,7 +65,7 @@ FROM(
          ELSE 2
     END AS Classification_ID
 from
-  `dc_datalake_prod_001`.`udm_datamart_cust_exp`.`cust_exp_drivers_nps_contribution`
+  `acme_prod`.`acme_datamart_cust_exp`.`cust_exp_drivers_nps_contribution`
 WHERE
   lower(touchpoint) like 'relationship' and
   secondary_drivers in (

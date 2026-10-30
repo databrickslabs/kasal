@@ -1,5 +1,8 @@
 """The decks router: one endpoint, revising one slide."""
 
+from unittest.mock import AsyncMock
+
+import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
@@ -9,6 +12,9 @@ from src.core.exceptions import KasalError
 from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.services.decks.slide_refine import SlideRefineService
 from src.utils.user_context import GroupContext
+
+#: The request session. SessionDep commits it before replying, so it is awaitable.
+SESSION = AsyncMock(name="SESSION")
 
 
 def _client(monkeypatch, refine):
@@ -27,7 +33,7 @@ def _client(monkeypatch, refine):
     )
 
     async def session():
-        yield "SESSION"
+        yield SESSION
 
     app.dependency_overrides[get_smart_db_session] = session
     monkeypatch.setattr(SlideRefineService, "refine", staticmethod(refine))
@@ -65,7 +71,7 @@ def test_refine_slide_passes_the_edit_through_and_returns_the_section(monkeypatc
     assert (
         seen["mode"] == "refine"
         and seen["instruction"] == "bigger"
-        and seen["session"] == "SESSION"
+        and seen["session"] is SESSION
     )
     assert seen["position"] == "2 of 8" and seen["model"] == "k"
 
@@ -93,19 +99,79 @@ def test_an_oversized_slide_is_rejected_by_the_schema(monkeypatch):
 
 def test_start_slide_edit_returns_run_id_and_forwards_capabilities(monkeypatch):
     from unittest.mock import AsyncMock
+
     from src.services.decks import agent_refine
 
     start = AsyncMock(return_value={"job_id": "agent-run"})
     monkeypatch.setattr(agent_refine, "start_slide_refinement", start)
     client = _client(monkeypatch, AsyncMock())
-    response = client.post("/decks/slides/refine/start", json={
-        "mode": "refine", "instruction": "Search online", "slide": "current",
-        "mcp_servers": ["browser"], "agentbricks_endpoints": ["researcher"],
-    })
+    response = client.post(
+        "/decks/slides/refine/start",
+        json={
+            "mode": "refine",
+            "instruction": "Search online",
+            "slide": "current",
+            "mcp_servers": ["browser"],
+            "agentbricks_endpoints": ["researcher"],
+        },
+    )
     assert response.status_code == 200
     assert response.json() == {"job_id": "agent-run"}
     body, session, context = start.call_args.args
     assert body.mcp_servers == ["browser"]
     assert body.agentbricks_endpoints == ["researcher"]
-    assert session == "SESSION"
+    # An older client sends no effort: the run keeps the model's own settings.
+    assert body.execution_effort is None
+    assert session is SESSION
     assert context.group_ids == ["g1"]
+
+
+def test_start_slide_edit_forwards_a_validated_effort(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from src.core.llm.effort import EffortSettings
+    from src.services.decks import agent_refine
+
+    start = AsyncMock(return_value={"job_id": "agent-run"})
+    monkeypatch.setattr(agent_refine, "start_slide_refinement", start)
+    response = _client(monkeypatch, AsyncMock()).post(
+        "/decks/slides/refine/start",
+        json={
+            "mode": "refine",
+            "instruction": "Tighten",
+            "slide": "current",
+            "execution_effort": {"tier": "high", "max_iter": 12},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = start.call_args.args[0]
+    assert body.execution_effort == EffortSettings(tier="high", max_iter=12)
+
+
+@pytest.mark.parametrize(
+    "effort",
+    [
+        {"tier": "ultra"},
+        {"tier": "low", "max_iter": 0},
+        {"tier": "high", "budget": 5},
+        "high",
+    ],
+)
+def test_an_invalid_effort_is_rejected_by_the_schema(monkeypatch, effort):
+    from unittest.mock import AsyncMock
+
+    from src.services.decks import agent_refine
+
+    start = AsyncMock(return_value={"job_id": "agent-run"})
+    monkeypatch.setattr(agent_refine, "start_slide_refinement", start)
+    response = _client(monkeypatch, AsyncMock()).post(
+        "/decks/slides/refine/start",
+        json={
+            "mode": "refine",
+            "instruction": "x",
+            "slide": "s",
+            "execution_effort": effort,
+        },
+    )
+    assert response.status_code == 422
+    start.assert_not_awaited()

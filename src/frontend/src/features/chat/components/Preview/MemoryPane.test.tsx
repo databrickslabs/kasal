@@ -130,4 +130,68 @@ describe('MemoryPane', () => {
     render(<MemoryPane runId="job-1" />);
     expect(screen.getByText(/Could not load memory: boom/)).toBeInTheDocument();
   });
+
+  describe('on a teamspace that stores a fact graph', () => {
+    const entities = [
+      { id: 'user', name: 'user', type: 'person' },
+      { id: 'acme', name: 'Acme', type: 'organization' },
+    ];
+    const works = {
+      id: 'f1',
+      subject_id: 'user',
+      subject: 'user',
+      relation: 'works_at',
+      object_id: 'acme',
+      object: 'Acme',
+      statement: 'The user works at Acme.',
+    };
+
+    it("shows the run's facts instead of records", () => {
+      withRecords([], { graph: { entities, facts: [works] } });
+      render(<MemoryPane runId="run-1" />);
+      const stats = within(screen.getByTestId('memory-stats'));
+      expect(stats.getByText('Facts')).toBeInTheDocument();
+      expect(stats.getByText('Entities')).toBeInTheDocument();
+      expect(screen.getByText('The user works at Acme.')).toBeInTheDocument();
+      expect(screen.getByText('works at')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Records' })).not.toBeInTheDocument();
+    });
+
+    it('explains an empty run instead of promising records', () => {
+      withRecords([], { graph: { entities, facts: [] } });
+      render(<MemoryPane runId="run-1" />);
+      expect(screen.getByText(/Nothing saved by this run/)).toBeInTheDocument();
+    });
+
+    it('shows a run note for a run that produced something', () => {
+      const note = {
+        id: 'n1',
+        subject_id: 'user',
+        subject: 'user',
+        relation: 'run_note',
+        object: 'Gathered a Swiss news roundup.',
+        statement: '13 Oct 2026: Gathered a Swiss news roundup.',
+      };
+      withRecords([], { graph: { entities, facts: [note] } });
+      render(<MemoryPane runId="run-1" />);
+      expect(within(screen.getByTestId('memory-stats')).getByText('Run notes')).toBeInTheDocument();
+      expect(screen.getByText('13 Oct 2026: Gathered a Swiss news roundup.')).toBeInTheDocument();
+      expect(screen.getByText('run note')).toBeInTheDocument();
+    });
+
+    it('labels what a run found and what always applies', () => {
+      const found = { ...works, id: 'f2', kind: 'finding' as const, statement: 'Acme made USD 4.2 bn.' };
+      const standing = { ...works, id: 'f3', kind: 'procedural' as const, statement: 'Answer in tables.' };
+      withRecords([], { graph: { entities, facts: [works, found, standing] } });
+      render(<MemoryPane runId="run-1" />);
+      expect(screen.getByText('found by a run')).toBeInTheDocument();
+      expect(screen.getByText('always applied')).toBeInTheDocument();
+    });
+
+    it('keeps the record view for a run that predates the switch', () => {
+      withRecords([rec('a', ['browser'])], { graph: { entities, facts: [] } });
+      render(<MemoryPane runId="run-1" />);
+      expect(within(screen.getByTestId('memory-stats')).getByText('Records')).toBeInTheDocument();
+    });
+  });
 });

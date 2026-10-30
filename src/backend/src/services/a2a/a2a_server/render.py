@@ -5,7 +5,7 @@ adapter works in canonical terms, so there is one table to check when the spec
 moves — not a scattering of string literals.
 """
 
-from typing import Optional
+from typing import List, Optional, Union
 
 from src.schemas.a2a import Artifact, Message, Part, Task, TaskStatus
 from src.services.external.artifacts import Artifact as CanonicalArtifact
@@ -133,7 +133,7 @@ def to_stream_events(frame: dict) -> list:
             taskId=frame["run_id"],
         )
 
-    events = [
+    events: List[Union[TaskStatusUpdateEvent, TaskArtifactUpdateEvent]] = [
         TaskStatusUpdateEvent(
             taskId=frame["run_id"], status=status, final=is_terminal(state)
         )

@@ -5,7 +5,6 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 """
 
 import asyncio
-import os
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
@@ -84,10 +83,10 @@ class CrewPreparation:
     def __init__(
         self,
         config: Dict[str, Any],
-        tool_service=None,
-        tool_factory=None,
+        tool_service: Any = None,
+        tool_factory: Any = None,
         user_token: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the CrewPreparation class
 
@@ -118,26 +117,8 @@ class CrewPreparation:
         logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
         if "memory_backend_config" in config:
             logger.info(
-                f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}"
+                f"[CrewPreparation.__init__] Memory backend config found, keys: {sorted(config['memory_backend_config'] or {})}"
             )
-
-    def _should_disable_memory_for_agent(self, agent_config: Dict[str, Any]) -> bool:
-        """
-        Check if memory is explicitly disabled for an agent.
-
-        Args:
-            agent_config: Agent configuration dictionary
-
-        Returns:
-            True if memory is explicitly set to False in the agent config
-        """
-        # Only check if memory is explicitly disabled in agent config
-        if "memory" in agent_config and agent_config["memory"] is False:
-            logger.info(
-                f"Memory explicitly disabled for agent {agent_config.get('name', agent_config.get('role', 'Unknown'))}"
-            )
-            return True
-        return False
 
     async def prepare(self) -> bool:
         """
@@ -1057,8 +1038,7 @@ class CrewPreparation:
                     )
             logger.info("=" * 80)
 
-            # 13. Handle OpenAI API key
-            await self._handle_openai_api_key()
+            # 13. No provider key goes into os.environ (LLMManager passes each).
 
             # 14. Create crew instance with error handling
             # NOTE: knowledge_sources no longer used - we use DatabricksKnowledgeSearchTool instead
@@ -1160,27 +1140,6 @@ class CrewPreparation:
         except Exception as e:
             handle_crew_error(e, "Error creating crew")
             return False
-
-    async def _handle_openai_api_key(self) -> None:
-        """Handle OpenAI API key configuration"""
-        try:
-            from src.services.settings.api_keys import ApiKeysService
-
-            # SECURITY: Get group_id from config for multi-tenant isolation
-            group_id = self.config.get("group_id")
-            openai_key = await ApiKeysService.get_provider_api_key(
-                "openai", group_id=group_id
-            )
-            if openai_key:
-                os.environ["OPENAI_API_KEY"] = openai_key
-                logger.info("OpenAI API key is configured, keeping it for CrewAI")
-            else:
-                os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
-                logger.info(
-                    "No OpenAI API key configured, set dummy key for CrewAI validation"
-                )
-        except Exception as e:
-            logger.warning(f"Error handling OpenAI API key: {e}")
 
     async def execute(self) -> Dict[str, Any]:
         """
@@ -1323,7 +1282,7 @@ class CrewPreparation:
             logger.error(f"[CrewPreparation] Error looking up Kasal agent UUID: {e}")
             return None
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Cleanup method to restore original environment settings.
         This should be called when done with the crew to restore the original storage directory.

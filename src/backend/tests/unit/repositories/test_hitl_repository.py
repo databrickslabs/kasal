@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.hitl_approval import (
     HITLApprovalStatus,
-    HITLRejectionAction,
     HITLTimeoutAction,
 )
 from src.repositories.hitl_repository import (
@@ -336,80 +335,6 @@ class TestHITLApprovalRepositoryGetById:
             await repository.get_by_id(1)
 
 
-class TestHITLApprovalRepositoryGetPendingForExecution:
-    """Test cases for get_pending_for_execution method."""
-
-    @pytest.mark.asyncio
-    async def test_get_pending_for_execution_success(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test successful retrieval of pending approval for execution."""
-        sample_approval.status = HITLApprovalStatus.PENDING
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.get_pending_for_execution("exec-123")
-
-        assert result == sample_approval
-        assert result.status == HITLApprovalStatus.PENDING
-        mock_async_session.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_get_pending_for_execution_not_found(
-        self, hitl_approval_repository, mock_async_session
-    ):
-        """Test retrieval when no pending approval exists."""
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.get_pending_for_execution(
-            "exec-nonexistent"
-        )
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_pending_for_execution_with_group_filter(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test retrieval with group_id filtering."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.get_pending_for_execution(
-            "exec-123", group_id="test-group"
-        )
-
-        assert result == sample_approval
-
-    @pytest.mark.asyncio
-    async def test_get_pending_for_execution_returns_latest(
-        self, hitl_approval_repository, mock_async_session
-    ):
-        """Test that latest pending approval is returned (ordered by created_at desc)."""
-        MockHITLApproval(
-            id=1, created_at=datetime.now(timezone.utc) - timedelta(hours=2)
-        )
-        newer_approval = MockHITLApproval(id=2, created_at=datetime.now(timezone.utc))
-        # Mocking returns first result which should be newest due to ordering
-        mock_result = MockResult([newer_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.get_pending_for_execution("exec-123")
-
-        assert result.id == 2
-
-    @pytest.mark.asyncio
-    async def test_get_pending_for_execution_without_session_raises_error(self):
-        """Test get_pending_for_execution raises RuntimeError without session."""
-        repository = HITLApprovalRepository(session=None)
-
-        with pytest.raises(
-            RuntimeError, match="HITLApprovalRepository requires a session"
-        ):
-            await repository.get_pending_for_execution("exec-123")
-
-
 class TestHITLApprovalRepositoryGetPendingForGroup:
     """Test cases for get_pending_for_group method."""
 
@@ -560,80 +485,9 @@ class TestHITLApprovalRepositoryGetAllForExecution:
 
 
 class TestHITLApprovalRepositoryUpdateStatus:
-    """Test cases for update_status method."""
-
-    @pytest.mark.asyncio
-    async def test_update_status_to_approved(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test successful status update to approved."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.update_status(
-            1,
-            HITLApprovalStatus.APPROVED,
-            responded_by="user@example.com",
-            approval_comment="Looks good!",
-        )
-
-        assert result is True
-        assert sample_approval.status == HITLApprovalStatus.APPROVED
-        assert sample_approval.responded_by == "user@example.com"
-        assert sample_approval.approval_comment == "Looks good!"
-        assert sample_approval.responded_at is not None
-        mock_async_session.flush.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_update_status_to_rejected(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test successful status update to rejected."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.update_status(
-            1,
-            HITLApprovalStatus.REJECTED,
-            responded_by="reviewer@example.com",
-            rejection_reason="Quality not sufficient",
-            rejection_action=HITLRejectionAction.RETRY,
-        )
-
-        assert result is True
-        assert sample_approval.status == HITLApprovalStatus.REJECTED
-        assert sample_approval.rejection_reason == "Quality not sufficient"
-        assert sample_approval.rejection_action == HITLRejectionAction.RETRY
-
-    @pytest.mark.asyncio
-    async def test_update_status_to_timeout(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test successful status update to timeout."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.update_status(
-            1, HITLApprovalStatus.TIMEOUT
-        )
-
-        assert result is True
-        assert sample_approval.status == HITLApprovalStatus.TIMEOUT
-
-    @pytest.mark.asyncio
-    async def test_update_status_not_found(
-        self, hitl_approval_repository, mock_async_session
-    ):
-        """Test status update when approval not found."""
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.update_status(
-            999, HITLApprovalStatus.APPROVED
-        )
-
-        assert result is False
-        mock_async_session.flush.assert_not_called()
+    """update_status is a conditional UPDATE, so it is tested against real
+    SQLite in test_hitl_repository_decisions.py; a mocked session would accept
+    the statement whether or not it has its WHERE clause."""
 
     @pytest.mark.asyncio
     async def test_update_status_without_session_raises_error(self):
@@ -644,22 +498,6 @@ class TestHITLApprovalRepositoryUpdateStatus:
             RuntimeError, match="HITLApprovalRepository requires a session"
         ):
             await repository.update_status(1, HITLApprovalStatus.APPROVED)
-
-    @pytest.mark.asyncio
-    async def test_update_status_sets_responded_at(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test that responded_at is set when status is updated."""
-        sample_approval.responded_at = None
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        before_update = datetime.now(timezone.utc)
-        await hitl_approval_repository.update_status(1, HITLApprovalStatus.APPROVED)
-        after_update = datetime.now(timezone.utc)
-
-        assert sample_approval.responded_at is not None
-        assert before_update <= sample_approval.responded_at <= after_update
 
 
 class TestHITLApprovalRepositoryGetExpiredPending:
@@ -1201,25 +1039,6 @@ class TestHITLApprovalRepositoryEdgeCases:
         mock_async_session.add.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_update_status_partial_fields(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test status update with only some optional fields."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await hitl_approval_repository.update_status(
-            1,
-            HITLApprovalStatus.APPROVED,
-            responded_by="user@example.com",
-            # No approval_comment
-        )
-
-        assert result is True
-        assert sample_approval.responded_by == "user@example.com"
-        assert sample_approval.approval_comment is None
-
-    @pytest.mark.asyncio
     async def test_get_pending_for_group_with_max_limit(
         self, hitl_approval_repository, mock_async_session
     ):
@@ -1231,19 +1050,6 @@ class TestHITLApprovalRepositoryEdgeCases:
         )
 
         assert total == 100
-
-    @pytest.mark.asyncio
-    async def test_concurrent_status_updates(
-        self, hitl_approval_repository, mock_async_session, sample_approval
-    ):
-        """Test that concurrent updates are handled by flush."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-
-        # Simulate concurrent update
-        await hitl_approval_repository.update_status(1, HITLApprovalStatus.APPROVED)
-
-        mock_async_session.flush.assert_called_once()
 
 
 class TestHITLWebhookRepositoryEdgeCases:
@@ -1435,9 +1241,7 @@ class TestHITLRepositoryDatabaseErrors:
         self, hitl_approval_repository, mock_async_session, sample_approval
     ):
         """Test handling of database error during status update."""
-        mock_result = MockResult([sample_approval])
-        mock_async_session.execute.return_value = mock_result
-        mock_async_session.flush.side_effect = Exception("Constraint violation")
+        mock_async_session.execute.side_effect = Exception("Constraint violation")
 
         with pytest.raises(Exception, match="Constraint violation"):
             await hitl_approval_repository.update_status(1, HITLApprovalStatus.APPROVED)

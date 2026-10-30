@@ -12,6 +12,7 @@ adapter too, so they live below all three:
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -62,3 +63,44 @@ def says_the_same(left: str, right: str, threshold: float) -> bool:
         return False
     union = len(a | b)
     return bool(union) and len(a & b) / union >= threshold
+
+
+def readable_output(text: str) -> str:
+    """A run's output made readable for extraction, when it is JSON.
+
+    Tools — an MCP server, a Genie space, an API — often return JSON, and an
+    agent may hand it back as its answer. Read as text, most of it is ids, nulls
+    and escape sequences (``\\n``, ``\\u00e9``), and the substance — a
+    ``final_answer`` holding a results table — starts late. Rendered as
+    ``key: value`` lines with empty values dropped and nested JSON strings
+    opened, the same content is shorter and says what it says. Nothing here
+    knows any tool's field names. Anything that is not JSON is returned as is.
+    """
+    stripped = (text or "").strip()
+    if not stripped or stripped[0] not in "{[":
+        return text
+    try:
+        data = json.loads(stripped)
+    except ValueError:
+        return text
+    lines: list[str] = []
+
+    def walk(value: object, path: str) -> None:
+        if value is None or value == "" or value == [] or value == {}:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                walk(item, f"{path}.{key}" if path else str(key))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(item, f"{path}[{index}]")
+        elif isinstance(value, str) and value.strip()[:1] in ("{", "["):
+            try:
+                walk(json.loads(value), path)
+            except ValueError:
+                lines.append(f"{path}: {value}")
+        else:
+            lines.append(f"{path}: {value}" if path else str(value))
+
+    walk(data, "")
+    return "\n".join(lines) or text

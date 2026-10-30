@@ -59,6 +59,12 @@ class BrokenService(BaseService):
         raise ValueError("Service initialization failed")
 
 
+@pytest.fixture(autouse=True)
+def _outside_databricks_apps(monkeypatch):
+    """These tests cover the non-Apps (oauth2-proxy) header precedence."""
+    monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+
+
 @pytest.fixture
 def mock_request():
     """Create a mock FastAPI request."""
@@ -283,21 +289,16 @@ class TestGetGroupContext:
 
     @pytest.mark.asyncio
     async def test_get_group_context_no_email(self, mock_request):
-        """Test group context when no email headers are provided."""
-        # Ensure request.state has no _group_context_cache so cache logic is bypassed
+        """No identity header: refuse with 401 rather than an empty context."""
+        from src.core.exceptions import UnauthorizedError
+
         mock_request.state = MagicMock(spec=[])
 
         with patch(
-            "src.dependencies.providers.GroupContext"
-        ) as mock_group_context_class:
-            mock_empty_context = MagicMock(spec=GroupContext)
-            mock_group_context_class.return_value = mock_empty_context
-
-            # Mock settings import inside the function to avoid admin@admin.com fallback
-            with patch("src.config.settings.settings") as mock_settings:
-                mock_settings.DEBUG_MODE = False
-
-                result = await get_group_context(
+            "src.utils.user_context.GroupContext.from_email",
+        ) as mock_from_email:
+            with pytest.raises(UnauthorizedError):
+                await get_group_context(
                     request=mock_request,
                     x_forwarded_email=None,
                     x_forwarded_access_token=None,
@@ -307,10 +308,7 @@ class TestGetGroupContext:
                     x_group_id=None,
                     x_group_domain=None,
                 )
-
-                # Verify empty context is returned
-                mock_group_context_class.assert_called_once_with()
-                assert result == mock_empty_context
+            mock_from_email.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_group_context_with_partial_headers(self, mock_request):

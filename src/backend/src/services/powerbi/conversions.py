@@ -6,13 +6,21 @@ Orchestrates conversion repositories and integrates with KPI conversion infrastr
 
 import logging
 import uuid
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import (
     BadRequestError,
     ForbiddenError,
     NotFoundError,
     UnauthorizedError,
+)
+from src.core.permissions import is_system_admin
+from src.models.conversion import (
+    ConversionHistory,
+    ConversionJob,
+    SavedConverterConfiguration,
 )
 from src.repositories.conversion_repository import (
     ConversionHistoryRepository,
@@ -49,7 +57,9 @@ class ConverterService:
     Integrates with existing KPI conversion infrastructure.
     """
 
-    def __init__(self, session, group_context: Optional[GroupContext] = None):
+    def __init__(
+        self, session: AsyncSession, group_context: Optional[GroupContext] = None
+    ) -> None:
         """
         Initialize service with session and group context.
 
@@ -64,6 +74,71 @@ class ConverterService:
         self.history_repo = ConversionHistoryRepository(session)
         self.job_repo = ConversionJobRepository(session)
         self.config_repo = SavedConverterConfigurationRepository(session)
+
+    # ===== TENANT SCOPING =====
+    #
+    # Every by-id read and write is filtered by the caller's groups (audit H1):
+    # history and config ids are sequential integers, so an unscoped lookup is
+    # an enumerable cross-tenant read/tamper. No group context means no access.
+
+    def _group_ids(self) -> List[str]:
+        if not self.group_context or not self.group_context.group_ids:
+            return []
+        return [g for g in self.group_context.group_ids if g]
+
+    def _primary_group_id(self) -> Optional[str]:
+        return self.group_context.primary_group_id if self.group_context else None
+
+    async def _get_history_or_404(self, history_id: int) -> ConversionHistory:
+        history = await self.history_repo.get_for_groups(history_id, self._group_ids())
+        if not history:
+            raise NotFoundError(detail=f"Conversion history {history_id} not found")
+        return history
+
+    async def _get_job_or_404(self, job_id: str) -> ConversionJob:
+        job = await self.job_repo.get_for_groups(job_id, self._group_ids())
+        if not job:
+            raise NotFoundError(detail=f"Conversion job {job_id} not found")
+        return job
+
+    async def _get_visible_config_or_404(
+        self, config_id: int
+    ) -> SavedConverterConfiguration:
+        """A template, or a config in the caller's group that is public or theirs."""
+        config = await self.config_repo.get_visible_to_groups(
+            config_id, self._group_ids()
+        )
+        email = self.group_context.group_email if self.group_context else None
+        visible = config is not None and (
+            config.is_template
+            or config.is_public
+            or (email and config.created_by_email == email)
+        )
+        if config is None or not visible:
+            raise NotFoundError(detail=f"Configuration {config_id} not found")
+        return config
+
+    async def _get_owned_config(
+        self, config_id: int, action: str
+    ) -> SavedConverterConfiguration:
+        """The caller's own config (in one of their groups), for update/delete."""
+        config = await self._get_visible_config_or_404(config_id)
+        email = self.group_context.group_email if self.group_context else None
+        if not email or config.created_by_email != email:
+            raise ForbiddenError(
+                detail=f"Not authorized to {action} this configuration"
+            )
+        if config.is_template:
+            self._require_system_admin_for_template(action)
+        return config
+
+    def _require_system_admin_for_template(self, action: str) -> None:
+        """A template is visible to EVERY tenant (audit N2): system admins only."""
+        context = self.group_context
+        if context is None or is_system_admin(context) is not True:
+            raise ForbiddenError(
+                detail=f"Only system administrators can {action} a template configuration"
+            )
 
     # ===== CONVERSION HISTORY METHODS =====
 
@@ -102,11 +177,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
-        history = await self.history_repo.get(history_id)
-        if not history:
-            raise NotFoundError(
-                detail=f"Conversion history {history_id} not found",
-            )
+        history = await self._get_history_or_404(history_id)
         return ConversionHistoryResponse.model_validate(history)
 
     async def update_history(
@@ -125,11 +196,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
-        history = await self.history_repo.get(history_id)
-        if not history:
-            raise NotFoundError(
-                detail=f"Conversion history {history_id} not found",
-            )
+        await self._get_history_or_404(history_id)
 
         updated = await self.history_repo.update(
             history_id, update_data.model_dump(exclude_unset=True)
@@ -150,13 +217,14 @@ class ConverterService:
         """
         filter_params = filter_params or ConversionHistoryFilter()
 
-        # Get group ID from context
-        group_id = self.group_context.primary_group_id if self.group_context else None
+        group_id = self._primary_group_id()
 
         # Apply filters
-        if filter_params.execution_id:
+        if not group_id:
+            history_list = []  # no tenant, no rows (repos treat None as "all")
+        elif filter_params.execution_id:
             history_list = await self.history_repo.find_by_execution_id(
-                filter_params.execution_id
+                filter_params.execution_id, group_id=group_id
             )
         elif filter_params.source_format and filter_params.target_format:
             history_list = await self.history_repo.find_by_formats(
@@ -197,7 +265,17 @@ class ConverterService:
         Returns:
             Conversion statistics
         """
-        group_id = self.group_context.primary_group_id if self.group_context else None
+        group_id = self._primary_group_id()
+        if not group_id:
+            return ConversionStatistics(
+                total_conversions=0,
+                successful=0,
+                failed=0,
+                success_rate=0,
+                average_execution_time_ms=0,
+                popular_conversions=[],
+                period_days=days,
+            )
         stats = await self.history_repo.get_statistics(group_id=group_id, days=days)
         return ConversionStatistics(**stats)
 
@@ -241,11 +319,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
-        job = await self.job_repo.get(job_id)
-        if not job:
-            raise NotFoundError(
-                detail=f"Conversion job {job_id} not found",
-            )
+        job = await self._get_job_or_404(job_id)
         return ConversionJobResponse.model_validate(job)
 
     async def update_job(
@@ -264,11 +338,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
-        job = await self.job_repo.get(job_id)
-        if not job:
-            raise NotFoundError(
-                detail=f"Conversion job {job_id} not found",
-            )
+        await self._get_job_or_404(job_id)
 
         updated = await self.job_repo.update(
             job_id, update_data.model_dump(exclude_unset=True)
@@ -291,6 +361,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
+        await self._get_job_or_404(job_id)
         updated = await self.job_repo.update_status(
             job_id,
             status=status_update.status,
@@ -318,9 +389,11 @@ class ConverterService:
         Returns:
             List of conversion jobs
         """
-        group_id = self.group_context.primary_group_id if self.group_context else None
+        group_id = self._primary_group_id()
 
-        if status:
+        if not group_id:
+            jobs = []  # no tenant, no rows (repos treat None as "all")
+        elif status:
             jobs = await self.job_repo.find_by_status(
                 status=status, group_id=group_id, limit=limit
             )
@@ -346,6 +419,10 @@ class ConverterService:
         Raises:
             BadRequestError: If not found or not cancellable
         """
+        if not await self.job_repo.get_for_groups(job_id, self._group_ids()):
+            raise BadRequestError(
+                detail=f"Job {job_id} not found or cannot be cancelled",
+            )
         cancelled = await self.job_repo.cancel_job(job_id)
 
         if not cancelled:
@@ -378,6 +455,9 @@ class ConverterService:
                 detail="Authentication required to save configurations",
             )
 
+        if config_data.is_template:
+            self._require_system_admin_for_template("create")
+
         # Add group context
         config_dict = config_data.model_dump()
         config_dict["group_id"] = self.group_context.primary_group_id
@@ -400,11 +480,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
-        config = await self.config_repo.get(config_id)
-        if not config:
-            raise NotFoundError(
-                detail=f"Configuration {config_id} not found",
-            )
+        config = await self._get_visible_config_or_404(config_id)
         return SavedConfigurationResponse.model_validate(config)
 
     async def update_saved_config(
@@ -424,20 +500,7 @@ class ConverterService:
             NotFoundError: If not found
             ForbiddenError: If not authorized
         """
-        config = await self.config_repo.get(config_id)
-        if not config:
-            raise NotFoundError(
-                detail=f"Configuration {config_id} not found",
-            )
-
-        # Check ownership (unless admin)
-        if (
-            self.group_context
-            and config.created_by_email != self.group_context.group_email
-        ):
-            raise ForbiddenError(
-                detail="Not authorized to update this configuration",
-            )
+        await self._get_owned_config(config_id, "update")
 
         updated = await self.config_repo.update(
             config_id, update_data.model_dump(exclude_unset=True)
@@ -458,20 +521,7 @@ class ConverterService:
             NotFoundError: If not found
             ForbiddenError: If not authorized
         """
-        config = await self.config_repo.get(config_id)
-        if not config:
-            raise NotFoundError(
-                detail=f"Configuration {config_id} not found",
-            )
-
-        # Check ownership (unless admin)
-        if (
-            self.group_context
-            and config.created_by_email != self.group_context.group_email
-        ):
-            raise ForbiddenError(
-                detail="Not authorized to delete this configuration",
-            )
+        await self._get_owned_config(config_id, "delete")
 
         await self.config_repo.delete(config_id)
         return {"message": f"Configuration {config_id} deleted successfully"}
@@ -490,12 +540,14 @@ class ConverterService:
         """
         filter_params = filter_params or SavedConfigurationFilter()
 
-        group_id = self.group_context.primary_group_id if self.group_context else None
+        group_id = self._primary_group_id()
         user_email = self.group_context.group_email if self.group_context else None
 
         # Apply filters
         if filter_params.is_template:
             configs = await self.config_repo.find_templates()
+        elif not group_id:
+            configs = []  # no tenant, no rows (repos treat None as "all")
         elif filter_params.is_public:
             configs = await self.config_repo.find_public(group_id=group_id)
         elif filter_params.source_format and filter_params.target_format:
@@ -542,6 +594,7 @@ class ConverterService:
         Raises:
             NotFoundError: If not found
         """
+        await self._get_visible_config_or_404(config_id)
         updated = await self.config_repo.increment_use_count(config_id)
 
         if not updated:
@@ -550,3 +603,35 @@ class ConverterService:
             )
 
         return SavedConfigurationResponse.model_validate(updated)
+
+    # ===== TEMPLATE REVIEW (read-only) =====
+
+    async def list_templates_created_by_non_admins(
+        self,
+    ) -> List[SavedConverterConfiguration]:
+        """Template configs whose creator is not a system administrator.
+
+        A template is visible to every tenant. Creating one has required a system
+        admin since the N2 fix, but rows a workspace user created before it are
+        still templates. This lists them for review; it changes nothing. See
+        ``scripts/maintenance/list_unreviewed_powerbi_templates.py``.
+
+        Callable by a system admin, or with no group context by an operator
+        entry point (the maintenance script), which already has database access.
+        """
+        if (
+            self.group_context is not None
+            and is_system_admin(self.group_context) is not True
+        ):
+            raise ForbiddenError(
+                detail="Only system administrators can review template configurations"
+            )
+        from src.services.groups.users import UserService
+
+        admins = await UserService(self.session).get_system_admin_emails()
+        templates = await self.config_repo.find_templates()
+        return [
+            config
+            for config in templates
+            if (config.created_by_email or "").strip().lower() not in admins
+        ]

@@ -13,15 +13,18 @@ Supports three authentication methods:
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
 # Thread pool for running sync operations in async context
 _AUTH_EXECUTOR = ThreadPoolExecutor(max_workers=3)
+_T = TypeVar("_T")
 
 
-def _run_sync_in_thread(func, *args, **kwargs):
+def _run_sync_in_thread(
+    func: Callable[..., _T], *args: Any, **kwargs: Any
+) -> "asyncio.Future[_T]":
     """Run a synchronous function in a thread pool."""
     loop = asyncio.get_event_loop()
     return loop.run_in_executor(_AUTH_EXECUTOR, lambda: func(*args, **kwargs))
@@ -165,7 +168,8 @@ async def get_fabric_access_token(
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(url, data=data)
         response.raise_for_status()
-        return response.json()["access_token"]
+        access_token: str = response.json()["access_token"]
+        return access_token
 
 
 async def get_fabric_access_token_from_config(config: Dict[str, Any]) -> str:

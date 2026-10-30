@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, List, Optional
+from collections.abc import Sequence
+from typing import Dict, List, Optional, Union
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,11 +9,6 @@ from src.core.exceptions import ConflictError
 from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
 from src.schemas.crew import CrewCreate, CrewUpdate
-from src.utils.sensitive_data_utils import (
-    decrypt_sensitive_fields,
-    encrypt_sensitive_fields,
-    safe_log_tool_configs,
-)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -22,8 +18,10 @@ class CrewService:
     """
     Service for Crew model with business logic.
 
-    Security: This service handles encryption/decryption of sensitive fields
-    in tool_configs to protect credentials stored in the database.
+    Security: ``crews.tool_configs`` and ``crews.nodes`` are ``SensitiveJSON``
+    columns, so the credentials in them are encrypted on every write and
+    decrypted on load. This service works with plaintext and must never encrypt
+    or decrypt them itself.
     """
 
     def __init__(self, session: AsyncSession):
@@ -35,98 +33,6 @@ class CrewService:
         """
         self.session = session
         self.repository = CrewRepository(session)
-
-    def _decrypt_crew_tool_configs(self, crew: Optional[Crew]) -> Optional[Crew]:
-        """
-        Decrypt sensitive fields in crew's tool_configs after retrieval.
-
-        SYNC on purpose — it is called from 13 places, several of them right after a
-        write. That makes plain attribute access unsafe: if the ORM considers the
-        instance EXPIRED, ``crew.tool_configs`` is not a dict read but a lazy
-        refresh, i.e. database IO from a sync frame. On the deployed app that
-        raised, and every crew save returned 500:
-
-            POST /api/v1/crews  500
-            greenlet_spawn has not been called; can't call await_only() here
-              crews.py:50  if crew and crew.tool_configs:
-              sqlalchemy/orm/attributes.py  state._load_expired(...)
-
-        ``expire_on_commit=False`` is set on every sessionmaker here, so expiry is
-        not coming from a commit — which is exactly why this reads the attribute
-        DEFENSIVELY rather than chasing whichever operation expired it. Asking the
-        instance's own state first means the outcome no longer depends on knowing
-        that.
-
-        A loaded value is decrypted as before. An unloaded one is left alone: the
-        caller gets the crew with its stored (encrypted) value rather than a 500,
-        and decryption is a display convenience, not a correctness requirement.
-
-        Args:
-            crew: Crew with potentially encrypted tool_configs
-
-        Returns:
-            Crew with decrypted tool_configs (in-memory only)
-        """
-        if crew is None:
-            return crew
-
-        configs = self._loaded_tool_configs(crew)
-        if configs:
-            # Not crew.id — on an expired instance that read is itself a lazy load,
-            # so logging the failure would raise from the except block.
-            crew_id = getattr(crew, "__dict__", {}).get("id", "<unloaded>")
-            try:
-                crew.tool_configs = decrypt_sensitive_fields(configs)
-            except Exception as e:
-                logger.error(f"Failed to decrypt tool_configs for crew {crew_id}: {e}")
-        return crew
-
-    @staticmethod
-    def _loaded_tool_configs(crew: Crew) -> Optional[Any]:
-        """``crew.tool_configs`` only if it is already in memory, else None.
-
-        ``inspect(crew).dict`` is the instance's loaded attribute dict: a key is
-        present only when the value is in memory. Absent means touching the
-        attribute would emit a SELECT — the lazy refresh that raised MissingGreenlet
-        from this sync frame. Checking membership turns that into a cheap miss.
-
-        ``state.expired`` is deliberately NOT the test: an expired instance can
-        still hold some attributes, and only the ones actually missing from
-        ``dict`` would do IO.
-        """
-        try:
-            from sqlalchemy import inspect as sa_inspect
-
-            state = sa_inspect(crew)
-            if "tool_configs" not in state.dict:
-                logger.debug(
-                    "tool_configs not loaded for crew %s; skipping decrypt rather "
-                    "than triggering a lazy refresh",
-                    state.dict.get("id", "<unknown>"),
-                )
-                return None
-        except Exception:  # noqa: BLE001 — a non-ORM object (or a test double)
-            pass
-        return crew.tool_configs
-
-    def _encrypt_tool_configs_in_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Encrypt sensitive fields in tool_configs before storage.
-
-        Args:
-            data: Dictionary containing crew data with tool_configs
-
-        Returns:
-            Dictionary with encrypted tool_configs
-        """
-        if "tool_configs" in data and data["tool_configs"]:
-            try:
-                data["tool_configs"] = encrypt_sensitive_fields(data["tool_configs"])
-                logger.debug(safe_log_tool_configs(data["tool_configs"], "Encrypted "))
-            except Exception as e:
-                logger.error(f"Failed to encrypt tool_configs: {e}")
-                raise
-        return data
 
     async def _hydrate_task_nodes_from_tasks(
         self, crew: Optional[Crew]
@@ -140,29 +46,39 @@ class CrewService:
         correct. The task row is the source of truth, so make the displayed node
         match it.
 
+        Only task rows of the CREW'S OWN workspace are read: a crew imported from
+        another workspace still names that workspace's task ids, and overlaying
+        those rows would copy another tenant's tool_configs (credentials
+        included) into this crew's canvas — and from there into a flow build.
+
         Reads the owning ``TaskService`` (never TaskRepository). In-memory only —
-        like decryption, this is a display convenience and is never persisted.
-        Best-effort: a lookup failure must never fail a crew read.
+        a display convenience that is never persisted. Best-effort: a lookup
+        failure must never fail a crew read.
         """
         if crew is None:
             return crew
+        crew_group = getattr(crew, "__dict__", {}).get("group_id")
+        if not crew_group:
+            return crew  # no workspace to scope the task reads to
         try:
             from src.services.catalog.tasks import TaskService
 
             task_svc = TaskService(self.session)
-            live: Dict[str, Any] = {}
+            live: Dict[str, object] = {}
             for tid in getattr(crew, "task_ids", None) or []:
                 task = await task_svc.get(str(tid))
-                tcfg = getattr(task, "tool_configs", None) if task else None
+                if task is None or getattr(task, "group_id", None) != crew_group:
+                    continue
+                tcfg = getattr(task, "tool_configs", None)
                 if tcfg:
                     live[str(tid)] = tcfg
             self._overlay_task_nodes(crew, live)
         except Exception as e:  # noqa: BLE001 — display convenience, never fatal
-            logger.warning(f"CrewService: task-node tool_configs hydrate skipped: {e}")
+            logger.warning("CrewService: task-node tool_configs hydrate skipped: %s", e)
         return crew
 
     @staticmethod
-    def _overlay_task_nodes(crew: Crew, cfg_by_task_id: Dict[str, Any]) -> None:
+    def _overlay_task_nodes(crew: Crew, cfg_by_task_id: Dict[str, object]) -> None:
         """Overlay each task node's ``tool_configs`` from ``{task_id: tool_configs}``.
 
         Pure/in-memory. Shared by the single-crew and the catalog-list hydration
@@ -210,7 +126,7 @@ class CrewService:
                 for crew in crews:
                     self._overlay_task_nodes(crew, cfg_by_id)
         except Exception as e:  # noqa: BLE001 — display convenience, never fatal
-            logger.warning(f"CrewService: catalog tool_configs hydrate skipped: {e}")
+            logger.warning("CrewService: catalog tool_configs hydrate skipped: %s", e)
         return crews
 
     async def _sync_task_rows_from_nodes(
@@ -256,76 +172,66 @@ class CrewService:
                     tid, TaskUpdate(tool_configs=cfg), group_context
                 )
         except Exception as e:  # noqa: BLE001 — never fail the crew save over it
-            logger.warning(f"CrewService: task-row tool_configs sync skipped: {e}")
+            logger.warning("CrewService: task-row tool_configs sync skipped: %s", e)
 
-    async def get(self, id: UUID) -> Optional[Crew]:
+    async def get(self, id: Union[UUID, str]) -> Optional[Crew]:
         """
-        Get a crew by ID with decrypted tool_configs.
+        Get a crew by ID.
 
         Args:
             id: ID of the crew to get
 
         Returns:
-            Crew if found, else None (with decrypted tool_configs)
+            Crew if found, else None
         """
         crew = await self.repository.get(id)
-        self._decrypt_crew_tool_configs(crew)
         return await self._hydrate_task_nodes_from_tasks(crew)
 
     async def create(self, obj_in: CrewCreate) -> Crew:
         """
-        Create a new crew with encrypted tool_configs.
+        Create a new crew.
 
         Args:
             obj_in: Crew data for creation
 
         Returns:
-            Created crew (with decrypted tool_configs for response)
+            Created crew
         """
-        data = obj_in.model_dump()
-        data = self._encrypt_tool_configs_in_data(data)
-        crew = await self.repository.create(data)
-        self._decrypt_crew_tool_configs(crew)
-        return crew
+        return await self.repository.create(obj_in.model_dump())
 
     async def find_by_name(self, name: str) -> Optional[Crew]:
         """
-        Find a crew by name with decrypted tool_configs.
+        Find a crew by name.
 
         Args:
             name: Name to search for
 
         Returns:
-            Crew if found, else None (with decrypted tool_configs)
+            Crew if found, else None
         """
-        crew = await self.repository.find_by_name(name)
-        return self._decrypt_crew_tool_configs(crew)
+        return await self.repository.find_by_name(name)
 
     async def find_all(self) -> List[Crew]:
         """
-        Find all crews with decrypted tool_configs.
+        Find all crews.
 
         Returns:
-            List of all crews (with decrypted tool_configs)
+            List of all crews
         """
-        crews = await self.repository.find_all()
-        for crew in crews:
-            self._decrypt_crew_tool_configs(crew)
-        return crews
+        return await self.repository.find_all()
 
     async def update_with_partial_data(
         self, id: UUID, obj_in: CrewUpdate
     ) -> Optional[Crew]:
         """
         Update a crew with partial data, only updating fields that are set.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             id: ID of the crew to update
             obj_in: Schema with fields to update
 
         Returns:
-            Updated crew if found, else None (with decrypted tool_configs)
+            Updated crew if found, else None
         """
         # Exclude unset fields (None) from update
         update_data = obj_in.model_dump(exclude_none=True)
@@ -333,32 +239,25 @@ class CrewService:
             # No fields to update
             return await self.get(id)
 
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"CrewService: encrypting tool_configs for crew {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
-        crew = await self.repository.update(id, update_data)
-        return self._decrypt_crew_tool_configs(crew)
+        return await self.repository.update(id, update_data)
 
     async def create_crew(self, obj_in: CrewCreate) -> Optional[Crew]:
         """
         Create a new crew with properly serialized data.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             obj_in: Crew data for creation
 
         Returns:
-            Created crew (with decrypted tool_configs for response)
+            Created crew
         """
         try:
             # Log details for debugging
-            logger.info(f"Creating crew with name: {obj_in.name}")
-            logger.info(f"Agent IDs: {obj_in.agent_ids}")
-            logger.info(f"Task IDs: {obj_in.task_ids}")
-            logger.info(f"Number of nodes: {len(obj_in.nodes) if obj_in.nodes else 0}")
-            logger.info(f"Number of edges: {len(obj_in.edges) if obj_in.edges else 0}")
+            logger.info("Creating crew with name: %s", obj_in.name)
+            logger.info("Agent IDs: %s", obj_in.agent_ids)
+            logger.info("Task IDs: %s", obj_in.task_ids)
+            logger.info("Number of nodes: %s", len(obj_in.nodes) if obj_in.nodes else 0)
+            logger.info("Number of edges: %s", len(obj_in.edges) if obj_in.edges else 0)
 
             # Properly serialize the complex JSON data
             crew_dict = obj_in.model_dump()
@@ -385,15 +284,10 @@ class CrewService:
                 else []
             )
 
-            # Encrypt sensitive fields in tool_configs before storage
-            crew_dict = self._encrypt_tool_configs_in_data(crew_dict)
-
             # Create the model using the serialized data
-            crew = await self.repository.create(crew_dict)
-            self._decrypt_crew_tool_configs(crew)
-            return crew
+            return await self.repository.create(crew_dict)
         except Exception as e:
-            logger.error(f"Error creating crew: {str(e)}")
+            logger.error("Error creating crew: %s", e)
             raise
 
     async def delete(self, id: UUID) -> bool:
@@ -457,7 +351,6 @@ class CrewService:
     ) -> Crew:
         """
         Create a new crew with group context.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             obj_in: Crew data for creation
@@ -466,7 +359,7 @@ class CrewService:
                 group, replace that crew's definition instead of raising ConflictError.
 
         Returns:
-            Created (or overwritten) crew (with decrypted tool_configs for response)
+            Created (or overwritten) crew
 
         Raises:
             ConflictError: If a crew with the same name already exists and overwrite is False
@@ -487,12 +380,15 @@ class CrewService:
             # Log details for debugging
             action = "Overwriting" if existing else "Creating"
             logger.info(
-                f"{action} crew with name: {obj_in.name} for group: {primary_group_id}"
+                "%s crew with name: %s for group: %s",
+                action,
+                obj_in.name,
+                primary_group_id,
             )
-            logger.info(f"Agent IDs: {obj_in.agent_ids}")
-            logger.info(f"Task IDs: {obj_in.task_ids}")
-            logger.info(f"Number of nodes: {len(obj_in.nodes)}")
-            logger.info(f"Number of edges: {len(obj_in.edges)}")
+            logger.info("Agent IDs: %s", obj_in.agent_ids)
+            logger.info("Task IDs: %s", obj_in.task_ids)
+            logger.info("Number of nodes: %s", len(obj_in.nodes))
+            logger.info("Number of edges: %s", len(obj_in.edges))
 
             # Convert schema to dict and add group fields
             crew_data = obj_in.model_dump()
@@ -514,28 +410,23 @@ class CrewService:
             ]
             crew_data["task_ids"] = [str(task_id) for task_id in crew_data["task_ids"]]
 
-            # Encrypt sensitive fields in tool_configs before storage
-            crew_data = self._encrypt_tool_configs_in_data(crew_data)
-
             if existing:
                 # Overwrite: replace the existing crew's definition, preserving its
                 # id and original creator (don't overwrite created_by_email).
                 logger.info(
-                    f"Overwriting existing crew '{obj_in.name}' (id={existing.id})"
+                    "Overwriting existing crew '%s' (id=%s)", obj_in.name, existing.id
                 )
                 crew = await self.repository.update(existing.id, crew_data) or existing
-                self._decrypt_crew_tool_configs(crew)
                 await self._sync_task_rows_from_nodes(crew, group_context)
                 return crew
 
             # Create the model using the serialized data
             crew_data["created_by_email"] = group_context.group_email
             crew = await self.repository.create(crew_data)
-            self._decrypt_crew_tool_configs(crew)
             await self._sync_task_rows_from_nodes(crew, group_context)
             return crew
         except Exception as e:
-            logger.error(f"Error creating crew with group: {str(e)}")
+            logger.error("Error creating crew with group: %s", e)
             raise
 
     async def clone_with_group(
@@ -567,7 +458,6 @@ class CrewService:
         source = await self.repository.get_by_group(crew_id, [primary_group_id])
         if not source:
             return None
-        self._decrypt_crew_tool_configs(source)
         # Hydrate the source's canvas nodes from the live task rows so the clone's
         # nodes carry current tool_configs, not a stale snapshot.
         await self._hydrate_task_nodes_from_tasks(source)
@@ -609,7 +499,7 @@ class CrewService:
         for new_tid, src_task in cloned_tasks:
             ctx = getattr(src_task, "context", None) or []
             if ctx:
-                await task_svc.update(
+                await task_svc.update_with_partial_data(
                     new_tid, TaskUpdate(context=remap_context(ctx, task_id_map))
                 )
 
@@ -635,55 +525,52 @@ class CrewService:
         )
         return await self.create_with_group(crew_create, group_context)
 
-    async def find_by_group(self, group_context: GroupContext) -> List[Crew]:
+    async def find_by_group(self, group_context: Optional[GroupContext]) -> List[Crew]:
         """
         Find all crews for the CURRENT workspace (primary group only).
-        Returns crews with decrypted tool_configs.
 
         Args:
             group_context: Group context from headers
 
         Returns:
-            List of crews for the selected workspace (with decrypted tool_configs)
+            List of crews for the selected workspace
         """
         primary_group_id = getattr(group_context, "primary_group_id", None)
-        if not primary_group_id:
+        if not primary_group_id or group_context is None:
             # If no current workspace, return empty list for security
             return []
 
         crews = await self.repository.find_by_group([primary_group_id])
-        for crew in crews:
-            self._decrypt_crew_tool_configs(crew)
         return await self._hydrate_crew_list_from_tasks(crews, group_context)
 
-    async def get_crews_by_ids(self, crew_ids: List[Any]) -> List[Crew]:
+    async def get_crews_by_ids(
+        self, crew_ids: Sequence[Union[UUID, str]]
+    ) -> List[Crew]:
         """Crews for a set of ids.
 
         Crews are this service's domain; `publications` and the prompt optimiser
         used to build ``CrewRepository`` themselves to resolve references.
         """
-        return await self.repository.find_by_ids(crew_ids)
+        return await self.repository.find_by_ids(list(crew_ids))
 
     async def get_by_group(
-        self, id: UUID, group_context: GroupContext
+        self, id: UUID, group_context: Optional[GroupContext]
     ) -> Optional[Crew]:
         """
         Get a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
-        Returns crew with decrypted tool_configs.
 
         Args:
             id: ID of the crew to get
             group_context: Group context from headers
 
         Returns:
-            Crew if found and belongs to current workspace, else None (with decrypted tool_configs)
+            Crew if found and belongs to current workspace, else None
         """
         primary_group_id = getattr(group_context, "primary_group_id", None)
         if not primary_group_id:
             return None
 
         crew = await self.repository.get_by_group(id, [primary_group_id])
-        self._decrypt_crew_tool_configs(crew)
         return await self._hydrate_task_nodes_from_tasks(crew)
 
     async def update_with_partial_data_by_group(
@@ -691,7 +578,6 @@ class CrewService:
     ) -> Optional[Crew]:
         """
         Update a crew with partial data, ensuring it belongs to the CURRENT workspace (primary group).
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             id: ID of the crew to update
@@ -699,7 +585,7 @@ class CrewService:
             group_context: Group context from headers
 
         Returns:
-            Updated crew if found and belongs to current workspace, else None (with decrypted tool_configs)
+            Updated crew if found and belongs to current workspace, else None
         """
         primary_group_id = getattr(group_context, "primary_group_id", None)
         if not primary_group_id:
@@ -714,7 +600,6 @@ class CrewService:
         update_data = obj_in.model_dump(exclude_none=True)
         if not update_data:
             # No fields to update
-            self._decrypt_crew_tool_configs(existing_crew)
             return existing_crew
 
         # Check for duplicate name within the group (if name is being changed)
@@ -727,20 +612,16 @@ class CrewService:
                     detail=f"A crew with the name '{update_data['name']}' already exists. Please choose a different name."
                 )
 
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"CrewService: encrypting tool_configs for crew {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
         crew = await self.repository.update(id, update_data)
-        self._decrypt_crew_tool_configs(crew)
         # Only sync task rows when this save actually carried nodes (a name-only
         # partial update has nothing to propagate).
         if "nodes" in update_data:
             await self._sync_task_rows_from_nodes(crew, group_context)
         return crew
 
-    async def delete_by_group(self, id: UUID, group_context: GroupContext) -> bool:
+    async def delete_by_group(
+        self, id: UUID, group_context: Optional[GroupContext]
+    ) -> bool:
         """
         Delete a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
 

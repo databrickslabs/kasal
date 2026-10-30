@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from src.services.converters.base.connectors import ConnectorType
-from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.base.models import KPI, DAXMeasure, KPIDefinition
 from src.services.converters.pipeline import (
     ConversionPipeline,
     OutboundFormat,
@@ -259,11 +259,16 @@ class TestConversionPipeline:
         """Test successful conversion to DAX format"""
         # Arrange
         mock_generator = Mock()
-        mock_dax_measure = Mock()
-        mock_dax_measure.name = "Total Sales"
-        mock_dax_measure.dax_formula = "SUM(Sales[Amount])"
-        mock_dax_measure.description = "Total sales amount"
-        mock_dax_measure.table = "Sales"
+        mock_dax_measure = DAXMeasure(
+            name="Total Sales",
+            dax_formula="SUM(Sales[Amount])",
+            description="Total sales amount",
+            original_kbi=KPI(
+                description="Total sales amount",
+                formula="amount",
+                source_table="Sales",
+            ),
+        )
 
         mock_generator.generate_all_measures.return_value = [mock_dax_measure]
         mock_generator_class.return_value = mock_generator
@@ -277,6 +282,21 @@ class TestConversionPipeline:
         assert result[0]["expression"] == "SUM(Sales[Amount])"
         assert result[0]["description"] == "Total sales amount"
         assert result[0]["table"] == "Sales"
+
+    def test_convert_to_dax_real_generator(self, pipeline, sample_definition):
+        """Real DAXMeasure objects convert (regression: no ``table`` attribute)"""
+        result = pipeline._convert_to_dax(sample_definition, {})
+
+        assert len(result) == len(sample_definition.kpis)
+        assert all("table" in measure for measure in result)
+
+    def test_convert_to_sql_real_generator(self, pipeline, sample_definition):
+        """Real SQLTranslationResult formats (regression: no to_output_string)"""
+        result = pipeline._convert_to_sql(
+            sample_definition, {"dialect": "databricks"}, use_transpilation=False
+        )
+
+        assert isinstance(result, str)
 
     @patch("src.services.converters.pipeline.SmartDAXGenerator")
     def test_convert_to_dax_handles_generation_error(
@@ -307,7 +327,7 @@ class TestConversionPipeline:
         # Mock the result object returned by generate_sql_from_kbi_definition
         mock_result = Mock()
         mock_result.sql_queries = ["SELECT SUM(amount) as total_sales"]
-        mock_result.to_output_string.return_value = (
+        mock_result.get_formatted_sql_output.return_value = (
             "-- Generated SQL\nSELECT SUM(amount) as total_sales;"
         )
 

@@ -52,20 +52,20 @@ beforeEach(() => {
 
 describe('UCMVDomainContextHint', () => {
   it('shows the domain-context skills the agent will feed to the tool', async () => {
-    list.mockResolvedValue([skill('cchbc-context', true), skill('pricing', false), skill('glossary', true, true)]);
-    render(<UCMVDomainContextHint agentId="a1" agentSkills={['cchbc-context', 'pricing']} agentName="Generator" onClearInline={() => {}} />);
-    expect(await screen.findByText('cchbc-context')).toBeInTheDocument();
+    list.mockResolvedValue([skill('acme-context', true), skill('pricing', false), skill('glossary', true, true)]);
+    render(<UCMVDomainContextHint agentId="a1" agentSkills={['acme-context', 'pricing']} agentName="Generator" onClearInline={() => {}} />);
+    expect(await screen.findByText('acme-context')).toBeInTheDocument();
     expect(screen.getByText('glossary')).toBeInTheDocument(); // given to every agent
     expect(screen.queryByText('pricing')).not.toBeInTheDocument(); // not tagged
   });
 
   it('attaches an existing domain-context skill to the agent in one click', async () => {
-    list.mockResolvedValue([skill('cchbc-context', true)]);
+    list.mockResolvedValue([skill('acme-context', true)]);
     attachSkillToAgent.mockResolvedValue({ id: 'a1' });
     render(<UCMVDomainContextHint agentId="a1" agentSkills={[]} agentName="Generator" onClearInline={() => {}} />);
     expect(await screen.findByText(/has no domain-context skill attached/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText('cchbc-context'));
-    await waitFor(() => expect(attachSkillToAgent).toHaveBeenCalledWith('a1', 'cchbc-context'));
+    fireEvent.click(screen.getByText('acme-context'));
+    await waitFor(() => expect(attachSkillToAgent).toHaveBeenCalledWith('a1', 'acme-context'));
     expect(await screen.findByText('Used for this task:')).toBeInTheDocument();
   });
 
@@ -122,7 +122,7 @@ describe('UCMVDomainContextHint', () => {
 
 describe('domainContextSkillName', () => {
   it('derives a valid skill name from the model name', () => {
-    expect(domainContextSkillName('Total Supply Chain (CCH)')).toBe('total-supply-chain-cch-domain-context');
+    expect(domainContextSkillName('Total Supply Chain (ACME)')).toBe('total-supply-chain-acme-domain-context');
     expect(domainContextSkillName('')).toBe('ucmv-domain-context');
   });
 });

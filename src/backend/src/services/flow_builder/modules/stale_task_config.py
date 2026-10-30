@@ -13,10 +13,52 @@ These helpers live here (rather than in ``flow_processors``) as one cohesive
 seam; ``flow_processors`` re-exports them so existing import paths stay stable.
 """
 
+from typing import Optional, Protocol
+
+from src.core.logger import LoggerManager
+
+logger = LoggerManager.get_instance().flow
+
+#: A tool_configs mapping as merged for one flow task.
+ToolConfigs = dict[str, object]
+#: ``(task_id, task_name, tool_configs)`` of one of the crew's CURRENT tasks.
+CurrentTask = tuple[object, Optional[str], object]
+
+
+class TaskReader(Protocol):
+    """The ``get`` the flow's data-access bundle offers for tasks."""
+
+    async def get(self, entity_id: str) -> object: ...
+
+
+def _as_configs(value: object) -> ToolConfigs:
+    return value if isinstance(value, dict) else {}
+
+
+def merge_task_tool_configs(
+    crew_data: object, task_node_data: object, task_data: object
+) -> ToolConfigs:
+    """A flow task's tool_configs: crew-level, then canvas node, then DB task.
+
+    Later sources win. The crew's canvas node carries tool_configs saved from chat
+    / Agent Builder (e.g. MCP_SERVERS) that never reach the task DB record, so it
+    is merged BEFORE the DB task: it fills that gap without overriding real
+    values the DB task does carry.
+    """
+    merged: ToolConfigs = {}
+    merged.update(_as_configs(getattr(crew_data, "tool_configs", None)))
+    if isinstance(task_node_data, dict):
+        merged.update(_as_configs(task_node_data.get("tool_configs")))
+    merged.update(_as_configs(getattr(task_data, "tool_configs", None)))
+    return merged
+
 
 def recover_mcp_from_current_tasks(
-    effective_tool_configs, flow_task_id, flow_task_name, current_tasks
-):
+    effective_tool_configs: object,
+    flow_task_id: object,
+    flow_task_name: Optional[str],
+    current_tasks: list[CurrentTask],
+) -> ToolConfigs:
     """Recover a missing MCP_SERVERS config from the crew's CURRENT task(s).
 
     When MCP_SERVERS is absent from effective_tool_configs, merge it from the
@@ -30,7 +72,7 @@ def recover_mcp_from_current_tasks(
         current_tasks: list of (task_id, task_name, tool_configs) for the crew's
             CURRENT tasks (from crew.task_ids)
     """
-    cfg = effective_tool_configs if isinstance(effective_tool_configs, dict) else {}
+    cfg = _as_configs(effective_tool_configs)
     if "MCP_SERVERS" in cfg:
         return cfg
     single = len(current_tasks) == 1
@@ -45,14 +87,16 @@ def recover_mcp_from_current_tasks(
     return cfg
 
 
-async def load_current_crew_tasks(crew_data, task_repo):
+async def load_current_crew_tasks(
+    crew_data: object, task_repo: TaskReader
+) -> list[CurrentTask]:
     """``(task_id, name, tool_configs)`` for the crew's CURRENT tasks.
 
     The source of truth for re-syncing a stale flow task from live crew config.
     Best-effort: returns ``[]`` on any issue — recovery must never break a flow
     run — and loads each task defensively for the same reason.
     """
-    out = []
+    out: list[CurrentTask] = []
     current_task_ids = getattr(crew_data, "task_ids", None) or []
     for cur_tid in current_task_ids:
         try:
@@ -60,10 +104,11 @@ async def load_current_crew_tasks(crew_data, task_repo):
         except Exception:  # noqa: BLE001 — a missing/renamed task must not abort
             cur_task = None
         if cur_task is not None:
+            name = getattr(cur_task, "name", None)
             out.append(
                 (
                     cur_tid,
-                    getattr(cur_task, "name", None),
+                    name if isinstance(name, str) else None,
                     getattr(cur_task, "tool_configs", None),
                 )
             )
@@ -71,8 +116,11 @@ async def load_current_crew_tasks(crew_data, task_repo):
 
 
 def resync_tool_configs_from_current_task(
-    effective_tool_configs, flow_task_id, flow_task_name, current_tasks
-):
+    effective_tool_configs: object,
+    flow_task_id: object,
+    flow_task_name: Optional[str],
+    current_tasks: list[CurrentTask],
+) -> ToolConfigs:
     """Re-sync a STALE flow task's tool_configs from the crew's CURRENT task.
 
     This is the whole-config generalisation of the MCP-only drift
@@ -85,7 +133,7 @@ def resync_tool_configs_from_current_task(
     task-name match, or — if the crew has a single task — that task. Mutates and
     returns ``effective_tool_configs``.
     """
-    cfg = effective_tool_configs if isinstance(effective_tool_configs, dict) else {}
+    cfg = _as_configs(effective_tool_configs)
     current_ids = {str(tid) for tid, _, _ in current_tasks}
     if str(flow_task_id) in current_ids:
         return cfg  # flow points at a live task — nothing stale to re-sync
@@ -96,4 +144,49 @@ def resync_tool_configs_from_current_task(
         if single or (flow_task_name and tname == flow_task_name):
             cfg.update(tcfg)  # live config wins over the frozen snapshot
             break
+    return cfg
+
+
+async def resync_stale_task_configs(
+    effective_tool_configs: ToolConfigs,
+    *,
+    crew_data: object,
+    task_repo: TaskReader,
+    task_id: object,
+    flow_task_name: Optional[str],
+    crew_id: object,
+    kind: str,
+) -> ToolConfigs:
+    """Bring a flow task's merged tool_configs in line with the crew's live task.
+
+    A flow's task IDs are frozen at save time, but crew edits mint NEW task rows
+    — so the flow can run a STALE task whose tool_configs still holds old values
+    (warehouse_id, dataset_id, enable_reconciliation, MCP_SERVERS, …) while the
+    crew is correct. Re-syncs the full config from the crew's current task, then
+    back-fills MCP_SERVERS. Best-effort: on any failure the configs come back
+    unchanged. ``kind`` names the task in the log ("flow" / "listener").
+    """
+    try:
+        current_tasks = await load_current_crew_tasks(crew_data, task_repo)
+        before = dict(effective_tool_configs)
+        cfg = resync_tool_configs_from_current_task(
+            effective_tool_configs, task_id, flow_task_name, current_tasks
+        )
+        cfg = recover_mcp_from_current_tasks(
+            cfg, task_id, flow_task_name, current_tasks
+        )
+    except (
+        Exception
+    ):  # noqa: BLE001 — logged with traceback; recovery never fails a run
+        logger.warning(
+            "tool_config re-sync from current crew task failed", exc_info=True
+        )
+        return effective_tool_configs
+    if cfg != before:
+        logger.info(
+            "Re-synced tool_configs for stale %s task %s from crew %s's current task(s)",
+            kind,
+            task_id,
+            crew_id,
+        )
     return cfg

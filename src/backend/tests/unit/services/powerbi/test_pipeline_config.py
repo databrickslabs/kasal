@@ -136,11 +136,11 @@ class TestGetFabricTokenGrants:
 
         with patch("requests.post", side_effect=_post):
             tok = gen.get_fabric_token(
-                TENANT_ID, CLIENT_ID, None, username="sa@x.com", password="pw"
+                TENANT_ID, CLIENT_ID, None, username="sa@example.com", password="pw"
             )
         assert tok == "fab-sa"
         assert cap["data"]["grant_type"] == "password"
-        assert cap["data"]["username"] == "sa@x.com"
+        assert cap["data"]["username"] == "sa@example.com"
         assert cap["data"]["scope"] == "https://api.fabric.microsoft.com/.default"
 
 
@@ -480,16 +480,22 @@ class TestReportIdAutoDiscovery:
             "workspaces": [
                 {
                     "reports": [
-                        {"id": "r-real", "name": "OTC Management Dashboard", "datasetId": "ds1"},
-                        {"id": "r-usage", "name": "Usage Metrics Report", "datasetId": "ds1"},
+                        {
+                            "id": "r-real",
+                            "name": "OTC Management Dashboard",
+                            "datasetId": "ds1",
+                        },
+                        {
+                            "id": "r-usage",
+                            "name": "Usage Metrics Report",
+                            "datasetId": "ds1",
+                        },
                     ]
                 }
             ]
         }
         with patch.object(rd, "requests") as rq:
-            result = rd.discover_report_id(
-                "tok", "ws", "ds1", scan_result=scan_result
-            )
+            result = rd.discover_report_id("tok", "ws", "ds1", scan_result=scan_result)
             rq.get.assert_not_called()
         assert result == "r-real"
 
@@ -505,15 +511,16 @@ class TestReportIdAutoDiscovery:
         }
         with patch.object(rd, "requests") as rq:
             rq.get.return_value = resp
-            result = rd.discover_report_id(
-                "tok", "ws", "ds1", scan_result=scan_result
-            )
+            result = rd.discover_report_id("tok", "ws", "ds1", scan_result=scan_result)
         assert result == "r-rest"
 
     def test_falls_back_when_scan_result_is_none(self):
-        assert self._discover(
-            [{"id": "r1", "name": "R", "datasetId": "ds1"}], dataset_id="ds1"
-        ) == "r1"
+        assert (
+            self._discover(
+                [{"id": "r1", "name": "R", "datasetId": "ds1"}], dataset_id="ds1"
+            )
+            == "r1"
+        )
 
     def test_malformed_scan_result_does_not_raise(self):
         from unittest.mock import patch
@@ -541,7 +548,11 @@ class TestMappingOnlyTablesExternalSources(object):
     def test_table_not_in_admin_scan_still_gets_a_draft(self):
         """Existing behavior: a table missing from the admin scan entirely."""
         measures = [
-            {"measure_name": "M", "table_name": "unscanned_table", "dax_expression": "SUM(unscanned_table[X])"}
+            {
+                "measure_name": "M",
+                "table_name": "unscanned_table",
+                "dax_expression": "SUM(unscanned_table[X])",
+            }
         ]
         mapping = gc.derive_mapping_only_tables(measures, admin_tables={})
         assert "unscanned_table" in mapping
@@ -562,7 +573,7 @@ class TestMappingOnlyTablesExternalSources(object):
         admin_tables = {
             "KBIs Testing Status": {
                 "mquery_expression": (
-                    'let Source = Excel.Workbook(Web.Contents('
+                    "let Source = Excel.Workbook(Web.Contents("
                     '"https://example.sharepoint.com/x.xlsx"), null, true) in Source'
                 ),
                 "columns": [{"name": "Value"}],
@@ -580,13 +591,15 @@ class TestMappingOnlyTablesExternalSources(object):
         """A table that scanned to real warehouse SQL must NOT be treated as
         mapping-only — this mechanism is only for tables with no other path."""
         measures = [
-            {"measure_name": "M", "table_name": "Fact_OTC", "dax_expression": "SUM(Fact_OTC[X])"}
+            {
+                "measure_name": "M",
+                "table_name": "Fact_OTC",
+                "dax_expression": "SUM(Fact_OTC[X])",
+            }
         ]
         admin_tables = {
             "Fact_OTC": {
-                "mquery_expression": (
-                    'let Source = Databricks.Catalogs() in Source'
-                ),
+                "mquery_expression": ("let Source = Databricks.Catalogs() in Source"),
                 "columns": [{"name": "X"}],
             }
         }

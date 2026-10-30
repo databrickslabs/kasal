@@ -45,13 +45,18 @@ def chat_token_usage(response: Any) -> dict[str, Any] | None:
     if usage is None:
         return None
     details = getattr(usage, "prompt_tokens_details", None)
+    # OpenAI reports cache reads under prompt_tokens_details.cached_tokens;
+    # Databricks-hosted Claude reports Anthropic's own top-level fields
+    # (cache_read_input_tokens / cache_creation_input_tokens) instead.
+    cached = (getattr(details, "cached_tokens", 0) if details else 0) or (
+        getattr(usage, "cache_read_input_tokens", 0) or 0
+    )
     return {
         "prompt_tokens": getattr(usage, "prompt_tokens", 0),
         "completion_tokens": getattr(usage, "completion_tokens", 0),
         "total_tokens": getattr(usage, "total_tokens", 0),
-        "cached_prompt_tokens": (
-            getattr(details, "cached_tokens", 0) if details else 0
-        ),
+        "cached_prompt_tokens": cached,
+        "cache_creation_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
     }
 
 

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.core.exceptions import ForbiddenError
 from src.services.catalog.templates import TemplateService as Svc
 
 
@@ -164,6 +165,31 @@ async def test_delete_with_group_check_requires_authorization():
     gc = SimpleNamespace(group_ids=["g1"])
     ok = await svc.delete_with_group_check(1, gc)
     assert ok is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("system_admin", [False, True])
+async def test_deleting_a_global_template_is_a_system_admin_act(system_admin):
+    """A global template is every workspace's: only a system admin deletes it.
+    Workspace members still delete their own workspace's template."""
+    svc = Svc(SimpleNamespace())
+    svc.repository = FakeRepo(None)
+    svc.repository._get = SimpleNamespace(id=1, group_id=None)
+    gc = SimpleNamespace(
+        group_ids=["g1"],
+        current_user=SimpleNamespace(is_system_admin=system_admin),
+    )
+    if system_admin:
+        assert await svc.delete_with_group_check(1, gc) is True
+        assert svc.repository.deleted == [1]
+    else:
+        with pytest.raises(ForbiddenError):
+            await svc.delete_with_group_check(1, gc)
+        assert svc.repository.deleted == []
+
+    svc.repository._get = SimpleNamespace(id=2, group_id="g1")
+    member = SimpleNamespace(group_ids=["g1"], current_user=None)
+    assert await svc.delete_with_group_check(2, member) is True
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,25 @@ class OutboundFormat(str, Enum):
     YAML = "yaml"
 
 
+def translation_gaps(definition: Optional[KPIDefinition]) -> List[Dict[str, str]]:
+    """Power BI measures the DAX -> SQL transpiler produced no SQL for.
+
+    Each is ``{"name", "reason"}``. A gap is reported, never emitted as a
+    measure: its SQL is ``None`` and it gets no ``expr`` in UC Metrics output.
+    """
+    gaps: List[Dict[str, str]] = []
+    for kpi in definition.kpis if definition else []:
+        advanced = getattr(kpi, "_advanced_parsing", None)
+        if not isinstance(advanced, dict):
+            continue
+        if advanced.get("is_transpilable") and advanced.get("transpiled_sql"):
+            continue
+        reason = advanced.get("transpilability_reason") or "not translated to SQL"
+        name = kpi.technical_name or kpi.description or "unnamed measure"
+        gaps.append({"name": name, "reason": str(reason)})
+    return gaps
+
+
 class ConversionPipeline:
     """
     End-to-end conversion pipeline from source system to target format.
@@ -53,7 +72,7 @@ class ConversionPipeline:
         print(result["output"])  # DAX measures
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
     def create_inbound_connector(
@@ -113,7 +132,7 @@ class ConversionPipeline:
         extract_params = extract_params or {}
         definition_name = definition_name or "converted_measures"
 
-        errors = []
+        errors: List[str] = []
         definition = None
         output = None
 
@@ -141,6 +160,18 @@ class ConversionPipeline:
                 )
 
             metadata = connector.get_metadata()
+            gaps = (
+                translation_gaps(definition)
+                if inbound_type == ConnectorType.POWERBI
+                and outbound_format in (OutboundFormat.SQL, OutboundFormat.UC_METRICS)
+                else []
+            )
+            if gaps:
+                self.logger.warning(
+                    "%d of %d measures have no SQL translation; reported as gaps",
+                    len(gaps),
+                    len(definition.kpis),
+                )
 
             return {
                 "success": True,
@@ -149,6 +180,7 @@ class ConversionPipeline:
                 "metadata": metadata.__dict__,
                 "errors": errors,
                 "measure_count": len(definition.kpis),
+                "gaps": gaps,
             }
 
         except Exception as e:
@@ -168,7 +200,7 @@ class ConversionPipeline:
         definition: KPIDefinition,
         format: OutboundFormat,
         params: Dict[str, Any],
-        inbound_type: ConnectorType = None,
+        inbound_type: Optional[ConnectorType] = None,
     ) -> Union[str, Dict[str, Any], List[Any]]:
         """
         Convert KPIDefinition to target format.
@@ -216,7 +248,7 @@ class ConversionPipeline:
 
     def _convert_to_dax(
         self, definition: KPIDefinition, params: Dict[str, Any]
-    ) -> List[Dict[str, str]]:
+    ) -> List[Dict[str, Optional[str]]]:
         """
         Convert to DAX measures with automatic dependency resolution.
 
@@ -240,7 +272,13 @@ class ConversionPipeline:
                         "name": dax_measure.name,
                         "expression": dax_measure.dax_formula,
                         "description": dax_measure.description,
-                        "table": dax_measure.table,
+                        # DAXMeasure has no ``table`` field; the measure's home
+                        # table is the source table of the KPI it came from.
+                        "table": (
+                            dax_measure.original_kbi.source_table
+                            if dax_measure.original_kbi
+                            else None
+                        ),
                     }
                 )
 
@@ -281,17 +319,26 @@ class ConversionPipeline:
                 continue
 
             advanced = kpi._advanced_parsing
-
-            # Extract transpiled SQL
-            transpiled_sql = advanced.get("transpiled_sql", "")
-            is_transpilable = advanced.get("is_transpilable", False)
+            transpiled_sql = advanced.get("transpiled_sql") or None
+            # No SQL means a gap, whatever the flag says: never emit a measure
+            # with SQL None (or the KPI's first column name) as translated.
+            is_transpilable = bool(advanced.get("is_transpilable") and transpiled_sql)
 
             measures.append(
                 {
                     "name": kpi.technical_name,
-                    "sql": transpiled_sql if is_transpilable else kpi.formula,
+                    "sql": transpiled_sql if is_transpilable else None,
                     "description": kpi.description,
                     "is_transpilable": is_transpilable,
+                    "status": "translated" if is_transpilable else "gap",
+                    "gap_reason": (
+                        None
+                        if is_transpilable
+                        else str(
+                            advanced.get("transpilability_reason")
+                            or "not translated to SQL"
+                        )
+                    ),
                     "signature": advanced.get("signature", ""),
                     "source_table": kpi.source_table,
                 }
@@ -359,21 +406,23 @@ class ConversionPipeline:
                 continue
 
             advanced = kpi._advanced_parsing
-            transpiled_sql = advanced.get("transpiled_sql", "")
-            is_transpilable = advanced.get("is_transpilable", False)
+            transpiled_sql = advanced.get("transpiled_sql") or None
 
-            # Use transpiled SQL if available, otherwise use original formula
-            measure_expr = transpiled_sql if is_transpilable else kpi.formula
+            if not (advanced.get("is_transpilable") and transpiled_sql):
+                # A gap gets no measure: an `expr:` holding None or a bare
+                # column name would deploy as a wrong-but-valid-looking metric.
+                reason = advanced.get("transpilability_reason") or "no SQL"
+                lines.append(
+                    f"  # GAP: {kpi.technical_name} was not translated "
+                    f"({reason}); no measure emitted"
+                )
+                lines.append("")
+                continue
 
-            # Add measure
             lines.append(f"  - name: {kpi.technical_name}")
-            lines.append(f"    expr: {measure_expr}")
+            lines.append(f"    expr: {transpiled_sql}")
             if kpi.description:
                 lines.append(f"    # {kpi.description}")
-            if not is_transpilable:
-                lines.append(
-                    "    # WARNING: Not transpilable - using original DAX formula"
-                )
             lines.append("")
 
         return "\n".join(lines)
@@ -404,8 +453,8 @@ class ConversionPipeline:
 
             # Return all SQL queries formatted
             if result.sql_queries:
-                # Use to_output_string() to get all queries with formatting
-                return result.to_output_string(formatted=True)
+                # All queries, formatted, with a header comment
+                return result.get_formatted_sql_output()
             return ""
 
     def _convert_to_uc_metrics(
@@ -473,7 +522,7 @@ class ConversionPipeline:
 
 
 def convert_powerbi_to_dax(
-    semantic_model_id: str, group_id: str, access_token: str, **kwargs
+    semantic_model_id: str, group_id: str, access_token: str, **kwargs: Any
 ) -> Dict[str, Any]:
     """
     Convert Power BI measures to DAX.
@@ -505,7 +554,7 @@ def convert_powerbi_to_sql(
     group_id: str,
     access_token: str,
     dialect: str = "databricks",
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Convert Power BI measures to SQL."""
     pipeline = ConversionPipeline()
@@ -528,7 +577,7 @@ def convert_powerbi_to_uc_metrics(
     access_token: str,
     catalog: str = "main",
     schema: str = "default",
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Convert Power BI measures to UC Metrics."""
     pipeline = ConversionPipeline()

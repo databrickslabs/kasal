@@ -176,7 +176,7 @@ class TestConfigureSubprocessLogging:
         mock_module_logger.handlers = []
         mock_get_logger.return_value = mock_module_logger
 
-        with patch.dict(os.environ, {"KASAL_DEBUG_TRACES": "true"}):
+        with patch.dict(os.environ, {"KASAL_LOG_CREW": "DEBUG"}):
             with patch("logging.FileHandler") as mock_fh:
                 mock_fh.return_value = MagicMock()
                 configure_subprocess_logging("exec-debug-traces", "crew")
@@ -197,7 +197,6 @@ class TestConfigureSubprocessLogging:
 
         with patch.dict(os.environ, {"KASAL_LOG_LEVEL": "INFO"}, clear=False):
             os.environ.pop("KASAL_LOG_CREW", None)
-            os.environ.pop("KASAL_DEBUG_TRACES", None)
             os.environ.pop("KASAL_DEBUG_ALL", None)
             with patch("logging.FileHandler") as mock_fh:
                 mock_fh.return_value = MagicMock()
@@ -241,3 +240,47 @@ class TestConfigureSubprocessLogging:
             with patch("logging.FileHandler") as mock_fh:
                 mock_fh.return_value = MagicMock()
                 configure_subprocess_logging("exec-env-logdir", "crew")
+
+
+class TestPrepareChildEnvironment:
+    """The first thing a spawned crew/flow interpreter does."""
+
+    def test_in_process_callers_keep_their_environment(self, monkeypatch):
+        """Unit tests call the child entry points in-process: never scrub then."""
+        from src.services.execution.subprocess_bootstrap import (
+            prepare_child_environment,
+        )
+
+        monkeypatch.setenv("SOME_TEST_ONLY_VAR", "kept")
+        with (
+            patch.dict(os.environ),  # restores what the child entry sets
+            patch("multiprocessing.parent_process", return_value=None),
+        ):
+            prepare_child_environment("exec-1", "crew")
+            assert os.environ["SOME_TEST_ONLY_VAR"] == "kept"
+            assert os.environ["KASAL_EXECUTION_ID"] == "exec-1"
+            from src.core.process_role import in_flow_subprocess, in_run_subprocess
+
+            assert in_run_subprocess() and not in_flow_subprocess()
+            assert "CREW_SUBPROCESS_MODE" not in os.environ
+
+    def test_a_spawned_child_applies_the_allow_list(self, monkeypatch):
+        from src.services.execution.subprocess_bootstrap import (
+            prepare_child_environment,
+        )
+
+        monkeypatch.setenv("SERPER_API_KEY", "leak")
+        monkeypatch.setenv("KASAL_LOG_LEVEL", "INFO")
+        with (
+            patch.dict(os.environ),
+            patch("multiprocessing.parent_process", return_value=MagicMock()),
+            patch(
+                "src.core.databricks_app.restrict_environment_to_child_allow_list"
+            ) as restrict,
+        ):
+            prepare_child_environment("exec-2", "flow")
+            from src.core.process_role import in_flow_subprocess
+
+            assert in_flow_subprocess()
+            assert os.environ["CREWAI_DEBUG_TRACING"] == "true"
+        restrict.assert_called_once_with()

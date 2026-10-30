@@ -6,7 +6,7 @@ between agents and tasks in the CrewAI ecosystem.
 """
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends
 
@@ -51,7 +51,7 @@ async def generate_connections(
     request: ConnectionRequest,
     service: ConnectionServiceDep,
     group_context: GroupContextDep,
-):
+) -> ConnectionResponse:
     """
     Generate connections between agents and tasks.
 
@@ -62,7 +62,7 @@ async def generate_connections(
     logging.getLogger().info(
         f"Generating connections for {len(request.agents)} agents and {len(request.tasks)} tasks"
     )
-    connections = await service.generate_connections(request)
+    connections = await service.generate_connections(request, group_context)
 
     # Log the number of assignments and dependencies
     logging.getLogger().info(
@@ -73,7 +73,9 @@ async def generate_connections(
 
 
 @router.get("/test-api-key", response_model=ApiKeyTestResponse)
-async def test_api_key(service: ConnectionServiceDep, group_context: GroupContextDep):
+async def test_api_key(
+    service: ConnectionServiceDep, group_context: GroupContextDep
+) -> Dict[str, Any]:
     """
     Test API keys and configuration.
 
@@ -82,6 +84,6 @@ async def test_api_key(service: ConnectionServiceDep, group_context: GroupContex
     """
     # Use injected service
     logging.getLogger().info("Testing API keys")
-    results = await service.test_api_keys()
+    results = await service.test_api_keys(group_id=group_context.primary_group_id)
 
     return results

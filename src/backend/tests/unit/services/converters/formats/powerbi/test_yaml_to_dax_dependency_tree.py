@@ -163,52 +163,6 @@ class TestConvertFilterToDAX:
         assert result == ""
 
 
-class TestValidateDaxSyntax:
-    """Lines 282-321: validate_dax_syntax"""
-
-    @pytest.fixture
-    def generator(self):
-        return DAXGenerator()
-
-    def test_valid_formula(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount])")
-        assert isinstance(is_valid, bool)
-
-    def test_unbalanced_parentheses(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount]")
-        assert is_valid is False
-        assert "Unbalanced parentheses" in msg
-
-    def test_invalid_not_in_syntax(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount] NOT IN {1,2})")
-        assert is_valid is False
-        assert "NOT IN" in msg
-
-    def test_and_outside_filter(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(T[a]) AND SUM(T[b])")
-        assert is_valid is False
-
-    def test_no_dax_function(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("Sales[Amount]")
-        assert is_valid is False
-        assert "No recognized DAX functions" in msg
-
-    def test_no_column_references(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(100)")
-        assert is_valid is False
-
-    def test_valid_calculate_with_filter(self, generator):
-        formula = 'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "West"))'
-        is_valid, msg = generator.validate_dax_syntax(formula)
-        assert is_valid is True
-
-    def test_positive_valid_message(self, generator):
-        formula = "SUM(Sales[Amount])"
-        is_valid, msg = generator.validate_dax_syntax(formula)
-        # Should have some message
-        assert isinstance(msg, str)
-
-
 class TestProcessDefinitionAndDependencyTree:
     """Lines 325-410: process_definition and dependency tree building"""
 
@@ -317,24 +271,15 @@ class TestProcessDefinitionAndDependencyTree:
                 generator._build_kbi_dependency_tree(calculated_kpi, [])
 
     def test_extract_formula_kbis_with_reference(self, generator):
-        """Lines 405-408: _extract_formula_kbis with mock resolver."""
-        from unittest.mock import MagicMock, patch
-
+        """_extract_formula_kbis resolves references with the real resolver
+        (regression: it called a non-existent resolve_kbi)."""
         base_kpi = make_kpi(technical_name="base_metric", formula="amount")
         calculated_kpi = make_kpi(
             technical_name="calc_metric",
             formula="{base_metric} * 2",
         )
-        # Patch the formula_parser to return a known reference
-        with patch.object(
-            generator._formula_parser,
-            "extract_kbi_references",
-            return_value=["base_metric"],
-        ):
-            # Patch the dependency_resolver to have a resolve_kbi method
-            mock_resolver = MagicMock()
-            mock_resolver.resolve_kbi.return_value = base_kpi
-            generator._dependency_resolver = mock_resolver
-            result = generator._extract_formula_kbis(calculated_kpi)
-            assert isinstance(result, list)
-            assert len(result) == 1
+        generator._dependency_resolver.build_kbi_lookup([base_kpi, calculated_kpi])
+
+        result = generator._extract_formula_kbis(calculated_kpi)
+
+        assert result == [base_kpi]

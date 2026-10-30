@@ -1,6 +1,8 @@
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import (
     BadRequestError,
@@ -25,7 +27,11 @@ class SchemaService:
     Acts as an intermediary between the API routers and the repository.
     """
 
-    def __init__(self, session=None, repository: SchemaRepository = None):
+    def __init__(
+        self,
+        session: Optional[AsyncSession] = None,
+        repository: Optional[SchemaRepository] = None,
+    ) -> None:
         """
         Initialize service with session or repository.
 

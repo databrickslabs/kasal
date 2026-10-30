@@ -17,18 +17,24 @@ import pytest
 # Point the process at a throwaway database BEFORE anything imports settings.
 #
 # This cannot be a fixture. `config/settings.py` evaluates
-# `os.getenv("SQLITE_DB_PATH", ...)` when the Settings CLASS BODY runs — i.e. at
-# import, during collection — so an autouse `monkeypatch.setenv` further down
-# this file always loses the race. It has been losing it silently: the default
-# used to be the CWD-relative "./app.db", which is how empty app.db files ended
-# up at the repo root and in src/frontend/. The default is absolute now, which
-# makes setting this early MORE important, not less: without it a stray write
-# would land in the real development database instead of a stray file.
-# Only the PATH is set here, deliberately. DATABASE_TYPE is left alone because
-# it is read the same way, and tests assert on its "postgres" default — setting
-# it at import time would bake "sqlite" into the class and break them. The
-# autouse fixture below still sets both for the code that reads them at runtime.
-os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
+# `os.getenv("DATABASE_TYPE", ...)` and `os.getenv("SQLITE_DB_PATH", ...)` when
+# the Settings CLASS BODY runs — i.e. at import, during collection — so an
+# autouse `monkeypatch.setenv` further down this file always loses the race.
+#
+# These are HARD-SET, not `setdefault`. The default path is the absolute
+# BACKEND_ROOT/app.db — the real development database — so a shell that
+# exported SQLITE_DB_PATH=app.db (or DATABASE_TYPE=postgres) used to send the
+# import-time `settings`, and with it the session factory, straight at the dev
+# database; the pollution guard at the bottom of this file only notices NEW
+# files, so writes into an existing app.db passed silently. "sqlite" is also
+# the Settings default, so pinning it bakes nothing unusual into the class.
+# DATABASE_URI / SYNC_DATABASE_URI are dropped because BaseSettings would read
+# an exported one verbatim and bypass both of the above. Tests that need other
+# values construct Settings(...) or patch os.environ themselves.
+os.environ["DATABASE_TYPE"] = "sqlite"
+os.environ["SQLITE_DB_PATH"] = ":memory:"
+os.environ.pop("DATABASE_URI", None)
+os.environ.pop("SYNC_DATABASE_URI", None)
 
 # Everything a test run writes goes in ONE place: tests/.artifacts/. It is
 # git-ignored, safe to delete, and the pollution guard at the bottom of this
@@ -38,9 +44,14 @@ os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 # services/llm/manager.py resolves its log file at module import, so a fixture
 # would be too late. Without this the suite writes 35 log files into
 # backend/logs/, the same directory the dev server uses.
+# Hard-set: with setdefault, an exported LOG_DIR sent test lines into the real
+# logs/llm.log, which the guard misses (it only notices NEW files).
 _ARTIFACTS = os.path.join(os.path.dirname(__file__), ".artifacts")
-os.environ.setdefault("LOG_DIR", os.path.join(_ARTIFACTS, "logs"))
-os.environ.setdefault("KASAL_MEMORY_DIR", os.path.join(_ARTIFACTS, "memory"))
+os.environ["LOG_DIR"] = os.path.join(_ARTIFACTS, "logs")
+os.environ["KASAL_MEMORY_DIR"] = os.path.join(_ARTIFACTS, "memory")
+# Real spans (the chat dispatcher's) otherwise create ./mlflow.db + ./mlruns in
+# the CWD. file:, not sqlite:, which still puts trace artifacts in ./mlruns.
+os.environ["MLFLOW_TRACKING_URI"] = "file://" + os.path.join(_ARTIFACTS, "mlruns")
 # Do not load a developer's CLI credentials during a unit test. Tests requiring
 # SDK authentication supply credentials or patch the SDK explicitly.
 os.environ["DATABRICKS_CONFIG_FILE"] = os.devnull
@@ -52,10 +63,23 @@ os.environ["DATABRICKS_CONFIG_FILE"] = os.devnull
 # evicts modules from sys.modules, and later imports get FRESH classes —
 # silently disconnecting the gpt-oss monkey patches the suite asserts on.
 try:
-    import numpy  # noqa: F401
+    import numpy
     import numpy.exceptions  # noqa: F401
 except Exception:
     pass
+
+# Register every ORM model up front. A `patch.dict("sys.modules", ...)` drops
+# modules first imported inside it; if that was a model, the re-import fails
+# with "Table '...' is already defined" unless an earlier file imported it.
+import src.db.all_models  # noqa: E402
+
+# Build the LLM handler classes from the REAL transport LLM before any test can
+# patch it. `class VLLMFunctionCallingLLM(LLM)` evaluated while a test has
+# `src.core.llm.transport.LLM` patched becomes a MagicMock, stays cached, and
+# fails every later test in that xdist worker that imports the LLM manager
+# (`Forward reference must be an expression`): an order-dependent failure that
+# only shows up with some file-to-worker assignments.
+import src.services.llm.handlers  # noqa: E402,F401
 
 # Suppress noisy third-party warnings early (before module imports trigger them).
 # These come from pyspark (distutils), starlette (python_multipart), and mlflow
@@ -196,6 +220,107 @@ def setup_test_env(monkeypatch):
     monkeypatch.setenv("DEBUG_MODE", "true")
 
 
+_ISOLATED_ENV_PREFIXES = ("DATABRICKS_", "MLFLOW_")
+
+
+@pytest.fixture(autouse=True)
+def isolate_databricks_and_mlflow_env():
+    """Restore every DATABRICKS_* / MLFLOW_* variable after each test.
+
+    Several code paths (MLflow setup, URL normalisation, the subprocess helpers)
+    write a workspace host or token into os.environ, and some tests drive them
+    without monkeypatch. A host left behind makes a later test's real MLflow /
+    databricks-sdk call retry against it for minutes instead of failing at once,
+    which under xdist hung whole workers. Every test starts from the same env.
+    """
+    before = {
+        k: v for k, v in os.environ.items() if k.startswith(_ISOLATED_ENV_PREFIXES)
+    }
+    yield
+    for key in [k for k in os.environ if k.startswith(_ISOLATED_ENV_PREFIXES)]:
+        if key not in before:
+            del os.environ[key]
+    for key, value in before.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def restore_multiprocessing_contexts():
+    """Undo attribute patches on the process-wide multiprocessing contexts.
+
+    The executors keep ``self._ctx = multiprocessing.get_context("spawn")``, a
+    singleton, and many executor tests do ``executor._ctx.Queue = MagicMock(...)``.
+    That replaces ``Queue`` on the shared context for every later test in the
+    worker, so a test that spawns a real child (test_run_wait) got a MagicMock
+    queue whenever such a file ran before it on the same xdist worker.
+    """
+    import multiprocessing
+
+    contexts = [multiprocessing.get_context(m) for m in ("spawn", "fork")]
+    saved = [dict(vars(ctx)) for ctx in contexts]
+    yield
+    for ctx, before in zip(contexts, saved):
+        current = vars(ctx)
+        for name in [n for n in current if n not in before]:
+            delattr(ctx, name)
+        for name, value in before.items():
+            if current.get(name) is not value:
+                setattr(ctx, name, value)
+
+
+@pytest.fixture(autouse=True)
+def restore_engine_settings_snapshot():
+    """Restore the process-wide Configuration → Engines snapshot after each test.
+
+    Engine-config writes (and a lifespan startup) update it, so without this a
+    test that saved a budget override changed the budgets of every later test
+    on the same xdist worker.
+    """
+    from src.services.settings import engine_settings
+
+    saved = dict(engine_settings._snapshot)
+    yield
+    engine_settings._snapshot.clear()
+    engine_settings._snapshot.update(saved)
+
+
+@pytest.fixture
+def engine_setting(monkeypatch):
+    """Set a Configuration → Engines setting for one test: ``engine_setting(key, v)``."""
+    from src.services.settings import engine_settings
+
+    def _set(key, value):
+        monkeypatch.setitem(
+            engine_settings._snapshot,
+            key,
+            str(value).lower() if isinstance(value, bool) else str(value),
+        )
+
+    return _set
+
+
+@pytest.fixture(autouse=True)
+def no_leaked_databricks_auth_window(request):
+    """Fail a test that leaves a Databricks credential scope (sp_auth) open.
+
+    A scope is context-local, so a leak cannot reach another request — but in
+    the test runner's main thread it would authenticate every later test's
+    MLflow/SDK client as the leaked identity. Reset it so the rest of the suite
+    is unaffected.
+    """
+    yield
+    sp_auth = sys.modules.get("src.services.mlflow.sp_auth")
+    if sp_auth is None or sp_auth.current_credentials() is None:
+        return
+    sp_auth._CREDENTIALS.set(None)
+    pytest.fail(
+        f"{request.node.nodeid} left a Databricks credential scope open "
+        "(sp_auth); close it, e.g. via _restore_environment_vars",
+        pytrace=False,
+    )
+
+
 # Cleanup fixtures
 @pytest.fixture(autouse=True)
 def cleanup_after_test():
@@ -211,31 +336,30 @@ def cleanup_after_test():
     'MagicMock'``. Restoring handler lists keeps such leaks contained to the
     test that caused them.
 
-    Also restore CREW_SUBPROCESS_MODE: the process_crew/flow executor entry
-    points set ``os.environ["CREW_SUBPROCESS_MODE"] = "true"`` in-process
+    Also reset the run-subprocess role: the process_crew/flow executor entry
+    points mark this process as a run subprocess (``core.process_role``) in-process
     (intended for the spawned interpreter), so any test that exercises them
     leaks the flag and silently flips subprocess-mode branches (e.g. the trace
     repository's parent-existence check, SSE-broadcast gates) for every test
     that runs after it.
     """
     import logging
-    import os
 
     saved = {logging.getLogger(): logging.getLogger().handlers[:]}
     for name in list(logging.root.manager.loggerDict):
         lg = logging.getLogger(name)
         if isinstance(lg, logging.Logger):
             saved[lg] = lg.handlers[:]
-    saved_subprocess_mode = os.environ.get("CREW_SUBPROCESS_MODE")
     try:
         yield
     finally:
         for lg, handlers in saved.items():
             lg.handlers[:] = handlers
-        if saved_subprocess_mode is None:
-            os.environ.pop("CREW_SUBPROCESS_MODE", None)
-        else:
-            os.environ["CREW_SUBPROCESS_MODE"] = saved_subprocess_mode
+        # The run-subprocess role: child entry points driven in-process mark
+        # it (core.process_role), which must not flip later tests' branches.
+        from src.core import process_role
+
+        process_role.reset()
         # The resolved-template cache is module-global; without clearing it a
         # template one test resolved bleeds into the next test's expectations.
         # (Sync fixture → clear the dict directly; no event loop is running.)
@@ -494,6 +618,21 @@ def _isolate_logging_config():
                 logger.setLevel(logging.NOTSET)
                 logger.propagate = True
                 logger.handlers[:] = []
+
+
+@pytest.fixture(autouse=True)
+def _isolate_logger_manager():
+    """Restore the LoggerManager singleton. Tests that reset it, or point it at
+    a since-deleted TemporaryDirectory, broke later tests in the worker."""
+    from src.core.logger import LoggerManager as cls
+
+    instance, initialized = cls._instance, cls._initialized
+    state = dict(vars(instance)) if instance is not None else None
+    yield
+    cls._instance, cls._initialized = instance, initialized
+    if instance is not None and state is not None:
+        vars(instance).clear()
+        vars(instance).update(state)
 
 
 @pytest.fixture(autouse=True)

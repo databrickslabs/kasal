@@ -8,17 +8,13 @@ handling timeouts, and triggering flow resume.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.execution_status import ExecutionStatus
-from src.models.hitl_approval import (
-    HITLApproval,
-    HITLApprovalStatus,
-    HITLTimeoutAction,
-)
+from src.models.hitl_approval import HITLApproval, HITLApprovalStatus
 from src.repositories.hitl_repository import (
     HITLApprovalRepository,
     HITLWebhookRepository,
@@ -31,10 +27,13 @@ from src.schemas.hitl import (
     HITLApprovalStatusEnum,
     HITLRejectionActionEnum,
 )
+from src.services.execution.stored_inputs import strip_run_credentials
 from src.services.flow_builder.conversation.interrupt import (
     APPROVAL_CONFIG_KEY,
     approval_payload,
 )
+from src.services.hitl.boot import BOOT_ID_KEY, current_boot_id
+from src.services.hitl.expiry import IN_RUN_GATE_KINDS, GateExpiry, is_in_run_gate
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +70,48 @@ class HITLPermissionDeniedError(HITLServiceError):
 
 class HITLApprovalValidationError(HITLServiceError):
     """The requested decision does not satisfy the gate policy."""
+
+
+def _already_decided(approval_id: int) -> HITLApprovalAlreadyProcessedError:
+    return HITLApprovalAlreadyProcessedError(
+        f"Approval {approval_id} was already decided by another response"
+    )
+
+
+def _summary(a: HITLApproval) -> HITLApprovalResponse:
+    """An approval as the list and status reads return it.
+
+    Without ``previous_crew_output``: those reads are polled to detect gates,
+    and shipping a ~1 MB output on each made the config-gen gate slow to open.
+    The flags say it exists; GET /approvals/{id} serves it when rendered.
+    """
+    return HITLApprovalResponse(
+        id=a.id,
+        execution_id=a.execution_id,
+        flow_id=a.flow_id,
+        gate_node_id=a.gate_node_id,
+        crew_sequence=a.crew_sequence,
+        status=HITLApprovalStatusEnum(a.status),
+        gate_config=a.gate_config,
+        previous_crew_name=a.previous_crew_name,
+        previous_crew_output=None,
+        has_previous_crew_output=bool(a.previous_crew_output),
+        previous_crew_output_size=(
+            len(a.previous_crew_output) if a.previous_crew_output else None
+        ),
+        flow_state_snapshot=a.flow_state_snapshot,
+        responded_by=a.responded_by,
+        responded_at=a.responded_at,
+        approval_comment=a.approval_comment,
+        rejection_reason=a.rejection_reason,
+        rejection_action=(
+            HITLRejectionActionEnum(a.rejection_action) if a.rejection_action else None
+        ),
+        expires_at=a.expires_at,
+        is_expired=a.is_expired,
+        created_at=a.created_at,
+        group_id=a.group_id,
+    )
 
 
 class HITLService:
@@ -128,6 +169,11 @@ class HITLService:
             Created HITLApproval record
         """
         try:
+            if gate_config.get("kind") in IN_RUN_GATE_KINDS:
+                # Which server's worker is blocked on it, so a restart can tell
+                # its own abandoned gates from another deployment's live ones.
+                gate_config = {**gate_config, BOOT_ID_KEY: current_boot_id()}
+
             # Calculate expiration
             timeout_seconds = gate_config.get("timeout_seconds", 3600)
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
@@ -224,24 +270,33 @@ class HITLService:
                     "A comment is required to approve this request"
                 )
 
-            # Update approval status
-            await self.approval_repo.update_status(
+            # Recorded only while still pending, so a decision that lost a race
+            # resumes nothing.
+            if not await self.approval_repo.update_status(
                 approval_id=approval_id,
                 status=HITLApprovalStatus.APPROVED,
                 responded_by=approved_by,
                 approval_comment=comment,
-            )
+            ):
+                raise _already_decided(approval_id)
 
             # Tool-call and task-review gates don't suspend the orchestration —
             # the blocked worker thread polls the row and resumes itself, so
             # there is no flow to relaunch.
-            if (approval.gate_config or {}).get("kind") in ("tool_call", "task_review"):
+            message = "Gate approved successfully"
+            if is_in_run_gate(approval):
                 execution_resumed = False
             else:
                 # Resume flow execution with user's token for OBO auth
                 execution_resumed = await self._resume_flow_execution(
                     approval, user_token=user_token
                 )
+                if not execution_resumed:
+                    await self._fail_unresumed(approval, "approved")
+                    message = (
+                        "Gate approved, but the flow could not be resumed; "
+                        "the run was marked failed"
+                    )
 
             logger.info(f"HITL approval {approval_id} approved by {approved_by}")
 
@@ -249,7 +304,7 @@ class HITLService:
                 success=True,
                 approval_id=approval_id,
                 status=HITLApprovalStatusEnum.APPROVED,
-                message="Gate approved successfully",
+                message=message,
                 execution_resumed=execution_resumed,
             )
 
@@ -271,6 +326,7 @@ class HITLService:
         group_id: str,
         reason: str,
         action: HITLRejectionActionEnum = HITLRejectionActionEnum.REJECT,
+        user_token: Optional[str] = None,
     ) -> HITLActionResponse:
         """
         Reject an HITL gate.
@@ -281,6 +337,7 @@ class HITLService:
             group_id: Group ID for authorization
             reason: Reason for rejection
             action: Action to take (reject = fail flow, retry = re-run previous crew)
+            user_token: User's access token for OBO authentication on retry
 
         Returns:
             HITLActionResponse with result
@@ -314,14 +371,14 @@ class HITLService:
                 else HITLApprovalStatus.REJECTED
             )
 
-            # Update approval status
-            await self.approval_repo.update_status(
+            if not await self.approval_repo.update_status(
                 approval_id=approval_id,
                 status=new_status,
                 responded_by=rejected_by,
                 rejection_reason=reason,
                 rejection_action=action.value,
-            )
+            ):
+                raise _already_decided(approval_id)
 
             # Handle rejection action
             gate_kind = (approval.gate_config or {}).get("kind")
@@ -338,8 +395,16 @@ class HITLService:
                 message = "Output rejected - the task retries with your feedback"
             elif action == HITLRejectionActionEnum.RETRY:
                 # Retry: Re-run the previous crew
-                execution_resumed = await self._retry_previous_crew(approval)
+                execution_resumed = await self._retry_previous_crew(
+                    approval, user_token=user_token
+                )
                 message = "Gate rejected - retrying previous crew"
+                if not execution_resumed:
+                    await self._fail_unresumed(approval, "sent back for a retry")
+                    message = (
+                        "Gate rejected, but the retry could not be started; "
+                        "the run was marked failed"
+                    )
             else:
                 # Reject: Fail the flow
                 await self._fail_execution(approval, reason)
@@ -370,14 +435,18 @@ class HITLService:
             logger.error(f"Database error rejecting HITL: {str(e)}")
             raise HITLServiceError(f"Failed to reject: {str(e)}")
 
-    async def get_approval(self, approval_id: str) -> Optional[HITLApproval]:
+    async def get_approval(
+        self, approval_id: Union[int, str]
+    ) -> Optional[HITLApproval]:
         """One approval row by id.
 
         Callers in other domains — the runtime's tool-approval gate and the
         human-review guardrail — used to build ``HITLApprovalRepository``
         themselves to poll a decision. Approvals are this service's domain.
+        They hold the id as a string; the column is an integer, and asyncpg
+        rejects a str bound to an integer parameter, so it is coerced here.
         """
-        return await self.approval_repo.get_by_id(approval_id)
+        return await self.approval_repo.get_by_id(int(approval_id))
 
     async def get_approvals_for_execution(
         self, execution_id: str, group_id: Optional[str] = None
@@ -404,42 +473,7 @@ class HITLService:
                 group_id=group_id, limit=limit, offset=offset
             )
 
-            # Omit the heavy `previous_crew_output` from the LIST response too
-            # (same reason as get_execution_hitl_status — this can be polled and
-            # each row's output can be ~1 MB). Clients fetch the full output via
-            # GET /approvals/{id} on demand.
-            items = [
-                HITLApprovalResponse(
-                    id=a.id,
-                    execution_id=a.execution_id,
-                    flow_id=a.flow_id,
-                    gate_node_id=a.gate_node_id,
-                    crew_sequence=a.crew_sequence,
-                    status=HITLApprovalStatusEnum(a.status),
-                    gate_config=a.gate_config,
-                    previous_crew_name=a.previous_crew_name,
-                    previous_crew_output=None,  # omitted — lazy-loaded on demand
-                    has_previous_crew_output=bool(a.previous_crew_output),
-                    previous_crew_output_size=(
-                        len(a.previous_crew_output) if a.previous_crew_output else None
-                    ),
-                    flow_state_snapshot=a.flow_state_snapshot,
-                    responded_by=a.responded_by,
-                    responded_at=a.responded_at,
-                    approval_comment=a.approval_comment,
-                    rejection_reason=a.rejection_reason,
-                    rejection_action=(
-                        HITLRejectionActionEnum(a.rejection_action)
-                        if a.rejection_action
-                        else None
-                    ),
-                    expires_at=a.expires_at,
-                    is_expired=a.is_expired,
-                    created_at=a.created_at,
-                    group_id=a.group_id,
-                )
-                for a in approvals
-            ]
+            items = [_summary(a) for a in approvals]
 
             return HITLApprovalListResponse(
                 items=items, total=total, limit=limit, offset=offset
@@ -473,46 +507,7 @@ class HITLService:
                 (a for a in approvals if a.status == HITLApprovalStatus.PENDING), None
             )
 
-            # Convert to response objects.
-            # NOTE: omit the (potentially ~1 MB) `previous_crew_output` here — this
-            # status endpoint is polled to DETECT gates, and shipping the full
-            # output made the config-gen gate slow to open (browser downloads +
-            # JSON.parses ~1 MB). The client lazy-loads the full output via
-            # GET /approvals/{id} only when it renders it. We still signal that
-            # output exists (has_previous_crew_output + size) so the client knows
-            # to fetch it.
-            approval_responses = [
-                HITLApprovalResponse(
-                    id=a.id,
-                    execution_id=a.execution_id,
-                    flow_id=a.flow_id,
-                    gate_node_id=a.gate_node_id,
-                    crew_sequence=a.crew_sequence,
-                    status=HITLApprovalStatusEnum(a.status),
-                    gate_config=a.gate_config,
-                    previous_crew_name=a.previous_crew_name,
-                    previous_crew_output=None,  # omitted — lazy-loaded on demand
-                    has_previous_crew_output=bool(a.previous_crew_output),
-                    previous_crew_output_size=(
-                        len(a.previous_crew_output) if a.previous_crew_output else None
-                    ),
-                    flow_state_snapshot=a.flow_state_snapshot,
-                    responded_by=a.responded_by,
-                    responded_at=a.responded_at,
-                    approval_comment=a.approval_comment,
-                    rejection_reason=a.rejection_reason,
-                    rejection_action=(
-                        HITLRejectionActionEnum(a.rejection_action)
-                        if a.rejection_action
-                        else None
-                    ),
-                    expires_at=a.expires_at,
-                    is_expired=a.is_expired,
-                    created_at=a.created_at,
-                    group_id=a.group_id,
-                )
-                for a in approvals
-            ]
+            approval_responses = [_summary(a) for a in approvals]
 
             pending_response = next(
                 (
@@ -542,63 +537,48 @@ class HITLService:
 
     async def process_expired_approvals(self) -> List[int]:
         """
-        Process all expired pending approvals.
+        Close every expired gate, and end the runs that only it was holding.
 
-        This method is called by a background task to handle timeouts.
-        It applies the configured timeout_action (auto_reject or fail).
+        Called by the background sweep. Which runs are failed, and when, is
+        decided by gate kind in ``services/hitl/expiry.py``; a run that already
+        finished is never relabelled.
 
         Returns:
             List of processed approval IDs
         """
         try:
-            expired_approvals = await self.approval_repo.get_expired_pending()
-            processed_ids = []
-
-            for approval in expired_approvals:
-                try:
-                    timeout_action = approval.timeout_action
-
-                    if timeout_action == HITLTimeoutAction.AUTO_REJECT:
-                        # Auto-reject the approval
-                        await self.approval_repo.update_status(
-                            approval_id=approval.id,
-                            status=HITLApprovalStatus.TIMEOUT,
-                            responded_by="system",
-                            rejection_reason="Approval timed out (auto-rejected)",
-                        )
-                        await self._fail_execution(
-                            approval, "HITL gate timed out and was auto-rejected"
-                        )
-                    else:
-                        # Fail action - fail the execution
-                        await self.approval_repo.update_status(
-                            approval_id=approval.id,
-                            status=HITLApprovalStatus.TIMEOUT,
-                            responded_by="system",
-                            rejection_reason="Approval timed out",
-                        )
-                        await self._fail_execution(approval, "HITL gate timed out")
-
-                    processed_ids.append(approval.id)
-                    logger.info(
-                        f"Processed expired HITL approval {approval.id} "
-                        f"with action {timeout_action}"
-                    )
-
-                except Exception as e:
-                    logger.error(
-                        f"Error processing expired approval {approval.id}: {str(e)}"
-                    )
-
-            return processed_ids
-
+            return await GateExpiry(self.session, self.approval_repo).process_expired()
         except SQLAlchemyError as e:
             logger.error(f"Database error processing expired approvals: {str(e)}")
             raise HITLServiceError(f"Failed to process expired approvals: {str(e)}")
 
+    async def reap_abandoned_gates(self, started_before: datetime) -> List[int]:
+        """Close in-run gates a previous server process left open; see expiry.py."""
+        return await GateExpiry(self.session, self.approval_repo).reap_abandoned(
+            started_before
+        )
+
     # =========================================================================
     # Private Methods
     # =========================================================================
+
+    async def _fail_unresumed(self, approval: HITLApproval, decision: str) -> None:
+        """A flow gate was decided, but its relaunch never started.
+
+        Left alone the run would sit at WAITING_FOR_APPROVAL with nothing
+        pending, which external callers see as a question nobody can answer.
+        """
+        try:
+            await self._update_execution_status(
+                execution_id=approval.execution_id,
+                status=ExecutionStatus.FAILED.value,
+                message=f"HITL gate {decision}, but the flow could not be resumed",
+            )
+        except Exception:
+            logger.exception(
+                "Could not mark run %s failed after its resume did not start",
+                approval.execution_id,
+            )
 
     async def _update_execution_status(
         self, execution_id: str, status: str, message: Optional[str] = None
@@ -655,8 +635,9 @@ class HITLService:
                 execution_id=approval.execution_id, status=ExecutionStatus.RUNNING.value
             )
 
-            # Extract the original flow configuration from the execution inputs
-            original_inputs = execution.inputs or {}
+            # The original flow configuration, minus any credential an older row
+            # still stores: the resume runs on the approver's token below.
+            original_inputs = strip_run_credentials(execution.inputs or {})
             flow_id = (
                 str(execution.flow_id)
                 if execution.flow_id
@@ -695,7 +676,7 @@ class HITLService:
 
             # Trigger the flow execution asynchronously in a background task
             # This ensures we don't block the approval response
-            async def _trigger_resume():
+            async def _trigger_resume() -> None:
                 try:
                     crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(
@@ -730,12 +711,15 @@ class HITLService:
             logger.error(f"Error resuming flow execution: {str(e)}", exc_info=True)
             return False
 
-    async def _retry_previous_crew(self, approval: HITLApproval) -> bool:
+    async def _retry_previous_crew(
+        self, approval: HITLApproval, user_token: Optional[str] = None
+    ) -> bool:
         """
         Retry the previous crew after rejection with retry action.
 
         Args:
             approval: The rejected HITLApproval with retry action
+            user_token: The reviewer's access token for OBO authentication
 
         Returns:
             True if retry was initiated successfully
@@ -763,8 +747,9 @@ class HITLService:
                 execution_id=approval.execution_id, status=ExecutionStatus.RUNNING.value
             )
 
-            # Extract the original flow configuration from the execution inputs
-            original_inputs = execution.inputs or {}
+            # The original flow configuration, minus any credential an older row
+            # still stores: the retry runs on the reviewer's token below.
+            original_inputs = strip_run_credentials(execution.inputs or {})
             flow_id = (
                 str(execution.flow_id)
                 if execution.flow_id
@@ -792,13 +777,15 @@ class HITLService:
                 f"flow_uuid={flow_uuid}, re-running from crew sequence {approval.crew_sequence}"
             )
 
-            # Create group context for the retry
+            # Create group context for the retry, with the reviewer's token for OBO
             group_context = GroupContext(
-                group_ids=[approval.group_id], group_email=approval.responded_by
+                group_ids=[approval.group_id],
+                group_email=approval.responded_by,
+                access_token=user_token,
             )
 
             # Trigger the flow execution asynchronously in a background task
-            async def _trigger_retry():
+            async def _trigger_retry() -> None:
                 try:
                     crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(

@@ -6,11 +6,13 @@ This module provides database operations for execution history models.
 
 import json
 import logging
+import typing
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from uuid import UUID
 
-from sqlalchemy import delete, distinct, func, update
+from sqlalchemy import Text, cast, delete, distinct, func, update
+from sqlalchemy.engine import CursorResult, Result, Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -24,10 +26,59 @@ from src.models.flow_state import FlowState
 
 logger = logging.getLogger(__name__)
 
+
+def _rowcount(result: Result[Any]) -> int:
+    """Rows a DML statement touched; ``execute()`` is typed as the base Result."""
+    return typing.cast("CursorResult[Any]", result).rowcount
+
+
 # Distinguishes "leave this column alone" from "set it to NULL" on partial
 # updates, where None is itself a meaningful value rather than an absent
 # argument.
 _UNSET = object()
+
+#: Characters of the serialized ``result`` a list row carries. Enough for a
+#: status line in a table; the whole payload stays on the detail endpoints.
+RESULT_PREVIEW_CHARS = 280
+
+
+def execution_summary_columns() -> tuple:
+    """The columns a run LIST needs — never the ``result``/``inputs`` blobs.
+
+    LLM results and crew YAML are routinely 10-150 KB per row, and a list page
+    is up to 100 rows. The small JSON fields list views still read (execution
+    type and flow id for rows written before those columns existed, and the
+    model) are extracted in SQL; ``result`` contributes only a truncated
+    preview.
+    """
+    run = ExecutionHistory
+    return (
+        run.id,
+        run.job_id,
+        run.status,
+        run.created_at,
+        run.completed_at,
+        run.run_name,
+        run.error,
+        run.group_id,
+        run.group_email,
+        run.execution_type,
+        run.harness,
+        run.flow_id,
+        run.crew_id,
+        run.flow_uuid,
+        run.checkpoint_status,
+        run.checkpoint_method,
+        run.mlflow_trace_id,
+        run.mlflow_experiment_name,
+        run.mlflow_evaluation_run_id,
+        run.inputs["execution_type"].as_string().label("input_execution_type"),
+        run.inputs["flow_id"].as_string().label("input_flow_id"),
+        run.inputs["model"].as_string().label("model"),
+        func.substr(cast(run.result, Text), 1, RESULT_PREVIEW_CHARS).label(
+            "result_preview"
+        ),
+    )
 
 
 class ExecutionHistoryRepository:
@@ -46,20 +97,31 @@ class ExecutionHistoryRepository:
         """Flush pending attribute changes on already-tracked runs."""
         await self.session.flush()
 
-    async def latest_result_with_keys(self, keys: List[str]) -> Optional[dict]:
-        """The most recent run whose ``result`` dict holds ALL of ``keys``.
+    async def latest_result_with_keys(
+        self,
+        keys: List[str],
+        *,
+        group_ids: Sequence[str],
+        job_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """The most recent run IN ``group_ids`` whose ``result`` dict holds ALL of ``keys``.
 
-        Serves the UCMV validator's fallback lookup. Same dialect reasoning as
-        :meth:`latest_checkpoint_containing`: the caller's raw ``result::text LIKE``
-        chain was Postgres-only and matched substrings anywhere in the JSON — a
-        value that merely CONTAINED the word counted as the key being present.
-        Filtering the decoded dict checks real keys and works on every dialect.
+        Serves the UCMV validator's fallback lookup. ``group_ids`` is required and
+        an empty scope returns None: this read used to span every tenant, so one
+        workspace's run picked up another's metric-view YAML (audit V3-1).
+        ``job_id`` narrows it to that one run. Filtering the decoded dict (not
+        ``result::text LIKE``) checks real keys and works on every dialect.
         """
+        if not group_ids:
+            return None
+        stmt = select(ExecutionHistory.result).where(
+            ExecutionHistory.result.isnot(None),
+            ExecutionHistory.group_id.in_(list(group_ids)),
+        )
+        if job_id is not None:
+            stmt = stmt.where(ExecutionHistory.job_id == job_id)
         result = await self.session.execute(
-            select(ExecutionHistory.result)
-            .where(ExecutionHistory.result.isnot(None))
-            .order_by(ExecutionHistory.created_at.desc())
-            .limit(50)
+            stmt.order_by(ExecutionHistory.created_at.desc()).limit(50)
         )
         for (data,) in result.all():
             if isinstance(data, str):
@@ -72,19 +134,23 @@ class ExecutionHistoryRepository:
         return None
 
     async def find_recent_results_containing(
-        self, key: str, limit: int = 20
+        self, key: str, *, group_ids: Sequence[str], limit: int = 20
     ) -> List[ExecutionHistory]:
-        """Recent runs whose decoded ``result`` dict contains ``key`` (dialect-portable).
+        """Recent runs IN ``group_ids`` whose decoded ``result`` contains ``key``.
 
         Serves the UCMV re-evaluation tool's scan for prior runs that recorded
-        non-transpiled measures (``untranslatable_items``). Filters the decoded JSON
-        in Python over a bounded, ordered window rather than a Postgres-only
-        ``result::text LIKE`` cast, so it behaves the same on SQLite and Lakebase.
-        Returns the ORM rows (caller reads job_id / run_name / created_at / result).
+        ``untranslatable_items``. Empty ``group_ids`` returns nothing (audit V3-1).
+        Filters in Python over a bounded, ordered window so it behaves the same on
+        SQLite and Lakebase. Returns the ORM rows.
         """
+        if not group_ids:
+            return []
         result = await self.session.execute(
             select(ExecutionHistory)
-            .where(ExecutionHistory.result.isnot(None))
+            .where(
+                ExecutionHistory.result.isnot(None),
+                ExecutionHistory.group_id.in_(list(group_ids)),
+            )
             .order_by(ExecutionHistory.created_at.desc())
             .limit(max(limit * 5, 50))
         )
@@ -97,33 +163,6 @@ class ExecutionHistoryRepository:
                 if len(out) >= limit:
                     break
         return out
-
-    async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
-        """The most recent run whose ``checkpoint_data`` holds ``key``.
-
-        Serves the UCMV validator, which looks for edits a user saved in an
-        earlier step of a multi-step flow.
-
-        The caller's version cast ``checkpoint_data::text`` in raw SQL — a
-        Postgres-only cast that fails on SQLite, so this silently found nothing in
-        local dev. Filtering is done in Python over a bounded, ordered window
-        instead, which behaves the same on every dialect.
-        """
-        result = await self.session.execute(
-            select(ExecutionHistory.checkpoint_data)
-            .where(ExecutionHistory.checkpoint_data.isnot(None))
-            .order_by(ExecutionHistory.created_at.desc())
-            .limit(50)
-        )
-        for (data,) in result.all():
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data)
-                except ValueError:
-                    continue
-            if isinstance(data, dict) and key in data:
-                return data
-        return None
 
     async def insert(
         self, run: ExecutionHistory, commit: bool = False
@@ -154,8 +193,12 @@ class ExecutionHistoryRepository:
             await self.session.commit()
 
     async def get_execution_history(
-        self, limit: int = 50, offset: int = 0, group_ids: List[str] = None
-    ) -> tuple[List[ExecutionHistory], int]:
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: Optional[List[str]] = None,
+        full: bool = False,
+    ) -> tuple[List[Any], int]:
         """
         Get paginated execution history with group filtering.
 
@@ -163,21 +206,24 @@ class ExecutionHistoryRepository:
             limit: Maximum number of items to return
             offset: Number of items to skip
             group_ids: List of group IDs for filtering
+            full: Load whole rows (``result``, ``inputs`` and every other
+                column). By default rows are :func:`execution_summary_columns`
+                projections, with attribute access by column name.
 
         Returns:
-            Tuple of (list of Run objects, total count)
+            Tuple of (runs, total count)
         """
         # Use the session from the repository
         if not self.session:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
         session = self.session
 
-        # Build base query with group filtering
-        if group_ids and len(group_ids) > 0:
-            base_filter = ExecutionHistory.group_id.in_(group_ids)
-        else:
-            # No filtering (fallback for admin/system access)
-            base_filter = True
+        # No scope means no rows, never "all tenants" — the same rule as
+        # ExecutionRepository._history_filter (audit V2). There is no system
+        # caller of this list; cleanup uses ExecutionRepository(system_level=True).
+        if not group_ids:
+            return [], 0
+        base_filter = ExecutionHistory.group_id.in_(group_ids)
 
         # Get total count
         count_stmt = (
@@ -186,16 +232,16 @@ class ExecutionHistoryRepository:
         total_count_result = await session.execute(count_stmt)
         total_count = total_count_result.scalar() or 0
 
-        # Get paginated runs
+        # Get paginated runs — summary columns only unless asked for payloads.
         stmt = (
-            select(ExecutionHistory)
+            select(*((ExecutionHistory,) if full else execution_summary_columns()))
             .where(base_filter)
             .order_by(ExecutionHistory.created_at.desc())
             .offset(offset)
             .limit(limit)
         )
         result = await session.execute(stmt)
-        runs = result.scalars().all()
+        runs = list(result.scalars().all() if full else result.all())
 
         return runs, total_count
 
@@ -236,7 +282,7 @@ class ExecutionHistoryRepository:
         return list(result.scalars().all())
 
     async def get_execution_by_id(
-        self, execution_id: int, group_ids: List[str] = None
+        self, execution_id: int, group_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by ID with group filtering.
@@ -263,7 +309,7 @@ class ExecutionHistoryRepository:
         return result.scalars().first()
 
     async def get_execution_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
+        self, job_id: str, group_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by job_id with group filtering.
@@ -289,9 +335,11 @@ class ExecutionHistoryRepository:
         result = await session.execute(stmt)
         return result.scalars().first()
 
-    async def get_execution_statuses_by_job_ids(self, job_ids: List[str]):
+    async def get_execution_statuses_by_job_ids(
+        self, job_ids: List[str]
+    ) -> List[Row[Any]]:
         """Scalar status snapshots for the internal poller; bounded IN clauses."""
-        rows = []
+        rows: List[Row[Any]] = []
         for start in range(0, len(job_ids), 500):
             result = await self.session.execute(
                 select(
@@ -304,8 +352,8 @@ class ExecutionHistoryRepository:
         return rows
 
     async def get_execution_summary_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
-    ):
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Row[Any]]:
         """Slim scalar-only lookup for hot polling paths.
 
         The full-row variant drags the result/inputs/partial_results/checkpoint
@@ -355,7 +403,7 @@ class ExecutionHistoryRepository:
         return await self._get_execution_by_id_internal(self.session, execution_id)
 
     async def check_execution_exists(
-        self, execution_id: int, group_ids: List[str] = None
+        self, execution_id: int, group_ids: Optional[List[str]] = None
     ) -> bool:
         """
         Check if an execution exists, scoped to the given groups.
@@ -418,7 +466,7 @@ class ExecutionHistoryRepository:
                 FlowState.flow_uuid.notin_(still_referenced),
             )
         )
-        count = result.rowcount or 0
+        count = _rowcount(result) or 0
         if count:
             logger.info(f"Deleted {count} orphaned flow_states row(s)")
         return count
@@ -473,14 +521,14 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id == job_id)
             task_status_result = await session.execute(task_status_stmt)
-            result["task_status_count"] = task_status_result.rowcount
+            result["task_status_count"] = _rowcount(task_status_result)
 
             # Delete associated error traces
             error_trace_stmt = delete(ErrorTrace).where(
                 ErrorTrace.run_id == execution_id
             )
             error_trace_result = await session.execute(error_trace_stmt)
-            result["error_trace_count"] = error_trace_result.rowcount
+            result["error_trace_count"] = _rowcount(error_trace_result)
 
             # Delete the run
             run_stmt = delete(ExecutionHistory).where(
@@ -488,7 +536,7 @@ class ExecutionHistoryRepository:
             )
             delete_result = await session.execute(run_stmt)
             logger.debug(
-                f"[DELETE] Deleted execution record, affected rows: {delete_result.rowcount}"
+                f"[DELETE] Deleted execution record, affected rows: {_rowcount(delete_result)}"
             )
 
             # After the run is gone, so "still referenced" is accurate.
@@ -565,14 +613,14 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id == job_id)
             task_status_result = await session.execute(task_status_stmt)
-            result["task_status_count"] = task_status_result.rowcount
+            result["task_status_count"] = _rowcount(task_status_result)
 
             # Delete associated error traces
             error_trace_stmt = delete(ErrorTrace).where(
                 ErrorTrace.run_id == execution_id
             )
             error_trace_result = await session.execute(error_trace_stmt)
-            result["error_trace_count"] = error_trace_result.rowcount
+            result["error_trace_count"] = _rowcount(error_trace_result)
 
             # Delete the run
             run_stmt = delete(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
@@ -658,7 +706,7 @@ class ExecutionHistoryRepository:
             return False
 
     async def delete_all_executions(
-        self, group_ids: List[str] = None
+        self, group_ids: Optional[List[str]] = None
     ) -> Dict[str, int]:
         """
         Delete all executions and associated data for specified groups.
@@ -679,7 +727,10 @@ class ExecutionHistoryRepository:
         )
 
     async def _delete_all_executions_with_session(
-        self, session: AsyncSession, group_ids: List[str] = None, commit: bool = False
+        self,
+        session: AsyncSession,
+        group_ids: Optional[List[str]] = None,
+        commit: bool = False,
     ) -> Dict[str, int]:
         """Internal method to handle deletion of all executions with a given session."""
         try:
@@ -713,14 +764,14 @@ class ExecutionHistoryRepository:
                     TaskStatus.job_id.in_(job_ids)
                 )
                 task_status_result = await session.execute(task_status_stmt)
-                result["task_status_count"] = task_status_result.rowcount
+                result["task_status_count"] = _rowcount(task_status_result)
 
                 # Delete error traces for these execution_ids
                 error_trace_stmt = delete(ErrorTrace).where(
                     ErrorTrace.run_id.in_(execution_ids)
                 )
                 error_trace_result = await session.execute(error_trace_stmt)
-                result["error_trace_count"] = error_trace_result.rowcount
+                result["error_trace_count"] = _rowcount(error_trace_result)
 
                 # Delete execution traces (FK to executionhistory.id and .job_id)
                 await session.execute(
@@ -757,12 +808,12 @@ class ExecutionHistoryRepository:
                 # Delete all task statuses
                 task_status_stmt = delete(TaskStatus)
                 task_status_result = await session.execute(task_status_stmt)
-                result["task_status_count"] = task_status_result.rowcount
+                result["task_status_count"] = _rowcount(task_status_result)
 
                 # Delete all error traces
                 error_trace_stmt = delete(ErrorTrace)
                 error_trace_result = await session.execute(error_trace_stmt)
-                result["error_trace_count"] = error_trace_result.rowcount
+                result["error_trace_count"] = _rowcount(error_trace_result)
 
                 # Delete all execution traces (FK to executionhistory.id and .job_id)
                 await session.execute(delete(ExecutionTrace))
@@ -780,7 +831,7 @@ class ExecutionHistoryRepository:
 
                 # Every execution is gone, so every flow state is orphaned.
                 flow_state_result = await session.execute(delete(FlowState))
-                result["flow_state_count"] = flow_state_result.rowcount or 0
+                result["flow_state_count"] = _rowcount(flow_state_result) or 0
 
             # Flush to ensure operations are sent to database
             await session.flush()
@@ -802,7 +853,7 @@ class ExecutionHistoryRepository:
 
     async def get_checkpoints_for_flow(
         self,
-        flow_id,
+        flow_id: Union[str, UUID],
         group_id: Optional[str] = None,
         status_filter: Optional[str] = "active",
     ) -> List[ExecutionHistory]:
@@ -1014,7 +1065,8 @@ class ExecutionHistoryRepository:
         """
         try:
             filters = [ExecutionHistory.job_id == job_id]
-            if group_ids:
+            # None = trusted system caller; [] = empty tenant, which matches nothing.
+            if group_ids is not None:
                 filters.append(ExecutionHistory.group_id.in_(group_ids))
             result = await self.session.execute(
                 select(ExecutionHistory).where(*filters)
@@ -1023,7 +1075,8 @@ class ExecutionHistoryRepository:
 
             if not execution:
                 return None
-            return execution.checkpoint_data
+            checkpoint: Optional[Dict[str, Any]] = execution.checkpoint_data
+            return checkpoint
 
         except Exception as e:
             logger.error(
@@ -1055,7 +1108,8 @@ class ExecutionHistoryRepository:
         """
         try:
             filters = [ExecutionHistory.job_id == job_id]
-            if group_ids:
+            # None = trusted system caller; [] = empty tenant, which matches nothing.
+            if group_ids is not None:
                 filters.append(ExecutionHistory.group_id.in_(group_ids))
 
             result = await self.session.execute(
@@ -1134,15 +1188,25 @@ class ExecutionHistoryRepository:
             return False
 
     async def update_execution_result(
-        self, job_id: str, result_data: dict, group_ids: list[str] = None
+        self,
+        job_id: str,
+        result_data: dict,
+        group_ids: Optional[list[str]] = None,
+        gate_stamp: Optional[Dict[str, object]] = None,
     ) -> bool:
         """
         Update the result field for an execution identified by job_id.
+
+        The edits are stored on this run's own row and nowhere else; a reader
+        finds them by the run's job_id and group.
 
         Args:
             job_id: Job ID of the execution
             result_data: New result data to store
             group_ids: Optional list of group IDs for tenant filtering
+            gate_stamp: The approval an ``edited_config`` save was made under,
+                stored beside it as ``edited_config_gate`` (cleared when None),
+                so only that gate replays it on resume
 
         Returns:
             True if successful, False if execution not found
@@ -1163,8 +1227,6 @@ class ExecutionHistoryRepository:
                 logger.warning(f"No execution found with job_id: {job_id}")
                 return False
 
-            import json as _json
-
             # Detect the type of result being saved so we use a dedicated
             # checkpoint_data key and never collide with other tools.
             is_ucmv = (
@@ -1174,38 +1236,31 @@ class ExecutionHistoryRepository:
             )
             is_config = isinstance(result_data, dict) and "join_key_map" in result_data
 
-            checkpoint_data = execution.checkpoint_data or {}
+            # A new dict: mutating the loaded one in place does not register as
+            # a change on a JSON column, so a run that already held a checkpoint
+            # record silently kept none of the edits.
+            checkpoint_data = dict(execution.checkpoint_data or {})
 
             if is_ucmv:
                 # UCMV Generator edit: use a dedicated key so Config Generator
                 # saves (which also use edited_config) never overwrite it.
                 checkpoint_data["ucmv_yaml_edits"] = result_data
                 logger.info(
-                    f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}"
-                )
-                # Also write to /tmp so the Validator subprocess can read the
-                # user's edits (subprocess can't connect to DB in deployed env).
-                try:
-
-                    _tmp_path = "/tmp/ucmv_user_edits.json"
-                    with open(_tmp_path, "w") as _f:
-                        _json.dump(result_data, _f)
-                    logger.info(
-                        f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access"
-                    )
-                except Exception as _tmp_err:
-                    logger.debug(
-                        f"[UCMV] Could not write user edits to /tmp: {_tmp_err}"
-                    )
-            elif is_config:
-                # Config Generator edit: keep using edited_config (existing behaviour)
-                checkpoint_data["edited_config"] = result_data
-                logger.info(
-                    f"Saved config edits to checkpoint_data.edited_config for job_id: {job_id}"
+                    "Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: %s",
+                    job_id,
                 )
             else:
-                # Generic: store under edited_config as before
+                # Config Generator (join_key_map) or generic edit, e.g. Genie config.
                 checkpoint_data["edited_config"] = result_data
+                if gate_stamp:
+                    checkpoint_data["edited_config_gate"] = dict(gate_stamp)
+                else:
+                    checkpoint_data.pop("edited_config_gate", None)
+                logger.info(
+                    "Saved %s edits to checkpoint_data.edited_config for job_id: %s",
+                    "config" if is_config else "result",
+                    job_id,
+                )
 
             execution.checkpoint_data = checkpoint_data
             await self.session.flush()
@@ -1370,21 +1425,21 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
             task_status_result = await self.session.execute(task_status_stmt)
-            task_status_count = task_status_result.rowcount
+            task_status_count = _rowcount(task_status_result)
 
             # Delete associated error traces
             error_trace_stmt = delete(ErrorTrace).where(
                 ErrorTrace.run_id.in_(execution_ids)
             )
             error_trace_result = await self.session.execute(error_trace_stmt)
-            error_trace_count = error_trace_result.rowcount
+            error_trace_count = _rowcount(error_trace_result)
 
             # Delete the execution history records
             run_stmt = delete(ExecutionHistory).where(
                 ExecutionHistory.created_at < cutoff
             )
             run_result = await self.session.execute(run_stmt)
-            run_count = run_result.rowcount
+            run_count = _rowcount(run_result)
 
             # Flow method state for the purged runs. flow_states has no FK to
             # executionhistory, so housekeeping never reached it and the table

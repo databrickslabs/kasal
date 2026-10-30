@@ -373,7 +373,7 @@ class TestApiKeyTestResult:
         assert result.has_key is True
         assert result.valid is None
         assert result.message is None
-        assert result.key_prefix is None
+        assert not hasattr(result, "key_prefix")
 
     def test_valid_api_key_test_result_full(self):
         """Test valid ApiKeyTestResult with all fields."""
@@ -387,7 +387,8 @@ class TestApiKeyTestResult:
         assert result.has_key is True
         assert result.valid is True
         assert result.message == "API key is valid"
-        assert result.key_prefix == "sk-abc"
+        # A key fragment is never part of the response, even if supplied.
+        assert "key_prefix" not in result.model_dump()
 
     def test_api_key_test_result_invalid_key(self):
         """Test ApiKeyTestResult for invalid key."""

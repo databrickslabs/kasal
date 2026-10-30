@@ -149,31 +149,3 @@ class PowerBISemanticModelCacheRepository:
         await self.session.refresh(cache)
 
         return cache
-
-    async def delete_old_caches(self, days_to_keep: int = 7) -> int:
-        """
-        Delete cache entries older than specified days.
-
-        Args:
-            days_to_keep: Number of days to keep cache entries
-
-        Returns:
-            Number of deleted entries
-        """
-        from datetime import timedelta
-
-        cutoff_date = date.today() - timedelta(days=days_to_keep)
-
-        result = await self.session.execute(
-            select(PowerBISemanticModelCache).where(
-                PowerBISemanticModelCache.cached_date < cutoff_date
-            )
-        )
-        old_caches = result.scalars().all()
-
-        for cache in old_caches:
-            await self.session.delete(cache)
-
-        await self.session.commit()
-
-        return len(old_caches)

@@ -23,7 +23,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,8 @@ def load_catalog(path: Optional[str] = None) -> Dict[str, Any]:
     so callers degrade to markdown surfaces instead of crashing."""
     try:
         p = Path(path) if path else _DEFAULT_CATALOG_PATH
-        return json.loads(p.read_text(encoding="utf-8"))
+        result: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
+        return result
     except Exception as exc:  # noqa: BLE001
         print(f"A2UI catalog unavailable ({exc}); markdown surfaces only.")
         return {}
@@ -96,7 +97,7 @@ MINIMAL_COMPONENTS = (
 )
 
 
-def subset_catalog(catalog: Dict[str, Any], names) -> Dict[str, Any]:
+def subset_catalog(catalog: Dict[str, Any], names: Iterable[str]) -> Dict[str, Any]:
     """Return a shallow copy of ``catalog`` whose ``components`` are limited to the
     intersection of ``names`` and what the catalog defines. surfaceKinds are kept
     verbatim. Used to realize the admin's 'minimal' catalog choice from the full
@@ -232,7 +233,8 @@ def guidance_for(directives: Dict[str, Any], query: str) -> str:
         and isinstance(directives.get(deliverable), str)
         and directives[deliverable].strip()
     ):
-        return directives[deliverable].strip()
+        result: str = directives[deliverable].strip()
+        return result
     default = directives.get("default")
     return default.strip() if isinstance(default, str) and default.strip() else ""
 
@@ -298,7 +300,8 @@ def resolve_catalog(
                 if isinstance(components, dict) and components:
                     if not parsed.get("surfaceKinds"):
                         parsed["surfaceKinds"] = default_catalog.get("surfaceKinds", [])
-                    return parsed
+                    result: dict[str, Any] = parsed
+                    return result
             except (ValueError, TypeError):
                 pass
         return default_catalog
@@ -448,6 +451,30 @@ def validate_surface(payload: Any, catalog: Dict[str, Any]) -> bool:
     return payload.get("root") in ids
 
 
+#: The only colour a surface ``theme`` may carry. The renderer paints theme values
+#: into CSS as they are (``background: theme.panel``), so anything else, such as
+#: ``url(...)``, could make the browser fetch it.
+_HEX_COLOUR = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")
+
+
+def drop_unsafe_theme(payload: dict) -> dict:
+    """Keep only the hex colours of a model-sent ``theme``; drop every other
+    entry, and the theme itself when nothing is left."""
+    if "theme" not in payload:
+        return payload
+    theme = payload["theme"] if isinstance(payload["theme"], dict) else {}
+    kept = {
+        key: value.strip()
+        for key, value in theme.items()
+        if isinstance(value, str) and _HEX_COLOUR.fullmatch(value.strip())
+    }
+    if kept:
+        payload["theme"] = kept
+    else:
+        del payload["theme"]
+    return payload
+
+
 def _deref(value: Any, data_model: Dict[str, Any]) -> Any:
     """Resolve a literal-or-{path} binding against dataModel (shallow JSON pointer)."""
     if isinstance(value, dict) and isinstance(value.get("path"), str):
@@ -461,6 +488,39 @@ def _deref(value: Any, data_model: Dict[str, Any]) -> Any:
                 return None
         return cur
     return value
+
+
+def normalize_tables(payload: dict) -> dict:
+    """Coerce every ``Table`` to the catalog shape: ``rows`` as a list of arrays.
+
+    Models borrow Chart's shape for tables — ``data: {"path": "/x"}`` bound to a
+    list of row OBJECTS — but the catalog's Table takes ``rows`` (row arrays
+    aligned to ``columns``) and has no ``data`` prop, so the renderer drew an
+    empty table. Rewrite in place: resolve ``rows`` (else ``data``), turn object
+    rows into arrays by ``columns`` (deriving columns from the first row's keys
+    when absent), and drop ``data``. Well-formed tables are left untouched.
+    """
+    data_model = payload.get("dataModel") or {}
+    for comp in payload.get("components") or []:
+        if not isinstance(comp, dict) or comp.get("component") != "Table":
+            continue
+        source = comp["rows"] if "rows" in comp else comp.get("data")
+        rows = _deref(source, data_model)
+        if not isinstance(rows, list):
+            continue
+        has_objects = any(isinstance(r, dict) for r in rows)
+        if "rows" in comp and "data" not in comp and not has_objects:
+            continue  # already catalog-shaped (literal or bound row arrays)
+        columns = _deref(comp.get("columns"), data_model)
+        if has_objects and not isinstance(columns, list):
+            first = next(r for r in rows if isinstance(r, dict))
+            columns = list(first.keys())
+            comp["columns"] = columns
+        comp["rows"] = [
+            [r.get(str(c)) for c in columns] if isinstance(r, dict) else r for r in rows
+        ]
+        comp.pop("data", None)
+    return payload
 
 
 def quiz_needs_work(payload: Any) -> bool:
@@ -494,7 +554,7 @@ def quiz_needs_work(payload: Any) -> bool:
         # need >= 3 non-empty, DISTINCT options (4 is the asked-for norm)
         if len(texts) < 3 or len(set(texts)) != len(texts):
             return False
-        ans = q.get("answer")
+        ans: Any = q.get("answer")
         if isinstance(ans, bool):
             return False
         try:
@@ -936,7 +996,7 @@ def compose_a2ui(
                         "Reply with ONLY the corrected JSON object."
                     )
                 else:
-                    return _done(payload)
+                    return _done(normalize_tables(drop_unsafe_theme(payload)))
             else:
                 problem = (
                     json_error_of(raw_str)

@@ -21,10 +21,47 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': [
         'warn',
-        { allowConstantExport: true },
+        // retryableLazy is our React.lazy wrapper (shared/errors/retryableLazy);
+        // plugin >=0.5 only recognises the built-in HOCs without this.
+        { allowConstantExport: true, extraHOCs: ['retryableLazy'] },
       ],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // Production builds strip console.log/info/debug; use utils/logger for
+      // debug output and keep console.warn/error for real problems.
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
+    },
+  },
+  {
+    // react-markdown only where the shared image policy is applied (checked by
+    // src/shared/a2ui/lib/imagePolicy.coverage.test.ts). Kept BEFORE the
+    // file-scoped no-restricted-imports blocks below, which replace this rule
+    // for their (non-UI) files rather than being replaced by it.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      '**/*.test.*',
+      'src/shared/a2ui/lib/markdown.tsx',
+      'src/shared/a2ui/components/primitives.tsx',
+      'src/shared/ui/PaginatedOutput.tsx',
+      'src/features/approvals/components/CrewOutputRenderer.tsx',
+      'src/features/chat/components/Cards/HelpCard.tsx',
+      'src/features/chat/components/Chat/MessageContent.tsx',
+      'src/features/chat/components/Preview/StepContent.tsx',
+      'src/features/executions/components/ShowResult.tsx',
+      'src/features/executions/components/UCMVResultViewer.tsx',
+      'src/features/help/documentation/Documentation.tsx',
+      'src/features/memory/components/MemoryRecordMarkdown.tsx',
+      'src/features/workflow/assistant/components/MessageRenderer.tsx',
+      'src/features/workflow/crews/components/DeliverableMarkdown.tsx',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{
+          name: 'react-markdown',
+          message: 'Render markdown through the shared image policy (safeImageComponents / mdComponents / MarkdownImage in shared/a2ui/lib), then add the file to this allowlist.',
+        }],
+      }],
+      'no-restricted-syntax': ['error', { selector: "ImportExpression[source.value='react-markdown']", message: 'Render markdown through the shared image policy; see the react-markdown allowlist in eslint.config.js.' }],
     },
   },
   {

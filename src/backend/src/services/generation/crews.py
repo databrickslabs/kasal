@@ -83,7 +83,7 @@ class CrewGenerationService(
         response: str,
         model: str,
         status: str = "success",
-        error_message: str = None,
+        error_message: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
     ) -> None:
         """
@@ -181,7 +181,7 @@ class CrewGenerationService(
         # it is also what records the trial once generation has produced ids.
         return system_message + tools_context
 
-    def _safe_get_attr(self, obj, attr, default=None):
+    def _safe_get_attr(self, obj: Any, attr: str, default: Any = None) -> Any:
         """
         Safely get an attribute from an object, whether it's a dictionary or an object.
 
@@ -363,7 +363,9 @@ class CrewGenerationService(
             ]
 
     @staticmethod
-    async def _has_persistent_memory_backend(session, group_context) -> bool:
+    async def _has_persistent_memory_backend(
+        session: Any, group_context: Optional[GroupContext]
+    ) -> bool:
         """Whether the group has a real (persistent) memory backend configured.
 
         Only Databricks Vector Search and Lakebase count — the default
@@ -621,6 +623,7 @@ class CrewGenerationService(
         _mode = getattr(request, "chat_mode_type", "chat") or "chat"
         _reasoning_effort = {"research": "medium", "deep": "high"}.get(_mode)
         _reasoning = _reasoning_effort is not None
+        _execution_effort = getattr(request, "execution_effort", None)
         _execution_type = "agent" if _mode == "chat" else "crew"
 
         # Everything else the mode implies — the per-task guardrail that was
@@ -641,14 +644,8 @@ class CrewGenerationService(
                 else {}
             )
             | (
-                {
-                    "execution_effort": request.execution_effort.model_dump(
-                        exclude_none=True
-                    )
-                }
-                if isinstance(
-                    getattr(request, "execution_effort", None), EffortSettings
-                )
+                {"execution_effort": _execution_effort.model_dump(exclude_none=True)}
+                if isinstance(_execution_effort, EffortSettings)
                 else {}
             )
             | (

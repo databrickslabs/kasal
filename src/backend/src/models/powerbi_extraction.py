@@ -14,8 +14,10 @@ JSON traversal.
 """
 
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -26,22 +28,30 @@ class PowerBIExtraction(Base):
     __tablename__ = "powerbi_extraction"
 
     # Primary key
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Provenance / linkage
-    execution_id = Column(String(100), nullable=True, index=True)  # crew/flow job id
-    workspace_id = Column(String(100), nullable=True, index=True)  # PBI workspace
-    dataset_id = Column(String(100), nullable=True, index=True)  # PBI dataset
-    report_id = Column(String(100), nullable=True)  # PBI report (if used)
+    execution_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )  # crew/flow job id
+    workspace_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )  # PBI workspace
+    dataset_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )  # PBI dataset
+    report_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # PBI report (if used)
 
     # Raw extracted artifacts (JSON — the full rows, not summaries)
-    relationships = Column(
+    relationships: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # [{from_table, from_column, from_cardinality, to_*, is_active, id}]
-    measures = Column(
+    measures: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # [{measure_name, table_name, expression (DAX), description}]
-    admin_tables = Column(
+    admin_tables: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # {table_name: {columns, mquery_expression, measures}}
     # {name: raw_M} model-level named/shared expressions (staging queries +
@@ -51,28 +61,38 @@ class PowerBIExtraction(Base):
     # parameter-driven Value.NativeQuery. Without this, the UCMV Generator
     # fallback can only redo the DIRECT resolution tier, not the fuller
     # reference-following / parameter-substitution one.
-    expressions = Column(JSON, nullable=True)
-    report_definition = Column(
+    expressions: Mapped[Any] = mapped_column(JSON, nullable=True)
+    report_definition: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # report visual bindings (measure expressions)
-    proposed_config = Column(JSON, nullable=True)  # the derived pipeline_config
-    warnings = Column(JSON, nullable=True)  # list of extraction warnings
+    proposed_config: Mapped[Any] = mapped_column(
+        JSON, nullable=True
+    )  # the derived pipeline_config
+    warnings: Mapped[Any] = mapped_column(
+        JSON, nullable=True
+    )  # list of extraction warnings
 
     # Promoted scalar counts (queryable without JSON traversal)
-    relationships_count = Column(Integer, nullable=True)
-    measures_count = Column(Integer, nullable=True)
-    measures_with_dax_count = Column(Integer, nullable=True)
-    admin_tables_count = Column(Integer, nullable=True)
+    relationships_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    measures_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    measures_with_dax_count: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    admin_tables_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Human-readable one-liner (mirrors conversion_history.input_summary)
-    summary = Column(Text, nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Multi-tenant isolation
-    group_id = Column(String(100), index=True, nullable=True)
-    created_by_email = Column(String(255), nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    created_by_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Timestamp
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
 
     # Indexes for common queries
     __table_args__ = (
@@ -80,7 +100,7 @@ class PowerBIExtraction(Base):
         Index("ix_powerbi_extraction_workspace_dataset", "workspace_id", "dataset_id"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<PowerBIExtraction(id={self.id}, "
             f"workspace={self.workspace_id}, dataset={self.dataset_id}, "

@@ -251,43 +251,6 @@ NESTED_SKILL_MD = (
 )
 
 
-def test_pull_recurses_into_bundle_subdirectories(monkeypatch):
-    """Push writes nested paths (references/...); pull must walk them back out.
-    The flat listing skipped is_directory entries, so a push->pull round-trip
-    silently dropped every nested file — including the references/ files
-    Kasal's own builtin skills carry."""
-    client = FakeClient(
-        get_routes={
-            "references/notes.md": FakeResponse(200, text="nested!"),
-            "/SKILL.md": FakeResponse(200, text=NESTED_SKILL_MD),
-            "/basic-math/references": FakeResponse(
-                200, {"contents": [{"name": "notes.md", "is_directory": False}]}
-            ),
-            "/basic-math": FakeResponse(
-                200,
-                {
-                    "contents": [
-                        {"name": "SKILL.md", "is_directory": False},
-                        {"name": "references", "is_directory": True},
-                    ]
-                },
-            ),
-        }
-    )
-    svc = _service(None, client, monkeypatch)
-    captured = {}
-
-    async def _create(payload, gc, source=None, files=None):
-        captured["files"] = files
-        return SimpleNamespace(id=1, name=payload.name)
-
-    svc._skills.create_skill = _create  # type: ignore[attr-defined]
-
-    asyncio.run(svc.import_skill("kasal", "default", "basic-math"))
-
-    assert captured["files"] == [{"path": "references/notes.md", "content": "nested!"}]
-
-
 def test_list_follows_pagination(monkeypatch):
     """A schema larger than one page must not silently truncate the listing."""
     pages = [

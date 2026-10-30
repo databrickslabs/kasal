@@ -26,7 +26,6 @@ vi.mock('../../features/configuration/components/APIKeys/APIKeys', () => ({ defa
 vi.mock('../../features/executions/components/LLMLogs', () => ({ default: () => null }));
 vi.mock('../../features/executions/components/ShowLogs', () => ({ default: () => null }));
 vi.mock('../../features/configuration/components/Configuration', () => ({ default: () => null }));
-vi.mock('../../features/tools/components/ToolForm', () => ({ default: () => null }));
 vi.mock('../../features/workflow/crews/components/SaveCrew', () => ({ default: () => null }));
 vi.mock('../../features/workflow/flows/components/SaveFlow', () => ({ default: () => null }));
 vi.mock('../Flow/CheckpointResumeDialog', () => ({ default: () => null }));

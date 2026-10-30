@@ -8,7 +8,7 @@ through the ``StorageBackend``, and emits the ``MemorySave*`` events that
 become the run's "Memory Write" trace rows. ``save_hooks`` receive the records
 that landed.
 
-``recall`` is one search with a score floor — plus, per the Memory Tuning
+``recall`` is one search with a similarity floor — plus, per the Memory Tuning
 knobs declared as fields below, distillation of a long query and exploration
 of alternatives (``recall_planner``). ``mode="raw"`` is the plain search.
 
@@ -21,7 +21,6 @@ test double, the real stores live in ``services.memory.storage``.
 import concurrent.futures
 import contextvars
 import logging
-import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -29,7 +28,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from src.core.events.bus import event_bus
 from src.core.events.types import (
@@ -44,6 +43,7 @@ from src.core.events.types import (
 from .analyze import MemoryAnalysis, extract_json_object
 from .consolidation import consolidate_on_save
 from .recall_planner import deep_recall
+from .tuning import MemoryHygiene
 from .types import KIND_EPISODIC, MemoryRecord, ScopeInfo
 
 logger = logging.getLogger(__name__)
@@ -242,32 +242,27 @@ class InMemoryStorage(StorageBackend):
             }
 
 
-# Fused-score floor (semantic + keyword + recency + importance, see
-# LocalStorageBackend.search) below which a recall returns nothing. 0.75 was
-# calibrated against live data with the Databricks embedder (see recall()).
-# Ollama's nomic-embed-text compresses the cosine scale: measured live, a run's
-# own previous task output scored 0.72 raw / 0.68 fused against the task
-# description that produced it, while unrelated records sat at 0.58-0.63 raw /
-# <=0.60 fused — so its floor sits between those clusters. Providers not listed
-# keep the calibrated default.
-DEFAULT_RECALL_MIN_SCORE = 0.75
-RECALL_MIN_SCORE_BY_EMBEDDER: dict[str, float] = {"ollama": 0.62}
+# Similarity floor below which a recall returns nothing: the COSINE of query and
+# record, applied by the backend before ranking — not the blended score. It was
+# the blend (0.75), and recency in the blend dropped every memory a few days
+# old, so teamspace memory could not reach an earlier session. Live chat turns,
+# Databricks embedder (2026-10-28): related questions median 0.71, unrelated
+# p95 0.59, off-topic probes <= 0.49; at 0.60 recall found a related memory for
+# 17 of 22 questions, where the 0.75 blend found none. Ollama's nomic-embed-text
+# compresses the scale (unrelated records 0.58-0.63 raw), so its floor sits
+# above that band. Providers not listed keep the calibrated default.
+DEFAULT_RECALL_MIN_SCORE = 0.60
+RECALL_MIN_SCORE_BY_EMBEDDER: dict[str, float] = {"ollama": 0.64}
 
 
 def default_recall_min_score(embedder_provider: str | None = None) -> float:
-    """Blended-score floor for a recall that passes no threshold.
+    """Similarity (cosine) floor for a recall that passes no threshold.
 
-    Precedence: KASAL_MEMORY_RECALL_MIN_SCORE (deployment override) → the floor
-    for ``embedder_provider`` → the calibrated default. A teamspace's explicit
+    The floor for ``embedder_provider``, else the calibrated default. A
+    teamspace's explicit
     Memory Tuning value is applied by the caller (``Memory.recall_min_score``)
     and never reaches here.
     """
-    raw = os.getenv("KASAL_MEMORY_RECALL_MIN_SCORE")
-    if raw is not None:
-        try:
-            return max(0.0, float(raw))
-        except ValueError:
-            pass
     if embedder_provider:
         return RECALL_MIN_SCORE_BY_EMBEDDER.get(
             embedder_provider.lower(), DEFAULT_RECALL_MIN_SCORE
@@ -279,7 +274,7 @@ def _default_recall_min_score() -> float:
     return default_recall_min_score()
 
 
-class Memory(BaseModel):
+class Memory(MemoryHygiene):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     llm: Any = Field(
@@ -294,6 +289,7 @@ class Memory(BaseModel):
     read_only: bool = False
     root_scope: str | None = None
     save_hooks: list[Any] = Field(default_factory=list, exclude=True)
+    decision_policy: Any = Field(default=None, exclude=True)
     analyze_on_save: bool = Field(
         default=True,
         description=(
@@ -308,7 +304,7 @@ class Memory(BaseModel):
     recall_min_score: float | None = Field(
         default=None,
         description=(
-            "Fused-score floor for recalls that pass no threshold. Set by "
+            "Cosine-similarity floor for recalls that pass no threshold. Set by "
             "CrewMemoryService from the teamspace's Memory Tuning or the "
             "resolved embedder's default; None falls back to "
             "default_recall_min_score()."
@@ -433,7 +429,8 @@ class Memory(BaseModel):
             effective_root,
             kind,
         )
-        return future.result()
+        value: list[MemoryRecord] = future.result()
+        return value
 
     def _analyze_for_save(self, content: str) -> "MemoryAnalysis | None":
         """Label one record with the analysis LLM. ``None`` when unavailable.
@@ -469,7 +466,12 @@ class Memory(BaseModel):
             if payload is None:
                 logger.debug("memory analysis returned no JSON object: %.200r", raw)
                 return None
-            return MemoryAnalysis.model_validate(payload)
+            analysis = MemoryAnalysis.model_validate(payload)
+            return (
+                self.decision_policy.label(text, analysis)
+                if self.decision_policy
+                else analysis
+            )
         except Exception:  # noqa: BLE001 — labelling must never break a save
             logger.warning("memory analysis failed; saving unlabelled", exc_info=True)
             return None
@@ -636,14 +638,12 @@ class Memory(BaseModel):
         # Nearest-neighbour search always returns SOMETHING — nearest is not
         # near. Without a floor, a query about a topic the store has never seen
         # returns the k least-unrelated records, and callers inject them as
-        # context. Knowledge search stops the same failure with the same rule
-        # (services/knowledge/search_guard.py: KNOWLEDGE_MIN_SCORE) — this is
-        # that stopping rule for memory (measured live: "genie ontology" over
-        # a news-only store recalled 18 news records at blended scores
-        # 0.56-0.74, and the model wove "Lebanon news" into the diagram).
-        # Related recalls in the same store scored 0.77-0.91, so the default
-        # floor sits between the two clusters. Callers may pass an explicit
-        # threshold — 0.0 disables.
+        # context (measured live: "genie ontology" over a news-only store
+        # recalled 18 news records and the model wove "Lebanon news" into the
+        # diagram). Knowledge search stops the same failure with the same rule
+        # (services/knowledge/search_guard.py: configured_min_score). The
+        # threshold is a cosine floor the backend applies before ranking — see
+        # DEFAULT_RECALL_MIN_SCORE. Callers may pass one; 0.0 disables.
         if score_threshold is None:
             score_threshold = (
                 self.recall_min_score
@@ -663,12 +663,13 @@ class Memory(BaseModel):
         effective_scope = scope or self.root_scope
 
         def _search(text: str) -> list[MemoryRecord]:
-            return self.storage.search(
+            result: list[MemoryRecord] = self.storage.search(
                 text,
                 limit=limit,
                 scope=effective_scope,
                 score_threshold=score_threshold,
             )
+            return result
 
         distilled: str | None = None
         rounds = 0
@@ -716,18 +717,22 @@ class Memory(BaseModel):
     def list_records(
         self, scope: str | None = None, limit: int = 100, offset: int = 0
     ) -> list[MemoryRecord]:
-        return self.storage.list_records(
+        result: list[MemoryRecord] = self.storage.list_records(
             scope or self.root_scope, limit=limit, offset=offset
         )
+        return result
 
     def list_scopes(self, path: str = "/") -> list[str]:
-        return self.storage.list_scopes(path)
+        result: list[str] = self.storage.list_scopes(path)
+        return result
 
     def list_categories(self, path: str = "/") -> list[str]:
-        return self.storage.list_categories(path)
+        result: list[str] = self.storage.list_categories(path)
+        return result
 
     def info(self, path: str = "/") -> ScopeInfo:
-        return self.storage.get_scope_info(path)
+        result: ScopeInfo = self.storage.get_scope_info(path)
+        return result
 
     def scope(self, path: str) -> "Memory":
         """A view of this memory rooted at path (shares storage and hooks)."""
@@ -766,9 +771,10 @@ class Memory(BaseModel):
             "valid_to": valid_to,
             "superseded_by": superseded_by,
         }
-        return self.storage.update(
+        result: MemoryRecord | None = self.storage.update(
             record_id, **{k: v for k, v in changes.items() if v is not None}
         )
+        return result
 
     def reset(self, scope: str | None = None) -> None:
         self.storage.reset(scope)

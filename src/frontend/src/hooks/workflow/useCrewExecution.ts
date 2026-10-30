@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { Node, Edge } from 'reactflow';
+import { useShallow } from 'zustand/react/shallow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useErrorStore } from '../../store/error';
-import { useRunStatusStore } from '../../store/runStatus';
 
 interface CrewExecutionResponse {
   job_id: string;
@@ -14,15 +14,19 @@ interface UseCrewExecutionResult {
 }
 
 export const useCrewExecution = (): UseCrewExecutionResult => {
-  const errorStore = useErrorStore();
-  const runStatusStore = useRunStatusStore();
-  
-  const { 
+  const showErrorMessage = useErrorStore(state => state.showErrorMessage);
+
+  const {
     isExecuting,
     setJobId,
     setIsExecuting,
     executeCrew
-  } = useCrewExecutionStore();
+  } = useCrewExecutionStore(useShallow(state => ({
+    isExecuting: state.isExecuting,
+    setJobId: state.setJobId,
+    setIsExecuting: state.setIsExecuting,
+    executeCrew: state.executeCrew,
+  })));
 
   const handleExecuteCrew = useCallback(async (nodes: Node[], edges: Edge[]): Promise<CrewExecutionResponse | undefined> => {
     try {
@@ -48,14 +52,14 @@ export const useCrewExecution = (): UseCrewExecutionResult => {
       return undefined;
     } catch (error) {
       console.error('Error executing crew:', error);
-      errorStore.showErrorMessage('Failed to execute crew workflow');
+      showErrorMessage('Failed to execute crew workflow');
       return undefined;
     } finally {
       if (typeof setIsExecuting === 'function') {
         setIsExecuting(false);
       }
     }
-  }, [setIsExecuting, executeCrew, setJobId, runStatusStore, errorStore]);
+  }, [setIsExecuting, executeCrew, setJobId, showErrorMessage]);
 
   return {
     handleExecuteCrew,

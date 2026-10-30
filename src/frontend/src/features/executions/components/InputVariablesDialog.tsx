@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -29,14 +29,7 @@ import {
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
 import { Node } from 'reactflow';
-import { placeholdersInFlowNodes } from '../../../utils/flowInputs';
-
-interface InputVariable {
-  name: string;
-  value: string;
-  description?: string;
-  required: boolean;
-}
+import { detectInputVariables, rowsForRun, withNewlyDetected, type InputVariable } from './inputVariableRows';
 
 interface InputVariablesDialogProps {
   open: boolean;
@@ -81,60 +74,21 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
   const [showAllOptional, setShowAllOptional] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
-  // Extract variables from agent and task nodes
+  // The dialog stays mounted between runs, so every opening starts from the
+  // variables of the crew or flow being run now, not the previous one.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (!open) return;
-
-    const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
-    const foundVariables = new Set<string>();
-
-    const scanString = (value: unknown) => {
-      if (value && typeof value === 'string') {
-        let match;
-        variablePattern.lastIndex = 0;
-        while ((match = variablePattern.exec(value)) !== null) {
-          foundVariables.add(match[1]);
-        }
-      }
-    };
-
-    // A flow's crew nodes carry the referenced crew's text nested inside them,
-    // so the field-by-field scan below cannot reach it. Same deep walk the run
-    // gate uses, so the dialog offers exactly what that gate detected.
-    const flowNodes = nodes.filter(node => node.type === 'crewNode');
-    if (flowNodes.length > 0) {
-      placeholdersInFlowNodes(flowNodes).forEach(name => foundVariables.add(name));
+    if (!open) {
+      wasOpen.current = false;
+      return;
     }
-
-    nodes.forEach(node => {
-      if (node.type === 'agentNode' || node.type === 'taskNode') {
-        const data = node.data as Record<string, unknown>;
-
-        // Check standard agent/task fields for variables
-        [data.role, data.goal, data.backstory, data.description, data.expected_output, data.label]
-          .forEach(scanString);
-
-        // Check tool_configs values (e.g. {user_question} in Reducer config)
-        // Check both data.tool_configs (progressive SSE path) and data.task.tool_configs (all-at-once/LoadCrew path)
-        const toolConfigs = (data.tool_configs || (data.task as Record<string, unknown>)?.tool_configs) as Record<string, Record<string, unknown>> | undefined;
-        if (toolConfigs && typeof toolConfigs === 'object') {
-          Object.values(toolConfigs).forEach(toolCfg => {
-            if (toolCfg && typeof toolCfg === 'object') {
-              Object.values(toolCfg).forEach(scanString);
-            }
-          });
-        }
-      }
-    });
-
-    const detectedVars = Array.from(foundVariables);
+    const detectedVars = detectInputVariables(nodes);
     setDetectedVariables(detectedVars);
-
-    // Initialize variables if they don't exist yet
-    if (variables.length === 0 && detectedVars.length > 0) {
-      setVariables(detectedVars.map(name => ({ name, value: '', required: true })));
-    }
-  }, [open, nodes, variables.length]);
+    const opening = !wasOpen.current;
+    wasOpen.current = true;
+    setVariables(previous => opening ? rowsForRun(previous, detectedVars) : withNewlyDetected(previous, detectedVars));
+    if (opening) setErrors({});
+  }, [open, nodes]);
 
   // Reset state when dialog closes
   useEffect(() => {

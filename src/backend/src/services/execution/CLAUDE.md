@@ -60,8 +60,43 @@ services/
     │                        #   service. Path adapters live with their path:
     │                        #   {agent,flow}_builder/checkpoint_adapter.py
     ├── logs/                # execution-log capture → queue → DB
+    ├── run_admission.py     # ONE concurrent-run limit for crew + flow runs
+    ├── run_wait.py          # wait for a run's child + read its result
+    ├── blocking_pools.py    # the two bounded pools the subprocess paths use
+    ├── process_tree.py      # stop only the process trees WE spawned
     └── subprocess_bootstrap.py  # what a spawned interpreter calls first
 ```
+
+The four parent-side subprocess modules, shared by both subprocess paths:
+
+- `run_admission.py`: `run_admission.slot(...)` gates every crew and flow run
+  in this server process. The limit is the engine-config row
+  `engine_name="kasal"`, `config_key="max_concurrent_runs"` (no env var;
+  default and ceiling are the pool size, 16; re-read at most every 30 s). Over
+  the limit a run QUEUES, it is not rejected: status `PENDING` with a
+  "Queued: …" message, FIFO admission, back to `RUNNING` when admitted.
+  `cancel_waiting()` is how a stop removes a queued run so it never spawns;
+  it also marks an admitted run that has not started, and the executor's
+  `claim_start()` (called right before `process.start()`, no `await` between)
+  refuses it. An engine-config write applies the new limit at once
+  (`apply_limit`), and a raised limit admits queued runs immediately. A second
+  `acquire` for an id that holds or awaits a slot raises `DuplicateRunError`.
+- `run_wait.py`: `collect_result()` drains the result queue WHILE the child
+  runs (a result bigger than the pipe buffer deadlocks a join-then-read), holds
+  one `RUN_WAIT_EXECUTOR` thread per run, and polls the exit on the loop.
+  `run_deadline()` is taken right after `process.start()`, so a run's timeout
+  starts when its process starts, never while it is queued.
+  `flush_queues_before_exit()` is the child's half (needed before `os._exit`).
+- `blocking_pools.py`: `RUN_WAIT_EXECUTOR` (result readers) and
+  `EVENT_RELAY_EXECUTOR` (relay reads), 16 threads each, off the default
+  executor so builds cannot starve Chat. Two pools, not one, or readers can
+  starve the relays their children need to exit. Raising the pool size raises
+  the admission ceiling; the two numbers move together.
+- `process_tree.py`: terminates the `multiprocessing.Process` the executor
+  holds plus its `psutil` descendants; the only fallback is a descendant of this
+  server whose `KASAL_EXECUTION_ID` matches exactly. Never iterates
+  `psutil.process_iter()`. Errors are narrowed to `psutil.Error`, and a stop
+  that did not happen is reported as failed.
 
 ## Rules
 
@@ -184,17 +219,17 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
   choosing a runtime is an operator decision, not something to put in front of
   someone writing a chat message — so the field is reachable from the API only.
 - **One bus still writes traces.** The CrewAI binding bridges
-  `crewai_event_bus` onto `event_bus` (`engines/crewai/events.py`) and nothing
+  `crewai_event_bus` onto `event_bus` (`harnesses/crewai/events.py`) and nothing
   downstream changes. Do NOT bridge events a Kasal subsystem already emits —
   LLM calls, tools, memory and guardrails all reach the bus under both harnesses,
   and bridging them again doubles every trace row.
 - **Both engines call models through Kasal's transport.** The CrewAI binding's
   LLM is a `crewai.BaseLLM` subclass that forwards to
-  `src.core.llm.transport` (`engines/crewai/llm.py`). Keep it that way: it is
+  `src.core.llm.transport` (`harnesses/crewai/llm.py`). Keep it that way: it is
   what makes Databricks auth, retry, the context clamp and token accounting
   identical, and therefore what makes a cross-engine comparison mean anything.
 - **What a harness cannot do is DECLARED, not discovered.** `Capability` in
-  `engines/binding.py` drives the API and greys out the UI. Today CrewAI claims
+  `harnesses/binding.py` drives the API and greys out the UI. Today CrewAI claims
   everything except `AGENT_PLAN` — the `todo` tool is written for Kasal's
   executor, one call per round over a conversation that executor owns. A declared
   capability must be one the binding actually delivers; the parity suite checks
@@ -213,7 +248,7 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
 - **CrewAI probes an LLM for capabilities with `hasattr`.** An omitted
   `supports_function_calling` is read as "cannot", and the agent silently drops
   to a ReAct prose loop — no error, just tool calls that stop parsing. Anything
-  added to `engines/crewai/llm.py` should ask the transport rather than assert a
+  added to `harnesses/crewai/llm.py` should ask the transport rather than assert a
   convenient default.
 - **A tool is invoked through `runtime/executor.wrap_tool` on BOTH engines.**
   That function is where the approval gate, replay, the outcome ledger and all

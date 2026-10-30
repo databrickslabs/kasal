@@ -15,19 +15,52 @@ with a fake and the module never imports an orchestrator or hits a network.
 from __future__ import annotations
 
 import difflib
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Optional, TypedDict
 
 import yaml
 
 
-def _load_view(yaml_text: str) -> Dict[str, Any]:
+class LoadedView(TypedDict):
+    """The fields of one UC Metric View YAML that the diff compares."""
+
+    source: str
+    filter: str
+    measures: dict[str, str]
+    dimensions: dict[str, str]
+
+
+class ChangedMeasure(TypedDict):
+    name: str
+    from_expr: str
+    to_expr: str
+
+
+class AddedMeasure(TypedDict):
+    name: str
+    expr: str
+
+
+class ViewDiff(TypedDict):
+    """Measure-level semantic diff of one view (ours vs the customer's)."""
+
+    changed_measures: list[ChangedMeasure]
+    added_measures: list[AddedMeasure]
+    removed_measures: list[str]
+    source_from: str
+    source_to: str
+    filter_from: str
+    filter_to: str
+
+
+def _load_view(yaml_text: str) -> LoadedView:
     """Parse one UC Metric View YAML into the fields we diff on.
 
     Returns ``{source, filter, measures: {name -> expr}, dimensions: {name ->
     expr}}``. Tolerant: malformed YAML or a non-mapping document yields empty
     structures rather than raising, so one bad file never sinks the batch.
     """
-    out: Dict[str, Any] = {
+    out: LoadedView = {
         "source": "",
         "filter": "",
         "measures": {},
@@ -43,13 +76,19 @@ def _load_view(yaml_text: str) -> Dict[str, Any]:
         return out
     out["source"] = str(doc.get("source") or "")
     out["filter"] = str(doc.get("filter") or "")
-    for key, bucket in (("measures", "measures"), ("dimensions", "dimensions")):
-        items = doc.get(key)
-        if isinstance(items, list):
-            for it in items:
-                if isinstance(it, dict) and it.get("name"):
-                    out[bucket][str(it["name"])] = str(it.get("expr") or "")
+    out["measures"] = _named_exprs(doc.get("measures"))
+    out["dimensions"] = _named_exprs(doc.get("dimensions"))
     return out
+
+
+def _named_exprs(items: object) -> dict[str, str]:
+    """``{name -> expr}`` for a measures/dimensions list (junk entries skipped)."""
+    named: dict[str, str] = {}
+    if isinstance(items, list):
+        for it in items:
+            if isinstance(it, dict) and it.get("name"):
+                named[str(it["name"])] = str(it.get("expr") or "")
+    return named
 
 
 def _norm(expr: str) -> str:
@@ -57,7 +96,7 @@ def _norm(expr: str) -> str:
     return " ".join((expr or "").split())
 
 
-def measure_names(yaml_text: str) -> set:
+def measure_names(yaml_text: str) -> set[str]:
     """The set of measure names declared in a UC Metric View YAML (empty on junk)."""
     return {n.strip().lower() for n in _load_view(yaml_text).get("measures", {})}
 
@@ -73,8 +112,8 @@ def _name_key(view: str) -> str:
 
 
 def resolve_original(
-    view: str, corrected_yaml: str, originals: Dict[str, str]
-) -> Tuple[Optional[str], str]:
+    view: str, corrected_yaml: str, originals: dict[str, str]
+) -> tuple[Optional[str], str]:
     """Find our original view for an uploaded one. Returns (original_key, how).
 
     ``how`` is one of ``exact`` / ``fuzzy_name`` / ``fuzzy_measures`` / ``none``.
@@ -115,7 +154,7 @@ def resolve_original(
     return None, "none"
 
 
-def diff_view(original_yaml: str, corrected_yaml: str) -> Dict[str, Any]:
+def diff_view(original_yaml: str, corrected_yaml: str) -> ViewDiff:
     """Measure-level semantic diff of one view: our output vs the customer's.
 
     Returns changed / added / removed measures (by name), plus source and filter
@@ -126,7 +165,7 @@ def diff_view(original_yaml: str, corrected_yaml: str) -> Dict[str, Any]:
     corr = _load_view(corrected_yaml)
 
     o_m, c_m = orig["measures"], corr["measures"]
-    changed: List[Dict[str, str]] = []
+    changed: list[ChangedMeasure] = []
     for name, o_expr in o_m.items():
         if name in c_m and _norm(o_expr) != _norm(c_m[name]):
             changed.append({"name": name, "from_expr": o_expr, "to_expr": c_m[name]})
@@ -145,13 +184,13 @@ def diff_view(original_yaml: str, corrected_yaml: str) -> Dict[str, Any]:
 
 
 def diff_all(
-    pairs: List[Dict[str, str]],
-) -> Dict[str, Dict[str, Any]]:
+    pairs: list[dict[str, str]],
+) -> dict[str, ViewDiff]:
     """Diff a list of ``{view, original_yaml, corrected_yaml}`` → ``{view -> diff}``.
 
     Views with no material change are dropped (nothing to learn from them).
     """
-    result: Dict[str, Dict[str, Any]] = {}
+    result: dict[str, ViewDiff] = {}
     for p in pairs:
         view = str(p.get("view") or "").strip()
         if not view:
@@ -203,10 +242,10 @@ translation prompt). No preamble, no code fences around the whole document."""
 
 
 def build_distillation_prompt(
-    diffs_by_view: Dict[str, Dict[str, Any]], model_hint: str = ""
+    diffs_by_view: dict[str, ViewDiff], model_hint: str = ""
 ) -> str:
     """Assemble the user prompt from the per-view diffs."""
-    lines: List[str] = []
+    lines: list[str] = []
     if model_hint:
         lines.append(f"Model / report: {model_hint}\n")
     for view, d in diffs_by_view.items():
@@ -235,7 +274,7 @@ def build_distillation_prompt(
 
 
 def distill_corrections_to_readme(
-    diffs_by_view: Dict[str, Dict[str, Any]],
+    diffs_by_view: dict[str, ViewDiff],
     llm_fn: Callable[[str, str], str],
     model_hint: str = "",
 ) -> Optional[str]:
@@ -254,8 +293,8 @@ def distill_corrections_to_readme(
 
 
 def distillation_messages(
-    diffs_by_view: Dict[str, Dict[str, Any]], model_hint: str = ""
-) -> List[Dict[str, str]]:
+    diffs_by_view: dict[str, ViewDiff], model_hint: str = ""
+) -> list[dict[str, str]]:
     """Build the system+user message list for an async LLM distillation call.
 
     Lets an async caller (the learning service) run the LLM itself —

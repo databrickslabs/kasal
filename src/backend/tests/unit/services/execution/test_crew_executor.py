@@ -5,7 +5,7 @@ Comprehensive unit tests for services/crew_executor.py
 import asyncio
 import threading
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -102,39 +102,6 @@ class TestGetMetrics:
         m1["total_executions"] = 999
         m2 = executor.get_metrics()
         assert m2["total_executions"] == 0
-
-
-class TestGetActiveExecutions:
-    """Tests for get_active_executions."""
-
-    def test_empty_when_no_active(self, executor):
-        assert executor.get_active_executions() == {}
-
-    def test_returns_running_only(self, executor):
-        now = datetime.now()
-        executor._active_executions["exec-1"] = {
-            "status": "RUNNING",
-            "start_time": now,
-        }
-        executor._active_executions["exec-2"] = {
-            "status": "COMPLETED",
-            "start_time": now,
-        }
-
-        result = executor.get_active_executions()
-        assert "exec-1" in result
-        assert "exec-2" not in result
-
-    def test_result_has_required_fields(self, executor):
-        now = datetime.now()
-        executor._active_executions["exec-1"] = {
-            "status": "RUNNING",
-            "start_time": now,
-        }
-        result = executor.get_active_executions()
-        assert "status" in result["exec-1"]
-        assert "start_time" in result["exec-1"]
-        assert "duration_seconds" in result["exec-1"]
 
 
 class TestRequestStop:
@@ -379,35 +346,3 @@ class TestContextManager:
         with patch.object(executor, "shutdown"):
             result = executor.__exit__(None, None, None)
         assert result is False
-
-
-class TestRunCrewWithExecutor:
-    """Tests for the run_crew_with_executor helper."""
-
-    @pytest.mark.asyncio
-    async def test_calls_global_executor(self):
-        from src.services.execution.thread_executor import (
-            crew_executor,
-            run_crew_with_executor,
-        )
-
-        mock_crew = MagicMock()
-        mock_crew.kickoff.return_value = "helper result"
-
-        with patch.object(
-            crew_executor,
-            "run_crew",
-            new_callable=AsyncMock,
-            return_value="helper result",
-        ) as mock_run:
-            result = await run_crew_with_executor(
-                "exec-helper", mock_crew, inputs={"k": "v"}
-            )
-
-        mock_run.assert_called_once_with(
-            execution_id="exec-helper",
-            crew=mock_crew,
-            inputs={"k": "v"},
-            timeout=None,
-        )
-        assert result == "helper result"

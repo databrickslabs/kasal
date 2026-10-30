@@ -12,16 +12,21 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import text
 
 from src.core.databricks_app import DatabricksAppInstallation
 from src.utils.databricks_app_auth import get_app_client
 from src.utils.encryption_utils import EncryptionUtils
 
-_SECRET_KEY = "encryption-material-v1"
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+_SECRET_KEY = "encryption-material-v1"  # secret-scope key name; the value is read at runtime — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
 
 def _scope_name() -> str:
@@ -35,12 +40,12 @@ def _scope_name() -> str:
     return f"kasal-app-{digest}"
 
 
-def _read_secret(client, scope: str, key: str) -> str:
+def _read_secret(client: Any, scope: str, key: str) -> str:
     result = client.secrets.get_secret(scope=scope, key=key)
     return base64.b64decode(result.value, validate=True).decode()
 
 
-def _legacy_fernet_key(client) -> str:
+def _legacy_fernet_key(client: Any) -> str:
     """Retain explicit or previously assigned keys during upgrade."""
     from databricks.sdk.errors import PermissionDenied, ResourceDoesNotExist
 
@@ -66,8 +71,8 @@ def _legacy_fernet_key(client) -> str:
         return ""
 
 
-def _validate_material(raw: str) -> dict:
-    material = json.loads(raw)
+def _validate_material(raw: str) -> dict[str, Any]:
+    material: dict[str, Any] = json.loads(raw)
     if material.get("version") != 1:
         raise ValueError("Unsupported app encryption material version")
     Fernet(material["fernet"].encode())
@@ -75,6 +80,11 @@ def _validate_material(raw: str) -> dict:
         material["private_key"].encode(), password=None
     )
     public = serialization.load_pem_public_key(material["public_key"].encode())
+    # EncryptionUtils only ever generates RSA pairs; anything else is invalid.
+    if not isinstance(private, rsa.RSAPrivateKey) or not isinstance(
+        public, rsa.RSAPublicKey
+    ):
+        raise ValueError("App encryption key pair must be RSA")
     if private.public_key().public_numbers() != public.public_numbers():
         raise ValueError("App encryption key pair does not match")
     return material
@@ -158,13 +168,15 @@ def _ensure_material(scope: str) -> None:
     directory = EncryptionUtils.get_key_directory()
     _write_private_file(directory / "private_key.pem", material["private_key"])
     _write_private_file(directory / "public_key.pem", material["public_key"])
+    # Keys parsed before this point came from files that were just replaced.
+    EncryptionUtils.reset_key_cache()
     # Subprocesses inherit this key and read the restored RSA files. No SDK call
     # or key generation is needed on their encrypt/decrypt paths.
     os.environ["ENCRYPTION_KEY"] = material["fernet"]
     EncryptionUtils._cached_key = material["fernet"].encode()
 
 
-async def initialize_app_keys(connection) -> None:
+async def initialize_app_keys(connection: "AsyncConnection") -> None:
     """Called during native Lakebase startup, before seeding or user requests."""
     scope = _scope_name()
     lock_id = int.from_bytes(

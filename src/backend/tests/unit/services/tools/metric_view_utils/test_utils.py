@@ -7,7 +7,6 @@ from src.services.tools.metric_view_utils.utils import (
     load_mapping,
     spark_sql_compat,
     to_snake_case,
-    unflatten_table_name,
     yaml_scalar,
 )
 
@@ -112,38 +111,6 @@ class TestSparkSqlCompat:
     def test_isnull_case_insensitive(self):
         result = spark_sql_compat("isnull(val, 0)")
         assert "COALESCE(val, 0)" in result
-
-
-class TestUnflattenTableName:
-    def test_triple_underscore_unflattened(self):
-        result = unflatten_table_name(
-            "cat.sch.cat__sch__tbl", catalog="cat", schema="sch"
-        )
-        assert result == "cat.sch.tbl"
-
-    def test_no_flatten_passes_through(self):
-        result = unflatten_table_name("cat.sch.regular_table")
-        assert result == "cat.sch.regular_table"
-
-    def test_no_matching_prefix(self):
-        result = unflatten_table_name(
-            "other.prefix.cat__sch__tbl", catalog="cat", schema="sch"
-        )
-        # Prefix "cat.sch." doesn't match "other.prefix...", so remainder = full name
-        # "other.prefix.cat__sch__tbl" splits on __ -> ["other.prefix.cat", "sch", "tbl"] (3 parts)
-        # -> joined as "other.prefix.cat.sch.tbl"
-        assert result == "other.prefix.cat.sch.tbl"
-
-    def test_two_parts_not_unflattened(self):
-        result = unflatten_table_name("cat.sch.a__b", catalog="cat", schema="sch")
-        # Only 2 parts after split — returns flat_name unchanged
-        assert result == "cat.sch.a__b"
-
-    def test_empty_catalog_schema(self):
-        result = unflatten_table_name("a__b__c")
-        # prefix is "." — doesn't match, remainder = full name
-        # a__b__c splits into 3 parts -> "a.b.c"
-        assert result == "a.b.c"
 
 
 class TestLoadMapping:

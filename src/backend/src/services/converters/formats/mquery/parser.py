@@ -12,7 +12,7 @@ Date: 2025
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import ExpressionType, MQueryExpression, PowerBITable
 
@@ -195,25 +195,6 @@ class MQueryParser:
         table.source_expressions = parsed_expressions
         return table
 
-    def get_expression_summary(self, expression: MQueryExpression) -> Dict[str, Any]:
-        """
-        Get a summary of a parsed expression for logging/display.
-
-        Args:
-            expression: Parsed MQueryExpression
-
-        Returns:
-            Summary dict
-        """
-        return {
-            "type": expression.expression_type.value,
-            "server": expression.server,
-            "database": expression.database,
-            "catalog": expression.catalog,
-            "warehouse_path": expression.warehouse_path,
-            "enable_folding": expression.enable_folding,
-        }
-
 
 class TableFromRowsConverter:
     """
@@ -264,7 +245,7 @@ class TableFromRowsConverter:
         Returns:
             List of row tuples
         """
-        rows = []
+        rows: List[Tuple[str, ...]] = []
 
         # Find the rows section: Table.FromRows( { {row1}, {row2}, ... }, type table [...] )
         # Match the content between Table.FromRows( { and }, type table
@@ -311,7 +292,7 @@ class TableFromRowsConverter:
         Returns:
             List of (column_name, column_type) tuples
         """
-        columns = []
+        columns: List[Tuple[str, str]] = []
 
         # Find type table [ Column1 = text, Column2 = number, ... ]
         type_table_match = re.search(
@@ -337,32 +318,6 @@ class TableFromRowsConverter:
 
         logger.info(f"[TableFromRows] Extracted {len(columns)} column definitions")
         return columns
-
-    def mquery_type_to_sql(self, mquery_type: str) -> str:
-        """
-        Convert M-Query type to SQL type.
-
-        Args:
-            mquery_type: M-Query type string
-
-        Returns:
-            SQL type string
-        """
-        type_map = {
-            "text": "STRING",
-            "number": "DOUBLE",
-            "int64.type": "BIGINT",
-            "type number": "DOUBLE",
-            "type text": "STRING",
-            "type date": "DATE",
-            "type datetime": "TIMESTAMP",
-            "type datetimezone": "TIMESTAMP",
-            "type time": "STRING",
-            "type duration": "STRING",
-            "type logical": "BOOLEAN",
-            "type binary": "BINARY",
-        }
-        return type_map.get(mquery_type.lower(), "STRING")
 
     def convert_to_sql(
         self,

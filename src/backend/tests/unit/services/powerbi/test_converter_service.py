@@ -111,6 +111,7 @@ def mock_group_context():
     """Create a mock group context."""
     context = MagicMock(spec=GroupContext)
     context.primary_group_id = "group-1"
+    context.group_ids = ["group-1"]
     context.group_email = "user@example.com"
     return context
 
@@ -177,17 +178,19 @@ class TestConverterServiceHistory:
     async def test_get_history_success(self, converter_service):
         """Test successful history retrieval."""
         mock_history = MockConversionHistory(id=123)
-        converter_service.history_repo.get.return_value = mock_history
+        converter_service.history_repo.get_for_groups.return_value = mock_history
 
         result = await converter_service.get_history(123)
 
         assert result.id == 123
-        converter_service.history_repo.get.assert_called_once_with(123)
+        converter_service.history_repo.get_for_groups.assert_called_once_with(
+            123, ["group-1"]
+        )
 
     @pytest.mark.asyncio
     async def test_get_history_not_found(self, converter_service):
         """Test history retrieval when not found."""
-        converter_service.history_repo.get.return_value = None
+        converter_service.history_repo.get_for_groups.return_value = None
 
         with pytest.raises(KasalError) as exc_info:
             await converter_service.get_history(999)
@@ -201,7 +204,7 @@ class TestConverterServiceHistory:
         existing_history = MockConversionHistory(id=123)
         updated_history = MockConversionHistory(id=123, status="failed")
 
-        converter_service.history_repo.get.return_value = existing_history
+        converter_service.history_repo.get_for_groups.return_value = existing_history
         converter_service.history_repo.update.return_value = updated_history
 
         update_data = ConversionHistoryUpdate(status="failed")
@@ -213,7 +216,7 @@ class TestConverterServiceHistory:
     @pytest.mark.asyncio
     async def test_update_history_not_found(self, converter_service):
         """Test history update when not found."""
-        converter_service.history_repo.get.return_value = None
+        converter_service.history_repo.get_for_groups.return_value = None
 
         update_data = ConversionHistoryUpdate(status="failed")
 
@@ -236,7 +239,7 @@ class TestConverterServiceHistory:
         assert result.count == 2
         assert len(result.history) == 2
         converter_service.history_repo.find_by_execution_id.assert_called_once_with(
-            "exec-123"
+            "exec-123", group_id="group-1"
         )
 
     @pytest.mark.asyncio
@@ -323,17 +326,19 @@ class TestConverterServiceJobs:
     async def test_get_job_success(self, converter_service):
         """Test successful job retrieval."""
         mock_job = MockConversionJob(id="job-123")
-        converter_service.job_repo.get.return_value = mock_job
+        converter_service.job_repo.get_for_groups.return_value = mock_job
 
         result = await converter_service.get_job("job-123")
 
         assert result.id == "job-123"
-        converter_service.job_repo.get.assert_called_once_with("job-123")
+        converter_service.job_repo.get_for_groups.assert_called_once_with(
+            "job-123", ["group-1"]
+        )
 
     @pytest.mark.asyncio
     async def test_get_job_not_found(self, converter_service):
         """Test job retrieval when not found."""
-        converter_service.job_repo.get.return_value = None
+        converter_service.job_repo.get_for_groups.return_value = None
 
         with pytest.raises(KasalError) as exc_info:
             await converter_service.get_job("nonexistent")
@@ -346,7 +351,7 @@ class TestConverterServiceJobs:
         existing_job = MockConversionJob(id="job-123")
         updated_job = MockConversionJob(id="job-123", status="running")
 
-        converter_service.job_repo.get.return_value = existing_job
+        converter_service.job_repo.get_for_groups.return_value = existing_job
         converter_service.job_repo.update.return_value = updated_job
 
         update_data = ConversionJobUpdate(status="running")
@@ -474,7 +479,7 @@ class TestConverterServiceConfigurations:
     async def test_get_saved_config_success(self, converter_service):
         """Test successful configuration retrieval."""
         mock_config = MockSavedConfiguration(id=123)
-        converter_service.config_repo.get.return_value = mock_config
+        converter_service.config_repo.get_visible_to_groups.return_value = mock_config
 
         result = await converter_service.get_saved_config(123)
 
@@ -483,7 +488,7 @@ class TestConverterServiceConfigurations:
     @pytest.mark.asyncio
     async def test_get_saved_config_not_found(self, converter_service):
         """Test configuration retrieval when not found."""
-        converter_service.config_repo.get.return_value = None
+        converter_service.config_repo.get_visible_to_groups.return_value = None
 
         with pytest.raises(KasalError) as exc_info:
             await converter_service.get_saved_config(999)
@@ -498,7 +503,9 @@ class TestConverterServiceConfigurations:
         )
         updated_config = MockSavedConfiguration(id=123, name="Updated Config")
 
-        converter_service.config_repo.get.return_value = existing_config
+        converter_service.config_repo.get_visible_to_groups.return_value = (
+            existing_config
+        )
         converter_service.config_repo.update.return_value = updated_config
 
         update_data = SavedConfigurationUpdate(name="Updated Config")
@@ -509,10 +516,13 @@ class TestConverterServiceConfigurations:
     @pytest.mark.asyncio
     async def test_update_saved_config_not_authorized(self, converter_service):
         """Test configuration update by non-owner."""
+        # Public, so visible in the group, but owned by someone else.
         existing_config = MockSavedConfiguration(
-            id=123, created_by_email="other@example.com"
+            id=123, created_by_email="other@example.com", is_public=True
         )
-        converter_service.config_repo.get.return_value = existing_config
+        converter_service.config_repo.get_visible_to_groups.return_value = (
+            existing_config
+        )
 
         update_data = SavedConfigurationUpdate(name="Updated")
 
@@ -527,7 +537,9 @@ class TestConverterServiceConfigurations:
         existing_config = MockSavedConfiguration(
             id=123, created_by_email="user@example.com"
         )
-        converter_service.config_repo.get.return_value = existing_config
+        converter_service.config_repo.get_visible_to_groups.return_value = (
+            existing_config
+        )
         converter_service.config_repo.delete.return_value = True
 
         result = await converter_service.delete_saved_config(123)
@@ -537,10 +549,13 @@ class TestConverterServiceConfigurations:
     @pytest.mark.asyncio
     async def test_delete_saved_config_not_authorized(self, converter_service):
         """Test configuration deletion by non-owner."""
+        # Public, so visible in the group, but owned by someone else.
         existing_config = MockSavedConfiguration(
-            id=123, created_by_email="other@example.com"
+            id=123, created_by_email="other@example.com", is_public=True
         )
-        converter_service.config_repo.get.return_value = existing_config
+        converter_service.config_repo.get_visible_to_groups.return_value = (
+            existing_config
+        )
 
         with pytest.raises(KasalError) as exc_info:
             await converter_service.delete_saved_config(123)

@@ -224,7 +224,7 @@ class TestSaveMessage:
         """Verify the exact dict passed to repository.create."""
         svc, repo = _build_service()
         repo.create = AsyncMock(return_value=MagicMock())
-        ctx = _make_group_context(group_ids=["g1"], group_email="e@x.com")
+        ctx = _make_group_context(group_ids=["g1"], group_email="e@example.com")
 
         await svc.save_message(
             session_id="s1",
@@ -247,7 +247,7 @@ class TestSaveMessage:
         assert data["confidence"] == "0.8"
         assert data["generation_result"] == {"k": "v"}
         assert data["group_id"] == "g1"
-        assert data["group_email"] == "e@x.com"
+        assert data["group_email"] == "e@example.com"
         # id and timestamp present
         assert "id" in data
         assert "timestamp" in data
@@ -353,7 +353,7 @@ class TestGetChatSession:
     async def test_returns_empty_when_group_ids_empty(self):
         """group_context with empty group_ids triggers early return."""
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=[], group_email="u@x.com")
+        ctx = GroupContext(group_ids=[], group_email="u@example.com")
 
         result = await svc.get_chat_session("sess-1", group_context=ctx)
 
@@ -364,7 +364,7 @@ class TestGetChatSession:
     async def test_returns_empty_when_group_ids_none(self):
         """group_context with group_ids=None triggers early return."""
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=None, group_email="u@x.com")
+        ctx = GroupContext(group_ids=None, group_email="u@example.com")
 
         result = await svc.get_chat_session("sess-1", group_context=ctx)
 
@@ -453,7 +453,7 @@ class TestGetUserSessions:
     @pytest.mark.asyncio
     async def test_returns_empty_when_group_ids_empty(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=[], group_email="u@x.com")
+        ctx = GroupContext(group_ids=[], group_email="u@example.com")
 
         result = await svc.get_user_sessions("u1", group_context=ctx)
 
@@ -462,7 +462,7 @@ class TestGetUserSessions:
     @pytest.mark.asyncio
     async def test_returns_empty_when_group_ids_none(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=None, group_email="u@x.com")
+        ctx = GroupContext(group_ids=None, group_email="u@example.com")
 
         result = await svc.get_user_sessions("u1", group_context=ctx)
 
@@ -582,7 +582,7 @@ class TestGetGroupSessions:
     @pytest.mark.asyncio
     async def test_returns_empty_when_group_ids_empty(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=[], group_email="u@x.com")
+        ctx = GroupContext(group_ids=[], group_email="u@example.com")
 
         result = await svc.get_group_sessions(group_context=ctx)
 
@@ -591,7 +591,7 @@ class TestGetGroupSessions:
     @pytest.mark.asyncio
     async def test_returns_empty_when_group_ids_none(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=None, group_email="u@x.com")
+        ctx = GroupContext(group_ids=None, group_email="u@example.com")
 
         result = await svc.get_group_sessions(group_context=ctx)
 
@@ -678,7 +678,7 @@ class TestDeleteSession:
     @pytest.mark.asyncio
     async def test_returns_false_when_group_ids_empty(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=[], group_email="u@x.com")
+        ctx = GroupContext(group_ids=[], group_email="u@example.com")
 
         result = await svc.delete_session("sess-1", group_context=ctx)
 
@@ -687,7 +687,7 @@ class TestDeleteSession:
     @pytest.mark.asyncio
     async def test_returns_false_when_group_ids_none(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=None, group_email="u@x.com")
+        ctx = GroupContext(group_ids=None, group_email="u@example.com")
 
         result = await svc.delete_session("sess-1", group_context=ctx)
 
@@ -737,7 +737,7 @@ class TestCountSessionMessages:
     @pytest.mark.asyncio
     async def test_returns_zero_when_group_ids_empty(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=[], group_email="u@x.com")
+        ctx = GroupContext(group_ids=[], group_email="u@example.com")
 
         result = await svc.count_session_messages("sess-1", group_context=ctx)
 
@@ -746,7 +746,7 @@ class TestCountSessionMessages:
     @pytest.mark.asyncio
     async def test_returns_zero_when_group_ids_none(self):
         svc, repo = _build_service()
-        ctx = GroupContext(group_ids=None, group_email="u@x.com")
+        ctx = GroupContext(group_ids=None, group_email="u@example.com")
 
         result = await svc.count_session_messages("sess-1", group_context=ctx)
 
@@ -938,7 +938,7 @@ class TestEdgeCases:
         """If group_context has empty group_ids, primary_group_id is None."""
         svc, repo = _build_service()
         repo.create = AsyncMock(return_value=MagicMock())
-        ctx = GroupContext(group_ids=[], group_email="u@x.com")
+        ctx = GroupContext(group_ids=[], group_email="u@example.com")
 
         result = await svc.save_message(
             session_id="s",
@@ -950,7 +950,7 @@ class TestEdgeCases:
 
         # primary_group_id returns None for empty list
         assert result.group_id is None
-        assert result.group_email == "u@x.com"
+        assert result.group_email == "u@example.com"
 
     @pytest.mark.asyncio
     async def test_save_message_returns_consistent_id_and_timestamp(self):
@@ -1081,13 +1081,16 @@ class TestNamedSessions:
         ctx = _make_group_context()
 
         record = await svc.create_named_session(
-            user_id="u@x.com", title="My Chat", session_id="sess-42", group_context=ctx
+            user_id="u@example.com",
+            title="My Chat",
+            session_id="sess-42",
+            group_context=ctx,
         )
 
         assert record.id == "sess-42"
         assert record.title == "My Chat"
         assert record.group_id == "grp-1"
-        assert record.user_id == "u@x.com"
+        assert record.user_id == "u@example.com"
 
     @pytest.mark.asyncio
     async def test_create_named_session_generates_id_and_default_title(self):
@@ -1096,7 +1099,7 @@ class TestNamedSessions:
             side_effect=lambda d: SimpleNamespace(**d)
         )
 
-        record = await svc.create_named_session(user_id="u@x.com", title="")
+        record = await svc.create_named_session(user_id="u@example.com", title="")
 
         assert record.id  # generated
         assert record.title == "New Chat"
@@ -1108,18 +1111,21 @@ class TestNamedSessions:
         svc.session_repository.list_by_group_and_user = AsyncMock(return_value=rows)
         ctx = _make_group_context(group_ids=["g1", "g2"])
 
-        result = await svc.list_named_sessions(user_id="u@x.com", group_context=ctx)
+        result = await svc.list_named_sessions(
+            user_id="u@example.com", group_context=ctx
+        )
 
         assert result == rows
         svc.session_repository.list_by_group_and_user.assert_awaited_once_with(
-            group_ids=["g1", "g2"], user_id="u@x.com", page=0, per_page=50
+            group_ids=["g1", "g2"], user_id="u@example.com", page=0, per_page=50
         )
 
     @pytest.mark.asyncio
     async def test_list_named_sessions_no_group_returns_empty(self):
         svc, _ = _build_service()
         assert (
-            await svc.list_named_sessions(user_id="u@x.com", group_context=None) == []
+            await svc.list_named_sessions(user_id="u@example.com", group_context=None)
+            == []
         )
 
     @pytest.mark.asyncio
@@ -1144,7 +1150,7 @@ class TestNamedSessions:
 
         result = await svc.save_message(
             session_id="sess-1",
-            user_id="u@x.com",
+            user_id="u@example.com",
             message_type="user",
             content="hi",
             group_context=ctx,

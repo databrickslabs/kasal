@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -38,7 +39,9 @@ class ScheduleRepository:
         # Calculate next run time if not provided
         if "next_run_at" not in schedule_data:
             schedule_data["next_run_at"] = calculate_next_run_from_last(
-                schedule_data["cron_expression"]
+                schedule_data["cron_expression"],
+                None,
+                schedule_data.get("timezone"),
             )
 
         # Create schedule
@@ -74,20 +77,6 @@ class ScheduleRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def find_by_tenant(self, tenant_id: str) -> List[Schedule]:
-        """
-        Find all schedules belonging to a specific tenant.
-
-        Args:
-            tenant_id: ID of the tenant to filter schedules by (mapped to group_id)
-
-        Returns:
-            List of Schedule objects belonging to the tenant
-        """
-        query = select(Schedule).where(Schedule.group_id == tenant_id)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-
     async def find_by_group(self, group_id: str) -> List[Schedule]:
         """
         Find all schedules belonging to a specific group.
@@ -102,7 +91,7 @@ class ScheduleRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_due_schedules(self, current_time) -> List[Schedule]:
+    async def find_due_schedules(self, current_time: datetime) -> List[Schedule]:
         """
         Find all schedules that are due to run.
 
@@ -140,10 +129,12 @@ class ScheduleRepository:
         for field, value in schedule_data.items():
             setattr(schedule, field, value)
 
-        # If cron expression is updated, recalculate next run time
-        if "cron_expression" in schedule_data:
+        # A new cron line or timezone moves the next run
+        if "cron_expression" in schedule_data or "timezone" in schedule_data:
             schedule.next_run_at = calculate_next_run_from_last(
-                schedule_data["cron_expression"], schedule.last_run_at
+                schedule.cron_expression,
+                schedule.last_run_at,
+                getattr(schedule, "timezone", None),
             )
 
         await self.session.flush()
@@ -193,7 +184,9 @@ class ScheduleRepository:
         # If activating, recalculate next run time
         if schedule.is_active:
             schedule.next_run_at = calculate_next_run_from_last(
-                schedule.cron_expression, schedule.last_run_at
+                schedule.cron_expression,
+                schedule.last_run_at,
+                getattr(schedule, "timezone", None),
             )
 
         await self.session.flush()
@@ -201,8 +194,17 @@ class ScheduleRepository:
 
         return schedule
 
+    async def deactivate(self, schedule_id: int) -> Optional[Schedule]:
+        """Switch a schedule off (``is_active = False``); None if not found."""
+        schedule = await self.find_by_id(schedule_id)
+        if not schedule:
+            return None
+        schedule.is_active = False
+        await self.session.flush()
+        return schedule
+
     async def update_after_execution(
-        self, schedule_id: int, execution_time
+        self, schedule_id: int, execution_time: datetime
     ) -> Optional[Schedule]:
         """
         Update schedule after execution.
@@ -229,7 +231,9 @@ class ScheduleRepository:
         # Update last run time and calculate next run time
         schedule.last_run_at = execution_time_naive
         schedule.next_run_at = calculate_next_run_from_last(
-            schedule.cron_expression, execution_time_naive
+            schedule.cron_expression,
+            execution_time_naive,
+            getattr(schedule, "timezone", None),
         )
 
         await self.session.flush()

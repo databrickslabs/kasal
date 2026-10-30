@@ -29,12 +29,27 @@ export interface ExecutionConfig {
   edges?: unknown[];
   flow_id?: string;
   flow_config?: Record<string, unknown>;
+  /** The saved crew a crew run was built from (see CrewExecutionConfig). */
+  crew_id?: string;
+  /** A chat run: it resumes from its own stored definition (see CrewExecutionConfig). */
+  trigger_type?: 'chat';
+}
+
+/** What Auto resolved to, on a response to a request that asked for `auto`. */
+export interface ModelSelection {
+  requested: 'auto';
+  model: string | null;
+  /** `selected` by the decision model, or the workspace default on `fallback`. */
+  status: 'selected' | 'fallback';
+  /** Why it fell back, e.g. `timeout` (see `chat.autoModel.reasons`). */
+  reason?: string | null;
 }
 
 export interface Execution {
   id: string;
   job_id: string;
   execution_id?: string;
+  model_selection?: ModelSelection | null;
   status: ExecutionStatus;
   result?: string;
   error?: string;

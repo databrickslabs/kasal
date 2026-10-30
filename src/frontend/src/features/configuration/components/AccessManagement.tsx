@@ -54,6 +54,7 @@ import { GroupService, Group, GroupUser } from '../../../api/groups/GroupService
 import { UserService, User } from '../../../api/groups/UserService';
 import GroupManagement from './GroupManagement';
 import AddPersonDialog from './AddPersonDialog';
+import { apiErrorMessage } from './apiErrorMessage';
 
 type Membership = { group: Group; member: GroupUser };
 type RoleOption = 'admin' | 'editor' | 'operator';
@@ -159,7 +160,11 @@ const AccessManagement: React.FC = () => {
       setUsers((prev) => prev.map((u) => (u.id === user.id ? updated : u)));
     } catch (error) {
       console.error('Failed to update permission:', error);
-      setNotice({ message: 'Failed to update permission', severity: 'error' });
+      // The server explains a refusal, e.g. removing the last system admin.
+      setNotice({
+        message: apiErrorMessage(error, 'Failed to update permission'),
+        severity: 'error',
+      });
     } finally {
       setBusyKey(null);
     }

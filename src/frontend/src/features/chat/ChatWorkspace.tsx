@@ -7,6 +7,7 @@ import { useChatExecutionActions } from './hooks/useChatExecutionActions';
 import { useSessionStore } from '../../app/sessions/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { useAppStore } from './store/appStore';
+import { useModelsStore } from '../../store/models';
 import { useDispatcher } from './hooks/useDispatcher';
 import { startGenerationStream } from './utils/generationStreamManager';
 import { GenerationCompleteData } from './types/dispatcher';
@@ -116,7 +117,9 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   // routed to the pane.
   const previewPaneVisible = (previewPaneOpen && !!previewContent) || showPreviewSkeleton;
 
-  const models = useAppStore((s) => s.models);
+  // The shared, live model list (store/models.ts) — updates in place when an
+  // admin changes models, the decision model, or the workspace.
+  const models = useModelsStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
 
 
@@ -129,10 +132,23 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
 
   const chatThemeIsDark = useThemeStore((s) => s.isDarkMode);
 
+  // The composer's draft, kept here so a send cancelled before it went out can
+  // put its text back (ahead of anything typed since); draftVersion re-shows it.
+  const composerDraftRef = useRef('');
+  const [draftVersion, setDraftVersion] = useState(0);
+  const restoreDraft = useCallback((text: string) => {
+    const typedSince = composerDraftRef.current.trim();
+    composerDraftRef.current = typedSince ? `${text}\n\n${composerDraftRef.current}` : text;
+    setDraftVersion((version) => version + 1);
+  }, []);
+
   // --- Initialize stores on mount ---
   useEffect(() => {
     useAppStore.getState().init();
-    useAppStore.getState().loadModels();
+    // Reconcile a stored choice with whatever list is already loaded; a stale
+    // or missing list reloads, and the models store re-syncs when it lands.
+    useAppStore.getState().syncModelSelection();
+    void useModelsStore.getState().ensureFresh();
     useAppStore.getState().loadTools();
     const refreshTools = () => { void useAppStore.getState().loadTools(); };
     window.addEventListener('tools-changed', refreshTools);
@@ -146,6 +162,8 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   useEffect(() => {
     const onGroupChange = () => {
       void refreshLibrary();
+      // Enabled models and Auto's availability are per workspace too: the
+      // models store reloads them itself on 'group-changed'.
     };
     window.addEventListener('group-changed', onGroupChange);
     return () => window.removeEventListener('group-changed', onGroupChange);
@@ -366,6 +384,7 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
       setPendingRun({ sessionId, label: flow.name || 'flow', run: () => handleExecuteFlow(flow) }),
     getCurrentSessionId: () => useSessionStore.getState().currentSessionId,
     ensureSession: () => useSessionStore.getState().ensureSession(),
+    restoreDraft,
   });
 
 
@@ -444,6 +463,12 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
               onBuildInstead={handleBuildInstead}
               onStopExecution={handleStopExecution}
               isLoading={viewIsLoading}
+              // One dispatch at a time, in every session: a message typed
+              // meanwhile stays in the composer rather than being dropped.
+              isSending={dispatcher.dispatching}
+              onCancelSending={dispatcher.cancelDispatch}
+              draftRef={composerDraftRef}
+              draftVersion={draftVersion}
               isExecuting={viewIsExecuting}
               isGenerating={viewIsGenerating}
               executionContext={viewExecutionContext}

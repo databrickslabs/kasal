@@ -67,7 +67,7 @@ class GuardrailFactory:
 
         # Create the appropriate guardrail based on type
         try:
-            guardrail = None
+            guardrail: Optional[BaseGuardrail] = None
 
             if guardrail_type == "company_count":
                 guardrail = CompanyCountGuardrail(config_data)

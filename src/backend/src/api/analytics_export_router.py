@@ -70,7 +70,7 @@ def _make_zip(folder_name: str, files: list) -> bytes:
 async def download_genie_space_export(
     space_id: str,
     request: Request,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> StreamingResponse:
     """
     Download a ZIP archive containing CI/CD YAML files for a Genie Space.
@@ -119,7 +119,7 @@ async def download_genie_space_export_post(
     space_id: str,
     body: GenieSpaceExportBody,
     request: Request,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> StreamingResponse:
     """
     Same as the GET endpoint but accepts ``serialized_space`` in the request body.
@@ -161,7 +161,7 @@ async def download_genie_space_export_post(
 async def preview_genie_space_export(
     space_id: str,
     request: Request,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> JSONResponse:
     """
     Return the YAML file contents as JSON without downloading a ZIP.
@@ -204,8 +204,8 @@ async def preview_genie_space_export(
 )
 async def list_dashboards(
     request: Request,
+    group_context: GroupContextDep,
     page_size: int = Query(50, ge=1, le=200, description="Max dashboards to return"),
-    group_context: GroupContextDep = None,
 ) -> List[DashboardSummary]:
     """List all Lakeview (AI/BI) dashboards accessible with current credentials."""
     if group_context:
@@ -235,7 +235,7 @@ async def list_dashboards(
 async def download_dashboard_export(
     dashboard_id: str,
     request: Request,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> StreamingResponse:
     """
     Download a ZIP archive containing CI/CD YAML files for a Lakeview Dashboard.
@@ -286,7 +286,7 @@ async def download_dashboard_export(
 async def preview_dashboard_export(
     dashboard_id: str,
     request: Request,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> JSONResponse:
     """
     Return dashboard YAML file contents as JSON without downloading a ZIP.

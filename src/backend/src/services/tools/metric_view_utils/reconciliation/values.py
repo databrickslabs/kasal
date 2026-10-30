@@ -21,7 +21,11 @@ invalid numeric must not silently become a matching blank.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pandas as pd
+
+_Errors = Literal["raise", "coerce"]
 
 
 def strip_percent(series: pd.Series) -> pd.Series:
@@ -41,9 +45,12 @@ def parse_value(
     series: pd.Series, value_format: str, strict: bool = False
 ) -> pd.Series:
     """Parse a PBI result column into numbers according to ``value_format``."""
-    errors = "raise" if strict else "coerce"
+    errors: _Errors = "raise" if strict else "coerce"
     if value_format == "percent_string":
-        return pd.to_numeric(strip_percent(series), errors=errors) / 100
+        scaled: pd.Series = pd.to_numeric(strip_percent(series), errors=errors)
+        return scaled / 100
     if value_format == "percent_string_unscaled":
-        return pd.to_numeric(strip_percent(series), errors=errors)
-    return pd.to_numeric(series, errors=errors)
+        unscaled: pd.Series = pd.to_numeric(strip_percent(series), errors=errors)
+        return unscaled
+    plain: pd.Series = pd.to_numeric(series, errors=errors)
+    return plain

@@ -10,7 +10,10 @@ Record of the `src/engines/crewai` restructure into path, kernel, and infra pack
 - [Open questions and risks](#6-open-questions--risks)
 - [Execution log and verification corrections](#7-execution-log--verification-corrections-added-during-implementation)
 
-**Status: implemented.** This document is the active record of the `src/engines/crewai` refactor; the re-tree it proposes has since been carried out (see §7 — Phase 0/1/2 DONE). Sections 1–2 describe the *pre-refactor* layout for context; the new layout is `paths/{light_agent,crew,flow}/`, `kernel/` (was `common/`), `infra/`, `memory/`, `guardrails/{core,demo}/`, with `helpers/`, `utils/`, `services/`, `mcp/` removed. All paths below are relative to `src/backend/src/engines/crewai/` unless otherwise noted.
+> [!IMPORTANT]
+> **Status: internal / historical record.** This proposal was carried out and then superseded. `src/engines/` no longer exists: the three execution paths now live in `src/backend/src/services/chat/`, `src/backend/src/services/agent_builder/` and `src/backend/src/services/flow_builder/`, over shared machinery in `src/backend/src/services/execution/` (kernel, config, runtime, harnesses). The file paths below describe the layout at the time of the refactor and are intentionally left as written. For the current layout, see the [code structure guide](./CODE_STRUCTURE_GUIDE.md) and [harnesses](./harnesses.md).
+
+**Status at the time: implemented.** The re-tree it proposed was carried out (see §7 — Phase 0/1/2 DONE). Sections 1–2 describe the *pre-refactor* layout for context; the layout it produced was `paths/{light_agent,crew,flow}/`, `kernel/` (was `common/`), `infra/`, `memory/`, `guardrails/{core,demo}/`, with `helpers/`, `utils/`, `services/`, `mcp/` removed. All paths below are relative to the former `src/backend/src/engines/crewai/` unless otherwise noted.
 
 ---
 

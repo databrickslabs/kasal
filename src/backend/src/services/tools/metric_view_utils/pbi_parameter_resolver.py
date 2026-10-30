@@ -9,7 +9,7 @@ class PbiParameterResolver:
     """Resolve Power BI parameters (FiscperFilter, RE_Version, CurrencyFilter)
     in native SQL extracted from scan data or MQuery transpiled SQL."""
 
-    def __init__(self, parameter_defaults: dict | None = None):
+    def __init__(self, parameter_defaults: dict | None = None) -> None:
         self._defaults = parameter_defaults or {}
 
     _RE_VERSION_CASE = (
@@ -28,9 +28,10 @@ class PbiParameterResolver:
     }
 
     @property
-    def _re_version_case(self):
+    def _re_version_case(self) -> str:
         """RE_Version CASE expression — overridable via config."""
-        return self._defaults.get("RE_Version_CASE", self._RE_VERSION_CASE)
+        case_expr: str = self._defaults.get("RE_Version_CASE", self._RE_VERSION_CASE)
+        return case_expr
 
     # Unresolved Power BI parameter interpolation, e.g.  " & FiscperFilter & "
     # or  '${FiscperFilter}' , left over after the known-param resolvers ran.
@@ -72,7 +73,7 @@ class PbiParameterResolver:
             re.IGNORECASE | re.DOTALL,
         )
 
-        def _replace(m: re.Match) -> str:
+        def _replace(m: re.Match[str]) -> str:
             else_branch = m.group(2).strip()
             if else_branch.startswith("(") and else_branch.endswith(")"):
                 else_branch = else_branch[1:-1].strip()

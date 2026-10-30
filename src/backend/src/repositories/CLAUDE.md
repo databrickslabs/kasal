@@ -123,8 +123,8 @@ needs an ID back, and leave `commit()` alone: committing inside a repository end
 a transaction the service is still composing, so a later failure in the same
 service call can no longer roll the earlier writes back.
 
-Four repositories still commit their injected session and are the exception, not
-the pattern (`mlflow_repository`, `powerbi_semantic_model_cache_repository`,
+Three repositories still commit their injected session and are the exception, not
+the pattern (`powerbi_semantic_model_cache_repository`,
 `execution_history_repository` — behind an explicit `commit` flag — and
 `database_backup_repository`, which drives raw DBAPI connections for
 export/import). Do not copy them into new code.

@@ -8,7 +8,7 @@ queue survives transient database failures, but not a restart of this process.
 import asyncio
 import logging
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Dict, cast
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def persist_execution_outcome(
                 status=outcome.status,
                 message=outcome.message or "",
                 result=outcome.result,
-                **({"preserve_terminal": True} if terminal else {}),
+                **cast(Dict[str, Any], {"preserve_terminal": True} if terminal else {}),
             ):
                 if _pending.get(execution_id) is outcome:
                     del _pending[execution_id]

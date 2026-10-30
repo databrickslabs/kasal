@@ -8,58 +8,33 @@ MEASURE() syntax.
 Output JSON feeds directly into the Databricks Dashboard Creator (tool 95).
 """
 
-import asyncio
 import json
 import logging
 import re
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
 
+# SEC #3: dashboard SQL becomes a stored Lakeview dataset query that runs when
+# the dashboard opens — one read-only SELECT only (shared with the M-Query
+# pipeline, which executes model-derived SQL the same way).
+from src.services.tools.metric_view_utils.sql_guard import (
+    is_read_only_select as _is_safe_select_sql,
+)
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
+
 logger = logging.getLogger(__name__)
 
 
-def _is_safe_select_sql(sql: str) -> bool:
-    """SEC #3: gate LLM-generated dashboard SQL to a single read-only SELECT.
-
-    The mapper's `sql` is authored by an LLM from attacker-influenceable PBI visual
-    metadata, then stored as a Lakeview dataset query that runs against the
-    warehouse when the dashboard opens. Allow only a lone SELECT/WITH; reject
-    dangerous verbs (DROP/DELETE/…/GRANT/EXEC), stacked statements (`;` before the
-    end), and dollar-quote breakout. Reuses the metric-view deny-list where
-    available. Returns True if the SQL is safe to store.
-    """
-    if not sql or not isinstance(sql, str):
-        return False
-    s = sql.strip().rstrip(";").strip()
-    if not s:
-        return False
-    # Must start with SELECT or WITH (read-only shapes only). NOTE: do NOT reuse
-    # metric_view_utils._check_dangerous_sql here — that deny-list is tuned for
-    # *measure expressions* and flags a leading SELECT as dangerous, so it would
-    # reject every legitimate dataset query.
-    if not re.match(r"^\s*(SELECT|WITH)\b", s, re.IGNORECASE):
-        return False
-    # No stacked statements (any ';' after trailing-strip is a second statement).
-    if ";" in s:
-        return False
-    up = s.upper()
-    # Dollar-quote breakout (the metric-view YAML wraps bodies in $$…$$).
-    if "$$" in s:
-        return False
-    # Block DML/DDL/privilege verbs appearing as whole words anywhere.
-    if re.search(
-        r"\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE|MERGE|GRANT|"
-        r"REVOKE|CREATE|EXEC|EXECUTE|CALL|COPY|MSCK|SET|USE)\b",
-        up,
-    ):
-        return False
-    # Block info-schema / catalog probing via UNION.
-    if re.search(r"\bUNION\b", up) and re.search(r"INFORMATION_SCHEMA|SYSTEM\.", up):
-        return False
-    return True
+def _q(name: str, dotted: bool = False) -> str:
+    """Back-quote an identifier for Spark SQL, escaping embedded backticks, so a
+    model-supplied name cannot leave it. ``dotted`` quotes ``a.b.c`` part by part."""
+    parts = str(name).split(".") if dotted else [str(name)]
+    return ".".join("`" + p.replace("`", "``") + "`" for p in parts)
 
 
 class PBIVisualUCMVMapperSchema(BaseModel):
@@ -131,30 +106,18 @@ class PBIVisualUCMVMapperTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain AuthContext synchronously (OBO → PAT → SPN)."""
-        import concurrent.futures
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        from src.utils.databricks_auth import get_auth_context
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
+        """
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        def _run_in_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        return resolve_tool_auth(host_override)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Parsing helpers
@@ -293,7 +256,7 @@ class PBIVisualUCMVMapperTool(BaseTool):
         from src.services.tools.async_bridge import run_async_with_context
         from src.utils.telemetry import KasalProduct, get_user_agent_header
 
-        async def _run():
+        async def _run() -> str:
             return await LLMManager.completion(
                 messages=[
                     {
@@ -468,14 +431,23 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
             measures = default_measures
             dims = default_dims
             sql = None
+            # Names come from metric-view YAML and tool arguments, and the SQL
+            # is stored as a dashboard query: quote them, and gate it exactly
+            # like the LLM path above.
             if view and measures:
+                from_view = _q(view, dotted=True)
                 if v["visual_type"] in ("card", "kpiVisual"):
-                    measure_expr = ", ".join(f"MEASURE({m})" for m in measures[:1])
-                    sql = f"SELECT {measure_expr} FROM {view}"
+                    measure_expr = ", ".join(f"MEASURE({_q(m)})" for m in measures[:1])
+                    sql = f"SELECT {measure_expr} FROM {from_view}"  # names back-quoted; gated read-only below — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 elif dims:
-                    dim_expr = ", ".join(dims)
-                    measure_expr = ", ".join(f"MEASURE({m})" for m in measures)
-                    sql = f"SELECT {dim_expr}, {measure_expr} FROM {view} GROUP BY {dim_expr}"
+                    dim_expr = ", ".join(_q(d) for d in dims)
+                    measure_expr = ", ".join(f"MEASURE({_q(m)})" for m in measures)
+                    sql = f"SELECT {dim_expr}, {measure_expr} FROM {from_view} GROUP BY {dim_expr}"  # names back-quoted; gated read-only below — nosemgrep: tmp.databricks.sql-injection.fstring-select
+            if sql and not _is_safe_select_sql(sql):
+                logger.warning(
+                    "Dropping unsafe fallback dashboard SQL for %s", v["visual_id"]
+                )
+                sql = None
             mappings.append(
                 {
                     "visual_id": v["visual_id"],
@@ -494,8 +466,8 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
     # Main _run
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _run(self, **kwargs: Any) -> str:  # noqa: C901
-        def _get(key):
+    def _run(self, **kwargs: Any) -> str:
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val
@@ -557,19 +529,36 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get("ucmv_output")
         if not ucmv_raw:
-            # DB fallback (same as the UCMV Validator / Genie config generator):
-            # covers standalone runs and flows where multi-hop injection did not
-            # deliver the deployer output across the intermediate crews.
+            # DB fallback (as in the Genie config generator): this run's own
+            # UCMV Generator output first, for a flow whose multi-hop injection
+            # did not deliver it; one read, as a flow's crews share its job id.
+            # Only a run with none of its own (a standalone run) takes the
+            # latest in the teamspace.
             try:
                 from src.services.tools.metric_view_validator_tool import (
                     MetricViewValidatorTool,
                 )
 
-                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+                latest = (
+                    MetricViewValidatorTool._fetch_latest_ucmv_from_db(
+                        job_id, attempts=1
+                    )
+                    if job_id
+                    else {}
+                )
                 if isinstance(latest, dict) and latest.get("yaml"):
                     logger.info(
-                        "[PBIVisualMapper] ucmv_output not injected — using latest UCMV Generator output from DB"
+                        "[PBIVisualMapper] ucmv_output not injected — using this run's UCMV Generator output from DB"
                     )
+                else:
+                    latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                    if isinstance(latest, dict) and latest.get("yaml"):
+                        logger.info(
+                            "[PBIVisualMapper] ucmv_output not injected and run %s has no UCMV output of its own — using the latest UCMV Generator output in this teamspace",
+                            job_id,
+                        )
+                if isinstance(latest, dict) and latest.get("yaml"):
                     ucmv_raw = json.dumps(latest)
             except Exception as e:
                 logger.warning(

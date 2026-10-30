@@ -6,7 +6,7 @@ combined measures with names like: kbi_name + "_" + structure_name
 """
 
 import re
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 from ...base.models import KPI, KPIDefinition, Structure
 
@@ -14,7 +14,7 @@ from ...base.models import KPI, KPIDefinition, Structure
 class StructureExpander:
     """Expands KBIs with applied structures to create combined measures"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.processed_definitions: List[KPIDefinition] = []
 
     def process_definition(self, definition: KPIDefinition) -> KPIDefinition:
@@ -98,9 +98,11 @@ class StructureExpander:
             # Determine aggregation type and filters based on structure formula
             if structure.formula:
                 # Structure has formula - this should be a CALCULATED measure
-                aggregation_type = "CALCULATED"
+                aggregation_type: Optional[str] = "CALCULATED"
                 # For calculated measures, only use structure filters (no base KBI data filters)
-                combined_filters = list(structure.filters)
+                combined_filters: List[Union[str, Dict[str, Any]]] = list(
+                    structure.filters
+                )
                 # No source table for calculated measures
                 source_table = None
             else:
@@ -110,7 +112,7 @@ class StructureExpander:
                 )
 
                 # Resolve structure filter variables before combining
-                resolved_structure_filters = []
+                resolved_structure_filters: List[str] = []
                 if structure.filters:
                     from ..translators.filters import FilterResolver
 
@@ -126,10 +128,10 @@ class StructureExpander:
 
                     # Resolve structure filters using the definition's variables
                     resolved_structure_filters = filter_resolver.resolve_filters(
-                        definition, temp_kpi
+                        temp_kpi, definition
                     )
 
-                combined_filters = list(base_kbi.filters) + resolved_structure_filters
+                combined_filters = [*base_kbi.filters, *resolved_structure_filters]
                 source_table = base_kbi.source_table
 
             # Determine display sign (structure overrides KBI if specified)
@@ -202,7 +204,7 @@ class StructureExpander:
         # Find structure references in parentheses
         pattern = r"\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)"
 
-        def replace_reference(match):
+        def replace_reference(match: re.Match[str]) -> str:
             struct_ref = match.group(1).strip()
             if struct_ref in all_structures:
                 # Convert to combined measure technical name (no brackets - let tree-parsing handle that)
@@ -220,125 +222,3 @@ class StructureExpander:
         name = re.sub(r"[^a-zA-Z0-9\s]", "", description.lower())
         name = re.sub(r"\s+", "_", name.strip())
         return name
-
-    def get_structure_dependencies(
-        self, structures: Dict[str, Structure]
-    ) -> Dict[str, List[str]]:
-        """
-        Analyze structure dependencies to ensure proper processing order
-
-        Returns:
-            Dictionary mapping structure names to their dependencies
-        """
-        dependencies = {}
-
-        for struct_name, structure in structures.items():
-            deps = []
-            if structure.formula:
-                # Find structure references in the formula
-                pattern = r"\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)"
-                matches = re.findall(pattern, structure.formula)
-                for match in matches:
-                    if match in structures and match != struct_name:
-                        deps.append(match)
-            dependencies[struct_name] = deps
-
-        return dependencies
-
-    def validate_structures(self, definition: KPIDefinition) -> List[str]:
-        """
-        Validate structure definitions and references
-
-        Returns:
-            List of validation error messages
-        """
-        errors = []
-
-        if not definition.structures:
-            return errors
-
-        # Check for circular dependencies
-        dependencies = self.get_structure_dependencies(definition.structures)
-
-        def has_circular_dependency(struct_name: str, visited: set, path: set) -> bool:
-            if struct_name in path:
-                return True
-            if struct_name in visited:
-                return False
-
-            visited.add(struct_name)
-            path.add(struct_name)
-
-            for dep in dependencies.get(struct_name, []):
-                if has_circular_dependency(dep, visited, path):
-                    return True
-
-            path.remove(struct_name)
-            return False
-
-        visited = set()
-        for struct_name in definition.structures.keys():
-            if struct_name not in visited:
-                if has_circular_dependency(struct_name, visited, set()):
-                    errors.append(
-                        f"Circular dependency detected involving structure: {struct_name}"
-                    )
-
-        # Check KPI structure references
-        for kpi in definition.kpis:
-            if kpi.apply_structures:
-                for struct_name in kpi.apply_structures:
-                    if struct_name not in definition.structures:
-                        errors.append(
-                            f"KPI '{kpi.technical_name or kpi.description}' references undefined structure: {struct_name}"
-                        )
-
-        return errors
-
-
-class TimeIntelligenceHelper:
-    """Helper class for common SAP BW time intelligence patterns"""
-
-    @staticmethod
-    def create_ytd_structure() -> Structure:
-        """Create Year-to-Date structure"""
-        return Structure(
-            description="Year to Date",
-            filters=[
-                "( fiscper3 < $var_current_period )",
-                "( fiscyear = $var_current_year )",
-                "( bic_chversion = '0000' )",  # Actuals version
-            ],
-            display_sign=1,
-        )
-
-    @staticmethod
-    def create_ytg_structure() -> Structure:
-        """Create Year-to-Go structure"""
-        return Structure(
-            description="Year to Go",
-            filters=[
-                "( fiscper3 >= $var_current_period )",
-                "( fiscyear = $var_current_year )",
-                "( bic_chversion = $var_forecast_version )",
-            ],
-            display_sign=1,
-        )
-
-    @staticmethod
-    def create_py_structure() -> Structure:
-        """Create Prior Year structure"""
-        return Structure(
-            description="Prior Year",
-            filters=["( fiscyear = $var_prior_year )", "( bic_chversion = '0000' )"],
-            display_sign=1,
-        )
-
-    @staticmethod
-    def create_act_plus_forecast_structure() -> Structure:
-        """Create combined Actuals + Forecast structure"""
-        return Structure(
-            description="Actuals + Forecast",
-            formula="( ytd_actuals ) + ( ytg_forecast )",
-            display_sign=1,
-        )

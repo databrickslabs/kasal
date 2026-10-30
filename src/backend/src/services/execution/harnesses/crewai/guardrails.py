@@ -28,7 +28,7 @@ would let an automated consumer treat a degraded answer as a clean one.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Tuple  # noqa: F401 — Tuple documents the contract
+from typing import Any, Callable, Tuple  # Tuple documents the contract
 
 from src.core.logger import LoggerManager
 
@@ -57,8 +57,9 @@ def adapt_guardrail(guardrail: Any) -> Any:
         # CrewAI defers output_json/output_pydantic conversion until AFTER its
         # guardrails. Returning TaskOutput bypasses that conversion; returning
         # the accepted text invokes it and populates fields used by flow routes.
-        if valid and result is output and isinstance(getattr(output, "raw", None), str):
-            return True, output.raw
+        raw = getattr(output, "raw", None)
+        if valid and result is output and isinstance(raw, str):
+            return True, raw
         return valid, result
 
     validate.__name__ = type(guardrail.guardrail).__name__
@@ -86,7 +87,7 @@ def _reason_for(result: Any) -> str:
     return str(result)
 
 
-def _annotate(output: Any, reason: str) -> Any:
+def annotate_degraded(output: Any, reason: str) -> Any:
     """Mark an output degraded, in text and in structure."""
     raw = getattr(output, "raw", None)
     if isinstance(raw, str) and DEGRADED_MARKER not in raw:
@@ -123,7 +124,7 @@ def degrade_on_exhausted(
     # construction fails with "If return type is annotated, it must be
     # Tuple[bool, Any]" — about an annotation that says exactly that.
     # No annotation means no validation, which is what we want.
-    def wrapped(output: Any):
+    def wrapped(output: Any):  # type: ignore[no-untyped-def]  # CrewAI validates any return annotation
         attempts["n"] += 1
         try:
             verdict = guardrail(output)
@@ -142,6 +143,6 @@ def degrade_on_exhausted(
             max_retries,
             reason,
         )
-        return True, _annotate(output, reason)
+        return True, annotate_degraded(output, reason)
 
     return wrapped

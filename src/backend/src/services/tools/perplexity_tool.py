@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type
 
@@ -125,35 +124,29 @@ class PerplexitySearchTool(BaseTool):
         timeout: Optional[Any] = None,
         result_as_answer: bool = False,
     ):
-        super().__init__()
+        super().__init__(result_as_answer=result_as_answer)  # type: ignore[call-arg]  # pydantic plugin: defaults live on the subclass
 
         # Log all relevant info about key source
         logger.info("Initializing PerplexitySearchTool")
-        logger.info(f"API key provided directly: {bool(api_key)}")
-        logger.info(
-            f"API key in environment: {bool(os.environ.get('PERPLEXITY_API_KEY'))}"
-        )
+        logger.info(f"API key provided: {bool(api_key)}")
         logger.info(f"result_as_answer: {result_as_answer}")
 
-        # Try to get API key from environment or parameter
+        # The key is passed in by whoever builds the tool (ToolFactory reads the
+        # workspace's ApiKeysService; an exported app its own environment). It is
+        # never read from os.environ here: the process environment is shared by
+        # every workspace this server serves.
         if not api_key:
-            api_key = os.environ.get("PERPLEXITY_API_KEY")
-            if not api_key:
-                logger.error(
-                    "No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings."
-                )
-                raise ValueError(
-                    "Perplexity API key is required. Please configure it in the API Keys settings."
-                )
+            logger.error(
+                "No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings."
+            )
+            raise ValueError(
+                "Perplexity API key is required. Please configure it in the API Keys settings."
+            )
 
         self._api_key = api_key
 
-        # Safely log a portion of the key for diagnostic purposes
         if api_key:
-            masked_key = (
-                f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
-            )
-            logger.info(f"Initialized Perplexity tool with API key: {masked_key}")
+            logger.info("Initialized Perplexity tool with an API key")
         else:
             logger.error("Failed to initialize Perplexity tool with a valid API key")
 
@@ -251,7 +244,7 @@ class PerplexitySearchTool(BaseTool):
             result = response.json()
             logger.debug(f"Full API response: {json.dumps(result, indent=2)}")
 
-            answer = (
+            answer: str = (
                 result.get("choices", [{}])[0].get("message", {}).get("content", "")
             )
 

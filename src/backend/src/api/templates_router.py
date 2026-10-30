@@ -1,10 +1,11 @@
 import logging
-from typing import Annotated, List
+from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, status
 
 from src.core.exceptions import NotFoundError
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.template import PromptTemplate
 from src.schemas.template import (
     PromptTemplateCreate,
     PromptTemplateResponse,
@@ -43,8 +44,8 @@ def get_template_service(session: SessionDep) -> TemplateService:
 TemplateServiceDep = Annotated[TemplateService, Depends(get_template_service)]
 
 
-@router.get("/health")
-async def health_check():
+@router.get("/health", response_model=None)
+async def health_check() -> Dict[str, Any]:
     """
     Health check endpoint.
 
@@ -58,7 +59,7 @@ async def health_check():
 async def list_templates(
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> List[PromptTemplate]:
     """
     Get all prompt templates for the current group.
 
@@ -84,7 +85,7 @@ async def get_template(
     template_id: int,
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> PromptTemplate:
     """
     Get a specific prompt template by ID with group isolation.
 
@@ -116,7 +117,7 @@ async def get_template_by_name(
     name: str,
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> PromptTemplate:
     """
     Get a specific prompt template by name with group isolation.
 
@@ -150,7 +151,7 @@ async def create_template(
     template: PromptTemplateCreate,
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> PromptTemplate:
     """
     Create a new prompt template with group isolation.
 
@@ -181,7 +182,7 @@ async def update_template(
     template: PromptTemplateUpdate,
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> PromptTemplate:
     """
     Update an existing prompt template with group isolation.
 
@@ -209,12 +210,12 @@ async def update_template(
     return updated_template
 
 
-@router.delete("/{template_id}", status_code=status.HTTP_200_OK)
+@router.delete("/{template_id}", response_model=None, status_code=status.HTTP_200_OK)
 async def delete_template(
     template_id: int,
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Delete a prompt template with group isolation.
 
@@ -239,11 +240,11 @@ async def delete_template(
     return {"message": f"Prompt template with ID {template_id} deleted successfully"}
 
 
-@router.delete("", status_code=status.HTTP_200_OK)
+@router.delete("", response_model=None, status_code=status.HTTP_200_OK)
 async def delete_all_templates(
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Delete all prompt templates for the current group.
 
@@ -268,7 +269,7 @@ async def delete_all_templates(
 async def reset_templates(
     service: TemplateServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Reset all prompt templates to default values for the current group.
 

@@ -11,7 +11,11 @@ path, via ``generate_config.py``'s CLI fallback).
 
 from __future__ import annotations
 
+import logging
+
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -81,11 +85,17 @@ def discover_report_id(
                 if best:
                     return best.get("id")
         except Exception:
-            pass  # fall through to the classic REST call below
+            # Fall through to the classic REST call below.
+            logger.debug("scan_result has no usable report match", exc_info=True)
 
     try:
-        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
-        resp = requests.get(url, headers=_headers(token), timeout=30)
+        # Lazy: pipeline_config imports this module.
+        from src.services.powerbi.pipeline_config import _pbi_id
+
+        url = (
+            f"https://api.powerbi.com/v1.0/myorg/groups/{_pbi_id(workspace_id)}/reports"
+        )
+        resp = requests.get(url, headers=_headers(token), timeout=30)  # fixed Power BI host, id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
         if resp.status_code != 200:
             return None
         reports = resp.json().get("value", [])
@@ -97,4 +107,5 @@ def discover_report_id(
         best = _pick_best_report_match(matches)
         return best.get("id") if best else None
     except Exception:
+        logger.warning("Report discovery via REST failed", exc_info=True)
         return None

@@ -34,18 +34,21 @@ raises, the result is ``ValidationStatus.ERROR`` with the exception message.
 
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Optional
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
 
-Row = Dict[str, Any]
-Rows = List[Row]
+Row = dict[str, object]
+Rows = list[Row]
 EvaluateFn = Callable[[str], Rows]
 """Callback that executes either a DAX query (starting with ``EVALUATE``) or a
 SQL query and returns a list of ``{column: value}`` dicts."""
@@ -76,8 +79,8 @@ class ValidationStatus(str, Enum):
 class ColumnMismatch:
     """A single per-period/country value that differs between PBI and UC."""
 
-    period: Any
-    country: Optional[Any]
+    period: object
+    country: object
     pbi_value: Optional[float]
     generated_value: Optional[float]
     abs_diff: Optional[float] = None
@@ -93,7 +96,7 @@ class ViewValidationResult:
     pbi_row_count: Optional[int] = None
     generated_row_count: Optional[int] = None
     row_count_match: Optional[bool] = None
-    period_mismatches: List[ColumnMismatch] = field(default_factory=list)
+    period_mismatches: list[ColumnMismatch] = field(default_factory=list)
     """Per-period sum differences for numeric columns (empty when row counts
     already differ or no ``period_col`` was supplied)."""
     error: Optional[str] = None
@@ -105,7 +108,7 @@ class MeasureValidationResult:
 
     measure_name: str
     status: ValidationStatus
-    mismatches: List[ColumnMismatch] = field(default_factory=list)
+    mismatches: list[ColumnMismatch] = field(default_factory=list)
     """Per-(period, country) rows where PBI value ≠ UC value."""
     pbi_total: Optional[float] = None
     generated_total: Optional[float] = None
@@ -142,9 +145,9 @@ class MeasureSpec:
 _NUMERIC = (int, float)
 
 
-def _to_float(v: Any) -> Optional[float]:
+def _to_float(v: object) -> Optional[float]:
     """Convert a value to float; return None for NULL / non-numeric."""
-    if v is None:
+    if not isinstance(v, (str, int, float)):
         return None
     try:
         return float(v)
@@ -152,7 +155,9 @@ def _to_float(v: Any) -> Optional[float]:
         return None
 
 
-def _diff(pbi: Optional[float], gen: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+def _diff(
+    pbi: Optional[float], gen: Optional[float]
+) -> tuple[Optional[float], Optional[float]]:
     """Return (abs_diff, pct_diff) for two nullable floats."""
     if pbi is None or gen is None:
         return (None, None)
@@ -167,7 +172,7 @@ def _strip_pbi_prefix(column: str) -> str:
     return m.group(1) if m else column
 
 
-def _normalise_rows(rows: Rows) -> List[Row]:
+def _normalise_rows(rows: Rows) -> Rows:
     """Strip PBI column-name prefixes from all row keys."""
     return [{_strip_pbi_prefix(k): v for k, v in row.items()} for row in rows]
 
@@ -175,13 +180,13 @@ def _normalise_rows(rows: Rows) -> List[Row]:
 def _period_sums(
     rows: Rows,
     period_col: str,
-    numeric_cols: List[str],
-) -> Dict[Any, Dict[str, float]]:
+    numeric_cols: list[str],
+) -> dict[object, dict[str, float]]:
     """Aggregate numeric columns by period_col.
 
     Returns ``{period: {col: sum, ...}}``.
     """
-    agg: Dict[Any, Dict[str, float]] = {}
+    agg: dict[object, dict[str, float]] = {}
     for row in rows:
         period = row.get(period_col)
         if period not in agg:
@@ -197,14 +202,14 @@ def _compare_period_sums(
     pbi_rows: Rows,
     uc_rows: Rows,
     period_col: str,
-    numeric_cols: List[str],
+    numeric_cols: list[str],
     tolerance: float,
-) -> List[ColumnMismatch]:
+) -> list[ColumnMismatch]:
     """Compare per-period numeric sums; return mismatches outside tolerance."""
     pbi_agg = _period_sums(pbi_rows, period_col, numeric_cols)
     uc_agg = _period_sums(uc_rows, period_col, numeric_cols)
     all_periods = set(pbi_agg) | set(uc_agg)
-    mismatches: List[ColumnMismatch] = []
+    mismatches: list[ColumnMismatch] = []
     for period in sorted(all_periods, key=str):
         for col in numeric_cols:
             pbi_val = pbi_agg.get(period, {}).get(col)
@@ -231,10 +236,11 @@ def _compare_period_country(
     country_col: Optional[str],
     value_col: str,
     tolerance: float,
-) -> List[ColumnMismatch]:
+) -> list[ColumnMismatch]:
     """Compare (period, country) → value pairs; return mismatches."""
-    def _index(rows: Rows) -> Dict[Tuple, Optional[float]]:
-        idx: Dict[Tuple, Optional[float]] = {}
+
+    def _index(rows: Rows) -> dict[tuple[object, object], Optional[float]]:
+        idx: dict[tuple[object, object], Optional[float]] = {}
         for row in rows:
             period = row.get(period_col)
             country = row.get(country_col) if country_col else None
@@ -245,7 +251,7 @@ def _compare_period_country(
     pbi_idx = _index(pbi_rows)
     uc_idx = _index(uc_rows)
     all_keys = set(pbi_idx) | set(uc_idx)
-    mismatches: List[ColumnMismatch] = []
+    mismatches: list[ColumnMismatch] = []
     for key in sorted(all_keys, key=lambda k: (str(k[0]), str(k[1]))):
         pbi_val = pbi_idx.get(key)
         uc_val = uc_idx.get(key)
@@ -264,14 +270,12 @@ def _compare_period_country(
     return mismatches
 
 
-def _detect_numeric_cols(rows: Rows) -> List[str]:
+def _detect_numeric_cols(rows: Rows) -> list[str]:
     """Heuristic: return column names whose first non-None value is numeric."""
     sample = next((r for r in rows if r), None)
     if not sample:
         return []
-    return [
-        k for k, v in sample.items() if isinstance(v, _NUMERIC)
-    ]
+    return [k for k, v in sample.items() if isinstance(v, _NUMERIC)]
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +289,7 @@ def validate_view(
     evaluate_fn: EvaluateFn,
     *,
     period_col: Optional[str] = None,
-    numeric_cols: Optional[List[str]] = None,
+    numeric_cols: Optional[list[str]] = None,
     tolerance: float = 1e-4,
 ) -> ViewValidationResult:
     """Compare a generated UC view against the PBI table.
@@ -318,6 +322,9 @@ def validate_view(
     try:
         pbi_rows = _normalise_rows(evaluate_fn(pbi_dax))
     except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(
+            "[pbi_validation] PBI evaluate failed for %s", view_name, exc_info=True
+        )
         return ViewValidationResult(
             view_name=view_name,
             status=ValidationStatus.ERROR,
@@ -326,6 +333,9 @@ def validate_view(
     try:
         uc_rows = _normalise_rows(evaluate_fn(generated_sql))
     except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(
+            "[pbi_validation] UC evaluate failed for %s", view_name, exc_info=True
+        )
         return ViewValidationResult(
             view_name=view_name,
             status=ValidationStatus.ERROR,
@@ -336,7 +346,7 @@ def validate_view(
     uc_count = len(uc_rows)
     row_count_match = pbi_count == uc_count
 
-    period_mismatches: List[ColumnMismatch] = []
+    period_mismatches: list[ColumnMismatch] = []
     if row_count_match and period_col and pbi_rows:
         effective_cols = numeric_cols or _detect_numeric_cols(pbi_rows)
         if effective_cols:
@@ -423,6 +433,11 @@ def validate_measure(
     try:
         pbi_rows = _normalise_rows(evaluate_fn(pbi_dax))
     except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(
+            "[pbi_validation] PBI evaluate failed for %s",
+            spec.pbi_measure_name,
+            exc_info=True,
+        )
         return MeasureValidationResult(
             measure_name=spec.pbi_measure_name,
             status=ValidationStatus.ERROR,
@@ -431,6 +446,11 @@ def validate_measure(
     try:
         uc_rows = _normalise_rows(evaluate_fn(uc_sql))
     except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(
+            "[pbi_validation] UC evaluate failed for %s",
+            spec.pbi_measure_name,
+            exc_info=True,
+        )
         return MeasureValidationResult(
             measure_name=spec.pbi_measure_name,
             status=ValidationStatus.ERROR,
@@ -441,16 +461,20 @@ def validate_measure(
         pbi_rows, uc_rows, period_col, country_col, "val", tolerance
     )
 
-    pbi_total = sum(
-        v for v in (_to_float(r.get("val")) for r in pbi_rows) if v is not None
-    ) or None
-    gen_total = sum(
-        v for v in (_to_float(r.get("val")) for r in uc_rows) if v is not None
-    ) or None
+    pbi_total = (
+        sum(v for v in (_to_float(r.get("val")) for r in pbi_rows) if v is not None)
+        or None
+    )
+    gen_total = (
+        sum(v for v in (_to_float(r.get("val")) for r in uc_rows) if v is not None)
+        or None
+    )
 
     return MeasureValidationResult(
         measure_name=spec.pbi_measure_name,
-        status=ValidationStatus.VERIFIED if not mismatches else ValidationStatus.UNVERIFIED,
+        status=(
+            ValidationStatus.VERIFIED if not mismatches else ValidationStatus.UNVERIFIED
+        ),
         mismatches=mismatches,
         pbi_total=pbi_total,
         generated_total=gen_total,

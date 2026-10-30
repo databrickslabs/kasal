@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
-from typing import Any, TypedDict
+from typing import IO, Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 def _http_json(
     url: str, payload: dict[str, Any], headers: dict[str, str], timeout: int = 10
 ) -> dict[str, Any]:
+    """POST JSON and parse the JSON reply, through the same guarded opener as
+    ``_safe_fetch``: http(s) only, no address that is not globally routable on
+    any hop, and (unless an egress proxy carries it) the connection goes to the
+    address that was checked.
+    """
+    _assert_http_scheme(url)  # the transport checks the address, per hop
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -35,7 +41,7 @@ def _http_json(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
@@ -48,8 +54,22 @@ def _http_json(
 
 #: Redirect hops followed before giving up. urllib's own default is 10.
 _MAX_REDIRECTS = 5
-#: Request headers dropped when a redirect changes the origin.
-_SENSITIVE_REQUEST_HEADERS = ("Authorization", "Cookie", "Proxy-Authorization")
+#: The only request headers kept when a redirect changes the origin: content
+#: negotiation and connection handling, none of which carries a credential.
+#: Every other header (Authorization, Cookie, an API key, any header a tool
+#: config set) is dropped, whatever its name. Lower-case: urllib re-cases
+#: header names, so they are compared case-insensitively.
+_CROSS_ORIGIN_REQUEST_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "connection",
+        "referer",
+        "upgrade-insecure-requests",
+        "user-agent",
+    }
+)
 
 
 def _assert_http_scheme(url: str) -> None:
@@ -59,8 +79,9 @@ def _assert_http_scheme(url: str) -> None:
 
 
 def _assert_public_target(url: str) -> str:
-    """Refuse non-HTTP schemes and hosts that resolve to private, loopback,
-    link-local or reserved addresses, and return the address that passed.
+    """Refuse non-HTTP schemes and hosts that resolve to an address that is
+    not globally routable (private, loopback, link-local, shared, reserved)
+    or is multicast, and return the address that passed.
 
     Applied to the first URL AND to every redirect hop — a public URL that
     302s to ``http://127.0.0.1/…`` used to be followed without a second look
@@ -79,63 +100,91 @@ def _assert_public_target(url: str) -> str:
     for info in infos:
         address = ipaddress.ip_address(info[4][0])
         if (
-            address.is_private
+            not address.is_global
+            or address.is_multicast
+            or address.is_private
             or address.is_loopback
             or address.is_link_local
             or address.is_reserved
         ):
             raise ValueError(f"Refusing to fetch private/internal address for {host!r}")
-    return infos[0][4][0]
+    return str(infos[0][4][0])
 
 
 class _PinnedHTTPConnection(http.client.HTTPConnection):
     """Connects to the address that was validated, not to a fresh lookup."""
 
-    def __init__(self, *args, pinned: str, **kwargs):
+    def __init__(self, *args: Any, pinned: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._pinned = pinned
 
-    def connect(self):
+    def connect(self) -> None:
         self.sock = socket.create_connection(
-            (self._pinned, self.port), self.timeout, self.source_address
+            (self._pinned, self.port),
+            self.timeout,
+            self.source_address,  # type: ignore[attr-defined]  # set by HTTPConnection.__init__, missing from typeshed
         )
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """As above; TLS still verifies the certificate against the HOST NAME."""
 
-    def __init__(self, *args, pinned: str, **kwargs):
+    def __init__(self, *args: Any, pinned: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._pinned = pinned
 
-    def connect(self):
+    def connect(self) -> None:
         sock = socket.create_connection(
-            (self._pinned, self.port), self.timeout, self.source_address
+            (self._pinned, self.port),
+            self.timeout,
+            self.source_address,  # type: ignore[attr-defined]  # set by HTTPConnection.__init__, missing from typeshed
         )
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        ctx = self._context  # type: ignore[attr-defined]  # private HTTPSConnection attr
+        self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
+
+
+def _through_proxy(req: urllib.request.Request) -> bool:
+    """True once ``ProxyHandler`` has routed ``req`` to an egress proxy: a
+    CONNECT tunnel for https, an absolute-URL request for http."""
+    return bool(getattr(req, "_tunnel_host", None)) or req.has_proxy()
 
 
 class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
     """The opener's transport: every request — first URL and every redirect
     hop, which the redirect handler re-issues through here — is validated and
-    then connected to exactly the address that passed."""
+    then connected to exactly the address that passed.
 
-    def __init__(self):
+    Through an egress proxy the proxy makes the connection, so the target is
+    validated but cannot be pinned."""
+
+    def __init__(self) -> None:
         urllib.request.HTTPHandler.__init__(self)
         urllib.request.HTTPSHandler.__init__(self, context=ssl.create_default_context())
 
-    def http_open(self, req):
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
         pinned = _assert_public_target(req.full_url)
-        return self.do_open(_PinnedHTTPConnection, req, pinned=pinned)
-
-    def https_open(self, req):
-        pinned = _assert_public_target(req.full_url)
+        if _through_proxy(req):
+            return self.do_open(http.client.HTTPConnection, req)
         return self.do_open(
-            _PinnedHTTPSConnection, req, pinned=pinned, context=self._context
+            _PinnedHTTPConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
+            req,
+            pinned=pinned,
+        )
+
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        pinned = _assert_public_target(req.full_url)
+        context = self._context  # type: ignore[attr-defined]  # private HTTPSHandler attr
+        if _through_proxy(req):
+            return self.do_open(http.client.HTTPSConnection, req, context=context)
+        return self.do_open(
+            _PinnedHTTPSConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
+            req,
+            pinned=pinned,
+            context=context,
         )
 
 
-def _origin(url: str) -> tuple:
+def _origin(url: str) -> tuple[str, str]:
     parts = urllib.parse.urlsplit(url)
     return (parts.scheme, parts.netloc)
 
@@ -146,7 +195,15 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
 
     max_redirections = _MAX_REDIRECTS
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         target = urllib.parse.urljoin(req.full_url, newurl)
         try:
             _assert_public_target(target)
@@ -156,26 +213,37 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
             ) from refused
         new = super().redirect_request(req, fp, code, msg, headers, target)
         if new is not None and _origin(target) != _origin(req.full_url):
-            for header in _SENSITIVE_REQUEST_HEADERS:
-                new.remove_header(header)
+            for header in list(new.headers):
+                if header.lower() not in _CROSS_ORIGIN_REQUEST_HEADERS:
+                    new.remove_header(header)
         return new
 
 
-def _open(request: urllib.request.Request, timeout: int):
+def _open(request: urllib.request.Request, timeout: int) -> http.client.HTTPResponse:
     """Open through the pinned, redirect-checking opener. The one seam tests stub.
 
     Built by hand rather than with ``build_opener``: the default set includes
     file:, ftp: and data: handlers, and a redirect to ``file:///etc/passwd``
-    must have nowhere to go."""
+    must have nowhere to go. An HTTP(S)_PROXY in the environment (NO_PROXY
+    honoured) is used for http(s), as urllib's default opener would."""
     opener = urllib.request.OpenerDirector()
-    for handler in (
+    handlers: list[urllib.request.BaseHandler] = [
         _PinnedHandler(),
         _SafeRedirects(),
         urllib.request.HTTPDefaultErrorHandler(),
         urllib.request.HTTPErrorProcessor(),
-    ):
+    ]
+    proxies = {
+        scheme: proxy
+        for scheme, proxy in urllib.request.getproxies_environment().items()
+        if scheme in ("http", "https")
+    }
+    if proxies:
+        handlers.append(urllib.request.ProxyHandler(proxies))
+    for handler in handlers:
         opener.add_handler(handler)
-    return opener.open(request, timeout=timeout)
+    response: http.client.HTTPResponse = opener.open(request, timeout=timeout)
+    return response
 
 
 def _safe_fetch(
@@ -184,7 +252,7 @@ def _safe_fetch(
     timeout: int = 15,
     max_bytes: int | None = None,
 ) -> str:
-    """Fetch a URL, refusing non-HTTP schemes and private/loopback hosts.
+    """Fetch a URL, refusing non-HTTP schemes and non-public hosts.
 
     ``max_bytes`` bounds how much of the response body is READ. Without it a
     multi-megabyte page is pulled into memory in full and only trimmed later,

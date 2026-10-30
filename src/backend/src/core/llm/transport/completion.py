@@ -8,9 +8,8 @@ ImportError is raised on first use if it is missing.
 """
 
 import logging
-import os
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import closing
 from typing import Any, Literal
 
@@ -36,6 +35,7 @@ from .budget import (
     partial_from_reasoning,
     resolve_execution_budget,
     rounds_exhausted,
+    spent_budget_answer,
     wrapup_conversation,
 )
 from .context_recovery import MAX_REJECTIONS_PER_ROUND
@@ -45,6 +45,7 @@ from .exceptions import (
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
+from .prompt_cache import CacheMode, cache_mode, chat_messages_for, without_hints
 from .request_deadline import bounded_params, call_deadline, check_request_deadline
 
 # Aliased: `function_calls` is the local variable name throughout the round
@@ -54,15 +55,15 @@ from .response_parsing import (
     answer_from_reasoning,
     builtin_tool_outputs,
     chat_token_usage,
-    merge_tool_call_metadata,
-    tool_call_metadata,
 )
 from .response_parsing import function_calls as parse_function_calls
 from .response_parsing import (
+    merge_tool_call_metadata,
     reasoning_items,
     responses_reasoning_text,
     responses_token_usage,
     split_message_content,
+    tool_call_metadata,
 )
 from .rpm import throttle
 from .tool_rounds import (
@@ -76,6 +77,10 @@ from .tool_rounds import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A round's answer: text, or — with ``delegate_tool_calls`` and no local tool
+# table — the model's tool calls, handed back for the caller to execute.
+_RoundAnswer = str | list[dict[str, Any]]
 
 
 # OpenAI's GPT-5.6 line refuses `reasoning_effort` on /v1/chat/completions when
@@ -93,6 +98,11 @@ logger = logging.getLogger(__name__)
 # Databricks-served gpt-5* endpoints accept `reasoning_effort` alongside tools,
 # and blanket-dropping it there would silently disable reasoning that works.
 # An optional provider prefix ("openai/gpt-5.6-terra") is tolerated.
+#: Sent when no API key was resolved (keyless local vLLM/KAT, or a workspace
+#: with none configured). Explicit so the OpenAI SDK never falls back to
+#: OPENAI_API_KEY in the shared process environment.
+NO_API_KEY = "no-key-configured"  # placeholder that keeps the SDK off env keys — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
+
 _TOOLS_REJECT_REASONING_EFFORT_RE = re.compile(r"(?:^|/)gpt-5\.6")
 
 # Anthropic models that accept `thinking: {"type": "enabled", "budget_tokens": N}`
@@ -166,16 +176,10 @@ def thinking_mode(model_name: str | None) -> str | None:
     return None
 
 
-def valid_thinking_efforts(model_name: str | None) -> tuple[str, ...]:
-    """Effort values ``model_name`` accepts — per model, never a global list.
-
-    There are five distinct scales across the seeded catalogue (Anthropic
-    adaptive takes low..max; gpt-5 takes minimal..high but rejects "none";
-    gpt-5-1 takes "none" but rejects "minimal"; the 5-2/5-4/5-6 line adds
-    "xhigh"; Gemini takes only low/medium/high). A single constant would be wrong
-    for most of them, which is why this delegates to the registry.
-    """
-    return allowed_efforts(model_name)
+# Kept under its old name: the Responses path strips hints unconditionally
+# (Databricks documents no cache_control there), and the Chat Completions path
+# goes through `chat_messages_for`, which strips them for non-Claude endpoints.
+_without_cache_breakpoints = without_hints
 
 
 class OpenAICompletion(ContextWindowBudget, BaseLLM):
@@ -262,7 +266,13 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                     "package: pip install openai"
                 ) from e
             self._client = OpenAI(
-                api_key=self.api_key or os.environ.get("OPENAI_API_KEY"),
+                # Never an env fallback: the caller (LLMManager) resolves the
+                # workspace's key; os.environ is shared by every workspace. The
+                # OpenAI SDK reads OPENAI_API_KEY itself when api_key is None, so
+                # an absent key is sent as an explicit placeholder instead — an
+                # endpoint that needs one answers 401 rather than accepting
+                # whatever key another tenant left in the environment.
+                api_key=self.api_key or NO_API_KEY,
                 base_url=self.base_url or self.api_base,
                 timeout=self.timeout,
                 max_retries=self.max_retries,
@@ -290,7 +300,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         from_task: Any = None,
         from_agent: Any = None,
         response_model: type[BaseModel] | None = None,
-    ) -> str:
+    ) -> str | Any:  # tool calls when delegated; a model with response_model
         import asyncio
 
         return await asyncio.to_thread(
@@ -316,10 +326,11 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         from_task: Any = None,
         from_agent: Any = None,
         response_model: type[BaseModel] | None = None,
-    ) -> str:
+    ) -> str | Any:  # tool calls when delegated; a model with response_model
         # Attribution for every delta this call streams — see BaseLLM._call_scope.
         with self._attributed(from_task, from_agent), call_deadline(from_agent):
             conversation = self._normalize_messages(messages)
+            self._served_model = None  # per call, like _reasoning_text
             self._emit_call_started_event(conversation, tools, from_task, from_agent)
             try:
                 if self.api == "responses":
@@ -333,10 +344,21 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             except LLMContextLengthExceededError:
                 raise
             except Exception as e:
-                self._emit_call_failed_event(str(e), from_task, from_agent)
-                if is_context_length_exceeded(e):
-                    raise LLMContextLengthExceededError(str(e)) from e
-                raise
+                # A delegated TASK turn (CrewAI): a spent clock ends it with the
+                # partial as text, as the Kasal harness's Task does. A bare
+                # agent call (Chat) still raises; its caller degrades it.
+                spent = (
+                    spent_budget_answer(e, self.model, conversation, from_task)
+                    if self.delegate_tool_calls and from_task is not None
+                    else None
+                )
+                if spent is None:
+                    self._emit_call_failed_event(str(e), from_task, from_agent)
+                    if is_context_length_exceeded(e):
+                        raise LLMContextLengthExceededError(str(e)) from e
+                    raise
+                logger.warning("budget spent (%s); returning the partial answer", e)
+                text, usage, call_type = spent, None, LLMCallType.LLM_CALL
 
             if isinstance(text, list):
                 # Tool calls handed back for the caller to execute
@@ -440,7 +462,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         """
         model = str(self.model).lower()
         has_budget = (
-            bool(self.thinking_budget_tokens) and self.thinking_budget_tokens > 0
+            self.thinking_budget_tokens is not None and self.thinking_budget_tokens > 0
         )
         is_adaptive = any(name in model for name in _THINKING_ADAPTIVE_MODELS)
 
@@ -508,6 +530,10 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             "display": "summarized",
         }
 
+    def _prompt_cache_mode(self) -> CacheMode | None:
+        """Which ``cache_control`` dialect this endpoint takes — see prompt_cache."""
+        return cache_mode(self.provider, self.model, self.api)
+
     def _prepare_completion_params(
         self,
         messages: list[dict[str, Any]],
@@ -517,7 +543,10 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         # skip_file_processing: crewAI 1.14.5 signature compatibility — kasal's
         # LLM subclasses pass it through; the engine has no file-input
         # processing path, so it is accepted and inert.
-        params: dict[str, Any] = {"model": self.model, "messages": messages}
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": chat_messages_for(self._prompt_cache_mode(), messages),
+        }
         # The escape hatch goes in FIRST so the declared fields below override
         # it. A typed, validated field must not be silently displaced by a loose
         # dict — and it is the order CrewAI's native provider uses
@@ -586,7 +615,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         check_deadline(deadline, rounds_done, self.model, conversation)
 
     def _executor(
-        self, available_functions: dict[str, Callable[..., Any]] | None
+        self, available_functions: dict[str, Callable[..., Any]]
     ) -> Callable[[str, Any], Any]:
         """A (name, arguments) -> result callable over this call's tool table."""
         return lambda name, arguments: self._handle_tool_execution(
@@ -672,7 +701,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         tools: list[dict[str, Any]] | None,
         available_functions: dict[str, Callable[..., Any]] | None,
         from_agent: Any = None,
-    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+    ) -> tuple[_RoundAnswer, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
         # Per-call, like _finish_reason: a previous call's thinking must not be
@@ -771,6 +800,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 continue
             usage = self._extract_chat_token_usage(response)
             self._track_token_usage_internal(usage)
+            self._note_served_model(response)
             function_calls = self._extract_function_calls_from_response(response)
             # Same block-list shape as the streaming path: without this the
             # reasoning blocks became part of the returned "answer".
@@ -844,7 +874,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             )
         return ""
 
-    def _chat_stream_chunks(self, params: dict[str, Any]) -> Iterator[Any]:
+    def _chat_stream_chunks(self, params: dict[str, Any]) -> Generator[Any, None, None]:
         """Negotiate usage before model fallback, including errors sent via SSE.
 
         The SDK can accept HTTP 200 and only raise the provider's validation
@@ -916,6 +946,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         with closing(self._chat_stream_chunks(params)) as response_stream:
             for part in response_stream:
                 check_request_deadline("".join(chunks))
+                self._note_served_model(part)
                 if getattr(part, "usage", None) is not None:
                     usage = self._extract_chat_token_usage(part)
                 choices = getattr(part, "choices", None)
@@ -1057,7 +1088,10 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         tools: list[dict[str, Any]] | None = None,
         response_model: type[BaseModel] | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"model": self.model, "input": messages}
+        params: dict[str, Any] = {
+            "model": self.model,
+            "input": _without_cache_breakpoints(messages),
+        }
         # First, for the same reason as the chat path: declared fields win.
         params.update(self.additional_params)
         if self.instructions is not None:
@@ -1103,7 +1137,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         tools: list[dict[str, Any]] | None,
         available_functions: dict[str, Callable[..., Any]] | None,
         from_agent: Any = None,
-    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+    ) -> tuple[_RoundAnswer, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
         # Per-call, like _finish_reason: a previous call's thinking must not be
@@ -1127,6 +1161,18 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 return function_calls, usage, LLMCallType.TOOL_CALL
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
+                if not self.auto_chain:
+                    # Without previous_response_id, replay the model's output
+                    # before results: call IDs alone are not conversation state.
+                    # Preserve reasoning items alongside the calls they produced.
+                    conversation.extend(
+                        (
+                            item
+                            if isinstance(item, dict)
+                            else item.model_dump(exclude_none=True)
+                        )
+                        for item in response.output
+                    )
                 # Same degenerate-loop breaker as the chat path.
                 repeats = repeat_guard.observe(function_calls)
                 if repeats >= 2:
@@ -1195,6 +1241,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
     ) -> tuple[str, list[dict[str, Any]]]:
         """Extract output text + function calls; track chaining state."""
         self._last_response_id = getattr(response, "id", None)
+        self._note_served_model(response)
         if self.auto_chain_reasoning:
             self._last_reasoning_items = self._extract_reasoning_items(response)
         reasoning = responses_reasoning_text(response)

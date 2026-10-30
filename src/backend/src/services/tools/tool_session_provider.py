@@ -28,15 +28,43 @@ querying it, or the tool has re-created the bypass this provider removed.
 
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from src.services.execution.history import ExecutionHistoryService
+    from src.services.knowledge.databricks_service import DatabricksKnowledgeService
+    from src.services.powerbi.conversions import ConverterService
+    from src.services.powerbi.extractions import PowerBIExtractionService
+    from src.services.powerbi.semantic_model_cache import (
+        PowerBISemanticModelCacheService,
+    )
 
 logger = logging.getLogger(__name__)
 
 
 class ToolSessionProvider:
     """Provides DB sessions and ready-to-use services to CrewAI tools."""
+
+    @staticmethod
+    def run_group_ids() -> list[str]:
+        """The workspace the current run belongs to, as a ``group_ids`` scope.
+
+        Read from the run's ``GroupContext`` (set by the chat path and by the crew
+        and flow subprocesses before any tool runs), never from tool input, which
+        the model or a tool config controls. Only the PRIMARY group: a run belongs
+        to one workspace, and its "latest output" fallbacks must not read another.
+        Empty when there is no context — callers then find nothing (audit V3-1).
+        """
+        try:
+            from src.utils.user_context import UserContext
+
+            group_context = UserContext.get_group_context()
+        except Exception:  # noqa: BLE001 — no context (e.g. unit tests)
+            return []
+        primary = getattr(group_context, "primary_group_id", None)
+        return [primary] if isinstance(primary, str) and primary else []
 
     @staticmethod
     @asynccontextmanager
@@ -59,7 +87,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def cache_service():
+    async def cache_service() -> (
+        AsyncGenerator["PowerBISemanticModelCacheService", None]
+    ):
         """Yield a PowerBISemanticModelCacheService with scoped session.
 
         Usage::
@@ -81,7 +111,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def converter_service(group_context=None):
+    async def converter_service(
+        group_context: Any = None,
+    ) -> AsyncGenerator["ConverterService", None]:
         """Yield a ConverterService — the owner of conversion history.
 
         Prefer this over :meth:`conversion_repo`: the service stamps ``group_id``
@@ -101,12 +133,15 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def execution_history_service():
+    async def execution_history_service() -> (
+        AsyncGenerator["ExecutionHistoryService", None]
+    ):
         """Yield an ExecutionHistoryService — the owner of execution_history rows.
 
         Lets a tool read prior run results (e.g. the UCMV re-evaluation scan) through
         the owning domain's service instead of querying the table directly, so query
         construction stays in the repository and the tool imports no repository.
+        Its "latest" lookups take ``group_ids``; pass :meth:`run_group_ids`.
         """
         from src.db.session import routed_scoped_session
         from src.services.execution.history import ExecutionHistoryService
@@ -120,7 +155,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def powerbi_extraction_service(group_context=None):
+    async def powerbi_extraction_service(
+        group_context: Any = None,
+    ) -> AsyncGenerator["PowerBIExtractionService", None]:
         """Yield a PowerBIExtractionService — the owner of extraction rows.
 
         Replaced ``conversion_repo``/``powerbi_extraction_repo``, which handed tools a
@@ -138,7 +175,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def knowledge_service(group_id: str = "default", user_token: str = None):
+    async def knowledge_service(
+        group_id: str = "default", user_token: str | None = None
+    ) -> AsyncGenerator["DatabricksKnowledgeService", None]:
         """Yield a DatabricksKnowledgeService with scoped session.
 
         Usage::

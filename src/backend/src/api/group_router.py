@@ -32,8 +32,8 @@ from src.schemas.group import (
     GroupUserUpdateRequest,
     GroupWithRoleResponse,
 )
-from src.services.groups.groups import GroupService
 from src.services.groups.duplication import GroupDuplicationService
+from src.services.groups.groups import GroupService
 from src.services.groups.users import UserService
 
 logger = LoggerManager.get_instance().api
@@ -208,7 +208,7 @@ async def create_group(
     group = await service.create_group(
         name=group_data.name,
         description=group_data.description,
-        created_by_email=admin_user.email,
+        created_by_email=str(admin_user.email),
     )
 
     # Get user count (will be 0 for new group)
@@ -238,8 +238,10 @@ async def get_group(
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ) -> GroupResponse:
-    """Get a specific group by ID. Requires admin privileges."""
-    # Use injected service
+    """Get a specific group by ID. Requires admin privileges on the target group."""
+    # SECURITY (audit L1): being an admin of the current workspace does not
+    # make you an admin of the group you are reading.
+    await _verify_group_admin(service, admin_user, group_id)
 
     group = await service.get_group_by_id(group_id)
     if not group:
@@ -302,7 +304,7 @@ async def delete_group(
     service: Annotated[GroupService, Depends(get_group_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete a group and all associated data.
 
@@ -473,7 +475,7 @@ async def remove_user_from_group(
     service: Annotated[GroupService, Depends(get_group_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Remove a user from a group. Requires admin privileges on the target group."""
     # SECURITY: must be a system admin or an admin of THIS group (not just any group)
     await _verify_group_admin(service, admin_user, group_id)

@@ -4,6 +4,7 @@
  * A configuration form for customizing Perplexity tool settings.
  */
 
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -105,7 +106,10 @@ export const PerplexityConfigSelector: React.FC<PerplexityConfigSelectorProps> =
   disabled = false
 }) => {
   const [config, setConfig] = useState<PerplexityConfig>({ ...DEFAULT_CONFIG, ...value });
-  const { secrets, fetchAPIKeys } = useAPIKeysStore();
+  const { secrets, fetchAPIKeys } = useAPIKeysStore(useShallow(state => ({
+    secrets: state.secrets,
+    fetchAPIKeys: state.fetchAPIKeys,
+  })));
   const [hasSystemApiKey, setHasSystemApiKey] = useState(false);
 
   // Check for existing Perplexity API key in system

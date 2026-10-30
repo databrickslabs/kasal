@@ -129,25 +129,6 @@ class TestMetadataGeneratorDimensions:
 
 
 class TestMetadataGeneratorHelpers:
-    def test_comment_override(self):
-        gen = MetadataGenerator(comment_overrides={"fact_sales": "Custom comment"})
-        assert gen.get_comment_override("fact_sales") == "Custom comment"
-
-    def test_comment_override_missing(self):
-        gen = MetadataGenerator()
-        assert gen.get_comment_override("fact_sales") is None
-
-    def test_dimension_exclusions(self):
-        gen = MetadataGenerator(
-            dimension_exclusions={"fact": {"internal_id", "tmp_col"}}
-        )
-        excl = gen.get_dimension_exclusions("fact")
-        assert "internal_id" in excl
-        assert "tmp_col" in excl
-
-    def test_dimension_exclusions_empty(self):
-        gen = MetadataGenerator()
-        assert gen.get_dimension_exclusions("fact") == set()
 
     def test_dimension_order(self):
         gen = MetadataGenerator(dimension_order={"fact": ["region", "year", "plant"]})

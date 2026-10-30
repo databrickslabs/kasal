@@ -35,9 +35,11 @@ _PAGES_PREFIX = "definition/pages/"
 def _field_name(field_ref: dict) -> str | None:
     """``{Measure: {..., Property: "X"}}`` or ``{Column: {...}}`` -> ``"X"``."""
     if "Measure" in field_ref:
-        return field_ref["Measure"].get("Property")
+        prop: str | None = field_ref["Measure"].get("Property")
+        return prop
     if "Column" in field_ref:
-        return field_ref["Column"].get("Property")
+        prop = field_ref["Column"].get("Property")
+        return prop
     return None
 
 

@@ -59,6 +59,10 @@ Rules:
 5. If the M expression does NOT read a queryable relational source (e.g. it is a hand-authored
    table, a web/JSON/Excel source, or pure in-memory transformation with no table), return
    success=false.
+6. NEVER drop a step that changes which rows the table holds. Table.SelectRows becomes WHERE,
+   Table.Distinct becomes SELECT DISTINCT, Table.Group becomes GROUP BY, a join becomes a JOIN.
+   If you cannot translate EVERY such step faithfully, return success=false: a SELECT that
+   reads more rows than the M keeps produces wrong numbers.
 
 ALWAYS respond with valid JSON (no markdown code blocks):
 {
@@ -100,7 +104,8 @@ def _parse_response(response_text: str) -> dict:
             text = text.split("```json")[1].split("```")[0].strip()
         elif text.startswith("```"):
             text = text.split("```")[1].split("```")[0].strip()
-        return json.loads(text)
+        parsed: dict = json.loads(text)
+        return parsed
     except (json.JSONDecodeError, IndexError):
         return {"success": False, "error": "Failed to parse LLM response"}
 
@@ -150,7 +155,7 @@ async def translate_mquery_to_sql(
     Returns a dict: {success, source_sql, source_table, confidence, explanation}.
     Fail-open — on any error returns {'success': False, ...}.
     """
-    _cache = cache if cache is not None else OrderedDict()
+    _cache: OrderedDict[str, dict] = cache if cache is not None else OrderedDict()
     cache_key = _content_hash(mquery)
     if cache_key in _cache:
         _cache.move_to_end(cache_key)

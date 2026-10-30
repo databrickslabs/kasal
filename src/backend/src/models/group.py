@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -70,12 +70,12 @@ class Group(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -110,7 +110,6 @@ class GroupUser(Base):
     """
 
     __tablename__ = "group_users"
-    __table_args__ = {"extend_existing": True}
 
     id: Mapped[str] = mapped_column(
         String(100), primary_key=True, default=generate_uuid
@@ -136,7 +135,7 @@ class GroupUser(Base):
 
     # Membership tracking
     joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     auto_created: Mapped[bool] = mapped_column(
         Boolean, default=False
@@ -144,12 +143,12 @@ class GroupUser(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -159,42 +158,12 @@ class GroupUser(Base):
     # Unique constraint: one user can only have one membership per group
     __table_args__ = ({"mysql_engine": "InnoDB", "extend_existing": True},)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<GroupUser(group_id='{self.group_id}', user_id='{self.user_id}', role='{self.role}')>"
 
 
 # Simplified role-based access - permissions handled by decorators in src.core.permissions
 # Role hierarchy: admin > editor > operator
-
-
-def get_role_hierarchy(role: GroupUserRole) -> int:
-    """
-    Get the hierarchy level for a role.
-    Higher numbers = more permissions.
-
-    Returns:
-        int: Hierarchy level (3=admin, 2=editor, 1=operator)
-    """
-    hierarchy = {
-        GroupUserRole.ADMIN: 3,  # Full access including user/group management
-        GroupUserRole.EDITOR: 2,  # Can create/edit workflows, execute
-        GroupUserRole.OPERATOR: 1,  # Can execute and monitor only
-    }
-    return hierarchy.get(role, 0)
-
-
-def role_has_access(user_role: GroupUserRole, required_role: GroupUserRole) -> bool:
-    """
-    Check if user role has sufficient access level for the required role.
-
-    Args:
-        user_role: The user's current role
-        required_role: The minimum role required for the action
-
-    Returns:
-        bool: True if user has sufficient access
-    """
-    return get_role_hierarchy(user_role) >= get_role_hierarchy(required_role)
 
 
 # Legacy compatibility aliases removed - migration complete

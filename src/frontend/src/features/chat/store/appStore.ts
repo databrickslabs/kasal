@@ -1,15 +1,15 @@
 import { create } from 'zustand';
 import { useThemeStore } from '../../../store/theme';
 import { AppConfig } from '../types/chat';
-import { ModelConfigResponse } from '../types/dispatcher';
 import { updateClient } from '../api/client';
-import { fetchEnabledModels } from '../api/models';
 import { fetchEnabledTools, ToolInfo } from '../api/tools';
 import { fetchWorkspaces, Workspace } from '../api/workspaces';
 import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 import { PublicationService } from '../../../api/workflow/PublicationService';
 import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
-import { getDefaultModel } from '../../../config/defaultModel';
+import { subscribeToModels, useModelsStore } from '../../../store/models';
+import { MODEL_EXPLICIT_STORAGE_KEY, resolveChatModel } from '../utils/autoModel';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -52,7 +52,9 @@ function saveConfig(config: AppConfig): void {
 interface AppState {
   config: AppConfig;
   theme: Theme;
-  models: ModelConfigResponse[];
+  // The enabled models and Auto's availability live in the shared models store
+  // (store/models.ts: `models`, `autoModelAvailable`), so the chat, the
+  // builders and Configuration → Models all read — and refresh — one list.
   tools: ToolInfo[];
   /** Map of tool ID (number or string) → tool title for quick lookup */
   toolNameMap: Record<string, string>;
@@ -70,6 +72,10 @@ interface AppState {
    */
   catalogLoaded: boolean;
   catalogError: string | null;
+  /**
+   * The composer's EFFECTIVE model: the user's stored choice (localStorage),
+   * reconciled with the live model list by `syncModelSelection`.
+   */
   selectedModel: string;
   sidebarOpen: boolean;
   settingsOpen: boolean;
@@ -86,7 +92,10 @@ interface AppActions {
   setSchedulesOpen: (open: boolean) => void;
   loadSchedules: () => Promise<void>;
   init: () => void;
+  /** Reload the shared model list, then reconcile `selectedModel`. */
   loadModels: () => Promise<void>;
+  /** Re-derive `selectedModel` from the stored choice and the live list. */
+  syncModelSelection: () => void;
   loadTools: () => Promise<void>;
   loadWorkspaces: () => Promise<void>;
   loadCatalog: () => Promise<void>;
@@ -106,7 +115,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // --- State ---
   config: loadConfig(),
   theme: useThemeStore.getState().isDarkMode ? 'dark' : 'light',
-  models: [],
   tools: [],
   toolNameMap: {},
   workspaces: [],
@@ -135,24 +143,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   loadModels: async () => {
+    await useModelsStore.getState().refresh();
+    get().syncModelSelection();
+  },
+
+  syncModelSelection: () => {
+    const live = useModelsStore.getState();
+    // Nothing to reconcile against until a list has loaded.
+    if (live.loadedForGroup === null) return;
+    let stored = '';
+    let explicit: boolean | null = null;
     try {
-      const m = await fetchEnabledModels();
-      const state = get();
-      set({ models: m });
-      if (m.length > 0 && !state.selectedModel) {
-        // Prefer the server-owned default; use the first enabled model only when
-        // that endpoint is not available in this workspace.
-        const preferred = getDefaultModel();
-        const key = m.some((x) => x.key === preferred)
-          ? preferred
-          : m[0].key;
-        set({ selectedModel: key });
-        try {
-          localStorage.setItem(MODEL_STORAGE_KEY, key);
-        } catch { /* */ }
-      }
-    } catch {
-      // Models endpoint may not be available
+      stored = localStorage.getItem(MODEL_STORAGE_KEY) || '';
+      const flag = localStorage.getItem(MODEL_EXPLICIT_STORAGE_KEY);
+      explicit = flag === null ? null : flag === '1';
+    } catch { /* */ }
+    const key = resolveChatModel({
+      stored,
+      explicit,
+      models: live.models,
+      autoAvailable: live.autoModelAvailable,
+      serverDefault: live.defaultModel,
+    });
+    if (key !== get().selectedModel) set({ selectedModel: key });
+    // Persist only a default the old selector would also have stored; Auto,
+    // a user's own pick and a fallback for a disabled pick are not stored.
+    if (key && !stored && !live.autoModelAvailable) {
+      try {
+        localStorage.setItem(MODEL_STORAGE_KEY, key);
+      } catch { /* */ }
     }
   },
 
@@ -190,7 +209,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   loadCatalog: async () => {
     const version = ++catalogRequestVersion;
-    const groupId = localStorage.getItem('selectedGroupId') || get().config.groupId;
+    const groupId = getTabGroupId() || get().config.groupId;
     // Clear the previous teamspace's data while checking what Chat can reach.
     set({ savedCrews: [], savedFlows: [], catalogLoaded: false, catalogError: null });
     const [crews, flows, chatPublished] = await Promise.all([
@@ -198,7 +217,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       listSavedFlows().catch(() => [] as CatalogItem[]),
       PublicationService.listChatPublished().catch(() => null),
     ]);
-    if (version !== catalogRequestVersion || groupId !== (localStorage.getItem('selectedGroupId') || get().config.groupId)) return;
+    if (version !== catalogRequestVersion || groupId !== (getTabGroupId() || get().config.groupId)) return;
     // Publication is required for Chat visibility. A failed lookup must never
     // turn the saved builder catalog into the Chat catalog.
     if (chatPublished === null) {
@@ -229,6 +248,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ selectedModel: model });
     try {
       localStorage.setItem(MODEL_STORAGE_KEY, model);
+      // The user chose (a model or Auto): keep it across loads.
+      localStorage.setItem(MODEL_EXPLICIT_STORAGE_KEY, '1');
     } catch { /* */ }
   },
 
@@ -258,3 +279,18 @@ useThemeStore.subscribe((state) => {
   applyTheme(theme);
   if (useAppStore.getState().theme !== theme) useAppStore.setState({ theme });
 });
+
+// The composer follows the live model list: when an admin disables the chosen
+// model, turns the decision model on or off, or the workspace changes, the
+// selection is reconciled without a reload (see resolveChatModel).
+const unsubscribeModels = subscribeToModels((live, previous) => {
+  if (
+    live.models !== previous.models
+    || live.autoModelAvailable !== previous.autoModelAvailable
+    || live.defaultModel !== previous.defaultModel
+    || live.loadedForGroup !== previous.loadedForGroup
+  ) {
+    useAppStore.getState().syncModelSelection();
+  }
+});
+if (import.meta.hot) import.meta.hot.dispose(unsubscribeModels);

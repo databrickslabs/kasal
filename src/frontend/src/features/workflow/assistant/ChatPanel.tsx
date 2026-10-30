@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import {
   Paper,
@@ -50,8 +51,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   onOpenLogs,
   chatSide = 'right'
 }) => {
-  const { selectedModel, setSelectedModel } = useCrewExecutionStore();
-  const { selectedTools } = useJobManagementStore();
+  const { selectedModel, setSelectedModel } = useCrewExecutionStore(useShallow(state => ({
+    selectedModel: state.selectedModel,
+    setSelectedModel: state.setSelectedModel,
+  })));
+  const selectedTools = useJobManagementStore(state => state.selectedTools);
 
   if (layout === 'canvas') return <WorkflowChat builderMode={builderMode} onFlowGenerated={onFlowGenerated} layout="canvas" onNodesGenerated={onNodesGenerated} onLoadingStateChange={onLoadingStateChange} selectedModel={selectedModel} selectedTools={selectedTools} isVisible={isVisible} setSelectedModel={setSelectedModel} nodes={nodes} edges={edges} onExecuteCrew={onExecuteCrew} onToggleCollapse={onToggleCollapse} chatSessionId={chatSessionId} onOpenLogs={onOpenLogs} />;
 

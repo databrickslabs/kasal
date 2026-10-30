@@ -7,7 +7,6 @@ execution updates, traces, and other real-time events to connected clients.
 
 import asyncio
 import json
-import os
 import threading
 import time
 from collections import OrderedDict, deque
@@ -21,6 +20,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Tuple,
 )
 from uuid import UUID
 
@@ -32,28 +32,6 @@ from src.core.logger import LoggerManager
 # as idle. Comment frames (lines starting with ":") are ignored by
 # EventSource clients per the SSE spec, so they are invisible to consumers.
 DEFAULT_HEARTBEAT_SECONDS = 15
-
-# Clamp bounds for the env override — mirrors the router's Query validation.
-_HEARTBEAT_MIN_SECONDS = 5
-_HEARTBEAT_MAX_SECONDS = 120
-
-
-def get_heartbeat_seconds(default: int = DEFAULT_HEARTBEAT_SECONDS) -> int:
-    """
-    Resolve the heartbeat interval, honoring the SSE_HEARTBEAT_SECONDS env var.
-
-    Env-tunable so a Databricks Apps deploy can shorten the keep-alive cadence
-    (e.g. SSE_HEARTBEAT_SECONDS=5) without a code change if the proxy's idle
-    window turns out to be tighter than the default. Invalid values fall back
-    to *default*; valid values are clamped to [5, 120] seconds.
-    """
-    raw = os.getenv("SSE_HEARTBEAT_SECONDS")
-    if raw:
-        try:
-            return max(_HEARTBEAT_MIN_SECONDS, min(_HEARTBEAT_MAX_SECONDS, int(raw)))
-        except (ValueError, TypeError):
-            pass
-    return default
 
 
 class _SSEEncoder(json.JSONEncoder):
@@ -125,7 +103,7 @@ class SSEConnectionManager:
     and broadcast to all connected clients.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Map job_id to set of event queues
         self.job_queues: Dict[str, Set[asyncio.Queue]] = {}
 
@@ -139,9 +117,11 @@ class SSEConnectionManager:
         self._event_id: int = 0
         self._event_id_lock = threading.Lock()
         # Per-job buffer: job_id → deque of (event_id, SSEEvent)
-        self._replay_buffer: Dict[str, deque] = {}
+        self._replay_buffer: Dict[str, deque[Tuple[int, SSEEvent]]] = {}
         # Global buffer for "stream-all" replay: (event_id, event, owner group)
-        self._global_replay: deque = deque(maxlen=500)
+        self._global_replay: deque[Tuple[int, SSEEvent, Optional[str]]] = deque(
+            maxlen=500
+        )
         self._replay_max_per_job = 200
         # Ownership (audit F04). A job's events reach the "stream-all"
         # subscribers of the workspace that owns the job and nobody else's;
@@ -322,7 +302,9 @@ class SSEConnectionManager:
 
         # Also broadcast to the "stream-all" subscribers of the workspace that
         # owns the job — cross-browser sync within a tenant, never across.
-        all_stream_keys = self._streams_by_group.get(owner, ())
+        all_stream_keys: Iterable[str] = (
+            self._streams_by_group.get(owner, ()) if owner is not None else ()
+        )
         if owner is None and self._streams_by_group:
             logger.debug(
                 f"[SSE_STREAM] job {job_id} has no registered owner; "
@@ -348,20 +330,6 @@ class SSEConnectionManager:
             )
 
         return sent_count
-
-    def get_connection_count(self, job_id: Optional[str] = None) -> int:
-        """
-        Get the number of active SSE connections.
-
-        Args:
-            job_id: Optional job ID to count connections for specific job
-
-        Returns:
-            Number of active connections
-        """
-        if job_id:
-            return len(self.job_queues.get(job_id, set()))
-        return self.connection_count
 
     def get_statistics(self) -> Dict[str, Any]:
         """
@@ -456,8 +424,7 @@ async def event_stream_generator(
         heartbeat_interval: Interval for sending keepalive comments (seconds).
             Heartbeats are SSE comment frames (``: keepalive ...``) emitted
             only when no real event has flowed for the interval, so a proxy
-            (Databricks Apps HTTP/2) never sees an idle stream. ``None`` falls
-            back to the SSE_HEARTBEAT_SECONDS env var, then to
+            (Databricks Apps HTTP/2) never sees an idle stream. ``None`` uses
             ``DEFAULT_HEARTBEAT_SECONDS``.
         last_event_id: If set, replay buffered events after this ID before
             switching to live streaming.  The browser sends this automatically
@@ -467,7 +434,7 @@ async def event_stream_generator(
         SSE-formatted event strings
     """
     if heartbeat_interval is None:
-        heartbeat_interval = get_heartbeat_seconds()
+        heartbeat_interval = DEFAULT_HEARTBEAT_SECONDS
     queue = sse_manager.create_event_queue(job_id, group_ids=group_ids)
     logger.info(
         f"[SSE_STREAM] Generator started | job={job_id} | timeout={timeout}s | "

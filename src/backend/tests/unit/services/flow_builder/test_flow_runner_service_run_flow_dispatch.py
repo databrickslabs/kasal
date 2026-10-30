@@ -104,45 +104,6 @@ class TestEmitErrorSpan:
 # ---------------------------------------------------------------------------
 
 
-class TestCreateFlowExecution:
-    """Tests for create_flow_execution (lines ~135-183)."""
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_success(self):
-        svc = _make_service()
-        mock_ex = _make_execution(exec_id=99, flow_id=uuid.uuid4())
-        svc.flow_execution_service.create_execution = AsyncMock(return_value=mock_ex)
-
-        result = await svc.create_flow_execution(
-            flow_id=str(uuid.uuid4()), job_id="job-x", config={"group_id": "g1"}
-        )
-        assert result["success"] is True
-        assert result["execution_id"] == 99
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_value_error(self):
-        svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(
-            side_effect=ValueError("bad uuid")
-        )
-
-        result = await svc.create_flow_execution(flow_id="not-a-uuid", job_id="job-y")
-        assert result["success"] is False
-        assert "bad uuid" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_generic_error(self):
-        svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(
-            side_effect=RuntimeError("db down")
-        )
-
-        result = await svc.create_flow_execution(
-            flow_id=str(uuid.uuid4()), job_id="job-z"
-        )
-        assert result["success"] is False
-
-
 # ---------------------------------------------------------------------------
 # run_flow – top-level routing
 # ---------------------------------------------------------------------------
@@ -414,10 +375,6 @@ class TestRunFlow:
             )
         assert exc_info.value.status_code == 500
 
-    # ---------------------------------------------------------------------------
-    # _get_required_providers
-    # ---------------------------------------------------------------------------
-
     @pytest.mark.asyncio
     async def test_run_flow_checkpoint_resume_never_touches_the_source(self):
         """A checkpoint resume runs under its OWN record.
@@ -469,111 +426,6 @@ class TestRunFlow:
             assert svc._run_dynamic_flow.await_args.args[0] == 99
             # ...and the source keeps the terminal status it earned.
             assert source.status == "COMPLETED"
-
-
-class TestGetRequiredProviders:
-    """Tests for _get_required_providers (lines 662-728)."""
-
-    @pytest.mark.asyncio
-    async def test_no_models_returns_empty(self):
-        svc = _make_service()
-        result = await svc._get_required_providers(MagicMock(), {})
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_single_model_with_provider(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock(return_value={"provider": "openai"})
-            MockSvc.return_value = instance
-            result = await svc._get_required_providers(MagicMock(), {"model": "gpt-4"})
-        assert "OPENAI" in result
-
-    @pytest.mark.asyncio
-    async def test_crew_config_models_extracted(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock(
-                return_value={"provider": "anthropic"}
-            )
-            MockSvc.return_value = instance
-            config = {
-                "crew": {
-                    # planning_llm is deliberately absent: the planner was removed and
-                    # its model is no longer collected as a required provider.
-                    "reasoning_llm": "claude-2",
-                    "manager_llm": "claude-1",
-                }
-            }
-            result = await svc._get_required_providers(MagicMock(), config)
-        assert "ANTHROPIC" in result
-
-    @pytest.mark.asyncio
-    async def test_top_level_llm_keys(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock(
-                return_value={"provider": "perplexity"}
-            )
-            MockSvc.return_value = instance
-            config = {
-                # planning_llm is deliberately absent (planner removed).
-                "reasoning_llm": "pplx-2",
-                "manager_llm": "pplx-3",
-            }
-            result = await svc._get_required_providers(MagicMock(), config)
-        assert "PERPLEXITY" in result
-
-    @pytest.mark.asyncio
-    async def test_model_config_not_found(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock(return_value=None)
-            MockSvc.return_value = instance
-            result = await svc._get_required_providers(
-                MagicMock(), {"model": "unknown-model"}
-            )
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_model_without_provider_key(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock(return_value={})
-            MockSvc.return_value = instance
-            result = await svc._get_required_providers(
-                MagicMock(), {"model": "some-model"}
-            )
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_model_config_service_raises(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock(side_effect=Exception("service down"))
-            MockSvc.return_value = instance
-            # Should not raise, just warn
-            result = await svc._get_required_providers(
-                MagicMock(), {"model": "some-model"}
-            )
-        assert isinstance(result, list)
-
-    @pytest.mark.asyncio
-    async def test_empty_model_name_skipped(self):
-        svc = _make_service()
-        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
-            instance = MagicMock()
-            instance.get_model_config = AsyncMock()
-            MockSvc.return_value = instance
-            await svc._get_required_providers(MagicMock(), {"model": ""})
-        # Empty model name is skipped
-        instance.get_model_config.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -746,9 +598,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_make_smart_session_patch(mock_session),
@@ -803,9 +653,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_make_smart_session_patch(mock_session),
@@ -847,9 +695,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_make_smart_session_patch(mock_session),
@@ -908,9 +754,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_make_smart_session_patch(mock_session),
@@ -1024,9 +868,7 @@ class TestRunFlowExecutionResultConversion:
             patch("src.services.flow_builder.backend_flow.BackendFlow", MockBF),
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_make_smart_session_patch(mock_session),

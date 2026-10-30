@@ -155,17 +155,6 @@ export class ToolService {
     }
   }
 
-  static async updateToolConfigurationInMemory(title: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
-    try {
-      const response = await apiClient.patch<Record<string, unknown>>(`/tools/configurations/${encodeURIComponent(title)}/in-memory`, config);
-      return response.data || {};
-    } catch (error) {
-      console.error('Error updating in-memory tool configuration:', error);
-      const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error updating in-memory tool configuration');
-    }
-  }
-
   static async listGlobal(): Promise<Tool[]> {
     try {
       const response = await apiClient.get<{ tools: Tool[]; count: number }>(`/tools/global`);

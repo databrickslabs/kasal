@@ -5,7 +5,7 @@ Handles SQL equivalent of SAP BW structures and time intelligence in SQL
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union, cast
 
 from ....base.models import KPI, KPIDefinition, Structure
 from ....common.transformers.formula import KBIDependencyResolver, KbiFormulaParser
@@ -40,27 +40,15 @@ class SQLStructureExpander:
         )
 
     def process_definition(
-        self, definition: KPIDefinition, options: SQLTranslationOptions = None
+        self, definition: KPIDefinition, options: Optional[SQLTranslationOptions] = None
     ) -> SQLDefinition:
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write("=== SQL STRUCTURE PROCESSOR CALLED ===\n")
-            if definition.structures:
-                f.write(f"Found {len(definition.structures)} structures\n")
-                for name, struct in definition.structures.items():
-                    f.write(f"Structure {name}: {len(struct.filters)} filters\n")
-            if definition.kpis:
-                f.write(f"Found {len(definition.kpis)} KBIs\n")
-                for kpi in definition.kpis:
-                    f.write(
-                        f"KPI {kpi.technical_name}: apply_structures={kpi.apply_structures}\n"
-                    )
         """
         Process a KPI definition and expand KBIs with applied structures for SQL
-        
+
         Args:
             definition: Original KPI definition with structures
             options: SQL translation options
-            
+
         Returns:
             Expanded SQL definition with combined KBI+structure measures
         """
@@ -230,17 +218,9 @@ class SQLStructureExpander:
         sql_structures = {}
 
         for struct_name, structure in structures.items():
-            # Add logging to a file to debug what's happening
-            with open("/tmp/sql_debug.log", "a") as f:
-                f.write(f"Processing structure: {struct_name}\n")
-                f.write(f"Structure filters: {structure.filters}\n")
-
             converted_filters = self._convert_filters_to_sql(
                 structure.filters, definition
             )
-
-            with open("/tmp/sql_debug.log", "a") as f:
-                f.write(f"Converted structure filters: {converted_filters}\n")
 
             sql_structure = SQLStructure(
                 description=structure.description,
@@ -256,9 +236,12 @@ class SQLStructureExpander:
                 )
 
             sql_structures[struct_name] = sql_structure
-
-            with open("/tmp/sql_debug.log", "a") as f:
-                f.write(f"Final SQL structure filters: {sql_structure.filters}\n")
+            self.logger.debug(
+                "structure %s: filters %s -> %s",
+                struct_name,
+                structure.filters,
+                sql_structure.filters,
+            )
 
         return sql_structures
 
@@ -288,7 +271,7 @@ class SQLStructureExpander:
 
         # Try to find date column from filters
         date_column = None
-        for filter_condition in structure.filters:
+        for filter_condition in cast(List[str], structure.filters):  # str filters
             for date_col in potential_date_columns:
                 if date_col in filter_condition.lower():
                     date_column = date_col
@@ -310,7 +293,7 @@ class SQLStructureExpander:
 
         return sql_structure
 
-    def _create_ytd_sql_template(self, date_column: str = None) -> str:
+    def _create_ytd_sql_template(self, date_column: Optional[str] = None) -> str:
         """Create SQL template for Year-to-Date calculations"""
         date_col = date_column or "fiscal_date"
 
@@ -325,7 +308,7 @@ class SQLStructureExpander:
             AND {date_col} <= CURRENT_DATE
             """
 
-    def _create_ytg_sql_template(self, date_column: str = None) -> str:
+    def _create_ytg_sql_template(self, date_column: Optional[str] = None) -> str:
         """Create SQL template for Year-to-Go calculations"""
         date_col = date_column or "fiscal_date"
 
@@ -340,7 +323,9 @@ class SQLStructureExpander:
             AND {date_col} <= DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year' - INTERVAL '1 day'
             """
 
-    def _create_prior_period_sql_template(self, date_column: str = None) -> str:
+    def _create_prior_period_sql_template(
+        self, date_column: Optional[str] = None
+    ) -> str:
         """Create SQL template for Prior Period calculations"""
         date_col = date_column or "fiscal_date"
 
@@ -356,19 +341,16 @@ class SQLStructureExpander:
             """
 
     def _convert_filters_to_sql(
-        self, filters: List[str], definition: KPIDefinition
+        self, filters: List[Union[str, Dict[str, Any]]], definition: KPIDefinition
     ) -> List[str]:
         """Convert SAP BW style filters to SQL WHERE conditions"""
         from .sql_aggregations import SQLFilterProcessor
 
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write(
-                f"_convert_filters_to_sql: definition.filters = {definition.filters}\n"
-            )
-
         processor = SQLFilterProcessor(self.dialect)
         return processor.process_filters(
-            filters, definition.default_variables, definition.filters
+            cast(List[str], filters),  # SQL filters are strings only
+            definition.default_variables,
+            definition.filters,
         )
 
     def _convert_kbis_to_sql_measures(
@@ -505,22 +487,16 @@ class SQLStructureExpander:
     ) -> KPI:
         """Create a combined KPI that incorporates the SQL structure"""
 
-        # Debug logging
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write(f"Creating combined KBI: {combined_name}\n")
-            f.write(f"Base KBI filters: {base_kbi.filters}\n")
-            f.write(f"SQL structure filters: {sql_structure.filters}\n")
-
         # Combine filters from base KBI and SQL structure
         combined_filters = list(base_kbi.filters) + list(sql_structure.filters)
-
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write(f"Combined filters: {combined_filters}\n")
+        self.logger.debug(
+            "combined KBI %s: filters %s", combined_name, combined_filters
+        )
 
         # Determine aggregation type and formula
         if sql_structure.formula:
             # Structure has its own formula - this should be CALCULATED
-            aggregation_type = "CALCULATED"
+            aggregation_type: Optional[str] = "CALCULATED"
             formula = sql_structure.formula
             source_table = None
         else:
@@ -576,7 +552,7 @@ class SQLStructureExpander:
         # Find structure references in parentheses (same as DAX processor)
         pattern = r"\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)"
 
-        def replace_reference(match):
+        def replace_reference(match: re.Match[str]) -> str:
             struct_ref = match.group(1).strip()
             if struct_ref in all_sql_structures:
                 # In SQL context, we'll create subquery references or CTEs
@@ -597,7 +573,9 @@ class SQLStructureExpander:
 
         return sql_measure
 
-    def _map_to_sql_aggregation_type(self, dax_agg_type: str) -> SQLAggregationType:
+    def _map_to_sql_aggregation_type(
+        self, dax_agg_type: Optional[str]
+    ) -> SQLAggregationType:
         """Map DAX aggregation type to SQL aggregation type"""
         if not dax_agg_type:
             return SQLAggregationType.SUM
@@ -634,7 +612,9 @@ class SQLStructureExpander:
         return name or "unnamed_measure"
 
     def generate_sql_queries_from_definition(
-        self, sql_definition: SQLDefinition, options: SQLTranslationOptions = None
+        self,
+        sql_definition: SQLDefinition,
+        options: Optional[SQLTranslationOptions] = None,
     ) -> List[SQLQuery]:
         """Generate SQL queries from processed SQL definition"""
         if options is None:
@@ -820,7 +800,7 @@ class SQLStructureExpander:
         sql_expr = sql_measure.sql_expression
 
         # Build complete custom SQL
-        custom_sql = f"SELECT {sql_expr.replace('FROM `FactSales`', f'FROM {from_clause}{subquery_where}')} AS {self._quote_identifier(measure_alias)}"
+        custom_sql = f"SELECT {sql_expr.replace('FROM `FactSales`', f'FROM {from_clause}{subquery_where}')} AS {self._quote_identifier(measure_alias)}"  # generated SQL text returned to the caller, identifiers quoted — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
         # Create query with custom SQL
         query = SQLQuery(
@@ -847,7 +827,7 @@ class SQLStructureExpander:
         """Create combined SQL query for multiple measures with proper table handling"""
 
         # Group measures by source table
-        table_measures = {}
+        table_measures: Dict[str, List[SQLMeasure]] = {}
         for sql_measure in sql_measures:
             table = sql_measure.source_table or "fact_table"
             if table not in table_measures:
@@ -875,7 +855,7 @@ class SQLStructureExpander:
         options: SQLTranslationOptions,
     ) -> SQLQuery:
         """Create SQL query for measures from a single table"""
-        select_expressions = []
+        select_expressions: List[str] = []
         all_filters = []
 
         for sql_measure in sql_measures:
@@ -933,11 +913,11 @@ class SQLStructureExpander:
                 )
 
                 # Build individual query
-                select_part = f"SELECT '{alias}' AS measure_name, {measure.to_sql_expression()} AS measure_value"
+                select_part = f"SELECT {self._quote_literal(alias)} AS measure_name, {measure.to_sql_expression()} AS measure_value"  # generated SQL text returned to the caller, alias escaped — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 from_part = f"FROM {from_clause}"
 
                 if processed_filters:
-                    where_part = f"WHERE {' AND '.join(processed_filters)}"
+                    where_part = f"WHERE {' AND '.join(processed_filters)}"  # generated SQL text returned to the caller — nosemgrep: tmp.databricks.sql-injection.fstring-where
                     query_part = f"{select_part} {from_part} {where_part}"
                 else:
                     query_part = f"{select_part} {from_part}"
@@ -970,12 +950,13 @@ class SQLStructureExpander:
         # Get expanded filters from KPI definition (stored in sql_definition)
         expanded_filters = {}
         if hasattr(sql_definition, "filters") and sql_definition.filters:
-            for filter_group, filters in sql_definition.filters.items():
-                if isinstance(filters, dict):
-                    for filter_name, filter_value in filters.items():
+            # (loop var must not shadow the ``filters`` parameter)
+            for filter_group, group_filters in sql_definition.filters.items():
+                if isinstance(group_filters, dict):
+                    for filter_name, filter_value in group_filters.items():
                         expanded_filters[filter_name] = filter_value
                 else:
-                    expanded_filters[filter_group] = str(filters)
+                    expanded_filters[filter_group] = str(group_filters)
 
         for filter_condition in filters:
             if not filter_condition:
@@ -1022,7 +1003,7 @@ class SQLStructureExpander:
         self,
         filter_condition: str,
         variables: Dict[str, Any],
-        expanded_filters: Dict[str, str] = None,
+        expanded_filters: Optional[Dict[str, str]] = None,
     ) -> str:
         """Substitute variables in a filter condition"""
         result = filter_condition
@@ -1064,71 +1045,15 @@ class SQLStructureExpander:
         return result
 
     def _quote_identifier(self, identifier: str) -> str:
-        """Quote identifier according to SQL dialect"""
+        """Quote identifier according to SQL dialect, doubling the quote char so
+        a model-supplied name (measure, table, schema) cannot leave it."""
+        q = "`" if self.dialect == SQLDialect.DATABRICKS else '"'
+        return q + str(identifier).replace(q, q + q) + q
+
+    def _quote_literal(self, value: str) -> str:
+        """Single-quoted string literal. Databricks SQL also processes backslash
+        escapes, so those are escaped first there."""
+        text = str(value)
         if self.dialect == SQLDialect.DATABRICKS:
-            return f"`{identifier}`"
-        else:  # STANDARD
-            return f'"{identifier}"'
-
-
-class SQLTimeIntelligenceHelper:
-    """Helper class for common SQL time intelligence patterns"""
-
-    def __init__(self, dialect: SQLDialect = SQLDialect.STANDARD):
-        self.dialect = dialect
-
-    def create_ytd_sql_structure(
-        self, date_column: str = "fiscal_date"
-    ) -> SQLStructure:
-        """Create Year-to-Date SQL structure"""
-        processor = SQLStructureExpander(self.dialect)
-        sql_template = processor._create_ytd_sql_template(date_column)
-
-        return SQLStructure(
-            description="Year to Date",
-            sql_template=sql_template,
-            date_column=date_column,
-            filters=[sql_template.strip()],
-            display_sign=1,
-        )
-
-    def create_ytg_sql_structure(
-        self, date_column: str = "fiscal_date"
-    ) -> SQLStructure:
-        """Create Year-to-Go SQL structure"""
-        processor = SQLStructureExpander(self.dialect)
-        sql_template = processor._create_ytg_sql_template(date_column)
-
-        return SQLStructure(
-            description="Year to Go",
-            sql_template=sql_template,
-            date_column=date_column,
-            filters=[sql_template.strip()],
-            display_sign=1,
-        )
-
-    def create_prior_year_sql_structure(
-        self, date_column: str = "fiscal_date"
-    ) -> SQLStructure:
-        """Create Prior Year SQL structure"""
-        processor = SQLStructureExpander(self.dialect)
-        sql_template = processor._create_prior_period_sql_template(date_column)
-
-        return SQLStructure(
-            description="Prior Year",
-            sql_template=sql_template,
-            date_column=date_column,
-            filters=[sql_template.strip()],
-            display_sign=1,
-        )
-
-    def create_variance_sql_structure(self, base_measures: List[str]) -> SQLStructure:
-        """Create variance calculation SQL structure"""
-        if len(base_measures) >= 2:
-            formula = f"({base_measures[0]}) - ({base_measures[1]})"
-        else:
-            formula = f"({base_measures[0] if base_measures else 'current'}) - (prior)"
-
-        return SQLStructure(
-            description="Variance Analysis", formula=formula, display_sign=1
-        )
+            text = text.replace("\\", "\\\\")
+        return "'" + text.replace("'", "''") + "'"

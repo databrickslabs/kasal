@@ -34,7 +34,7 @@ KEEP_VERBATIM = 20
 
 
 def split_for_fold(
-    messages: List[Dict[str, Any]], keep: int = KEEP_VERBATIM
+    messages: Optional[List[Dict[str, Any]]], keep: int = KEEP_VERBATIM
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """``(to_fold, verbatim)`` — the older messages, and the ones kept as-is.
 
@@ -97,6 +97,8 @@ async def fold_thread_history(
         prompt = build_summary_prompt(
             getattr(state, SUMMARY_CHANNEL, None) or None, render_transcript(to_fold)
         )
+        if not model_name:  # logged and skipped by the handler below
+            raise ValueError("no model to fold the thread history with")
         response = await LLMManager.completion(messages=prompt, model=model_name)
         summary = (
             response["choices"][0]["message"]["content"]

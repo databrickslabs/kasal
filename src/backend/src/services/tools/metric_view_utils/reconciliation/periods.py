@@ -8,11 +8,12 @@ quarter-/year-grain UCMV enters scope rather than guessing the shape now.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime, timezone
 from typing import Optional
 
 
-def matches_reference_years(period: str, reference_years: list) -> bool:
+def matches_reference_years(period: str, reference_years: Sequence[object]) -> bool:
     """True if ``period`` (fiscper "YYYYNNN" for month grain, or a bare year)
     falls within ``reference_years`` — matched on the leading 4 characters,
     which is correct for both shapes. An empty ``reference_years`` means "no year
@@ -39,7 +40,7 @@ def is_closed_period(period: str, reference_date: Optional[date] = None) -> bool
     return str(period) < current_period(reference_date)
 
 
-def normalize_snapshot_date(value) -> str:
+def normalize_snapshot_date(value: object) -> str:
     """Accept only exact dates or midnight timestamps; never silently truncate
     intraday data."""
     if isinstance(value, datetime):

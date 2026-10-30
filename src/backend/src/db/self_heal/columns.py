@@ -8,9 +8,10 @@ late-arriving columns; ``ensure_columns`` does the work.
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from src.db.self_heal.dialect import _conn_is_sqlite, _pg_columns
-from src.db.self_heal.tables import ensure_table
-from src.db.self_heal.vectors import _ensure_pgvector_embedding_columns
+from src.db.self_heal.tables import ensure_index, ensure_table
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,9 @@ logger = logging.getLogger(__name__)
 ColumnSpec = tuple[str, str, str]
 
 
-async def ensure_columns(conn, table: str, columns: list[ColumnSpec]) -> None:
+async def ensure_columns(
+    conn: AsyncConnection, table: str, columns: list[ColumnSpec]
+) -> None:
     """Add whichever of ``columns`` ``table`` is missing. A no-op on a table that
     does not exist yet — ``create_all`` or the table step owns creation.
 
@@ -31,38 +34,38 @@ async def ensure_columns(conn, table: str, columns: list[ColumnSpec]) -> None:
     whole self-heal transaction on the deployed app, leaving
     ``agents.thinking_budget_tokens`` missing. Only the genuinely missing
     columns get an ALTER, so the common case never touches the failure path.
+
+    A failure RAISES, so the step's SAVEPOINT rolls back (``self_heal/report.py``
+    explains why catching it here would abort the whole pass on PostgreSQL).
     """
     is_sqlite = _conn_is_sqlite(conn)
-    try:
+    if is_sqlite:
+        res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in res.fetchall()}
+    else:
+        existing = await _pg_columns(conn, table)
+    if not existing:
+        return  # table not created yet
+    for name, sqlite_ddl, pg_ddl in columns:
+        if name in existing:
+            continue
         if is_sqlite:
-            res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
-            existing = {row[1] for row in res.fetchall()}
+            await conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN {name} {sqlite_ddl}"
+            )
         else:
-            existing = await _pg_columns(conn, table)
-        if not existing:
-            return  # table not created yet
-        for name, sqlite_ddl, pg_ddl in columns:
-            if name in existing:
-                continue
-            if is_sqlite:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN {name} {sqlite_ddl}"
-                )
-            else:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {pg_ddl}"
-                )
-            logger.info(f"Added {table}.{name} column")
-        logger.info(f"Ensured {table} columns")
-    except Exception as e:
-        logger.warning(f"Could not ensure {table} columns: {e}")
+            await conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {pg_ddl}"
+            )
+        logger.info(f"Added {table}.{name} column")
+    logger.info(f"Ensured {table} columns")
 
 
-async def _ensure_documentation_embeddings_columns(conn) -> None:
+async def _ensure_documentation_embeddings_columns(conn: AsyncConnection) -> None:
     """documentation_embeddings.group_id / file_path — knowledge-ingest fallback,
-    built-in doc seeding and group-scoped search all reference them. Then the
-    knowledge_embeddings table (uploaded knowledge when no Lakebase backend is
-    active), its per-user ``created_by``, and the pgvector columns on both."""
+    built-in doc seeding and group-scoped search all reference them. The
+    knowledge table and the pgvector columns are separate steps, so a
+    documentation_embeddings this role cannot ALTER does not skip them."""
     await ensure_columns(
         conn,
         "documentation_embeddings",
@@ -71,14 +74,18 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
             ("file_path", "VARCHAR", "VARCHAR"),
         ],
     )
+
+
+async def _ensure_knowledge_embeddings_table(conn: AsyncConnection) -> None:
+    """knowledge_embeddings (uploaded knowledge when no Lakebase backend is
+    active) and its per-user ``created_by``."""
     await ensure_table(conn, "src.models.documentation_embedding", "KnowledgeEmbedding")
     await ensure_columns(
         conn, "knowledge_embeddings", [("created_by", "VARCHAR(255)", "VARCHAR(255)")]
     )
-    await _ensure_pgvector_embedding_columns(conn)
 
 
-async def _ensure_publications_columns(conn) -> None:
+async def _ensure_publications_columns(conn: AsyncConnection) -> None:
     """publications: the publisher's "holds a conversation" flag. Without it a
     published crew can never be continued across turns."""
     await ensure_columns(
@@ -88,7 +95,7 @@ async def _ensure_publications_columns(conn) -> None:
     )
 
 
-async def _ensure_chat_sessions_columns(conn) -> None:
+async def _ensure_chat_sessions_columns(conn: AsyncConnection) -> None:
     """chat_sessions: the refresh-reconnect marker, the per-session preview that
     moved off browser IndexedDB onto the server, and the rolling context
     summary. Without them saving a preview or the running-job marker fails."""
@@ -117,7 +124,7 @@ async def _ensure_chat_sessions_columns(conn) -> None:
     )
 
 
-async def _ensure_agent_columns(conn) -> None:
+async def _ensure_agent_columns(conn: AsyncConnection) -> None:
     """agents: skills, and the per-agent thinking / output-token overrides (NULL
     inherits the model row). A database missing one accepts the field from the
     UI and silently drops it on save — "my selection did not persist"."""
@@ -134,7 +141,7 @@ async def _ensure_agent_columns(conn) -> None:
     )
 
 
-async def _ensure_execution_history_columns(conn) -> None:
+async def _ensure_execution_history_columns(conn: AsyncConnection) -> None:
     """executionhistory: the run a resume came from, the saved crew a run was
     built from, and which agent runtime ran it (NULL reads as "kasal"). Because
     SQLAlchemy selects every mapped column, a missing one breaks EVERY read of
@@ -150,7 +157,23 @@ async def _ensure_execution_history_columns(conn) -> None:
     )
 
 
-async def _ensure_crew_columns(conn) -> None:
+async def _ensure_schedule_columns(conn: AsyncConnection) -> None:
+    """schedule: the saved crew a schedule runs and the IANA timezone its cron
+    line is read in. NULL keeps a schedule on its stored copy and the server's
+    clock, which is how every schedule saved before them behaves. Because
+    SQLAlchemy selects every mapped column, a missing one breaks every read of
+    the table — the scheduler loop included."""
+    await ensure_columns(
+        conn,
+        "schedule",
+        [
+            ("crew_id", "TEXT", "UUID"),
+            ("timezone", "VARCHAR(64)", "VARCHAR(64)"),
+        ],
+    )
+
+
+async def _ensure_crew_columns(conn: AsyncConnection) -> None:
     """crews.reasoning_config — the saved reasoning budget. The removed planner
     columns (crews.planning / planning_llm, schedule.planning) are deliberately
     NOT dropped here: an unmapped nullable column is harmless, and DROP COLUMN
@@ -158,23 +181,29 @@ async def _ensure_crew_columns(conn) -> None:
     await ensure_columns(conn, "crews", [("reasoning_config", "TEXT", "JSONB")])
 
 
-async def _ensure_ui_config_columns(conn) -> None:
+async def _ensure_ui_config_columns(conn: AsyncConnection) -> None:
     """ui_config: the table itself first — ``init_db`` skips ``create_all`` once
     any table exists, so installs older than ui_config never got it and the UI
     Configurator 500'd with "no such table" — then the Predefined-UI columns
-    (catalog + branding, and the per-component toggles)."""
+    (catalog + branding, the per-component toggles, and the workspace's
+    overrides of the system A2UI defaults)."""
     await ensure_table(conn, "src.models.ui_config", "UIConfig")
     await ensure_columns(
         conn,
         "ui_config",
         [
             (c, "TEXT", "TEXT")
-            for c in ("catalog_json", "style_json", "disabled_components")
+            for c in (
+                "catalog_json",
+                "style_json",
+                "disabled_components",
+                "settings_json",
+            )
         ],
     )
 
 
-async def _ensure_modelconfig_columns(conn) -> None:
+async def _ensure_modelconfig_columns(conn: AsyncConnection) -> None:
     """modelconfig: per-model params, and the Anthropic thinking knobs (which of
     the two applies is decided by transport.thinking_mode()). A missing column
     here fails the first SELECT of the model catalogue — which is every LLM
@@ -192,7 +221,7 @@ async def _ensure_modelconfig_columns(conn) -> None:
     )
 
 
-async def _ensure_memory_backend_columns(conn) -> None:
+async def _ensure_memory_backend_columns(conn: AsyncConnection) -> None:
     """Memory tuning was added by Alembic, which deployments do not run.
 
     Keep legacy enable_* columns and existing settings intact; only add the
@@ -203,7 +232,22 @@ async def _ensure_memory_backend_columns(conn) -> None:
     )
 
 
-async def _ensure_databricks_config_columns(conn) -> None:
+async def _ensure_mlflow_config_columns(conn: AsyncConnection) -> None:
+    """mlflowconfig settings moved out of env vars (MLFLOW_EVAL_MAX_ROWS,
+    GEPA_JUDGE_SAMPLES, MCP_SERVER_ENABLED + MLFLOW_TRACKING_URI). Nullable: NULL
+    keeps the built-in default / no local server."""
+    await ensure_columns(
+        conn,
+        "mlflowconfig",
+        [
+            ("evaluation_max_rows", "INTEGER", "INTEGER"),
+            ("optimization_judge_samples", "INTEGER", "INTEGER"),
+            ("local_tracking_uri", "VARCHAR", "VARCHAR"),
+        ],
+    )
+
+
+async def _ensure_databricks_config_columns(conn: AsyncConnection) -> None:
     """databricksconfig.ai_gateway_enabled — defaults to false (serving-endpoint
     routing) so an existing install keeps its behaviour."""
     await ensure_columns(
@@ -213,7 +257,7 @@ async def _ensure_databricks_config_columns(conn) -> None:
     )
 
 
-async def _ensure_group_users_columns(conn) -> None:
+async def _ensure_group_users_columns(conn: AsyncConnection) -> None:
     """group_users.allow_agent_builder / allow_flow_builder — the per-membership
     builder-capability overrides (NULL derives from the role). They shipped with
     an Alembic migration only, which never runs at startup, so on any database
@@ -229,34 +273,37 @@ async def _ensure_group_users_columns(conn) -> None:
     )
 
 
-async def _ensure_users_columns(conn) -> None:
+async def _ensure_users_columns(conn: AsyncConnection) -> None:
     """users.personal_group_id — the allocated personal-workspace id (see the
     model). Unique, so two users can never be handed one workspace; a partial
     unique index is what both dialects offer for a nullable column."""
     await ensure_columns(
         conn, "users", [("personal_group_id", "VARCHAR(255)", "VARCHAR(255)")]
     )
-    try:
-        await conn.exec_driver_sql(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_personal_group_id "
-            "ON users (personal_group_id)"
-        )
-    except Exception as e:  # noqa: BLE001 — the column is the requirement
-        logger.warning(f"Could not create the users.personal_group_id index: {e}")
 
 
-async def _ensure_powerbi_extraction_columns(conn) -> None:
+async def _ensure_users_personal_group_index(conn: AsyncConnection) -> None:
+    """The unique index on users.personal_group_id. Its own step: the column is
+    the requirement, and existing duplicates must not roll the column back."""
+    await ensure_index(
+        conn,
+        "users",
+        "ix_users_personal_group_id",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_personal_group_id "
+        "ON users (personal_group_id)",
+    )
+
+
+async def _ensure_powerbi_extraction_columns(conn: AsyncConnection) -> None:
     """powerbi_extraction.expressions — the model's named/shared expressions
     ({name: raw_M} staging queries + parameters) added to the PowerBIExtraction
     model. Because SQLAlchemy selects every mapped column, a missing one breaks
     EVERY read of the table, not just the write path — a DB provisioned before
     the column would fail extraction persistence AND any later query of it."""
-    await ensure_columns(
-        conn, "powerbi_extraction", [("expressions", "JSON", "JSON")]
-    )
+    await ensure_columns(conn, "powerbi_extraction", [("expressions", "JSON", "JSON")])
 
 
-async def _ensure_flow_states_columns(conn) -> None:
+async def _ensure_flow_states_columns(conn: AsyncConnection) -> None:
     """flow_states.group_id — tenant scoping added to the FlowState model. Because
     SQLAlchemy selects every mapped column, a missing group_id breaks EVERY read of
     the table (flow persistence load, crash-resume), not just group-filtered paths —
@@ -265,10 +312,15 @@ async def _ensure_flow_states_columns(conn) -> None:
     await ensure_columns(
         conn, "flow_states", [("group_id", "VARCHAR(100)", "VARCHAR(100)")]
     )
-    try:
-        await conn.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS ix_flow_states_group_uuid "
-            "ON flow_states (group_id, flow_uuid)"
-        )
-    except Exception as e:  # noqa: BLE001 — the column is the requirement
-        logger.warning(f"Could not create the flow_states.group_uuid index: {e}")
+
+
+async def _ensure_flow_states_group_index(conn: AsyncConnection) -> None:
+    """The (group_id, flow_uuid) index. Its own step, so a failed index never
+    rolls back the column every flow_states read needs."""
+    await ensure_index(
+        conn,
+        "flow_states",
+        "ix_flow_states_group_uuid",
+        "CREATE INDEX IF NOT EXISTS ix_flow_states_group_uuid "
+        "ON flow_states (group_id, flow_uuid)",
+    )

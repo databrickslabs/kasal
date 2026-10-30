@@ -36,14 +36,27 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.core.events import LLMCallType, LLMStreamChunkEvent, event_bus
 from src.core.llm.transport import OpenAICompletion
 
+#: Output cap for the Responses API when the model sets none.
+DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS = 16000
+
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).
 logger = logging.getLogger("crew")
+
+
+@dataclass
+class ParsedResponse:
+    """What ``parse_tool_outputs`` mode returns: the answer and the
+    provider-side (built-in) tools the model ran to produce it."""
+
+    text: str
+    builtin_tool_outputs: list[dict[str, Any]] = field(default_factory=list)
 
 
 class DatabricksResponsesLLM(OpenAICompletion):
@@ -54,10 +67,19 @@ class DatabricksResponsesLLM(OpenAICompletion):
     text-only responses that skip tool calls.
     """
 
+    #: Output cap for this model (Configuration → Models: params.output_token_cap;
+    #: was the KASAL_RESPONSES/CODEX_MAX_OUTPUT_TOKENS env vars).
+    output_token_cap: int = DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS
+
     def __init__(self, **kwargs: Any) -> None:
         # Force Responses API — codex only works with this endpoint
         kwargs.setdefault("api", "responses")
+        # BaseLLM routes unknown kwargs into additional_params (sent on the
+        # wire), so the cap is taken out and set as the declared field.
+        cap = kwargs.pop("output_token_cap", None)
         super().__init__(**kwargs)
+        if cap:
+            self.output_token_cap = int(cap)
 
         # Store raw output items (with phase) from the last response.
         # These are injected into the ``input`` array on the next call
@@ -74,7 +96,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
 
     def supports_native_structured_output(self) -> bool:
         """The Responses API validates output_pydantic directly (see
-        _handle_responses → _validate_structured_output), so a task's
+        _run_responses → _validate_structured_output), so a task's
         output_pydantic is passed to the model as ``text.format`` and enforced,
         returning a typed object. Signals the converter selection NOT to
         downgrade this model to the soft output_json prompt, which would set
@@ -100,22 +122,23 @@ class DatabricksResponsesLLM(OpenAICompletion):
         from_agent: Any = None,
         response_model: Any | None = None,
     ) -> Any:
-        """Drive the Responses API through this handler's own ``_handle_responses``.
+        """Drive the Responses API through this handler's own ``_run_responses``.
 
         The base ``OpenAICompletion.call`` builds the response first and passes a
-        ``Response`` into ``_handle_responses``; ours instead takes the request
+        ``Response`` into ``_handle_responses``; ``_run_responses`` takes the request
         PARAMS — it owns response creation (with caching), phase capture, tool
         execution and event emission. Bridge the two here so the codex path uses
-        its own handler. Without this override the base passes a ``Response``
-        where ``_handle_responses`` expects params, and ``create(**response)``
-        raises "argument after ** must be a mapping, not Response".
+        its own handler. It used to be named ``_handle_responses`` too, an
+        incompatible override of the base's: any base path reaching it passed a
+        ``Response`` where params were expected ("argument after ** must be a
+        mapping, not Response").
         """
         conversation = self._normalize_messages(messages)
         self._emit_call_started_event(conversation, tools, from_task, from_agent)
         params = self._prepare_responses_params(
             conversation, tools, response_model=response_model
         )
-        return self._handle_responses(
+        return self._run_responses(
             params,
             available_functions=available_functions,
             from_task=from_task,
@@ -142,17 +165,9 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # (max_output_tokens=128000), which used to flow into every request —
         # ~30x the largest response ever observed (p99 well under 4k tokens)
         # and an open invitation for a runaway generation to bill 128k output
-        # tokens. Override via KASAL_RESPONSES_MAX_OUTPUT_TOKENS when a workload
-        # genuinely needs more. Keep the older Codex setting as a compatibility
-        # fallback for existing deployments.
-        import os as _os
-
-        cap = int(
-            _os.environ.get(
-                "KASAL_RESPONSES_MAX_OUTPUT_TOKENS",
-                _os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"),
-            )
-        )
+        # tokens. A model that genuinely needs more raises its own cap in
+        # Configuration → Models (params.output_token_cap).
+        cap = self.output_token_cap
         current = params.get("max_output_tokens")
         if current is None:
             explicit = getattr(self, "max_completion_tokens", None) or getattr(
@@ -176,7 +191,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # we drop so their matching function_call_output is dropped too — an
         # orphaned output ("No tool call found for call_id …") is just a
         # different 400. With the delegated-call shape now matching the transport
-        # (see the return in _handle_responses), a blank name should not arise;
+        # (see the return in _run_responses), a blank name should not arise;
         # this is the belt-and-suspenders that stops one from failing the run.
         dropped_call_ids: set[str] = set()
         for item in params.get("input", []):
@@ -296,7 +311,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
         import litellm
         from openai.types.responses import Response
 
-        # Reset per call: _handle_responses reads this to decide whether the
+        # Reset per call: _run_responses reads this to decide whether the
         # response's token usage represents real API spend (cache replays cost
         # zero tokens and must not inflate the crew's total_tokens aggregate).
         self._last_response_from_cache = False
@@ -407,7 +422,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
             )
         return response
 
-    def _handle_responses(
+    def _run_responses(
         self,
         params: dict[str, Any],
         available_functions: dict[str, Any] | None = None,
@@ -437,7 +452,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
         back to a caller that owns its own loop (the CrewAI executor); that path
         returns after the first response, unchanged.
         """
-        from openai.types.responses import Response  # noqa: F401 (parity import)
+        from openai.types.responses import Response  # (parity import)
 
         # Round cap + wall-clock deadline for the tool loop. getattr-guarded so
         # the isolated unit test's minimal fake base (no _execution_budget) still
@@ -470,38 +485,18 @@ class DatabricksResponsesLLM(OpenAICompletion):
                     if reasoning_items:
                         self._last_reasoning_items = reasoning_items
 
-                usage = self._extract_responses_token_usage(response)
-                if getattr(self, "_last_response_from_cache", False):
-                    # Cache replay: the original usage is embedded in the cached
-                    # payload but no API tokens were spent — counting it would
-                    # overstate crew total_tokens by roughly the cache hit rate.
-                    logger.debug(
-                        "[DatabricksCodex] cache hit — token usage not counted"
-                    )
-                    usage_for_event = None
-                else:
-                    self._track_token_usage_internal(usage)
-                    # Surface per-call usage on the event bus
-                    # (LLMCallCompletedEvent carries it to the OTel bridge →
-                    # execution_trace) and in the logs — this path bypasses
-                    # litellm, so without this the codex path records zero token
-                    # usage anywhere.
-                    usage_for_event = usage
-                    if usage:
-                        logger.info(
-                            "[DatabricksCodex] usage: prompt=%s completion=%s "
-                            "total=%s",
-                            usage.get("prompt_tokens"),
-                            usage.get("completion_tokens"),
-                            usage.get("total_tokens"),
-                        )
+                usage_for_event = self._record_round_usage(response)
 
                 self._log_response(response)
 
                 # If parse_tool_outputs is enabled, return structured result
                 if self.parse_tool_outputs:
-                    parsed_result = self._extract_builtin_tool_outputs(response)
-                    parsed_result.text = self._apply_stop_words(parsed_result.text)
+                    parsed_result = ParsedResponse(
+                        text=self._apply_stop_words(response.output_text or ""),
+                        builtin_tool_outputs=self._extract_builtin_tool_outputs(
+                            response
+                        ),
+                    )
                     self._emit_call_completed_event(
                         response=parsed_result.text,
                         call_type=LLMCallType.LLM_CALL,
@@ -625,6 +620,30 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 from_agent=from_agent,
             )
             raise
+
+    def _record_round_usage(self, response: Any) -> dict[str, Any] | None:
+        """Count one response's tokens; the usage to report on its event.
+
+        A cache replay reports None: the original usage is embedded in the cached
+        payload but no API tokens were spent — counting it would overstate crew
+        total_tokens by roughly the cache hit rate. Otherwise the usage goes on
+        the event bus (LLMCallCompletedEvent carries it to the OTel bridge →
+        execution_trace) and in the logs — this path bypasses litellm, so
+        without this the codex path records zero token usage anywhere.
+        """
+        usage = self._extract_responses_token_usage(response)
+        if getattr(self, "_last_response_from_cache", False):
+            logger.debug("[DatabricksCodex] cache hit — token usage not counted")
+            return None
+        self._track_token_usage_internal(usage)
+        if usage:
+            logger.info(
+                "[DatabricksCodex] usage: prompt=%s completion=%s total=%s",
+                usage.get("prompt_tokens"),
+                usage.get("completion_tokens"),
+                usage.get("total_tokens"),
+            )
+        return usage
 
     def _run_tool_round(
         self,

@@ -40,7 +40,7 @@ async def test_recovers_mcp_from_current_task_into_agent_build():
 
     current_task = MagicMock()
     current_task.name = "Gather and Retrieve Online Mentions"
-    current_task.tool_configs = {"MCP_SERVERS": {"servers": ["nemotemoyou"]}}
+    current_task.tool_configs = {"MCP_SERVERS": {"servers": ["example-mcp"]}}
 
     def _task_get(tid):
         return current_task if str(tid) == current_task_id else stale_task
@@ -70,7 +70,7 @@ async def test_recovers_mcp_from_current_task_into_agent_build():
         assert mock_agent_config.configure_agent_and_tools.await_count == 1
         _, kwargs = mock_agent_config.configure_agent_and_tools.call_args
         assert kwargs.get("crew_tool_configs", {}).get("MCP_SERVERS") == {
-            "servers": ["nemotemoyou"]
+            "servers": ["example-mcp"]
         }
 
 

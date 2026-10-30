@@ -564,7 +564,8 @@ class KasalMLflowSpanExporter(SpanExporter):
             if attributes:
                 end_kwargs["attributes"] = attributes
             client.end_span(**end_kwargs)
-            return child.span_id
+            span_id: Optional[str] = child.span_id
+            return span_id
         except Exception as e:
             logger.debug(
                 f"[OTel-MLflow][{self._job_id}] Error creating span '{name}': {e}"

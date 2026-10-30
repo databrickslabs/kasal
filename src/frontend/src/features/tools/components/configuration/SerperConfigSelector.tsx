@@ -4,6 +4,7 @@
  * A configuration form for customizing Serper search tool settings.
  */
 
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -117,7 +118,10 @@ export const SerperConfigSelector: React.FC<SerperConfigSelectorProps> = ({
   disabled = false
 }) => {
   const [config, setConfig] = useState<SerperConfig>({ ...DEFAULT_CONFIG, ...value });
-  const { secrets, fetchAPIKeys } = useAPIKeysStore();
+  const { secrets, fetchAPIKeys } = useAPIKeysStore(useShallow(state => ({
+    secrets: state.secrets,
+    fetchAPIKeys: state.fetchAPIKeys,
+  })));
   const [hasSystemApiKey, setHasSystemApiKey] = useState(false);
 
   // Check for existing Serper API key in system

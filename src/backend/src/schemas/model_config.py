@@ -164,7 +164,7 @@ class ModelListResponse(BaseModel):
     # default (models/agent.py, schemas/agent.py, schemas/crew.py, the engine
     # paths) derives from the SAME constant, and shipping it here means a UI
     # placeholder cannot drift from what the backend would actually pick.
-    # Overridable per deployment via DEFAULT_LLM_MODEL.
+    # The installed default model (Configuration → Models), not an env var.
     default_model: str = Field(
         default_factory=lambda: _default_engine_model(),
         description="Model the server falls back to when none is specified",

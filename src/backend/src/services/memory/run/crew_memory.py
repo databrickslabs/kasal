@@ -28,7 +28,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
@@ -65,7 +65,7 @@ class CrewMemoryService:
         """
         self.config = config
         self.user_token = user_token
-        self._original_storage_dir = None
+        self._original_storage_dir: Optional[str] = None
         # Why memory ended up disabled, for the caller to surface. None = fine.
         self.last_memory_error: Optional[str] = None
 
@@ -145,7 +145,7 @@ class CrewMemoryService:
 
         # Use provided crew_id if available (but always prefix with group_id for isolation)
         if self.config.get("crew_id"):
-            provided_crew_id = self.config.get("crew_id")
+            provided_crew_id = cast(str, self.config.get("crew_id"))
             # SECURITY: Ensure group_id prefix for tenant isolation
             if not provided_crew_id.startswith(f"{group_id}_"):
                 crew_id = f"{group_id}_{provided_crew_id}"
@@ -464,11 +464,13 @@ class CrewMemoryService:
             memory_config.backend_type == MemoryBackendType.DEFAULT
             and not custom_embedder
             and not crew_kwargs.get("embedder")
-            and not os.environ.get("OPENAI_API_KEY")
         ):
+            # No env fallback: a provider key reaches the embedder only through
+            # the workspace's configured embedder (EmbedderConfigBuilder reads
+            # ApiKeysService), never from the shared process environment.
             reason = (
-                "DEFAULT backend and no embedder at all: no Databricks embedder, "
-                "no configured provider, and OPENAI_API_KEY unset"
+                "DEFAULT backend and no embedder at all: no Databricks embedder "
+                "and no configured provider"
             )
             logger.warning("Disabling memory — %s", reason)
             self.last_memory_error = reason
@@ -521,7 +523,15 @@ class CrewMemoryService:
         )
         memory_kwargs["storage"] = adapted_storage
         try:
-            crew_kwargs["memory"] = Memory(**memory_kwargs)
+            from src.services.memory.storage import graph_factory
+
+            crew_kwargs["memory"] = (
+                graph_factory.build_graph_memory(
+                    storage, memory_kwargs, memory_config, self.config
+                )
+                if graph_factory.graph_enabled(memory_config)
+                else Memory(**memory_kwargs)
+            )
             logger.info(
                 "Configured unified Memory with %s storage (crew=%s)",
                 memory_config.backend_type.value,
@@ -562,18 +572,10 @@ class CrewMemoryService:
                 embedder = custom_embedder
             if embedder is None:
                 embedder = build_litellm_embedder(crew_kwargs.get("embedder"))
-            if embedder is None and os.environ.get("OPENAI_API_KEY"):
-                embedder = build_litellm_embedder(
-                    {
-                        "provider": "openai",
-                        "config": {"model": "text-embedding-3-small"},
-                    }
-                )
             if embedder is None:
                 self.last_memory_error = (
                     "no embedding route: no Databricks embedder, "
-                    f"configured={crew_kwargs.get('embedder')!r}, "
-                    f"OPENAI_API_KEY={'set' if os.environ.get('OPENAI_API_KEY') else 'unset'}"
+                    f"configured={crew_kwargs.get('embedder')!r}"
                 )
                 return None
 
@@ -645,6 +647,9 @@ class CrewMemoryService:
         # of the scope either (it changes per prompt and would wall each run off).
         group_id = self.config.get("group_id") or "default"
         kwargs["root_scope"] = f"/{group_id}"
+        from src.services.decisions.memory import MemoryDecisions
+
+        kwargs["decision_policy"] = MemoryDecisions(group_id)
 
         tuning = getattr(memory_config, "cognitive_config", None)
         tuning_dict = (
@@ -681,6 +686,14 @@ class CrewMemoryService:
             "complex_query_threshold",
             "exploration_budget",
             "query_analysis_threshold",
+            "recall_max_drop",
+            "write_screening",
+            "forgetting_enabled",
+            "superseded_retention_days",
+            "episodic_ttl_days",
+            "importance_floor",
+            "supersession_enabled",
+            "llm_consolidation_enabled",
         ):
             if key in tuning_dict and tuning_dict[key] is not None:
                 kwargs[key] = tuning_dict[key]
@@ -753,7 +766,7 @@ class CrewMemoryService:
                 group_id,
             )
             return llm
-        except Exception as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
+        except Exception as exc:  # degrade to the crew LLM, never break the run
             logger.warning(
                 "Could not build memory analysis LLM '%s' (%s); "
                 "falling back to the crew's LLM instance",
@@ -790,7 +803,7 @@ class CrewMemoryService:
                 "execution_id": exec_id,
             }
 
-            def set_trace_ctx(mem_obj):
+            def set_trace_ctx(mem_obj: Any) -> None:
                 try:
                     if not mem_obj:
                         return
@@ -932,13 +945,6 @@ class CrewMemoryService:
 
         except Exception as context_error:
             logger.warning(f"Failed to set context on memory backend: {context_error}")
-
-    def restore_storage_directory(self) -> None:
-        """Restore original storage directory environment variable"""
-        if self._original_storage_dir is not None:
-            os.environ["CREWAI_STORAGE_DIR"] = self._original_storage_dir
-        elif "CREWAI_STORAGE_DIR" in os.environ:
-            del os.environ["CREWAI_STORAGE_DIR"]
 
 
 async def build_session_memory(

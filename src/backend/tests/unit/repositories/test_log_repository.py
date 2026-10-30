@@ -144,51 +144,6 @@ class TestCreate:
         mock_session.add.assert_called_once()
 
 
-class TestGetLogsPaginatedByTenant:
-
-    @pytest.mark.asyncio
-    async def test_returns_empty_when_no_tenant_ids(self, repo, mock_session):
-        result = await repo.get_logs_paginated_by_tenant(tenant_ids=None)
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_returns_empty_for_empty_tenant_ids(self, repo, mock_session):
-        result = await repo.get_logs_paginated_by_tenant(tenant_ids=[])
-
-        assert result == []
-
-
-class TestCountLogsByTenant:
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_when_no_tenant_ids(self, repo, mock_session):
-        result = await repo.count_logs_by_tenant(tenant_ids=None)
-
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_for_empty_tenant_ids(self, repo, mock_session):
-        result = await repo.count_logs_by_tenant(tenant_ids=[])
-
-        assert result == 0
-
-
-class TestGetUniqueEndpointsByTenant:
-
-    @pytest.mark.asyncio
-    async def test_returns_empty_when_no_tenant_ids(self, repo, mock_session):
-        result = await repo.get_unique_endpoints_by_tenant(tenant_ids=None)
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_returns_empty_for_empty_tenant_ids(self, repo, mock_session):
-        result = await repo.get_unique_endpoints_by_tenant(tenant_ids=[])
-
-        assert result == []
-
-
 class TestGetLogsPaginatedByGroup:
 
     @pytest.mark.asyncio

@@ -1,13 +1,22 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DeckStudio from './DeckStudio';
+import HtmlDeckBlock from '../Chat/HtmlDeckBlock';
 import { useAppStore } from '../../store/appStore';
-import { fetchEnabledModels } from '../../api/models';
+import { fetchEnabledModelRows as fetchEnabledModels } from '../../../../api/config/EnabledModelsService';
+import { resetModelsStoreForTests } from '../../../../store/models';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
 import { downloadDeckHtml } from '../../utils/deckExport';
+import { useThemeStore } from '../../../../store/theme';
+import { useChatEffortStore } from '../../../../store/chatEffort';
+import { DEFAULT_EFFORT } from '../../../../types/workflow/effort';
 
-vi.mock('../../api/models', () => ({ fetchEnabledModels: vi.fn() }));
+// The picker reads the shared models store, which loads through this.
+vi.mock('../../../../api/config/EnabledModelsService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../api/config/EnabledModelsService')>()),
+  fetchEnabledModelRows: vi.fn(),
+}));
 
 const refineSlide = vi.fn();
 vi.mock('../../../../api/chat/DeckService', () => ({
@@ -44,8 +53,10 @@ const deckInMessage = () => {
 describe('DeckStudio', () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
+    useThemeStore.setState({ isDarkMode: false });
     refineSlide.mockReset();
-    useAppStore.setState({ selectedModel: 'chat-model', models: [] });
+    resetModelsStoreForTests();
+    useAppStore.setState({ selectedModel: 'chat-model' });
     vi.mocked(fetchEnabledModels).mockResolvedValue([
       { key: 'chat-model', name: 'Chat model' },
       { key: 'edit-model', name: 'Editing model' },
@@ -69,7 +80,7 @@ describe('DeckStudio', () => {
     expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
     fireEvent.change(picker, { target: { value: 'edit-model' } });
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(picker).toBeDisabled();
     await waitFor(() => expect(refineSlide).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'edit-model' }), expect.any(Function),
@@ -79,6 +90,32 @@ describe('DeckStudio', () => {
     expect(useAppStore.getState().selectedModel).toBe('chat-model');
   });
 
+  it('sends an edit-local effort that starts at the app default and locks while its slide runs', async () => {
+    const close = vi.fn();
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} messageId="m1" onClose={close} />);
+    const effort = screen.getByRole('combobox', { name: 'Slide edit effort' });
+    expect(effort).toHaveValue(DEFAULT_EFFORT.tier);
+    submitSlide(1);
+    expect(refineSlide).toHaveBeenLastCalledWith(
+      expect.objectContaining({ execution_effort: DEFAULT_EFFORT }), expect.any(Function),
+    );
+    expect(effort).toBeDisabled();
+    await act(async () => runs[0].resolve({ section: slide('Cover updated') }));
+    await waitFor(() => expect(effort).toBeEnabled());
+    fireEvent.keyDown(effort, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.change(effort, { target: { value: 'high' } });
+    submitSlide(2);
+    expect(refineSlide).toHaveBeenLastCalledWith(
+      expect.objectContaining({ execution_effort: { tier: 'high' } }), expect.any(Function),
+    );
+    await act(async () => runs[1].resolve({ section: slide('Two updated') }));
+    expect(effort).toHaveValue('high');
+    expect(useChatEffortStore.getState().settings).toEqual(DEFAULT_EFFORT);
+  });
+
   it('allows the workspace default when writing a new slide', async () => {
     refineSlide.mockResolvedValue({ section: slide('New') });
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
@@ -86,7 +123,7 @@ describe('DeckStudio', () => {
     fireEvent.change(screen.getByLabelText('Slide edit model'), { target: { value: '' } });
     fireEvent.click(screen.getByLabelText('Add a slide at position 2'));
     fireEvent.change(screen.getByLabelText('New slide instruction'), { target: { value: 'Explain tokens' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(refineSlide).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'add', model: null }), expect.any(Function),
     ));
@@ -113,11 +150,213 @@ describe('DeckStudio', () => {
     expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
   });
 
+  it('closes with a plain Done button, without an X icon beside it', () => {
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    const done = screen.getByTitle('Done (Esc)');
+    expect(done).toHaveTextContent(/^Done$/);
+    expect(done.querySelector('svg')).toBeNull();
+  });
+
+  it('reattaches to running edits after closing and reopening, including parallel saves', async () => {
+    const runs = [deferred<{ section: string; job_id: string }>(), deferred<{ section: string; job_id: string }>()];
+    refineSlide.mockImplementation((_request, started) => {
+      const index = refineSlide.mock.calls.length - 1;
+      started(`job-${index}`);
+      return runs[index].promise;
+    });
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    submitSlide(1, 'Improve cover');
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'job-0');
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'true');
+    submitSlide(2, 'Improve second');
+    await act(async () => runs[0].resolve({ section: slide('New cover'), job_id: 'job-0' }));
+    await act(async () => runs[1].resolve({ section: slide('New second'), job_id: 'job-1' }));
+    expect(refineSlide).toHaveBeenCalledTimes(2);
+    expect(deckInMessage()).toEqual(['New cover', 'New second', 'Three']);
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    expect(screen.getByText('3 slides · 2 edits')).toBeInTheDocument();
+  });
+
+  it('keeps completed results and undo history when a run finishes while closed', async () => {
+    const run = deferred<{ section: string }>();
+    refineSlide.mockReturnValue(run.promise);
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    submitSlide(1, 'Improve cover');
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    await act(async () => run.resolve({ section: slide('Updated while closed') }));
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    expect(screen.getByText('3 slides · 1 edit')).toBeInTheDocument();
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'false');
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    fireEvent.click(screen.getByLabelText('Move slide 1 down'));
+    expect(deckInMessage()).toEqual(['Two', 'Updated while closed', 'Three']);
+  });
+
+  it('shares the pending save queue across editor mounts in builder mode', async () => {
+    const save = deferred<void>();
+    const onDeckChange = vi.fn().mockReturnValueOnce(save.promise).mockResolvedValue(undefined);
+    refineSlide.mockResolvedValueOnce({ section: slide('New cover') }).mockResolvedValueOnce({ section: slide('New second') });
+    render(<HtmlDeckBlock code={DECK} onDeckChange={onDeckChange} />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    submitSlide(1);
+    await waitFor(() => expect(onDeckChange).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    expect(screen.getByLabelText('Move slide 2 up')).toBeDisabled();
+    submitSlide(2);
+    await waitFor(() => expect(refineSlide).toHaveBeenCalledTimes(2));
+    expect(onDeckChange).toHaveBeenCalledTimes(1);
+    await act(async () => save.resolve());
+    await waitFor(() => expect(onDeckChange).toHaveBeenCalledTimes(2));
+    expect(titles(onDeckChange.mock.calls[1][1])).toEqual(['New cover', 'Two', 'Three']);
+    expect(titles(onDeckChange.mock.calls[1][0])).toEqual(['New cover', 'New second', 'Three']);
+    expect(screen.getByLabelText('Move slide 2 up')).toBeEnabled();
+  });
+
+  it('keeps failures visible after reopening without leaking them into another deck', async () => {
+    const run = deferred<{ section: string }>();
+    refineSlide.mockReturnValue(run.promise);
+    render(<><HtmlDeckBlock code={DECK} messageId="m1" /><HtmlDeckBlock code={slide('Other deck')} /></>);
+    fireEvent.click(screen.getAllByTitle('Edit deck')[0]);
+    submitSlide(1, 'Improve');
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    await act(async () => run.reject(new Error('Provider unavailable')));
+    fireEvent.click(screen.getAllByTitle('Edit deck')[1]);
+    expect(screen.queryByText('Provider unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('slide-run')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    fireEvent.click(screen.getAllByTitle('Edit deck')[0]);
+    expect(screen.getByRole('alert')).toHaveTextContent('Provider unavailable');
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+  });
+
+  it('scrolls the thumbnail rail to keep keyboard selection visible without moving focus', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const rail = screen.getByRole('list', { name: 'Slides' });
+    const dialog = screen.getByRole('dialog', { name: 'Deck studio' });
+    const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 200, width: 200, height: bottom - top, x: 0, y: top, toJSON() {} });
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(rect(100, 400));
+    Object.defineProperty(rail, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(screen.getByRole('listitem', { name: 'Slide 2' }), 'getBoundingClientRect').mockReturnValue(rect(220, 320));
+    vi.spyOn(screen.getByRole('listitem', { name: 'Slide 3' }), 'getBoundingClientRect').mockReturnValue(rect(420, 520));
+    vi.spyOn(screen.getByRole('listitem', { name: 'Slide 1' }), 'getBoundingClientRect').mockReturnValue(rect(-20, 80));
+    fireEvent.keyDown(dialog, { key: 'ArrowDown' });
+    expect(rail.scrollTop).toBe(0); // Already visible: no jumping.
+    fireEvent.keyDown(dialog, { key: 'End' });
+    expect(rail.scrollTop).toBe(120);
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Home' });
+    expect(rail.scrollTop).toBe(0);
+  });
+
+  it('keeps real keyboard focus inside the studio while navigating running slides', async () => {
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const dialog = screen.getByRole('dialog', { name: 'Deck studio' });
+    submitSlide(1);
+    expect(dialog).toHaveFocus();
+    // Dispatch to actual focus, not directly to the dialog: body focus would
+    // bypass its handler and produce the user's intermittent page scrolling.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+    submitSlide(2);
+    expect(dialog).toHaveFocus();
+    for (const [key, number] of [['ArrowUp', 1], ['ArrowDown', 2], ['ArrowDown', 3], ['ArrowUp', 2]] as const) {
+      fireEvent.keyDown(document.activeElement!, { key });
+      expect(screen.getByRole('listitem', { name: `Slide ${number}` })).toHaveAttribute('aria-current', 'true');
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+    await act(async () => runs[1].resolve({ section: slide('Updated second') }));
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(dialog).toHaveFocus();
+    await act(async () => runs[0].resolve({ section: slide('Updated cover') }));
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+  });
+
   it('downloads the presentation as HTML', () => {
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
     fireEvent.click(screen.getByTitle('Download'));
     fireEvent.click(screen.getByRole('button', { name: 'Download HTML' }));
     expect(downloadDeckHtml).toHaveBeenCalledWith(DECK);
+  });
+
+  it('follows Kasal theme changes without changing the slide content', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const root = screen.getByRole('dialog', { name: 'Deck studio' }).parentElement;
+    expect(root).toHaveAttribute('data-theme', 'light');
+    expect(root).toHaveStyle({ colorScheme: 'light' });
+    act(() => useThemeStore.setState({ isDarkMode: true }));
+    expect(root).toHaveAttribute('data-theme', 'dark');
+    expect(root).toHaveStyle({ colorScheme: 'dark' });
+    act(() => useThemeStore.setState({ isDarkMode: false }));
+    expect(root).toHaveAttribute('data-theme', 'light');
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('accepts consecutive thumbnail and between-slide drops with a fresh native drag each time', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const transfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
+    const drag = (from: number, target: HTMLElement) => {
+      const source = screen.getByLabelText(`Select slide ${from}`);
+      expect(source).toHaveAttribute('draggable', 'true');
+      fireEvent.dragStart(source, { dataTransfer: transfer });
+      expect(transfer.setData).toHaveBeenLastCalledWith('text/plain', String(from - 1));
+      expect(transfer.effectAllowed).toBe('move');
+      fireEvent.dragOver(target, { dataTransfer: transfer });
+      fireEvent.drop(target, { dataTransfer: transfer });
+      fireEvent.dragEnd(source);
+    };
+    drag(3, screen.getByLabelText('Add a slide at position 1'));
+    expect(deckInMessage()).toEqual(['Three', 'Cover', 'Two']);
+    drag(1, screen.getByLabelText('Add a slide at position 4'));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+    drag(2, screen.getByLabelText('Select slide 1'));
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']);
+    // A cancelled drag or a foreign drop cannot reuse the last source index.
+    fireEvent.dragStart(screen.getByLabelText('Select slide 1'), { dataTransfer: transfer });
+    fireEvent.dragEnd(screen.getByLabelText('Select slide 1'));
+    fireEvent.drop(screen.getByLabelText('Select slide 3'), { dataTransfer: transfer });
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']);
+  });
+
+  it('moves slides with the arrow buttons, preserves selection, and supports undo', async () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    expect(screen.getByLabelText('Move slide 1 up')).toBeDisabled();
+    expect(screen.getByLabelText('Move slide 3 down')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Move slide 2 up'));
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']);
+    expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
+    fireEvent.click(screen.getByLabelText('Move slide 1 down'));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']));
+  });
+
+  it('explains the reorder lock and unlocks the arrows after generation finishes', async () => {
+    let resolve!: (result: { section: string }) => void;
+    refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByLabelText('Move slide 2 up')).toBeDisabled();
+    expect(screen.getByLabelText('Move slide 2 down')).toBeDisabled();
+    expect(screen.getByText('Reordering available after slide edits finish saving')).toBeInTheDocument();
+    await act(async () => resolve({ section: slide('Updated') }));
+    expect(screen.getByLabelText('Move slide 2 up')).toBeEnabled();
+    expect(screen.queryByText('Reordering available after slide edits finish saving')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Move slide 2 up'));
+    expect(deckInMessage()).toEqual(['Two', 'Updated', 'Three']);
   });
 
   it('imports a standalone HTML presentation through the existing save path', async () => {
@@ -170,7 +409,7 @@ describe('DeckStudio', () => {
     refineSlide.mockResolvedValue({ section: slide('Two!'), model: 'm', attempts: 1, job_id: 'j' });
     render(<DeckStudio code={DECK} messageId="m1" initialIndex={1} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(refineSlide).toHaveBeenCalledTimes(1));
     expect(refineSlide.mock.calls[0][0]).toMatchObject({
       mode: 'refine',
@@ -198,7 +437,7 @@ describe('DeckStudio', () => {
     refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'true');
     act(() => refineSlide.mock.calls[0][1]('failed-edit'));
     expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'failed-edit');
@@ -219,7 +458,7 @@ describe('DeckStudio', () => {
     refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
     const { unmount } = render(<DeckStudio code={DECK} messageId="m1" onDeckChange={async () => {}} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(post).toHaveBeenCalledWith('owner', 'user', 'Slide 1: bigger title', undefined);
     unmount();
     useSessionStore.setState({ currentSessionId: 'other', messages: [] });
@@ -241,7 +480,7 @@ describe('DeckStudio', () => {
     refineSlide.mockResolvedValue({ section: slide('Two'), model: 'm', attempts: 1 });
     render(<DeckStudio code={DECK} messageId="m1" initialIndex={1} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'x' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('unchanged'));
     expect(screen.queryByText(/1 edit/)).toBeNull();
   });
@@ -267,7 +506,7 @@ describe('DeckStudio', () => {
     expect(deckInMessage()).toEqual(['Cover', undefined, 'Cover', 'Two']);
     expect(screen.getByText('New slide 2 — what should it cover?')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('New slide instruction'), { target: { value: 'agenda' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(deckInMessage()).toEqual(['Cover', 'New', 'Cover', 'Two']));
     expect(refineSlide.mock.calls[0][0]).toMatchObject({ mode: 'add', before: slide('Cover'), after: slide('Cover'), position: '2 of 4' });
     // The always-visible button appends one at the end; "leave it blank" keeps it.
@@ -297,6 +536,114 @@ describe('DeckStudio', () => {
     expect(screen.getByText('Slide 3')).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement || document.body, { key: 'ArrowLeft', bubbles: true });
     expect(screen.getByText('Slide 2')).toBeInTheDocument();
+  });
+
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  };
+  const submitSlide = (number: number, instruction = 'Improve this slide') => {
+    fireEvent.click(screen.getByLabelText(`Select slide ${number}`));
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: instruction } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  };
+
+  it.each([[0, 1], [1, 0]])('merges parallel edits completing in order %s then %s, preserving focus and undo', async (first, second) => {
+    const runs = [deferred<{ section: string; job_id: string }>(), deferred<{ section: string; job_id: string }>()];
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    submitSlide(1);
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    submitSlide(2);
+    expect(refineSlide).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByLabelText('Delete slide 3')).toBeDisabled();
+    expect(screen.getByLabelText('Duplicate slide 1')).toBeDisabled();
+    expect(screen.getByText('Add slide')).toBeDisabled();
+    act(() => {
+      refineSlide.mock.calls[0][1]('job-1');
+      refineSlide.mock.calls[1][1]('job-2');
+    });
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'job-2');
+    fireEvent.click(screen.getByLabelText('Select slide 1'));
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'job-1');
+    fireEvent.click(screen.getByLabelText('Select slide 3'));
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    expect(screen.queryByTestId('slide-run')).not.toBeInTheDocument();
+    const replacements = ['Cover updated', 'Two updated'];
+    await act(async () => runs[first].resolve({ section: slide(replacements[first]), job_id: `job-${first + 1}` }));
+    expect(screen.getByRole('listitem', { name: `Slide ${second + 1}` })).toHaveAttribute('aria-busy', 'true');
+    const intermediate = deckInMessage();
+    await act(async () => runs[second].resolve({ section: slide(replacements[second]), job_id: `job-${second + 1}` }));
+    expect(deckInMessage()).toEqual(['Cover updated', 'Two updated', 'Three']);
+    expect(screen.getByRole('listitem', { name: 'Slide 3' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('3 slides · 2 edits')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(`Undo: Refined slide ${second + 1}`));
+    expect(deckInMessage()).toEqual(intermediate);
+    await act(async () => {});
+    fireEvent.click(screen.getByTitle(`Undo: Refined slide ${first + 1}`));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('queues overlapping saves and rebases the second save onto the first saved deck', async () => {
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    const saves = [deferred<void>(), deferred<void>()];
+    const onDeckChange = vi.fn().mockReturnValueOnce(saves[0].promise).mockReturnValueOnce(saves[1].promise);
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} onDeckChange={onDeckChange} onClose={() => {}} />);
+    submitSlide(1);
+    submitSlide(2);
+    await act(async () => {
+      runs[0].resolve({ section: slide('Cover updated') });
+      runs[1].resolve({ section: slide('Two updated') });
+    });
+    expect(onDeckChange).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    await act(async () => saves[0].resolve());
+    expect(onDeckChange).toHaveBeenCalledTimes(2);
+    const [next, previous] = onDeckChange.mock.calls[1];
+    expect(titles(previous)).toEqual(['Cover updated', 'Two', 'Three']);
+    expect(titles(next)).toEqual(['Cover updated', 'Two updated', 'Three']);
+    await act(async () => saves[1].resolve());
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+  });
+
+  it('a failed save does not block another slide or appear in its activity', async () => {
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    const firstSave = deferred<void>();
+    const onDeckChange = vi.fn().mockReturnValueOnce(firstSave.promise).mockResolvedValueOnce(undefined);
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} onDeckChange={onDeckChange} onClose={() => {}} />);
+    submitSlide(1);
+    submitSlide(2);
+    await act(async () => {
+      runs[0].resolve({ section: slide('Cover updated') });
+      runs[1].resolve({ section: slide('Two updated') });
+    });
+    await act(async () => firstSave.reject(new Error('Save unavailable')));
+    expect(titles(onDeckChange.mock.calls[1][0])).toEqual(['Cover', 'Two updated', 'Three']);
+    expect(onDeckChange.mock.calls[1][1]).toBe(DECK);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Select slide 1'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Save unavailable');
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    expect(screen.getByText('3 slides · 1 edit')).toBeInTheDocument();
+  });
+
+  it('rejects a stale result if the target changed externally during generation', async () => {
+    const run = deferred<{ section: string }>();
+    const onDeckChange = vi.fn().mockResolvedValue(undefined);
+    refineSlide.mockReturnValue(run.promise);
+    const { rerender } = render(<DeckStudio code={DECK} onDeckChange={onDeckChange} onClose={() => {}} />);
+    submitSlide(1);
+    rerender(<DeckStudio code={[slide('External edit'), slide('Two'), slide('Three')].join('\n')}
+      onDeckChange={onDeckChange} onClose={() => {}} />);
+    await act(async () => run.resolve({ section: slide('Stale edit') }));
+    expect(onDeckChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('changed while the edit was running');
   });
 
   it('Escape closes', () => {

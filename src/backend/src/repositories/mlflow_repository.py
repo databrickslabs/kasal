@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,10 @@ class MLflowRepository:
 
     The old columns on ``databricksconfig`` still exist — the migration copies
     rather than moves — but nothing reads them any more.
+
+    Writes FLUSH and never commit: :class:`MLflowService` owns the transaction.
+    This repository used to commit inside every setter, so a settings update
+    that failed validation on a later field had already saved the earlier ones.
     """
 
     def __init__(self, session: AsyncSession, *, default_enabled: bool = False):
@@ -55,8 +59,7 @@ class MLflowRepository:
             return cfg
         cfg = MLflowConfig(group_id=group_id, enabled=self.default_enabled)
         self.session.add(cfg)
-        await self.session.commit()
-        await self.session.refresh(cfg)
+        await self.session.flush()
         logger.info("Created MLflowConfig for group_id=%s", group_id)
         return cfg
 
@@ -67,7 +70,7 @@ class MLflowRepository:
     async def set_enabled(self, enabled: bool, group_id: Optional[str] = None) -> bool:
         cfg = await self._ensure(group_id)
         cfg.enabled = enabled
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     # Evaluation toggle helpers
@@ -80,7 +83,7 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         cfg.evaluation_enabled = enabled
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     async def get_evaluation_judge_model(
@@ -112,5 +115,51 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         cfg.experiment_name = (name or "").strip() or None
-        await self.session.commit()
+        await self.session.flush()
+        return True
+
+    async def get_local_tracking_uri(
+        self, group_id: Optional[str] = None
+    ) -> Optional[str]:
+        cfg = await self._get(group_id)
+        value = getattr(cfg, "local_tracking_uri", None) if cfg else None
+        return value if isinstance(value, str) and value.strip() else None
+
+    async def set_local_tracking_uri(
+        self, uri: Optional[str], group_id: Optional[str] = None
+    ) -> bool:
+        cfg = await self._ensure(group_id)
+        setattr(cfg, "local_tracking_uri", (uri or "").strip().rstrip("/") or None)
+        await self.session.flush()
+        return True
+
+    async def set_evaluation_judge_model(
+        self, model: Optional[str], group_id: Optional[str] = None
+    ) -> bool:
+        cfg = await self._ensure(group_id)
+        setattr(cfg, "evaluation_judge_model", (model or "").strip() or None)
+        await self.session.flush()
+        return True
+
+    async def get_advanced(
+        self, group_id: Optional[str] = None
+    ) -> Dict[str, Optional[int]]:
+        """The Advanced settings; None means "use the built-in default"."""
+        cfg = await self._get(group_id)
+        return {
+            "evaluation_max_rows": getattr(cfg, "evaluation_max_rows", None),
+            "optimization_judge_samples": getattr(
+                cfg, "optimization_judge_samples", None
+            ),
+        }
+
+    async def set_advanced(
+        self, values: Dict[str, Optional[int]], group_id: Optional[str] = None
+    ) -> bool:
+        """Set the given Advanced settings; a None value resets one to its default."""
+        cfg = await self._ensure(group_id)
+        for field in ("evaluation_max_rows", "optimization_judge_samples"):
+            if field in values:
+                setattr(cfg, field, values[field])
+        await self.session.flush()
         return True

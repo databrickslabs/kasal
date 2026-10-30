@@ -13,14 +13,20 @@ from src.core.exceptions import (
     BadRequestError,
     ForbiddenError,
 )
-from src.core.permissions import check_role_in_context, require_admin
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.core.permissions import check_role_in_context, is_system_admin, require_admin
+from src.dependencies.providers import (
+    GroupContextDep,
+    SessionDep,
+    ToolSecretsVisibleDep,
+)
 from src.schemas.tool import (
     ToggleResponse,
     ToolCreate,
     ToolListResponse,
     ToolResponse,
     ToolUpdate,
+    masked_config,
+    masked_tool,
 )
 from src.services.tools.tool_service import ToolService
 
@@ -58,49 +64,60 @@ ToolServiceDep = Annotated[ToolService, Depends(get_tool_service)]
 @router.get("", response_model=List[ToolResponse])
 async def get_tools(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> List[ToolResponse]:
     """
     Get all tools for the current group.
 
-    Uses dependency injection to get ToolService with repository.
+    Any member. Stored credentials in ``config`` are masked for members
+    without builder rights.
 
     Args:
         service: Injected ToolService instance
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         List of tools for the current group
     """
     tools = await service.get_all_tools_for_group(group_context)
-    return tools.tools
+    if secrets_visible:
+        return tools.tools
+    return [masked_tool(tool) for tool in tools.tools]
 
 
 @router.get("/enabled", response_model=ToolListResponse)
 async def get_enabled_tools(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> ToolListResponse:
     """
     Get all enabled tools for the current group.
 
-    Uses dependency injection to get ToolService with repository.
+    Any member. Stored credentials in ``config`` are masked for members
+    without builder rights.
 
     Args:
         service: Injected ToolService instance
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
     """
     logger.info("Getting enabled tools")
     tools_response = await service.get_enabled_tools_for_group(group_context)
     logger.info(f"Found {tools_response.count} enabled tools")
-    return tools_response
+    if secrets_visible:
+        return tools_response
+    masked = [masked_tool(tool) for tool in tools_response.tools]
+    return ToolListResponse(tools=masked, count=len(masked))
 
 
 @router.get("/global", response_model=ToolListResponse)
 @require_admin()
 async def list_global_tools(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolListResponse:
     """List globally cataloged tools (base tools with no group_id)."""
     from src.services.tools.tool_service import _filter_personal_workspace_tools
@@ -116,29 +133,32 @@ async def list_global_tools(
 async def get_tool_by_id(
     tool_id: int,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> ToolResponse:
     """
     Get a tool by ID with group isolation.
 
-    Uses dependency injection to get ToolService with repository.
+    Any member. Stored credentials in ``config`` are masked for members
+    without builder rights.
 
     Args:
         tool_id: ID of the tool to get
         service: Injected ToolService instance
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
     """
     logger.info(f"Getting tool with ID {tool_id}")
     tool = await service.get_tool_with_group_check(tool_id, group_context)
     logger.info(f"Found tool with ID {tool_id}")
-    return tool
+    return tool if secrets_visible else masked_tool(tool)
 
 
 @router.post("/", response_model=ToolResponse, status_code=status.HTTP_201_CREATED)
 async def create_tool(
     tool_data: ToolCreate,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """
     Create a new tool with group isolation.
@@ -166,11 +186,12 @@ async def update_tool(
     tool_id: int,
     tool_data: ToolUpdate,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """
     Update an existing tool with group isolation.
-    Only Editors and Admins can update tools.
+    Only Editors and Admins can update tools; a global tool (no group) only
+    a system admin (enforced in ToolService, so every caller gets it).
 
     Uses dependency injection to get ToolService with repository.
 
@@ -194,11 +215,12 @@ async def update_tool(
 async def delete_tool(
     tool_id: int,
     session: SessionDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> None:
     """
     Delete a tool with group isolation.
-    Only Editors and Admins can delete tools.
+    Only Editors and Admins can delete tools; a global tool (no group) only
+    a system admin (enforced in ToolService).
 
     Args:
         tool_id: ID of the tool to delete
@@ -219,7 +241,7 @@ async def delete_tool(
 async def toggle_tool_enabled(
     tool_id: int,
     session: SessionDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToggleResponse:
     """
     Toggle the enabled status of a tool with group isolation.
@@ -251,31 +273,39 @@ async def toggle_tool_enabled(
 @router.get("/configurations/all", response_model=Dict[str, Dict[str, Any]])
 async def get_all_tool_configurations(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Get configurations for all tools for the current group using group-first override.
+
+    Any member; stored credentials are masked for members without builder rights.
     """
     logger.info("Getting all tool configurations (group-aware)")
     configs = await service.get_all_tool_configurations_for_group(group_context)
     logger.info(f"Retrieved configurations for {len(configs)} tools")
-    return configs
+    if secrets_visible:
+        return configs
+    return {title: masked_config(config) for title, config in configs.items()}
 
 
 @router.get("/configurations/{tool_name}", response_model=Dict[str, Any])
 async def get_tool_configuration(
     tool_name: str,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> Dict[str, Any]:
     """
     Get configuration for a specific tool with group-first fallback to base.
+
+    Any member; stored credentials are masked for members without builder rights.
     """
     logger.info(f"Getting configuration for tool: {tool_name}")
     config = await service.get_tool_configuration_with_group_check(
         tool_name, group_context
     )
-    return config
+    return config if secrets_visible else masked_config(config)
 
 
 @router.put("/configurations/{tool_name}", response_model=Dict[str, Any])
@@ -283,7 +313,7 @@ async def update_tool_configuration(
     tool_name: str,
     config: Dict[str, Any],
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> Dict[str, Any]:
     """
     Update configuration for a specific tool, scoped to the caller's group.
@@ -301,27 +331,22 @@ async def update_tool_configuration(
 
 
 @router.patch("/{tool_id}/global-availability", response_model=ToolResponse)
-@require_admin()
 async def set_global_availability(
     tool_id: int,
     payload: Dict[str, Any],
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """System admin: set global availability (enabled) for a base tool.
 
     Rejects if the tool is group-scoped (must be a base tool with group_id=None).
     """
+    # System admins only: a base tool is every workspace's tool.
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can change global tool availability")
     if "enabled" not in payload or not isinstance(payload["enabled"], bool):
         raise BadRequestError("'enabled' boolean is required")
 
-    # Ensure the tool exists and is a base (global) tool
-    tool = await service.get_tool_by_id(tool_id)
-    if getattr(tool, "group_id", None) is not None:
-        raise BadRequestError("Not a global tool")
-
-    # Update enabled on the base tool
-    updated = await service.update_tool(
-        tool_id, ToolUpdate(enabled=bool(payload["enabled"]))
+    return await service.set_global_availability(
+        tool_id, payload["enabled"], group_context
     )
-    return updated

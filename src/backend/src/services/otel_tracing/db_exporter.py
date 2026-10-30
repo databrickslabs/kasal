@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # code (see the migration that rewrites execution_trace.span_name). An
 # unmigrated database is the one case where an old row no longer maps.
 SPAN_NAME_MAP: Dict[str, str] = {
+    "kasal.decision.evaluate": "decision_evaluated",
     # Crew lifecycle
     "kasal.crew.kickoff": "crew_started",
     "kasal.crew.complete": "crew_completed",
@@ -275,14 +276,17 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     Merges kasal bridge attrs with CrewAI instrumentor attrs to produce
     a rich metadata dict for downstream consumption.
     """
-    attrs = dict(span.attributes) if span.attributes else {}
+    attrs: Dict[str, Any] = dict(span.attributes) if span.attributes else {}
     metadata: Dict[str, Any] = {}
 
-    # Kasal bridge attributes — capture ALL kasal.extra.* dynamically
+    # Kasal bridge attributes — capture ALL kasal.extra.* dynamically, and the
+    # Auto link (kasal.auto.* -> auto_*) on the chosen model's LLM calls.
     prefix = "kasal.extra."
     for key, val in attrs.items():
         if key.startswith(prefix) and val is not None:
             metadata[key[len(prefix) :]] = val
+        elif key.startswith("kasal.auto.") and val is not None:
+            metadata["auto_" + key[len("kasal.auto.") :]] = val
 
     # CrewAI instrumentor IDs
     for key, meta_key in (
@@ -407,7 +411,13 @@ class KasalDBSpanExporter(SpanExporter):
         return SpanExportResult.SUCCESS
 
     def _span_to_record(self, span: ReadableSpan) -> Optional[Dict[str, Any]]:
-        """Convert a single span to a trace DB record dict."""
+        """Convert a single span to a trace DB record dict.
+
+        None for the run's Auto decision span: the API process wrote its row,
+        with these same ids, before the run started (``auto_decision.py``).
+        """
+        if span.attributes and span.attributes.get("kasal.decision.persisted"):
+            return None
         event_type = _extract_event_type(span)
 
         # Build the record matching execution_trace columns
@@ -464,7 +474,7 @@ class KasalDBSpanExporter(SpanExporter):
 
         job_id = self._job_id
 
-        async def _write_async():
+        async def _write_async() -> None:
             written = 0
             batch: list = []
             try:
@@ -555,7 +565,7 @@ class KasalDBSpanExporter(SpanExporter):
 
         shutdown_done = threading.Event()
 
-        def _do_shutdown():
+        def _do_shutdown() -> None:
             self._executor.shutdown(wait=True, cancel_futures=False)
             shutdown_done.set()
 

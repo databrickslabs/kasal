@@ -9,6 +9,8 @@ export interface User {
   status: string;
   is_system_admin: boolean;
   is_personal_workspace_manager: boolean;
+  /** This user's Personal Space id, as allocated by the backend. */
+  personal_group_id?: string | null;
   created_at: string;
   updated_at: string;
   last_login: string | null;
@@ -40,6 +42,16 @@ export class UserService {
   async getUsers(search = '', skip = 0, limit = 100): Promise<User[]> {
     const response = await apiClient.get<User[]>('/users', { params: { search, skip, limit } });
     return response.data;
+  }
+
+  /** Every user, a page at a time: GET /users returns at most `pageSize` (1000 max) per call. */
+  async getAllUsers(pageSize = 1000): Promise<User[]> {
+    const users: User[] = [];
+    for (let skip = 0; ; skip += pageSize) {
+      const page = await this.getUsers('', skip, pageSize);
+      users.push(...page);
+      if (page.length < pageSize) return users;
+    }
   }
 
   async provisionUser(email: string): Promise<User> {

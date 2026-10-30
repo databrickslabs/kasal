@@ -18,7 +18,6 @@ from src.schemas.user import (
     UserBase,
     UserInDB,
     UserPermissionUpdate,
-    UserResponse,
     UserUpdate,
 )
 
@@ -319,31 +318,6 @@ class TestUserInDB:
         assert user.is_system_admin is True
         assert user.is_personal_workspace_manager is True
         assert user.last_login == now
-
-
-class TestUserResponse:
-    """Test cases for UserResponse schema."""
-
-    def test_user_response_inherits_user_in_db(self):
-        """Test that UserResponse inherits from UserInDB."""
-        assert issubclass(UserResponse, UserInDB)
-
-    def test_valid_user_response(self):
-        """Test valid UserResponse creation."""
-        user_data = {
-            "id": "user123",
-            "username": "responseuser",
-            "email": "response@example.com",
-            "role": UserRole.REGULAR,
-            "status": UserStatus.ACTIVE,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now(),
-        }
-
-        response = UserResponse(**user_data)
-
-        assert response.id == "user123"
-        assert response.username == "responseuser"
 
 
 class TestGroupSchemas:

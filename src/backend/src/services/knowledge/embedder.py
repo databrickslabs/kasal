@@ -17,9 +17,8 @@ which only runs in production — and there the Databricks embedder (1024-dim) i
 used, never this fallback. So the default mirrors the memory embedder
 (``nomic-embed-text``) for one consistent local embedding model.
 
-Override with ``KNOWLEDGE_OLLAMA_EMBED_MODEL`` — set it to a 1024-dim model
-(e.g. ``mxbai-embed-large``, requires ``ollama pull``) ONLY if you run local dev
-against real Postgres/pgvector without Databricks, where the column width binds.
+The model is ``DEFAULT_OLLAMA_EMBED_MODEL`` (services/llm/endpoints); the old
+KNOWLEDGE_OLLAMA_EMBED_MODEL env override is gone.
 
 This mirrors the Databricks→Ollama fallback in
 ``engines/kasal/config/embedder_config_builder.py`` so memory and knowledge stay
@@ -29,8 +28,9 @@ consistent. Both the embed and search paths call
 """
 
 import logging
-import os
 from typing import Any, Dict, Optional
+
+from src.services.llm.endpoints import DEFAULT_OLLAMA_EMBED_MODEL, ollama_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +39,8 @@ KNOWLEDGE_EMBEDDING_MODEL = "databricks-gte-large-en"
 
 # Local fallback (dev only). Defaults to nomic-embed-text — the same model the
 # memory embedder uses locally — because local dev stores vectors in SQLite as
-# TEXT, which ignores the nominal 1024 width. Override with
-# KNOWLEDGE_OLLAMA_EMBED_MODEL (e.g. mxbai-embed-large) for local pgvector setups.
-KNOWLEDGE_OLLAMA_EMBED_MODEL = os.getenv(
-    "KNOWLEDGE_OLLAMA_EMBED_MODEL", "nomic-embed-text"
-)
+# TEXT, which ignores the nominal 1024 width.
+KNOWLEDGE_OLLAMA_EMBED_MODEL = DEFAULT_OLLAMA_EMBED_MODEL
 
 
 async def resolve_knowledge_embedder_config(
@@ -70,9 +67,9 @@ async def resolve_knowledge_embedder_config(
             "config": {"model": KNOWLEDGE_EMBEDDING_MODEL},
         }
 
-    # The Ollama HTTP host is read from OLLAMA_API_BASE by LLMManager; we include
-    # it here too so the config is self-describing for logging/diagnostics.
-    ollama_url = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+    # The Ollama host the LLM path uses too (services/llm/endpoints); included
+    # so the config is self-describing for logging/diagnostics.
+    ollama_url = ollama_base_url()
     logger.info(
         "Databricks embeddings unavailable; knowledge embedder falling back to "
         f"Ollama '{KNOWLEDGE_OLLAMA_EMBED_MODEL}' at {ollama_url}"

@@ -1,5 +1,8 @@
 # Plan: tag Kasal-created resources for real internal $DBU
 
+> [!NOTE]
+> **Status: internal / proposal — not built.** `KASAL_RESOURCE_TAGS` does not exist in the code yet. Paths were updated to the current layout.
+
 ## Goal
 
 Get **real $DBU** (from `system.billing.usage`) for the Databricks resources Kasal
@@ -11,8 +14,8 @@ This is the **complement** to the HTTP-header approach (see the
 
 | Resource | Kasal's relationship | This plan covers it? |
 |----------|----------------------|----------------------|
-| **Lakebase instance** | Kasal **creates** it (`lakebase_service.create_instance`) | ✅ yes — tag at create |
-| **Vector Search endpoint** | Kasal **creates** it (`databricks_vector_endpoint_repository.create_endpoint`) | ✅ yes — tag at create |
+| **Lakebase instance** | Kasal **creates** it (`services/databricks/lakebase/service.py::create_instance`) | ✅ yes — tag at create |
+| **Vector Search endpoint** | Kasal used to create it; today it only lists existing endpoints | Not applicable (see step 2) |
 | **Databricks App** (Kasal itself) | deployed via bundle | ✅ yes — tag in `app.yaml` / bundle |
 | **Model serving / LLM** | Kasal only **connects** to shared `databricks-*` endpoints | ❌ **no** — not ours to tag → use the HTTP-header token→$ path instead |
 | Connect-to-**existing** Lakebase/VS | Kasal didn't create it | ❌ no — can't tag another owner's resource |
@@ -43,7 +46,7 @@ Add to `src/utils/telemetry.py` (next to `KASAL_BASE`):
 KASAL_RESOURCE_TAGS = {"app": "kasal", "created_by": "kasal"}
 ```
 
-### 1. Lakebase instance — `services/lakebase_service.py::create_instance` (~L359)
+### 1. Lakebase instance — `services/databricks/lakebase/service.py::create_instance` (~L389)
 `DatabaseInstance` accepts `custom_tags` (verify against the installed
 `databricks-sdk` version; the field may be `custom_tags: Dict[str,str]`). Change:
 ```python
@@ -61,8 +64,8 @@ instance = w.database.create_database_instance(
 If the SDK's `DatabaseInstance` has no `custom_tags`, tag via the update/patch API
 after creation, or fall back to a budget policy (below).
 
-### 2. Vector Search endpoint — `repositories/databricks_vector_endpoint_repository.py::create_endpoint` (~L36)
-The endpoint is created by a raw REST `payload`. Add tags to the body (confirm the
+### 2. Vector Search endpoint (no longer applies)
+Kasal no longer creates Vector Search endpoints: the vector-endpoint repository this step targeted has been removed, and the code now only lists existing endpoints. Keep this step only if endpoint creation returns. As originally written, the endpoint was created by a raw REST `payload`. Add tags to the body (confirm the
 `/api/2.0/vector-search/endpoints` create schema supports `custom_tags`):
 ```python
 from src.utils.telemetry import KASAL_RESOURCE_TAGS

@@ -41,8 +41,8 @@ class DataInputHandler:
         self.mv_parser = UCMetricsViewParser(metrics_view_path)
         self.table_mapping_parser = MeasureTableMappingParser(table_mapping_path)
         self.dax_parser = DAXExpressionParser()
-        self._yaml_measures_cache = None
-        self._dax_measures_cache = None
+        self._yaml_measures_cache: Optional[List[Dict]] = None
+        self._dax_measures_cache: Optional[List[Dict]] = None
 
     def get_yaml_measure(self, measure_name: str) -> Optional[Dict]:
         """
@@ -77,17 +77,6 @@ class DataInputHandler:
         if not measure_name:
             raise ValueError("measure_name cannot be None or empty")
         return self.table_mapping_parser.get_measure_by_name(measure_name)
-
-    def get_all_yaml_measures(self) -> List[Dict]:
-        """
-        Get all measures from the metrics view YAML.
-
-        Returns:
-            List of measure dictionaries (empty list if none found)
-        """
-        if self._yaml_measures_cache is None:
-            self._yaml_measures_cache = self.mv_parser.extract_measures()
-        return self._yaml_measures_cache
 
     def get_all_dax_measures(self) -> List[Dict]:
         """

@@ -135,7 +135,7 @@ class CrewSkipPolicy:
         names: Dict[int, Optional[str]] = {}
         sequence = 0
 
-        def note(seq, name, task_ids, tasks):
+        def note(seq: int, name: Optional[str], task_ids: Any, tasks: Any) -> None:
             names[seq] = name
             for task_id in task_ids or []:
                 owner_of_task[str(task_id)] = seq
@@ -208,7 +208,7 @@ class CrewSkipPolicy:
 
 
 def _identity_changed(
-    crew_name: Optional[str], crew_tasks: Any, identities: Dict[str, Any]
+    crew_name: Optional[str], crew_tasks: Any, identities: Dict[Any, Any]
 ) -> bool:
     """Whether this crew is verifiably different from the one checkpointed.
 

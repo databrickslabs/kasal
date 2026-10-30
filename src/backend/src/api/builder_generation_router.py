@@ -2,9 +2,11 @@
 
 import asyncio
 import logging
+from typing import Union
 
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import check_role_in_context
@@ -15,13 +17,17 @@ from src.schemas.dispatcher import DispatcherRequest
 from src.schemas.flow_generation import FlowGenerationRequest
 from src.services.execution import generation_run
 from src.services.generation.builder import BuilderGenerationService
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/builder-generations", tags=["builder-generations"])
 _tasks: set[asyncio.Task] = set()
+_BuilderRequest = Union[DispatcherRequest, FlowGenerationRequest]
 
 
-async def _generate(mode, request, group_context, job_id):
+async def _generate(
+    mode: str, request: _BuilderRequest, group_context: GroupContext, job_id: str
+) -> None:
     # This background entry point owns a fresh routed session. Never pass the
     # request session to a worker that outlives the HTTP response.
     from src.db.session import routed_scoped_session
@@ -46,7 +52,12 @@ async def _generate(mode, request, group_context, job_id):
         await generation_run.close_run(job_id, error=str(exc))
 
 
-async def _start(mode, request, group_context, session):
+async def _start(
+    mode: str,
+    request: _BuilderRequest,
+    group_context: GroupContext,
+    session: AsyncSession,
+) -> CrewStreamingResponse:
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can design crews and flows")
     job_id = await BuilderGenerationService(session).open(mode, request, group_context)
@@ -60,7 +71,7 @@ async def _start(mode, request, group_context, session):
 @router.post("/crew", response_model=CrewStreamingResponse, status_code=202)
 async def start_crew(
     request: DispatcherRequest, group_context: GroupContextDep, session: SessionDep
-):
+) -> CrewStreamingResponse:
     # A builder turn designs a crew; it must never auto-run a Chat answer.
     return await _start(
         "crew",
@@ -73,5 +84,5 @@ async def start_crew(
 @router.post("/flow", response_model=CrewStreamingResponse, status_code=202)
 async def start_flow(
     request: FlowGenerationRequest, group_context: GroupContextDep, session: SessionDep
-):
+) -> CrewStreamingResponse:
     return await _start("flow", request, group_context, session)

@@ -2,17 +2,20 @@
 
 The routes this platform actually serves, grouped by domain.
 
-**This document is a map, not a contract.** The app exposes **444 routes across
-53 domains** — more than a hand-written page can carry without going stale, which
+**This document is a map, not a contract.** The app exposes **430 routes across
+52 domains** — more than a hand-written page can carry without going stale, which
 is exactly what happened to the previous version of this file (24 of its 63
 documented endpoints did not exist, including a `/crews/{id}/kickoff` pair that
 was never how a crew ran). The authoritative, always-current reference is the
 OpenAPI schema the app generates from its own routers:
 
 ```text
-GET /docs          # Swagger UI
-GET /openapi.json  # the machine-readable schema
+GET /api-docs          # Swagger UI
+GET /api-openapi.json  # the machine-readable schema
 ```
+
+Both are served at the domain root (not under `/api/v1`) and only while
+`DOCS_ENABLED` is true.
 
 When those two disagree with this page, the schema is right. See
 [Keeping this page honest](#keeping-this-page-honest) for the check.
@@ -45,6 +48,7 @@ Every path below is relative to that prefix.
 - [API keys](#api-keys)
 - [Schedules](#schedules)
 - [Engine configuration](#engine-configuration)
+- [Decision model](#decision-model)
 - [Other domains](#other-domains)
 - [Conventions](#conventions)
 - [Rate limiting](#rate-limiting)
@@ -58,30 +62,61 @@ Every path below is relative to that prefix.
 `/auth/login`, no refresh tokens, no session to establish. Identity arrives on
 each request as headers, set by whatever fronts the app.
 
-Under **Databricks Apps**, the platform sets them for you:
+Which headers are trusted depends on where the app runs:
 
-| Header | Carries |
-| --- | --- |
-| `X-Forwarded-Email` | The caller's identity; the group (teamspace) is derived from it |
-| `X-Forwarded-Access-Token` | The user's Databricks OAuth token, used for on-behalf-of calls |
+| Deployment | Trusted headers | Notes |
+| --- | --- | --- |
+| Databricks Apps | `X-Forwarded-Email`, `X-Forwarded-User`, `X-Forwarded-Access-Token` | Set by the platform proxy. `X-Auth-Request-*` headers are **stripped** by `UntrustedIdentityHeadersMiddleware` before any route sees them, because inside Apps they can only come from the client |
+| oauth2-proxy or a local run | `X-Auth-Request-Email`, `X-Auth-Request-User`, `X-Auth-Request-Access-Token`, then `X-Forwarded-*` as the fallback | `X-Auth-Request-*` wins when both are present |
 
-Behind an **OAuth2 proxy**, the equivalents are read too: `X-Auth-Request-Email`,
-`X-Auth-Request-User`, `X-Auth-Request-Access-Token`.
+The email identifies the caller; `X-Forwarded-User` is carried but never used as
+the email. The access token is used for on-behalf-of calls to Databricks.
 
-Two optional headers override the derived context:
+Two optional headers select the workspace (teamspace):
 
 | Header | Effect |
 | --- | --- |
-| `group_id` | Act in a specific teamspace rather than the default one for the email |
+| `group_id` | Act in a specific teamspace rather than the default one for the email; it must be one of your memberships |
 | `X-Group-Domain` | Select the group by email domain |
 
 A plain `Authorization: Bearer <token>` is also accepted as a source of the
-access token, but it does **not** by itself establish identity — the email
-header is what determines the group, and group context is what every
-tenant-scoped endpoint filters on.
+access token for Databricks calls, but it does **not** establish identity.
 
-See `src/backend/src/core/dependencies.py` (`get_group_context`) and
-`src/backend/src/utils/user_context.py`.
+**Requests without an identity are refused.** Every protected route depends on
+`get_group_context`, which fails closed:
+
+| Condition | Status |
+| --- | --- |
+| No trusted identity header | `401` |
+| An identity that maps to no workspace (for example a name without `@`) | `401` |
+| `group_id` is not one of your workspaces, or cannot be resolved | `403`, with fixed detail text (below) |
+| The workspace resolver fails unexpectedly | `503` (retry) |
+
+A `403` from this check never echoes the requested group or the resolver's
+reason. Its `detail` is one of two fixed strings: `Access denied: no access to
+group` when `group_id` is not one of your workspaces (the frontend matches this
+phrase to drop a stale saved workspace), or `Access denied: workspace could not
+be resolved` for any other refusal. The reason is logged server-side.
+
+Only public routes such as the health checks skip this dependency.
+
+**Local development.** With `LOCAL_DEV_AUTH=true` (which `run.sh` sets), a
+request that carries no identity header runs as `dev@localhost`. The flag is ignored inside Databricks Apps and when
+`ENVIRONMENT=production`. If you start `uvicorn` yourself without it, every API
+call returns `401` unless you send an identity header:
+
+```bash
+curl -H "X-Forwarded-Email: dev@example.com" http://localhost:8000/api/v1/crews
+```
+
+Browser `EventSource` streams cannot set headers, so on loopback only (outside
+Apps and production, `/sse/` paths only) the SSE routes also accept
+`_sse_email` and `_sse_group_id` query parameters. A header identity always wins.
+
+See `src/backend/src/utils/request_identity.py`,
+`src/backend/src/dependencies/providers.py` (`get_group_context`) and the
+middleware in `src/backend/src/main.py`. For the per-route role checks, see
+[authorization boundaries](./SECURITY.md#authorization-boundaries).
 
 ---
 
@@ -106,6 +141,26 @@ see [Executions](#executions).
 | `POST` | `/crews/{crew_id}/publish` | Publish (e.g. to chat) |
 | `PATCH` | `/crews/{crew_id}/publish` | Change a publication |
 | `DELETE` | `/crews/{crew_id}/publish` | Unpublish |
+
+A crew that runs without the canvas (published over MCP or A2A, started by an
+event trigger, or resumed) is rebuilt from its saved agents and tasks. Each task
+runs on the agent its agent-to-task edge on the canvas comes from, as in a canvas
+run; the task's `agent_id` is used only for a task with no edge.
+
+**Release notes:**
+
+- These runs used to read `agent_id` alone, so a task whose `agent_id` had been
+  cleared ran on the crew's first agent. Where a task's edge and its `agent_id`
+  disagree, the agent on the edge now runs the task. With several agent edges
+  into one task, the last one wins, as in a canvas run.
+- In the Agent Builder catalog, clicking a crew opens that crew rather than a
+  copy of its agents and tasks; **Open as copy** on the card starts a new crew
+  from it.
+- A crew opened from the catalog is edited live: saving a task or agent form
+  changes the saved crew, and any publication of it, at once, without pressing
+  Save. Saving it under a new name is refused, because the two crews would share
+  their agents and tasks; use **Update catalog** to save it, or **Open as copy**
+  to start a new crew.
 
 Export lives on its own router: see [Other domains](#other-domains).
 
@@ -146,6 +201,12 @@ Export lives on its own router: see [Other domains](#other-domains).
 `output_pydantic` / `output_json` for structured output, `guardrail`,
 `human_input`, `async_execution`.
 
+`PUT /tasks/{task_id}` changes only the fields it is sent. A `config` that is
+sent replaces the stored one, and the root `output_pydantic`, `output_json`,
+`output_file`, `callback` and `guardrail` columns follow it; when none is sent
+the stored `config` is kept.
+`agent_id: ""` is read as "not provided" and leaves the assignment unchanged.
+
 ---
 
 ## Flows
@@ -175,8 +236,8 @@ configuration — there is no per-crew run endpoint.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `POST` | `/executions` | Start a run (crew or flow) and return its `execution_id` |
-| `GET` | `/executions` | List runs (`limit` 1–100, default 50; `offset`) |
-| `GET` | `/executions/{execution_id}` | Full record including the result |
+| `GET` | `/executions` | List runs as summary rows (`limit` 1–100, default 50; `offset`; `include_payload`) |
+| `GET` | `/executions/{execution_id}` | Full record including `result` and `inputs` |
 | `GET` | `/executions/{execution_id}/status` | Status only — the polling endpoint |
 | `POST` | `/executions/{execution_id}/stop` | Ask a run to stop |
 | `POST` | `/executions/{execution_id}/force-stop` | Kill it |
@@ -189,6 +250,26 @@ configuration — there is no per-crew run endpoint.
 
 **Status values:** `PENDING`, `PREPARING`, `RUNNING`, `COMPLETED`, `FAILED`,
 `CANCELLED`, `STOPPED`.
+
+**List rows are summaries.** `GET /executions` returns each run without its
+`result` and `inputs`: ids, status, timestamps, run name, error, group,
+execution type, harness, flow and crew ids, the MLflow and checkpoint fields,
+the model, and `result_preview`, the first 280 characters of the serialized
+result. Read `GET /executions/{execution_id}` for the full result, or pass
+`?include_payload=true` to get full rows in bulk.
+
+**`inputs` is the run's configuration, never its credentials.** The access
+token a run uses is not stored with the run and is not returned by these
+endpoints. A resumed run uses the token of the request that resumes it.
+
+**Over the concurrent-run limit, a run queues.** Crew and flow runs share one
+limit per server process (see [run concurrency limit](#run-concurrency-limit)).
+A run started while every slot is in use is still accepted: its status is
+`PENDING` with a message such as `Queued: all 16 run slots are in use (position
+2). The run starts when a slot frees.` Queued runs start first in, first out,
+and switch to `RUNNING` when admitted. `POST /executions/{execution_id}/stop`
+on a queued run removes it from the queue, so it never starts. A run's timeout
+counts from when its process starts, not from when it was queued.
 
 There is **no `/executions/{id}/logs`**. Per-step detail is in the traces
 (below); process logs are streamed over SSE.
@@ -231,20 +312,42 @@ from `GET /crews/{crew_id}`) — or use the UI, which does exactly this.
 To run a **flow**, POST the same endpoint with `execution_type: "flow"` and
 either `flow_id` or an inline `nodes` / `edges` definition.
 
+### Letting the decision model choose the model
+
+`"model": "auto"` (on `POST /executions`, in an agent's `llm`, or on
+`POST /dispatcher/dispatch`) asks the workspace's decision model to pick one of
+its enabled models. The server replaces it before the run starts; if the
+decision model is off or unsure, the workspace default model is used. The
+response then carries `model_selection`:
+
+```json
+{"requested": "auto", "model": "databricks-claude-opus-5-5", "status": "selected"}
+```
+
+`status` is `selected` or `fallback`; `model_selection` is `null` (or absent on
+dispatch) when the request named a model. `GET /decision-config` returns
+`available: true` when Auto can be used in the workspace. See
+[Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto).
+
 ---
 
 ## Execution history
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/executions/history` | Paged run history for the teamspace |
-| `GET` | `/executions/history/{execution_id}` | One historical run |
-| `DELETE` | `/executions/history/{execution_id}` | Delete one |
-| `DELETE` | `/executions/history` | Delete all history for the teamspace |
-| `GET` | `/executions/history/all-groups` | Across teamspaces (admin) |
+| `GET` | `/executions/history` | Paged run history for the teamspace, as summary rows (`include_payload`) |
+| `GET` | `/executions/history/{execution_id}` | One historical run, including `result`, `input`, `agents_yaml` and `tasks_yaml` |
+| `DELETE` | `/executions/history/{execution_id}` | Delete one (editors and admins) |
+| `DELETE` | `/executions/history` | Delete all history for the selected teamspace (admins, or anyone in their own personal workspace; `400` with no single teamspace selected) |
+| `GET` | `/executions/history/all-groups` | Across teamspaces (admin), as summary rows (`include_payload`) |
 | `GET` | `/executions/{execution_id}/outputs` | Task outputs recorded for a run |
 | `PATCH` | `/executions/{job_id}/result` | Amend a stored result |
-| `DELETE` | `/executions/{job_id}` | Delete a run record |
+| `DELETE` | `/executions/{job_id}` | Delete a run record (editors and admins) |
+
+Like `GET /executions`, the two history list endpoints omit `result`, `input`,
+`agents_yaml` and `tasks_yaml` from each row and return `result_preview`
+instead. Add `?include_payload=true` for full rows, or read one run from
+`GET /executions/history/{execution_id}`.
 
 ---
 
@@ -255,8 +358,7 @@ Per-agent, per-task and per-tool events for a run — what the timeline renders.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/traces/` | List traces |
-| `POST` | `/traces/` | Record a trace |
-| `DELETE` | `/traces/` | Delete traces |
+| `DELETE` | `/traces/` | Delete every trace in the selected teamspace (same rule as `DELETE /executions/history`) |
 | `GET` | `/traces/{trace_id}` | One trace row |
 | `DELETE` | `/traces/{trace_id}` | Delete one |
 | `GET` | `/traces/job/{job_id}` | Every trace for a run (`limit`, `offset`) |
@@ -267,6 +369,9 @@ Per-agent, per-task and per-tool events for a run — what the timeline renders.
 | `DELETE` | `/traces/execution/{run_id}` | Delete by numeric run id |
 
 Note the trailing slash on the collection routes.
+
+There is no `POST /traces/`. Runs write their own traces; the API only reads and
+deletes them.
 
 ---
 
@@ -279,10 +384,10 @@ Note the trailing slash on the collection routes.
 | `GET` | `/tools/global` | Globally available tools |
 | `POST` | `/tools/` | Create a tool |
 | `GET` | `/tools/{tool_id}` | Get a tool |
-| `PUT` | `/tools/{tool_id}` | Update a tool |
-| `DELETE` | `/tools/{tool_id}` | Delete a tool |
+| `PUT` | `/tools/{tool_id}` | Update a tool (a global tool: system admins only) |
+| `DELETE` | `/tools/{tool_id}` | Delete a tool (a global tool: system admins only) |
 | `PATCH` | `/tools/{tool_id}/toggle-enabled` | Enable / disable — **not** `/enable` or `/disable` |
-| `PATCH` | `/tools/{tool_id}/global-availability` | Make available to every teamspace |
+| `PATCH` | `/tools/{tool_id}/global-availability` | Make available to every teamspace (system admins only) |
 | `GET` | `/tools/configurations/all` | Every tool configuration |
 | `GET` | `/tools/configurations/{tool_name}` | One tool's configuration |
 | `PUT` | `/tools/configurations/{tool_name}` | Update it |
@@ -306,6 +411,11 @@ Keyed by **model key** (e.g. `databricks-llama-4-maverick`), not a numeric id.
 | `PATCH` | `/models/global/{model_key}/toggle` | Toggle globally |
 | `POST` | `/models/enable-all` | Enable every model |
 | `POST` | `/models/disable-all` | Disable every model |
+
+Model rows are one global catalog shared by every workspace, so create, update,
+delete, enable-all, disable-all and the global toggle are **system-admin only**
+(`403` otherwise). Workspace admins use `PATCH /models/{model_key}/toggle`,
+which writes a per-workspace override instead of the shared row.
 
 There is no `/models/test`. Provider reachability is checked through
 `/databricks/...` and the connection endpoints.
@@ -343,6 +453,31 @@ Commonly set: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SERPER_API_KEY`,
 | `GET`/`POST` | `/schedules/jobs` | Databricks job bindings |
 | `PUT` | `/schedules/jobs/{job_id}` | Update a job binding |
 
+**Timezone.** A schedule's cron line is read in its `timezone`, an IANA name
+such as `Europe/Berlin`. The schedule dialogs send the browser's timezone, so
+"every day at 09:00" means 09:00 where the user is: 07:00 UTC in summer and
+08:00 UTC in winter for Berlin. `next_run_at` and `last_run_at` stay naive UTC.
+A schedule with no timezone (every schedule saved before the field existed, or
+one created through the API without it) is read on the server's clock, which is
+UTC on Databricks Apps. An unknown timezone name is rejected with a 422.
+
+**What a schedule from a past run runs.** `POST /schedules/from-execution`
+schedules what the run was built from, not the run's stored copy, because that
+copy is masked (`***REDACTED***` in place of every secret):
+
+- A run of a saved crew stores the crew's `crew_id`. Each scheduled run is
+  rebuilt from the crew as it is then, and records that `crew_id`, so
+  emit-on-completion rules match it. `agents_yaml`/`tasks_yaml` on the schedule
+  are a masked copy for display.
+- A run of a saved flow stores the flow's `flow_id` and no nodes, so each run
+  loads the saved flow.
+- A run with neither (a chat answer, an unsaved canvas) keeps its stored copy.
+  If masking removed something from it, the request is refused with a 400 that
+  says so.
+
+`PUT /schedules/{schedule_id}` changes only the fields it is sent. A flow
+schedule's edit must still send `execution_type: "flow"`.
+
 A scheduled run names no harness, so it takes the configured default — see
 below.
 
@@ -361,7 +496,56 @@ A run's harness is decided once, at creation, and recorded on its row; changing
 this setting never re-points a run already under way.
 
 The same router also carries the rest of `engine-config` (16 routes) —
-`flow_enabled`, OpenTelemetry switches and similar.
+`flow_enabled`, OpenTelemetry switches and similar. Creating or changing a row
+requires a system admin (`403` otherwise).
+
+### Run concurrency limit
+
+Crew and flow runs share one concurrent-run limit per server process, read from
+the engine-config row `engine_name="kasal"`, `config_key="max_concurrent_runs"`.
+With no row, or a disabled or non-integer one, the limit is 16. A value above 16
+is capped at 16, the size of the thread pools each live run holds a thread in,
+and a value below 1 counts as 1. The value is re-read at most every 30 seconds,
+so a change applies to runs admitted after that.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/engine-config` | Create the row: `engine_name`, `engine_type`, `config_key`, `config_value` (a string), optional `enabled` and `description` |
+| `GET` | `/engine-config/engine/kasal/config/max_concurrent_runs` | Read it (`404` when unset) |
+| `PATCH` | `/engine-config/engine/kasal/config/max_concurrent_runs/value` | Change the value: `{"config_value": "8"}` |
+
+To set the limit to 8 the first time:
+
+```bash
+curl -X POST https://<your-app>.databricksapps.com/api/v1/engine-config \
+  -H "Content-Type: application/json" \
+  -H "X-Forwarded-Email: admin@example.com" \
+  -d '{"engine_name": "kasal", "engine_type": "system", "config_key": "max_concurrent_runs", "config_value": "8"}'
+```
+
+For what a queued run looks like, see [Executions](#executions).
+
+---
+
+## Decision model
+
+The authenticated workspace's opt-in to the external decision model. The
+provider's base URL is a system setting (`jev_api_base`, through
+`GET`/`PATCH /engine-config/settings`), and the provider key is the workspace's
+`JEV_API_KEY` under [API keys](#api-keys); neither is set here.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/decision-config` | This workspace's switch: `{"enabled": bool, "api_key_configured": bool}` |
+| `PUT` | `/decision-config` | Turn it on or off: `{"enabled": true}`. Workspace admins only (`403` otherwise) |
+| `POST` | `/decision-config/recommend` | Model and effort advice for a task: `{"prompt": "..."}` (1 to 12,000 characters) returns `{"model": "<model key or null>", "effort": "<profile or null>"}` |
+
+`PUT` with `enabled: true` answers `400` when no provider URL is set on the
+deployment or the workspace has no `JEV_API_KEY`, and `409` when a concurrent
+save created the row first. `recommend` needs workspace membership only; it
+returns both fields `null` when the model abstains or the decision model is not
+available, and never changes a run's model or effort. For what the decision
+model decides and sends, see [Decision model](./DECISION_MODEL.md).
 
 ---
 
@@ -374,20 +558,19 @@ in the OpenAPI schema rather than repeated here:
 | --- | --- | --- |
 | `memory-backend` | 22 | Memory backends, Databricks Vector Search, indices |
 | `database-management` | 21 | Connections, migrations, maintenance |
-| `mcp` | 20 | MCP servers, tools, connection testing |
-| `converters` | 18 | Document and format conversion |
+| `mcp` | 20 | MCP servers, tools, connection testing; the Databricks MCP catalog and the admin-only `POST /mcp/databricks/migrate-external-urls` |
+| `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`); creating a template configuration (`is_template: true`), or updating or deleting one, is system-admin only |
 | `chat-history` | 16 | Chat sessions and their messages |
 | `prompt optimization` | 15 | GEPA prompt optimisation |
-| `databricks-secrets` | 14 | Secret scopes and values |
 | `powerbi` | 14 | Semantic models, business mappings, field synonyms, query |
 | `groups` | 12 | Teamspaces and membership |
 | `Human in the Loop` | 10 | Approval gates for tool calls |
-| `skills` | 10 | Skill definitions attached to agents |
+| `skills` | 16 | Skill definitions attached to agents; `POST /skills/drafts` drafts one with an LLM as a traced run (see [LLM architecture](./LLM_ARCHITECTURE.md#tracing-a-standalone-generation-call)) |
 | `templates` | 9 | Prompt templates |
 | `mlflow` | 9 | Experiments, traces, evaluation |
-| `databricks` | 9 | Workspace configuration and auth |
+| `databricks` | 9 | Workspace configuration and auth. `POST /databricks/config` refuses a `workspace_url` that is not `https` or whose host is not the credentialed workspace (`403`); the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for that same workspace |
 | `a2a` / `a2a-agents` | 17 | Agent-to-agent protocol |
-| `crews-export` | 8 | Export a crew as a standalone Databricks App |
+| `crews-export` | 8 | Export a crew as a standalone Databricks App or Model Serving endpoint. `GET /crews/{crew_id}/deployment/status` (editors and admins) and `DELETE /crews/{crew_id}/deployment/{endpoint_name}` (admins) only act on an endpoint that serves that crew in your group, and answer `404` for any other |
 | `users` | 7 | Users and permissions |
 | `Server-Sent Events` | 6 | Live run streaming |
 | `schemas` | 6 | Structured-output schema definitions |
@@ -411,9 +594,12 @@ returns a JSON array (or an object with the collection plus paging fields, e.g.
 { "detail": "Human-readable message" }
 ```
 
-with the meaning in the HTTP status: `400` invalid input, `403` outside your
-group, `404` unknown id, `409` conflict, `422` schema validation, `500` server
-error.
+with the meaning in the HTTP status: `400` invalid input, `401` no identity,
+`403` not permitted (wrong role, or a `group_id` you do not belong to), `404`
+unknown id (tenant-scoped lookups also answer `404` for another group's
+resource, so ids do not leak across tenants), `409` conflict, `422` schema validation, `500` server error, `503` a
+dependency such as the workspace resolver or the Databricks connection is
+unavailable.
 
 **Paging** is `limit` + `offset`, not `page`. Where a cap exists it is stated on
 the route — `/executions` allows `limit` 1–100 (default 50). Endpoints without
@@ -430,10 +616,9 @@ Per identity (group, falling back to client IP), applied only to the `/api/`
 surface. SSE streams and health checks are exempt so a long-lived stream cannot
 exhaust a window.
 
-| Setting | Default |
-| --- | --- |
-| `RATE_LIMIT_DEFAULT` | `600/minute` |
-| `RATE_LIMIT_STORAGE_URI` | in-memory |
+The limit is `600/minute`, counted in memory (a Databricks App runs one
+instance). It is a constant in `src/backend/src/core/rate_limit.py`, not an
+environment variable.
 
 Exceeding it returns `429`. If the `limits` package is not installed the
 middleware is a no-op — there is no limiting at all, rather than a stricter
@@ -453,12 +638,27 @@ cd src/backend
 uv run python - <<'PY'
 from src.api import api_router
 from src.config.settings import settings
-for r in sorted(api_router.routes, key=lambda r: getattr(r, "path", "")):
-    for m in sorted(getattr(r, "methods", set()) - {"HEAD", "OPTIONS"}):
-        print(f"{m:7} {settings.API_V1_STR}{r.path}")
+
+
+def walk(routes, prefix=""):
+    for r in routes:
+        inner = getattr(r, "original_router", None)  # an included router
+        if inner is not None:
+            yield from walk(inner.routes, prefix + r.include_context.prefix)
+            continue
+        for m in getattr(r, "methods", None) or ():
+            if m not in ("HEAD", "OPTIONS"):
+                yield m, prefix + r.path
+
+
+for m, p in sorted(walk(api_router.routes), key=lambda x: (x[1], x[0])):
+    print(f"{m:7} {settings.API_V1_STR}{p}")
 PY
 ```
 
+FastAPI wraps each included router, so `api_router.routes` holds wrappers rather
+than routes; iterating it directly prints nothing, which reads as a clean check.
+
 Anything in this document that is not in that output does not exist. When they
-disagree, fix the document — and prefer sending people to `/docs`, which cannot
-drift.
+disagree, fix the document — and prefer sending people to `/api-docs`, which
+cannot drift.

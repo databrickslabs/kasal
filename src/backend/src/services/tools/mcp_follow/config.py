@@ -24,7 +24,7 @@ preset data — the engine itself knows no server by name.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import AbstractSet, Any, Dict, List, Optional, Tuple
 
 from src.services.tools.mcp_follow.runner import FollowSpec
 
@@ -164,19 +164,26 @@ def follow_spec_from_config(wrapper: Any, result: Any) -> Optional[FollowSpec]:
         interval_seconds = _positive_number(pair.get("interval_seconds"))
         done_fields = [str(f) for f in (pair.get("done_fields") or DEFAULT_DONE_FIELDS)]
 
-        def is_final(envelope: dict, _terminal=terminal, _done=done_fields) -> bool:
+        def is_final(
+            envelope: dict,
+            _terminal: AbstractSet[str] = terminal,
+            _done: List[str] = done_fields,
+        ) -> bool:
             if str(envelope.get("status") or "").upper() in _terminal:
                 return True
             return any(envelope.get(field) not in (None, "") for field in _done)
+
+        def poll_params_of(
+            envelope: dict, _ids: Tuple[str, ...] = tuple(id_params)
+        ) -> Dict[str, Any]:
+            return _poll_params(envelope, list(_ids))
 
         return FollowSpec(
             name=str(pair.get("name") or start),
             poll_tool=poll_tool,
             envelope_of=status_envelope,
             is_final=is_final,
-            poll_params_of=lambda envelope, _ids=tuple(id_params): _poll_params(
-                envelope, list(_ids)
-            ),
+            poll_params_of=poll_params_of,
             has_content=result_has_content,
             cancel_tool=cancel_tool,
             timeout_seconds=timeout_seconds,

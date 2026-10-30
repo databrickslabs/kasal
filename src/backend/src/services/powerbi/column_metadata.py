@@ -22,7 +22,11 @@ model, exactly as the reconciliation framework's own
 
 from __future__ import annotations
 
+import logging
+
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -35,7 +39,8 @@ def _row_get(row: dict, col: str, default: str = "") -> str:
     — tolerant of the Execute Queries API's bracketed-or-not column keys."""
     for key in (f"[{col}]", col):
         if key in row and row[key] is not None:
-            return row[key]
+            value: str = row[key]
+            return value
     return default
 
 
@@ -72,7 +77,10 @@ def extract_column_summarize_by(
             return {}
         data = resp.json()
         rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
-    except Exception:
+    except Exception:  # fail-open: metadata only enriches measure coverage
+        logger.warning(
+            "Column SummarizeBy lookup failed; continuing without it", exc_info=True
+        )
         return {}
 
     out: dict[str, dict[str, str]] = {}

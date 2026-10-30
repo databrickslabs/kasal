@@ -1751,10 +1751,12 @@ async def test_memory_events_for_other_run_memory_are_ignored():
 # ---------------------------------------------------------------------------
 #
 # The light agent wraps kickoff in an MLflow root trace (same mechanism as
-# crew/flow's execute_with_mlflow_trace → start_root_trace) so its LLM spans land
-# in MLflow grouped under one named trace. CHAT-ONLY: it also tags the trace with
-# the chat session_id (+ user) via MLflow's session metadata keys so a
-# conversation's turns group into one MLflow session.
+# crew/flow's execute_with_mlflow_trace → start_root_trace) so the turn lands in
+# MLflow as one named trace. CHAT-ONLY: it also tags the trace with the chat
+# session_id (+ user) via MLflow's session metadata keys so a conversation's
+# turns group into one MLflow session. The setup is the parent-process one
+# (configure_parent_mlflow_tracing); where the trace lands when turns overlap
+# is covered by test_turn_trace_destination.py.
 
 from contextlib import contextmanager  # noqa: E402
 
@@ -1763,46 +1765,29 @@ from src.services.chat.service import (  # noqa: E402
 )
 
 
-def _mlflow_result(
-    tracing_ready=True,
-    experiment_name="/Shared/kasal-crew-execution-traces-uc",
-    enabled=True,
-):
-    return SimpleNamespace(
-        enabled=enabled,
-        tracing_ready=tracing_ready,
-        experiment_name=experiment_name,
-        uc_trace_storage=True,
-        error=None,
-    )
-
-
 @contextmanager
-def _patch_mlflow_uc_stack(mlflow_result, update_mock):
-    """Patch the light-agent MLflow stack: db config lookup, the EXACT crew/flow
-    setup function (configure_mlflow_in_subprocess) returning ``mlflow_result``,
-    the root-trace context manager, the trace-attribute helpers, and the
-    session-tag API. Yields the configure mock for assertions."""
+def _patch_mlflow_uc_stack(tracing_ready, update_mock):
+    """Patch the light-agent MLflow stack: the parent-process setup returning
+    ``tracing_ready`` (and owning the process binding), the root-trace context
+    manager, the trace-attribute helpers, and the session-tag API. Yields the
+    configure mock for assertions."""
     import mlflow
 
     @contextmanager
     def _fake_trace(name, inputs=None):
         yield MagicMock()
 
-    svc_cls = MagicMock()
-    svc_cls.return_value.get_databricks_config = AsyncMock(
-        return_value=SimpleNamespace(mlflow_enabled=True)
-    )
-    configure_mock = AsyncMock(return_value=mlflow_result)
+    configure_mock = AsyncMock(return_value=tracing_ready)
 
     with (
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch(
-            "src.db.session.async_session_factory", side_effect=lambda: _fake_session()
-        ),
-        patch("src.services.databricks.workspace.service.DatabricksService", svc_cls),
-        patch(
-            "src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess",
+            "src.services.mlflow.mlflow_parent_setup.configure_parent_mlflow_tracing",
             configure_mock,
+        ),
+        patch(
+            "src.services.mlflow.mlflow_parent_setup.owns_process_binding",
+            return_value=True,
         ),
         patch("src.services.mlflow.tracing.start_root_trace", _fake_trace),
         patch("src.services.otel_tracing.mlflow_setup.set_trace_attributes"),
@@ -1824,7 +1809,7 @@ async def test_kickoff_plain_when_mlflow_tracing_not_ready():
     config = SimpleNamespace(model="m", inputs={}, session_id="sess-1")
 
     update_mock = MagicMock()
-    with _patch_mlflow_uc_stack(_mlflow_result(tracing_ready=False), update_mock):
+    with _patch_mlflow_uc_stack(False, update_mock):
         out = await svc._kickoff_with_mlflow_trace(
             agent, "the prompt", config, "exec-1", "ctx", None, "g1"
         )
@@ -1836,7 +1821,7 @@ async def test_kickoff_plain_when_mlflow_tracing_not_ready():
 
 @pytest.mark.asyncio
 async def test_kickoff_traces_and_tags_session():
-    """Tracing ready → runs the crew/flow MLflow setup for the group and tags the
+    """Tracing ready → runs the parent MLflow setup for the group and tags the
     chat session id + user; kickoff runs exactly once."""
     svc = LightAgentService()
     agent = AsyncMock()
@@ -1848,7 +1833,7 @@ async def test_kickoff_traces_and_tags_session():
     )
 
     update_mock = MagicMock()
-    with _patch_mlflow_uc_stack(_mlflow_result(), update_mock) as configure_mock:
+    with _patch_mlflow_uc_stack(True, update_mock) as configure_mock:
         out = await svc._kickoff_with_mlflow_trace(
             agent, "the prompt", config, "exec-1", "ctx", ctx, "g1"
         )
@@ -1856,7 +1841,8 @@ async def test_kickoff_traces_and_tags_session():
     assert out.raw == "hello"
     agent.kickoff_async.assert_awaited_once()
     configure_mock.assert_awaited_once()
-    assert configure_mock.await_args.kwargs.get("group_id") == "g1"
+    assert configure_mock.await_args.args[1] is ctx
+    assert configure_mock.await_args.kwargs.get("label") == "Chat"
     # Chat-only session/user metadata.
     update_mock.assert_called_once()
     md = update_mock.call_args.kwargs.get("metadata")
@@ -1875,7 +1861,7 @@ async def test_kickoff_session_id_from_inputs_fallback():
     )
 
     update_mock = MagicMock()
-    with _patch_mlflow_uc_stack(_mlflow_result(), update_mock):
+    with _patch_mlflow_uc_stack(True, update_mock):
         out = await svc._kickoff_with_mlflow_trace(
             agent, "the prompt", config, "exec-1", "ctx", None, "g1"
         )
@@ -1897,7 +1883,7 @@ async def test_kickoff_no_session_tag_without_session_id():
     config = SimpleNamespace(model="m", inputs={}, session_id=None)
 
     update_mock = MagicMock()
-    with _patch_mlflow_uc_stack(_mlflow_result(), update_mock) as configure_mock:
+    with _patch_mlflow_uc_stack(True, update_mock) as configure_mock:
         out = await svc._kickoff_with_mlflow_trace(
             agent, "the prompt", config, "exec-1", "ctx", None, "g1"
         )
@@ -1909,23 +1895,46 @@ async def test_kickoff_no_session_tag_without_session_id():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer,valid", [
-    ('<section class="slide">Revised</section>', True),
-    ('Research unavailable', False),
-    ('<section class="slide">One</section><section class="slide">Two</section>', False),
-])
+@pytest.mark.parametrize(
+    "answer,valid",
+    [
+        ('<section class="slide">Revised</section>', True),
+        ("Research unavailable", False),
+        (
+            '<section class="slide">One</section><section class="slide">Two</section>',
+            False,
+        ),
+    ],
+)
 @pytest.mark.parametrize("needs_finalization", [False, True])
-async def test_slide_contract_uses_agent_and_only_persists_one_slide(answer, valid, needs_finalization):
+async def test_slide_contract_uses_agent_and_only_persists_one_slide(
+    answer, valid, needs_finalization
+):
     config = make_config(
-        agents_yaml={"editor": {"role": "Slide editor", "goal": "Edit", "backstory": "One slide", "tools": [], "memory": False}},
-        tasks_yaml={"edit": {"description": "Search online then improve the slide", "expected_output": "One slide"}},
+        agents_yaml={
+            "editor": {
+                "role": "Slide editor",
+                "goal": "Edit",
+                "backstory": "One slide",
+                "tools": [],
+                "memory": False,
+            }
+        },
+        tasks_yaml={
+            "edit": {
+                "description": "Search online then improve the slide",
+                "expected_output": "One slide",
+            }
+        },
     )
     config.output_contract = "slide"
     agent = AsyncMock()
     agent.kickoff_async.return_value = SimpleNamespace(raw=answer)
     if needs_finalization:
         agent.kickoff_async.side_effect = [
-            SimpleNamespace(raw="Now I'll create the improved slide with research-backed content:"),
+            SimpleNamespace(
+                raw="Now I'll create the improved slide with research-backed content:"
+            ),
             SimpleNamespace(raw=answer),
         ]
     update = AsyncMock(return_value=True)
@@ -1933,17 +1942,37 @@ async def test_slide_contract_uses_agent_and_only_persists_one_slide(answer, val
         patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch("src.services.settings.api_keys.ApiKeysService"),
-        patch("src.services.tools.tool_factory.ToolFactory.create", new_callable=AsyncMock, return_value=MagicMock()),
-        patch("src.services.execution.kernel.agent_tools.build_agent_with_tools", new_callable=AsyncMock, return_value=agent),
-        patch("src.services.execution.status.ExecutionStatusService.update_status", update),
-        patch("src.services.chat.diagram_directive.apply_diagram_directive") as deck_directive,
-        patch("src.services.a2ui.runner.compose_surface", new_callable=AsyncMock) as compose,
+        patch(
+            "src.services.tools.tool_factory.ToolFactory.create",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=agent,
+        ),
+        patch(
+            "src.services.execution.status.ExecutionStatusService.update_status", update
+        ),
+        patch(
+            "src.services.chat.diagram_directive.apply_diagram_directive"
+        ) as deck_directive,
+        patch(
+            "src.services.a2ui.runner.compose_surface", new_callable=AsyncMock
+        ) as compose,
     ):
-        result = await run_light_agent(f"slide-{uuid.uuid4()}", config, group_context=make_group_context())
-    assert agent.kickoff_async.await_count == (1 if valid and not needs_finalization else 2)
+        result = await run_light_agent(
+            f"slide-{uuid.uuid4()}", config, group_context=make_group_context()
+        )
+    assert agent.kickoff_async.await_count == (
+        1 if valid and not needs_finalization else 2
+    )
     deck_directive.assert_not_called()
     compose.assert_not_awaited()
     assert result["status"] == ("COMPLETED" if valid else "FAILED")
     if valid:
-        completed = [c for c in update.call_args_list if c.kwargs.get("status") == "COMPLETED"]
+        completed = [
+            c for c in update.call_args_list if c.kwargs.get("status") == "COMPLETED"
+        ]
         assert completed[-1].kwargs["result"] == {"section": answer, "model": "gpt-4"}

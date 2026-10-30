@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Typography,
@@ -40,6 +41,7 @@ import {
   ApiKeyUpdate,
  
 } from '../../../../api/index';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 // Extended interfaces for editing with masked values
 interface ApiKeyWithMasked extends ApiKey {
@@ -49,13 +51,19 @@ interface ApiKeyWithMasked extends ApiKey {
 
 import { useAPIKeys } from '../../../../hooks/global/useAPIKeys';
 import { useAPIKeysStore } from '../../../../store/apiKeys';
+import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../../store/user';
 import { NotificationState } from '../../../../types/common';
 
 import { matchesSearch } from './searchApiKeys';
 
 function APIKeys(): JSX.Element {
   const { secrets: apiKeys, loading, error, updateSecrets: updateApiKeys } = useAPIKeys();
-  const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore();
+  const personalGroupId = usePersonalGroupId();
+  const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore(useShallow(state => ({
+    editDialogOpen: state.editDialogOpen,
+    providerToEdit: state.providerToEdit,
+    closeApiKeyEditor: state.closeApiKeyEditor,
+  })));
   const [editDialog, setEditDialog] = useState<boolean>(false);
   const [editingApiKey, setEditingApiKey] = useState<ApiKeyWithMasked | null>(null);
 
@@ -97,9 +105,11 @@ function APIKeys(): JSX.Element {
     'ANTHROPIC_API_KEY',
     'QWEN_API_KEY',
     'DEEPSEEK_API_KEY',
+    'JEV_API_KEY',
     'GROK_API_KEY',
     'GEMINI_API_KEY',
     'KIMI_API_KEY',
+    'OPENROUTER_API_KEY',
     'POWERBI_USERNAME',
     'POWERBI_PASSWORD',
     'POWERBI_CLIENT_SECRET'
@@ -113,9 +123,11 @@ function APIKeys(): JSX.Element {
       'databricks': 'DATABRICKS_API_KEY',
       'qwen': 'QWEN_API_KEY',
       'deepseek': 'DEEPSEEK_API_KEY',
+      'jev': 'JEV_API_KEY',
       'grok': 'GROK_API_KEY',
       'gemini': 'GEMINI_API_KEY',
-      'kimi': 'KIMI_API_KEY'
+      'kimi': 'KIMI_API_KEY',
+      'openrouter': 'OPENROUTER_API_KEY'
     };
     return mapping;
   }, []);
@@ -440,8 +452,8 @@ function APIKeys(): JSX.Element {
 
         {/* Shared Workspace Warning */}
         {(() => {
-          const selectedGroupId = localStorage.getItem('selectedGroupId');
-          const isSharedWorkspace = selectedGroupId && !selectedGroupId.startsWith('user_');
+          const selectedGroupId = getTabGroupId();
+          const isSharedWorkspace = selectedGroupId && !isPersonalWorkspaceId(selectedGroupId, personalGroupId);
 
           if (isSharedWorkspace) {
             return (
@@ -602,4 +614,4 @@ function APIKeys(): JSX.Element {
   );
 }
 
-export default APIKeys; 
+export default APIKeys;

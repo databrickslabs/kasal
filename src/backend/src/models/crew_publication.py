@@ -1,14 +1,8 @@
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    Integer,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -46,41 +40,47 @@ class Publication(Base):
         UniqueConstraint("external_name", "group_id", name="uq_publication_name_group"),
     )
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     #: "crew" | "flow" — which execution path this capability runs on.
-    entity_type = Column(String(16), nullable=False, default="crew", index=True)
+    entity_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="crew", index=True
+    )
     #: The crew id or flow id. Stored as a string because the two use different
     #: id types and this column addresses both.
-    entity_id = Column(String, nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     #: Which external surfaces expose it, e.g. ``["mcp", "a2a"]``. An empty list
     #: keeps the name/description/schema someone wrote while exposing nothing, so
     #: toggling a protocol off does not destroy the publication.
-    protocols = Column(JSON, nullable=False, default=list)
+    protocols: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
 
     #: The MCP tool name / A2A skill id. Stable contract — external clients pin it.
-    external_name = Column(String, nullable=False)
-    description = Column(String, nullable=False)
+    external_name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)
 
     #: JSON Schema for declared inputs. Without one, a per-capability tool is
     #: barely more useful than the generic start_crew.
-    input_schema = Column(JSON, nullable=True)
+    input_schema: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     #: Whether this capability HOLDS A CONVERSATION: follow-up turns go back to
     #: it with the recent transcript instead of being re-matched from scratch.
     #: Set by the publisher. A flow whose state declares `conversational` holds
     #: one whether or not this is set; for a crew this flag is the only way.
-    conversational = Column(Boolean, nullable=True, default=False)
+    conversational: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
 
     #: Tenant isolation. NOT nullable: an unscoped publication is reachable from
     #: outside with no group to filter by, which is the leak this layer exists to
     #: prevent.
-    group_id = Column(String, nullable=False, index=True)
-    created_by_email = Column(String, nullable=True)
+    group_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_by_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     def __repr__(self) -> str:
         return (

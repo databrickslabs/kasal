@@ -35,6 +35,13 @@ from src.repositories.database_backup_repository import DatabaseBackupRepository
 # ---------------------------------------------------------------------------
 
 
+def _bound_to(dialect):
+    """A session whose bind reports ``dialect`` (the database type's source)."""
+    session = MagicMock()
+    session.get_bind.return_value.dialect.name = dialect
+    return session
+
+
 def make_repo(session=None, user_token=None):
     if session is None:
         session = AsyncMock()
@@ -743,8 +750,12 @@ class TestRestorePostgresBackup:
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_restore_postgres_sql_statement_error_continues(self):
-        """restore_postgres_backup continues on individual statement errors."""
+    async def test_restore_postgres_sql_statement_error_rolls_back(self):
+        """A failed statement rolls the restore back and says so.
+
+        It used to log and carry on, reporting success — but PostgreSQL aborts
+        the transaction at the first failure, so nothing after it was restored.
+        """
         repo = make_repo()
 
         sql_content = (
@@ -761,12 +772,16 @@ class TestRestorePostgresBackup:
             side_effect=[MagicMock(), Exception("table not found")]
         )
         session.commit = AsyncMock()
+        session.rollback = AsyncMock()
 
         result = await repo.restore_postgres_backup(
             "cat", "sch", "vol", "backup.sql", session=session
         )
 
-        assert result["success"] is True
+        assert result["success"] is False
+        assert "statement 2" in result["error"]
+        session.rollback.assert_awaited_once()
+        session.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_restore_postgres_json_format(self):
@@ -960,8 +975,8 @@ class TestGetDatabaseInfoExtended:
 
     @pytest.mark.asyncio
     async def test_sqlite_path_from_settings_when_none(self):
-        """get_database_info uses settings.SQLITE_DB_PATH when db_path is None."""
-        repo = make_repo()
+        """A SQLite session with no db_path reads settings.SQLITE_DB_PATH."""
+        repo = make_repo(_bound_to("sqlite"))
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -974,14 +989,9 @@ class TestGetDatabaseInfoExtended:
             conn.close()
 
             # get_database_info internally does `from src.config.settings import settings`
-            # so we must patch the settings object inside that module
-            with (
-                patch(
-                    "src.repositories.database_backup_repository.settings"
-                ) as mock_outer,
-                patch("src.config.settings.settings") as mock_inner_settings,
-            ):
-                mock_outer.DATABASE_URI = "sqlite:///app.db"
+            # so we must patch the settings object inside that module; the
+            # database TYPE comes from the repository's session, not settings.
+            with patch("src.config.settings.settings") as mock_inner_settings:
                 mock_inner_settings.SQLITE_DB_PATH = db_path
 
                 result = await repo.get_database_info(db_path=None, session=None)
@@ -994,13 +1004,9 @@ class TestGetDatabaseInfoExtended:
     @pytest.mark.asyncio
     async def test_sqlite_path_default_fallback(self):
         """get_database_info uses './app.db' fallback when SQLITE_DB_PATH is empty."""
-        repo = make_repo()
+        repo = make_repo(_bound_to("sqlite"))
 
-        with (
-            patch("src.repositories.database_backup_repository.settings") as mock_outer,
-            patch("src.config.settings.settings") as mock_inner,
-        ):
-            mock_outer.DATABASE_URI = "sqlite:///app.db"
+        with patch("src.config.settings.settings") as mock_inner:
             mock_inner.SQLITE_DB_PATH = ""
 
             result = await repo.get_database_info(db_path=None, session=None)
@@ -1012,13 +1018,9 @@ class TestGetDatabaseInfoExtended:
     @pytest.mark.asyncio
     async def test_sqlite_relative_path_made_absolute(self):
         """get_database_info converts relative SQLITE_DB_PATH to absolute path."""
-        repo = make_repo()
+        repo = make_repo(_bound_to("sqlite"))
 
-        with (
-            patch("src.repositories.database_backup_repository.settings") as mock_outer,
-            patch("src.config.settings.settings") as mock_inner,
-        ):
-            mock_outer.DATABASE_URI = "sqlite:///app.db"
+        with patch("src.config.settings.settings") as mock_inner:
             mock_inner.SQLITE_DB_PATH = "nonexistent/relative/app.db"
 
             result = await repo.get_database_info(db_path=None, session=None)
@@ -1163,13 +1165,9 @@ class TestGetDatabaseInfoExtended:
     @pytest.mark.asyncio
     async def test_postgres_unsupported_db_type(self):
         """get_database_info returns error for unsupported database type."""
-        repo = make_repo()
+        repo = make_repo(_bound_to("mysql"))
 
-        with patch(
-            "src.repositories.database_backup_repository.settings"
-        ) as mock_settings:
-            mock_settings.DATABASE_URI = "mysql://user:pass@host/db"
-            result = await repo.get_database_info(db_path=None, session=None)
+        result = await repo.get_database_info(db_path=None, session=None)
 
         assert result["success"] is False
         assert "Unsupported database type" in result["error"]

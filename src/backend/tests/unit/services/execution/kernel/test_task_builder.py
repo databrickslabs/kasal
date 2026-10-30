@@ -13,9 +13,9 @@ from src.services.execution.kernel.task_builder import build_task_args
 from tests.unit.helpers.harness_double import patch_build
 
 GENIE_MCP_URL = (
-    "https://ws.databricks.com/api/2.0/mcp/genie/01f16bcd318214ec8ef983b7627e0221"
+    "https://ws.databricks.com/api/2.0/mcp/genie/01f00000000000000000000000000001"
 )
-GENIE_SPACE_ID = "01f16bcd318214ec8ef983b7627e0221"
+GENIE_SPACE_ID = "01f00000000000000000000000000001"
 
 
 def _agent():

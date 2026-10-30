@@ -7,9 +7,10 @@ until the service decides the row is safely in-flight). See
 """
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import delete, desc, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -149,7 +150,7 @@ class TriggerQueueRepository(BaseRepository[TriggerQueue]):
             )
             .values(status=STATUS_PENDING, claimed_at=None)
         )
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def purge_finished(self, older_than: datetime) -> int:
         """Delete finished rows (``dispatched``/``dead``) created before the
@@ -161,7 +162,7 @@ class TriggerQueueRepository(BaseRepository[TriggerQueue]):
                 TriggerQueue.created_at < older_than,
             )
         )
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     # --------------------------------------------------------------- reads (API)
     async def list_for_groups(

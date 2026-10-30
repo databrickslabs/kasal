@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.services.catalog.templates import TemplateService
 from src.services.execution import generation_run
 from src.services.llm.manager import LLMManager
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 from src.utils.user_context import GroupContext
 
@@ -69,7 +70,7 @@ def run_name(mode: str, instruction: str, position: str) -> str:
         what = what[: _MAX_RUN_NAME - 1].rstrip() + "…"
     head = "New slide" if mode == "add" else "Slide refine"
     where = f" (slide {position})" if position else ""
-    return f"{head}{where}: {what}" if what else f"{head}{where}"
+    return f"{head}{where}: {what}" if what else f"{head}{where}"  # fmt: skip  # display text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
 
 class SlideRefineService:
@@ -208,13 +209,13 @@ def _user_message(
     where = f" (slide {position})" if position else ""
     if mode == "add":
         return (
-            f"MODE: add a new slide{where}\n\n"
+            f"MODE: add a new slide{where}\n\n"  # prompt text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
             f"WHAT THE NEW SLIDE SHOULD COVER:\n{instruction or 'a slide that fits naturally between its neighbours'}\n\n"
             f"THE SLIDE BEFORE IT:\n{before or '(none — this will be the first slide)'}\n\n"
             f"THE SLIDE AFTER IT:\n{after or '(none — this will be the last slide)'}\n"
         )
     return (
-        f"MODE: revise one slide{where}\n\n"
+        f"MODE: revise one slide{where}\n\n"  # prompt text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
         f"INSTRUCTION:\n{instruction}\n\n"
         f"SLIDE TO REVISE:\n{slide}\n\n"
         f"REFERENCE SLIDE (design to match):\n{reference or '(none — keep the slide’s own design)'}\n"
@@ -229,7 +230,8 @@ async def _ask(
     began = time.monotonic()
     content, served = await LLMManager.completion(
         messages=messages,
-        model=model,
+        # No model picked: the engine default, as the other generators do.
+        model=model or DEFAULT_ENGINE_MODEL,
         temperature=0.3,
         max_tokens=6000,
         extra_headers=get_user_agent_header(KasalProduct.DECK_EDIT),

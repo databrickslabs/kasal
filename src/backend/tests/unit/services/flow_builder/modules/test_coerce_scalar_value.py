@@ -22,7 +22,7 @@ def test_false_strings_become_python_false():
 
 def test_string_true_compares_equal_to_bool_after_coercion():
     # The actual router bug: "true" == True is False until coerced.
-    assert ("true" == True) is False  # noqa: E712 — demonstrates the bug
+    assert ("true" == True) is False  # demonstrates the bug
     assert (coerce_scalar_value("true") == True) is True  # noqa: E712
 
 

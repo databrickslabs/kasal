@@ -150,7 +150,7 @@ async def test_create_flow_with_group_crew_not_found():
     # imported it first the patch missed, a real repository was built on the mock
     # session, and result.scalars() came back a coroutine.
     mock_crew_service = AsyncMock()
-    mock_crew_service.get = AsyncMock(return_value=None)
+    mock_crew_service.get_by_group = AsyncMock(return_value=None)
 
     with patch("src.services.flow_builder.flow_service.FlowRepository") as MockFlowRepo:
         flow_repo = AsyncMock()
@@ -165,7 +165,7 @@ async def test_create_flow_with_group_crew_not_found():
             result = await svc.create_flow_with_group(flow_in, group_ctx)
 
     assert result is not None
-    mock_crew_service.get.assert_awaited_once()
+    mock_crew_service.get_by_group.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -177,7 +177,7 @@ async def test_create_flow_with_group_crew_found():
     # See the note above: patch the SERVICE flow_service calls, not the repository.
     mock_crew = MagicMock()
     mock_crew_service = AsyncMock()
-    mock_crew_service.get = AsyncMock(return_value=mock_crew)
+    mock_crew_service.get_by_group = AsyncMock(return_value=mock_crew)
 
     with patch("src.services.flow_builder.flow_service.FlowRepository") as MockFlowRepo:
         flow_repo = AsyncMock()
@@ -192,8 +192,11 @@ async def test_create_flow_with_group_crew_found():
             result = await svc.create_flow_with_group(flow_in, group_ctx)
 
     assert result is not None
-    # FlowCreate coerces crew_id to a UUID, so that is what reaches the service.
-    mock_crew_service.get.assert_awaited_once_with(uuid.UUID(crew_id))
+    # FlowCreate coerces crew_id to a UUID, so that is what reaches the service,
+    # with the caller's context: the crew must be in the flow's workspace.
+    mock_crew_service.get_by_group.assert_awaited_once_with(
+        uuid.UUID(crew_id), group_ctx
+    )
 
 
 @pytest.mark.asyncio
@@ -468,28 +471,6 @@ async def test_delete_all_flows_for_group_error_swallowed():
 # ---------------------------------------------------------------------------
 # get_flows_by_crew
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_get_flows_by_crew_invalid_uuid():
-    svc = make_service()
-    result = await svc.get_flows_by_crew("not-a-valid-uuid")
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_get_flows_by_crew_string_uuid():
-    svc = make_service()
-    crew_id = str(uuid.uuid4())
-
-    with patch("src.services.flow_builder.flow_service.FlowRepository") as MockRepo:
-        mock_repo = AsyncMock()
-        flow = make_flow(crew_id=crew_id)
-        mock_repo.find_by_crew_id = AsyncMock(return_value=[flow])
-        MockRepo.return_value = mock_repo
-
-        result = await svc.get_flows_by_crew(crew_id)
-        assert len(result) == 1
 
 
 # ---------------------------------------------------------------------------

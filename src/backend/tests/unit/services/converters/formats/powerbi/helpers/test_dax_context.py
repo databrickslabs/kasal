@@ -325,24 +325,6 @@ class TestDAXBaseKBIContext:
         assert "FILTER(Sales, status = 'active')" in result
         assert "FILTER(Sales, region = 'US')" in result
 
-    def test_get_dax_constant_selection_expressions_no_fields(self, simple_kbi):
-        """Test get_dax_constant_selection_expressions with no fields"""
-        context = DAXBaseKBIContext(kbi=simple_kbi)
-        result = context.get_dax_constant_selection_expressions("Sales")
-
-        assert result == []
-
-    def test_get_dax_constant_selection_expressions_with_fields(
-        self, kbi_with_constant_selection
-    ):
-        """Test get_dax_constant_selection_expressions generates REMOVEFILTERS"""
-        context = DAXBaseKBIContext(kbi=kbi_with_constant_selection)
-        result = context.get_dax_constant_selection_expressions("Sales")
-
-        assert len(result) == 2
-        assert "REMOVEFILTERS(Sales[month])" in result
-        assert "REMOVEFILTERS(Sales[year])" in result
-
     def test_get_target_columns_for_calculation_no_constant_selection(self, simple_kbi):
         """Test get_target_columns_for_calculation without constant selection"""
         context = DAXBaseKBIContext(kbi=simple_kbi)

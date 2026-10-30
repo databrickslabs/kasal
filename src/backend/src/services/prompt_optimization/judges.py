@@ -18,10 +18,12 @@ from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
+from src.services.prompt_optimization.host import PromptOptimizationHost
 from src.services.prompt_optimization.judge_registry import (
     JudgeRegistry,
     uc_schema_of,
 )
+from src.services.prompt_optimization.labels.review import trace_filter
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -52,7 +54,7 @@ def _judge_link(backend: Any, registry_uri: str) -> Any:
     return lambda prompt_name: tab
 
 
-class JudgeOperationsMixin:
+class JudgeOperationsMixin(PromptOptimizationHost):
     async def list_crew_evals(
         self, crew_id: str, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
@@ -69,7 +71,9 @@ class JudgeOperationsMixin:
                 # too-small page silently hides previously GRADED answers
                 # (observed live — graded traces fell out of a 25-trace page).
                 traces = mlflow.search_traces(
-                    filter_string=f"tags.kasal_crew_id = '{crew_id}'",
+                    filter_string=trace_filter(
+                        crew_id, getattr(group_context, "primary_group_id", None)
+                    ),
                     max_results=200,
                     return_type="list",
                 )
@@ -83,7 +87,7 @@ class JudgeOperationsMixin:
                             break
                     except Exception:
                         pass
-                    assessments = []
+                    assessments: List[Any] = []
                     try:
                         assessments = trace.search_assessments() or []
                     except Exception:
@@ -156,7 +160,7 @@ class JudgeOperationsMixin:
                     mlflow.log_expectation(
                         trace_id=trace_id,
                         name="human_expectation",
-                        value=expectation.strip(),
+                        value=(expectation or "").strip(),
                     )
                 return True
 
@@ -268,7 +272,7 @@ class JudgeOperationsMixin:
             raise ValueError(
                 "Judge creation requires MLflow: a Databricks workspace "
                 "(deployed) or a local MLflow server "
-                "(MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI, for dev)."
+                "(Configuration → MLflow, for development)."
             )
         safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name.strip())
         if not safe_name:

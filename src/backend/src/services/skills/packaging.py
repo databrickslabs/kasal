@@ -109,7 +109,7 @@ def read_zip(data: bytes) -> Tuple[ParsedSkill, List[Dict[str, Any]]]:
 
         try:
             path = normalise_path(relative)
-        except Exception as exc:  # noqa: BLE001 — the loader's refusals
+        except Exception as exc:  # the loader's refusals
             raise SkillPackageError(str(exc)) from exc
 
         content = _text(archive.read(info))

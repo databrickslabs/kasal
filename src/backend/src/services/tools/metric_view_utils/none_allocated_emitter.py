@@ -19,6 +19,11 @@ and the file is a reconciliation worklist, not a deployable view.
 
 from __future__ import annotations
 
+import logging
+import re
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
+
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TranslationResult,
@@ -26,13 +31,21 @@ from src.services.tools.metric_view_utils.data_classes import (
 from src.services.tools.metric_view_utils.utils import to_snake_case
 from src.services.tools.metric_view_utils.yaml_emitter import emit_yaml
 
+if TYPE_CHECKING:
+    from src.services.tools.metric_view_utils.dax_translator import DaxTranslator
+
+logger = logging.getLogger(__name__)
+
 _VIEW_KEY = "none_allocated_measures"
 # Deliberately not a real 3-level name: these measures reference columns across
 # several facts, so there is no single source. Flags it as a worklist.
 _PLACEHOLDER_SOURCE = "TODO.none_allocated.measures_span_multiple_facts"
 
 
-def _covered_names(all_specs: dict, emitted_yaml) -> set:
+def _covered_names(
+    all_specs: Mapping[str, MetricViewSpec],
+    emitted_yaml: Mapping[str, str] | Sequence[str] | None,
+) -> set[str]:
     """Measures that ACTUALLY made it into the exported YAML — as an emitted
     measure or a documented comment — in both PBI and snake_case form.
 
@@ -45,13 +58,13 @@ def _covered_names(all_specs: dict, emitted_yaml) -> set:
     """
     blob = (
         "\n".join(emitted_yaml.values())
-        if isinstance(emitted_yaml, dict)
+        if isinstance(emitted_yaml, Mapping)
         else "\n".join(emitted_yaml or [])
     )
-    covered: set = set()
+    covered: set[str] = set()
     for spec in all_specs.values():
         for m in spec.measures:
-            nm = getattr(m, "measure_name", "") or ""
+            nm = m.measure_name or ""
             if nm and nm in blob:  # `- name: <snake>` actually emitted
                 covered.add(m.original_name)
                 covered.add(to_snake_case(m.original_name))
@@ -63,22 +76,38 @@ def _covered_names(all_specs: dict, emitted_yaml) -> set:
     return covered
 
 
-def _entry_fields(m: dict) -> tuple[str, str, str]:
+def _first_text(m: Mapping[str, object], *keys: str) -> str:
+    """Return ``str`` of the first truthy value among ``keys``, else ``""``."""
+    for key in keys:
+        value = m.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _entry_fields(m: Mapping[str, object]) -> tuple[str, str, str]:
     """(name, original_name, dax) tolerant of the two entry shapes this receives:
     the pipeline ``mapping`` (measure_name / dax_expression) and the raw extracted
     measures / ``measures_with_dax`` (name / expression)."""
-    name = m.get("measure_name") or m.get("name") or m.get("original_name") or ""
-    orig = m.get("original_name") or m.get("measure_name") or m.get("name") or ""
-    dax = m.get("dax_expression") or m.get("expression") or m.get("raw_expr") or ""
+    name = _first_text(m, "measure_name", "name", "original_name")
+    orig = _first_text(m, "original_name", "measure_name", "name")
+    dax = _first_text(m, "dax_expression", "expression", "raw_expr")
     return name, orig, dax
 
 
+def _broken_reason(broken: object) -> str:
+    """Reason text for a measure the allocator flagged as broken in the PBI model."""
+    if isinstance(broken, Mapping):
+        return str(broken.get("reason", "references a non-existent column"))
+    return "references a non-existent column"
+
+
 def build_none_allocated_spec(
-    reference_measures: list[dict],
-    all_specs: dict,
-    emitted_yaml,
-    translator,
-    artifact_patterns,
+    reference_measures: Sequence[Mapping[str, object]],
+    all_specs: Mapping[str, MetricViewSpec],
+    emitted_yaml: Mapping[str, str] | Sequence[str] | None,
+    translator: DaxTranslator,
+    artifact_patterns: re.Pattern[str],
 ) -> MetricViewSpec | None:
     """Build the synthetic catch-all spec, or ``None`` if nothing is orphaned.
 
@@ -123,8 +152,7 @@ def build_none_allocated_spec(
                     sql_expr=None,
                     is_translatable=False,
                     skip_reason=(
-                        "TODO — not emitted (broken in PBI): "
-                        + str(broken.get("reason", "references a non-existent column"))
+                        "TODO — not emitted (broken in PBI): " + _broken_reason(broken)
                     ),
                     dax_expression=dax,
                     confidence="none",
@@ -149,6 +177,9 @@ def build_none_allocated_spec(
         try:
             res = translator.translate(translate_input, _VIEW_KEY)
         except Exception as e:  # translator must never break the catch-all
+            logger.warning(
+                "catch-all translation failed for %s: %s", orig, e, exc_info=True
+            )
             res = TranslationResult(
                 measure_name=to_snake_case(orig),
                 original_name=orig,
@@ -174,9 +205,12 @@ def build_none_allocated_spec(
                 )
             if cross:
                 reason = res.skip_reason or ""
-                res.skip_reason = (reason + " · " if reason else "") + str(
-                    cross.get("reason", "cross-fact ratio")
+                cross_reason = (
+                    str(cross.get("reason", "cross-fact ratio"))
+                    if isinstance(cross, Mapping)
+                    else "cross-fact ratio"
                 )
+                res.skip_reason = (reason + " · " if reason else "") + cross_reason
             res.is_translatable = False
             if not res.dax_expression:
                 res.dax_expression = dax
@@ -234,12 +268,12 @@ def build_none_allocated_spec(
 
 
 def build_none_allocated_yaml(
-    reference_measures: list[dict],
-    all_specs: dict,
-    emitted_yaml,
-    translator,
-    artifact_patterns,
-    visual_usage_index: dict | None = None,
+    reference_measures: Sequence[Mapping[str, object]],
+    all_specs: Mapping[str, MetricViewSpec],
+    emitted_yaml: Mapping[str, str] | Sequence[str] | None,
+    translator: DaxTranslator,
+    artifact_patterns: re.Pattern[str],
+    visual_usage_index: dict[str, list[dict]] | None = None,
 ) -> str | None:
     """Emit the catch-all view's YAML text, or ``None`` when nothing is orphaned
     (or emission fails — the caller treats this as best-effort).
@@ -269,8 +303,12 @@ def build_none_allocated_yaml(
             # a visual-placed measure in a real view). Dedup-safe on re-run.
             annotate_indirect_visual_usage({**all_specs, spec.fact_table_key: spec})
         except Exception:
-            pass
+            logger.warning(
+                "visual-usage annotation of the catch-all failed; emitting without it",
+                exc_info=True,
+            )
     try:
         return emit_yaml(spec)
     except Exception:
+        logger.warning("catch-all YAML emission failed", exc_info=True)
         return None

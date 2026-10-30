@@ -73,7 +73,7 @@ class TestOnPostgres:
         conn = self._conn(["id", "group_id", "user_id", "role"])
         await _ensure_group_users_columns(conn)
         stmts = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
-        assert "information_schema.columns" in stmts[0]
+        assert "pg_attribute" in stmts[0]
         assert stmts[1:] == [
             "ALTER TABLE group_users ADD COLUMN IF NOT EXISTS allow_agent_builder BOOLEAN",
             "ALTER TABLE group_users ADD COLUMN IF NOT EXISTS allow_flow_builder BOOLEAN",

@@ -31,6 +31,23 @@ describe('parseSkillCommand', () => {
     expect(parseSkillCommand('that was a skill issue')).toBeNull();
     expect(parseSkillCommand('compare snowflake with databricks')).toBeNull();
   });
+
+  it('only drafts a skill when the skill is what is being created', () => {
+    expect(parseSkillCommand('create skill')?.mode).toBe('blank');
+    expect(parseSkillCommand('write me a new SQL-review skill')?.mode).toBe('blank');
+    expect(parseSkillCommand('build a skill that formats SQL')?.mode).toBe('blank');
+    expect(parseSkillCommand('can you create a skill from this conversation?')?.mode).toBe('capture');
+    expect(parseSkillCommand('save this as a skill')?.mode).toBe('capture');
+  });
+
+  it('a request that USES a skill goes to the agent, not the skill drafter', () => {
+    // The reported case: "create" applies to the presentation, not the skill.
+    expect(parseSkillCommand('create a presentation using the databricks skill')).toBeNull();
+    expect(parseSkillCommand('make a slide deck with the sql skill')).toBeNull();
+    expect(parseSkillCommand('use the presentation skill to create a deck')).toBeNull();
+    expect(parseSkillCommand('build a dashboard via my skills')).toBeNull();
+    expect(parseSkillCommand('turn the skill output into a report')).toBeNull();
+  });
 });
 
 describe('buildTranscript', () => {

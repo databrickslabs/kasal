@@ -4,6 +4,7 @@ Target: 80%+ coverage
 """
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -86,12 +87,54 @@ class TestGetExecutionHistory:
             return_value=([mock_run], 1)
         )
 
-        result = await service.get_execution_history(limit=50, offset=0)
+        result = await service.get_execution_history(
+            limit=50, offset=0, include_payload=True
+        )
 
         assert result.total == 1
         assert result.limit == 50
         assert result.offset == 0
         assert len(result.executions) == 1
+        assert result.executions[0].result == {"content": "Test result"}
+
+    @pytest.mark.asyncio
+    async def test_get_execution_history_rows_are_summaries_by_default(
+        self, service, mock_history_repo
+    ):
+        """List rows carry a preview, never the result/inputs payload."""
+        row = SimpleNamespace(
+            id=1,
+            job_id="job-1",
+            run_name="run",
+            status="completed",
+            error=None,
+            created_at="2024-01-01T00:00:00",
+            execution_type=None,
+            input_execution_type="flow",
+            harness="kasal",
+            model="m",
+            group_email="a@example.com",
+            mlflow_trace_id=None,
+            mlflow_experiment_name=None,
+            mlflow_evaluation_run_id=None,
+            flow_uuid=None,
+            checkpoint_status=None,
+            checkpoint_method=None,
+            result_preview='{"content": "Test"}',
+        )
+        mock_history_repo.get_execution_history = AsyncMock(return_value=([row], 1))
+
+        result = await service.get_execution_history()
+
+        mock_history_repo.get_execution_history.assert_called_once_with(
+            limit=50, offset=0, group_ids=None, full=False
+        )
+        item = result.executions[0]
+        assert item.result is None and item.input is None
+        assert item.agents_yaml is None and item.tasks_yaml is None
+        assert item.result_preview == '{"content": "Test"}'
+        assert item.execution_type == "flow"
+        assert item.model == "m"
 
     @pytest.mark.asyncio
     async def test_get_execution_history_with_group_ids(
@@ -106,7 +149,7 @@ class TestGetExecutionHistory:
         )
 
         mock_history_repo.get_execution_history.assert_called_once_with(
-            limit=50, offset=0, group_ids=group_ids
+            limit=50, offset=0, group_ids=group_ids, full=False
         )
         assert result.total == 0
 
@@ -127,7 +170,7 @@ class TestGetExecutionHistory:
             return_value=([mock_run], 1)
         )
 
-        result = await service.get_execution_history()
+        result = await service.get_execution_history(include_payload=True)
 
         assert result.total == 1
 
@@ -151,7 +194,7 @@ class TestGetExecutionHistory:
             return_value=([mock_run], 1)
         )
 
-        result = await service.get_execution_history()
+        result = await service.get_execution_history(include_payload=True)
 
         assert result.total == 1
 
@@ -242,7 +285,7 @@ class TestGetExecutionById:
         await service.get_execution_by_id(1, tenant_ids=tenant_ids)
 
         mock_history_repo.get_execution_by_id.assert_called_once_with(
-            1, tenant_ids=tenant_ids
+            1, group_ids=tenant_ids
         )
 
     @pytest.mark.asyncio
@@ -860,18 +903,6 @@ class TestCheckpointMethods:
 
         assert result is True
         mock_session.commit.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_mark_checkpoint_resumed(self, service, mock_history_repo):
-        """Test marking a checkpoint as resumed."""
-        mock_history_repo.update_checkpoint_status = AsyncMock(return_value=True)
-
-        result = await service.mark_checkpoint_resumed(1, 2)
-
-        assert result is True
-        mock_history_repo.update_checkpoint_status.assert_called_once_with(
-            execution_id=1, status="resumed"
-        )
 
 
 class TestGetExecutionByJobId:

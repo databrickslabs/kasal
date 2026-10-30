@@ -32,7 +32,7 @@ starred/await/yield expressions are all rejected.
 
 import ast
 import operator
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any, Callable, Dict, FrozenSet, Optional
 
 __all__ = ["safe_eval", "UnsafeExpressionError"]
 
@@ -52,7 +52,7 @@ _BIN_OPS = {
     ast.Pow: operator.pow,
 }
 
-_UNARY_OPS = {
+_UNARY_OPS: Dict[type, Callable[..., Any]] = {
     ast.Not: operator.not_,
     ast.USub: operator.neg,
     ast.UAdd: operator.pos,
@@ -195,11 +195,16 @@ def _eval_node(
     if isinstance(node, ast.Set):
         return {_eval_node(e, names, allowed_call_names) for e in node.elts}
     if isinstance(node, ast.Dict):
+        if any(k is None for k in node.keys):
+            # ``{**other}`` — the key slot is None. Previously rejected by falling
+            # through to the catch-all below; now rejected explicitly.
+            raise UnsafeExpressionError("Unsupported expression element: NoneType")
         return {
             _eval_node(k, names, allowed_call_names): _eval_node(
                 v, names, allowed_call_names
             )
             for k, v in zip(node.keys, node.values)
+            if k is not None
         }
 
     # Indexing / slicing ---------------------------------------------------

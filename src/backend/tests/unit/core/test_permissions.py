@@ -17,11 +17,14 @@ from src.utils.user_context import GroupContext
 # ---------------------------------------------------------------------------
 
 
-def _make_current_user(is_system_admin=False, is_personal_workspace_manager=False):
+def _make_current_user(
+    is_system_admin=False, is_personal_workspace_manager=False, personal_group_id=None
+):
     """Return a MagicMock that looks like a User model."""
     user = MagicMock()
     user.is_system_admin = is_system_admin
     user.is_personal_workspace_manager = is_personal_workspace_manager
+    user.personal_group_id = personal_group_id
     return user
 
 
@@ -31,6 +34,7 @@ def _make_ctx(
     is_system_admin=False,
     is_personal_workspace_manager=False,
     include_current_user=True,
+    personal_group_id=None,
 ):
     """
     Build a real GroupContext instance.
@@ -38,10 +42,13 @@ def _make_ctx(
     primary_group_id is computed from group_ids[0], so pass group_ids
     explicitly when you need a specific primary_group_id value.
     e.g. group_ids=["team_456"] → primary_group_id == "team_456"
-         group_ids=["user_123"] → primary_group_id == "user_123"
+    The personal workspace is the user's stored ``personal_group_id``; a scope
+    is personal only when it is exactly that id.
     """
     current_user = (
-        _make_current_user(is_system_admin, is_personal_workspace_manager)
+        _make_current_user(
+            is_system_admin, is_personal_workspace_manager, personal_group_id
+        )
         if include_current_user
         else None
     )
@@ -97,72 +104,9 @@ class TestIsAdmin:
 # ---------------------------------------------------------------------------
 
 
-class TestIsEditorOrAbove:
-    """Tests for is_editor_or_above()."""
-
-    def test_true_for_admin(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert is_editor_or_above("admin") is True
-
-    def test_true_for_editor(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert is_editor_or_above("editor") is True
-
-    def test_false_for_operator(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert not is_editor_or_above("operator")
-
-    def test_false_for_none(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert not is_editor_or_above(None)
-
-    def test_case_insensitive_EDITOR(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert is_editor_or_above("EDITOR") is True
-
-
 # ---------------------------------------------------------------------------
 # is_operator_or_above
 # ---------------------------------------------------------------------------
-
-
-class TestIsOperatorOrAbove:
-    """Tests for is_operator_or_above()."""
-
-    def test_true_for_admin(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("admin") is True
-
-    def test_true_for_editor(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("editor") is True
-
-    def test_true_for_operator(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("operator") is True
-
-    def test_false_for_none(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert not is_operator_or_above(None)
-
-    def test_false_for_unknown_role(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert not is_operator_or_above("viewer")
-
-    def test_case_insensitive_OPERATOR(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("OPERATOR") is True
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +200,7 @@ class TestIsWorkspaceAdmin:
         ctx = _make_ctx(
             group_ids=["user_123"],
             is_personal_workspace_manager=True,
+            personal_group_id="user_123",
         )
         assert is_workspace_admin(ctx) is True
 
@@ -265,6 +210,7 @@ class TestIsWorkspaceAdmin:
         ctx = _make_ctx(
             group_ids=["user_123"],
             is_personal_workspace_manager=False,
+            personal_group_id="user_123",
         )
         assert is_workspace_admin(ctx) is False
 
@@ -320,6 +266,7 @@ class TestGetEffectiveRole:
         ctx = _make_ctx(
             group_ids=["user_999"],
             is_personal_workspace_manager=True,
+            personal_group_id="user_999",
         )
         assert get_effective_role(ctx) == "admin"
 
@@ -329,6 +276,7 @@ class TestGetEffectiveRole:
         ctx = _make_ctx(
             group_ids=["user_999"],
             is_personal_workspace_manager=False,
+            personal_group_id="user_999",
         )
         assert get_effective_role(ctx) == "editor"
 
@@ -354,6 +302,69 @@ class TestGetEffectiveRole:
 
         ctx = _make_ctx(user_role=None, include_current_user=False)
         assert get_effective_role(ctx) is None
+
+
+# ---------------------------------------------------------------------------
+# The personal workspace is the user's stored id, never a name prefix
+# ---------------------------------------------------------------------------
+
+# Team ids are a slug of the team name plus 8 hex characters, so a team named
+# "User Marketing" gets an id that starts with "user_".
+_USER_NAMED_TEAM = "user_marketing_1a2b3c4d"
+_PERSONAL = "user_5f0c9e2a7b6d4c1e8f3a2b1c0d9e8f7a"
+
+
+class TestPersonalWorkspaceMatchesStoredId:
+    def test_operator_in_team_named_user_marketing_stays_operator(self):
+        from src.core.permissions import check_role_in_context, get_effective_role
+
+        ctx = _make_ctx(
+            user_role="operator",
+            group_ids=[_USER_NAMED_TEAM],
+            personal_group_id=_PERSONAL,
+        )
+        assert get_effective_role(ctx) == "operator"
+        assert check_role_in_context(ctx, ["admin", "editor"]) is False
+
+    def test_admin_of_team_named_user_marketing_is_workspace_admin(self):
+        from src.core.permissions import is_workspace_admin
+
+        ctx = _make_ctx(
+            user_role="admin",
+            group_ids=[_USER_NAMED_TEAM],
+            personal_group_id=_PERSONAL,
+        )
+        assert is_workspace_admin(ctx) is True
+
+    def test_personal_space_manager_gets_no_admin_in_that_team(self):
+        from src.core.permissions import get_effective_role, is_workspace_admin
+
+        ctx = _make_ctx(
+            user_role="operator",
+            group_ids=[_USER_NAMED_TEAM],
+            is_personal_workspace_manager=True,
+            personal_group_id=_PERSONAL,
+        )
+        assert get_effective_role(ctx) == "operator"
+        assert is_workspace_admin(ctx) is False
+
+    def test_own_personal_workspace_is_recognised_by_its_stored_id(self):
+        from src.core.permissions import get_effective_role
+
+        ctx = _make_ctx(group_ids=[_PERSONAL], personal_group_id=_PERSONAL)
+        assert get_effective_role(ctx) == "editor"
+
+    def test_union_scope_keeps_the_least_privileged_role(self):
+        """No workspace selected: the scope is every membership plus the personal
+        workspace, and the role is the least privileged one across it."""
+        from src.core.permissions import get_effective_role
+
+        ctx = _make_ctx(
+            user_role="operator",
+            group_ids=[_USER_NAMED_TEAM, _PERSONAL],
+            personal_group_id=_PERSONAL,
+        )
+        assert get_effective_role(ctx) == "operator"
 
 
 # ---------------------------------------------------------------------------

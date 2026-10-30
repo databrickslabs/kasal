@@ -18,7 +18,9 @@ import {
 } from '@mui/icons-material';
 import { apiClient } from '../../../shared/api/client';
 import { useMLflowStore } from '../../../store/mlflow';
-import type { MLflowBackend, MLflowSettings } from '../../../types/config/mlflow';
+import type { MLflowBackend, MLflowSettings, MLflowSettingsPatch } from '../../../types/config/mlflow';
+import LocalMlflowServerField from './LocalMlflowServerField';
+import MLflowJudgeAndAdvanced from './MLflowJudgeAndAdvanced';
 
 /**
  * MLflow tracing settings — their own section, not a corner of the Databricks one.
@@ -95,7 +97,7 @@ const MLflowConfiguration: React.FC = () => {
     void load();
   }, [load]);
 
-  const patch = useCallback(async (body: Partial<MLflowSettings>) => {
+  const patch = useCallback(async (body: MLflowSettingsPatch) => {
     setSaving(true);
     setError(null);
     setSavedMsg(null);
@@ -119,8 +121,10 @@ const MLflowConfiguration: React.FC = () => {
             `write traces and register prompts, then redeploy the app.`,
         );
       }
-    } catch {
-      setError('Could not save MLflow settings.');
+    } catch (err) {
+      // A 400 (invalid field) or 403 (not a workspace admin) explains itself.
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === 'string' && detail ? detail : 'Could not save MLflow settings.');
     } finally {
       setSaving(false);
     }
@@ -297,6 +301,14 @@ const MLflowConfiguration: React.FC = () => {
         </Typography>
       )}
 
+      {!settings.installation_managed && (
+        <LocalMlflowServerField
+          value={settings.local_tracking_uri}
+          saving={saving}
+          onSave={(uri) => void patch({ local_tracking_uri: uri })}
+        />
+      )}
+
       {backend.kind === 'local' && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Databricks is not configured, so traces go to your local MLflow server.
@@ -313,9 +325,8 @@ const MLflowConfiguration: React.FC = () => {
 
       {noBackend && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No MLflow backend is available. Configure a Databricks workspace, or start
-          a local MLflow server and set <code>MLFLOW_TRACKING_URI</code> before
-          launching Kasal.
+          No MLflow backend is available. Configure a Databricks workspace, or set a
+          local MLflow server above.
         </Alert>
       )}
 
@@ -374,6 +385,8 @@ const MLflowConfiguration: React.FC = () => {
         A separate, more expensive opt-in than tracing: each evaluated run costs an
         extra model call. Requires tracing to be on.
       </Typography>
+
+      <MLflowJudgeAndAdvanced settings={settings} saving={saving} onPatch={patch} />
     </Box>
   );
 };

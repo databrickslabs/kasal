@@ -100,7 +100,7 @@ class SkillService:
         if skill.group_id is None:
             skill = await self._own_copy_of(skill, group_context)
 
-        merged = {
+        merged: Dict[str, Any] = {
             "name": data.name if data.name is not None else skill.name,
             "description": (
                 data.description if data.description is not None else skill.description
@@ -302,14 +302,6 @@ class SkillService:
             files=files,
         )
 
-    async def export_zip(
-        self, skill_id: int, group_context: GroupContext
-    ) -> Optional[bytes]:
-        skill = await self.get_skill(skill_id, group_context)
-        if not skill:
-            return None
-        return packaging.write_zip(skill)
-
     @staticmethod
     def validate(data: SkillCreate) -> SkillValidationResult:
         """Check a skill without saving it, for the authoring UI.
@@ -331,7 +323,9 @@ class SkillService:
             return SkillValidationResult(valid=False, errors=exc.errors)
         return SkillValidationResult(valid=True, warnings=parsed.warnings)
 
-    def _validate(self, name, description, body, data) -> parser.ParsedSkill:
+    def _validate(
+        self, name: str, description: str, body: str, data: Any
+    ) -> parser.ParsedSkill:
         return parser.validate_row(
             name, description, body, data.license, data.compatibility, data.metadata
         )

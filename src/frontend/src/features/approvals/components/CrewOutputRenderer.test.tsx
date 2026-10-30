@@ -81,6 +81,46 @@ describe('CrewOutputRenderer', () => {
     expect(link!.getAttribute('rel')).toContain('noopener');
   });
 
+  describe('images in the output under review', () => {
+    const remote = 'https://images.example.org/c.png?d=1';
+
+    it('shows a remote markdown image as a placeholder and makes no request until clicked', () => {
+      const { container } = renderOutput(`![chart](${remote}) ![logo](/logo192.png)\n\n[src](https://example.com/page)`);
+      expect(container.querySelector(`img[src="${remote}"]`)).toBeNull();
+      expect(screen.getByRole('link', { name: 'Load image' })).toHaveAttribute('href', remote);
+      expect(container.querySelector('img[src="/logo192.png"]')).not.toBeNull();
+      expect(screen.getByRole('link', { name: 'src' })).toHaveAttribute('target', '_blank');
+    });
+
+    it('gives an HTML document a policy that lets only inline images load', () => {
+      const docs = [
+        `<!DOCTYPE html><html><head><title>t</title></head><body><img src="${remote}"></body></html>`,
+        `<html lang="en"><body><img src="${remote}"></body></html>`,
+        `<!doctype html><body><img src="${remote}"></body>`,
+        // A <head> AFTER the content must not pull the policy past the image.
+        `<body><img src="${remote}"><p>x</p></body><head><title>late</title></head>`,
+        `  <!DOCTYPE html>\n<body><img src="${remote}"><head></head></body>`,
+      ];
+      for (const doc of docs) {
+        const { container, unmount } = renderOutput(doc);
+        const srcdoc = container.querySelector('iframe')!.getAttribute('srcdoc') || '';
+        const parsed = new DOMParser().parseFromString(srcdoc, 'text/html');
+        const meta = parsed.head.querySelector('meta[http-equiv="Content-Security-Policy"]');
+        expect(meta, srcdoc).not.toBeNull();
+        expect(meta!.getAttribute('content')).toContain("default-src 'none'");
+        expect(meta!.getAttribute('content')).toContain('img-src data: blob:');
+        // The policy precedes everything that could fetch.
+        expect(parsed.head.firstElementChild).toBe(meta);
+        expect(srcdoc.indexOf('Content-Security-Policy')).toBeLessThan(srcdoc.indexOf('<img'));
+        // A leading doctype stays first, so the document keeps standards mode.
+        if (/^\s*<!doctype/i.test(doc)) expect(parsed.compatMode).toBe('CSS1Compat');
+        // The document itself is untouched.
+        expect(parsed.body.querySelector('img')!.getAttribute('src')).toBe(remote);
+        unmount();
+      }
+    });
+  });
+
   it('accepts a CSS string maxHeight (full-screen mode)', () => {
     // Should not throw with a non-numeric height; markdown still renders.
     const { container } = renderOutput('# ok', 'calc(100vh - 160px)');

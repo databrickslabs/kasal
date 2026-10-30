@@ -19,8 +19,16 @@ warehouse; otherwise generation stays single-pass.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
+
+from ..raw_fields import RawMap, as_int, as_list, as_map, opt_float, str_or
+
+# A reconciliation report / generation output: a JSON-shaped mapping.
+GenerateFn = Callable[[Optional[list[RawMap]]], Mapping[str, object] | None]
+DeployFn = Callable[[RawMap], Mapping[str, object] | None]
+ReconcileFn = Callable[[RawMap, RawMap], Mapping[str, object] | None]
 
 # How many mismatching cells to carry back per measure as feedback — enough to
 # show the pattern to the model, not the whole failing set.
@@ -35,7 +43,7 @@ class CycleResult:
     overall_pct: float
     measures_at_100: int
     total_measures: int
-    failing_measures: list = field(default_factory=list)
+    failing_measures: list[str] = field(default_factory=list)
     deploy_ok: bool = True
     note: str = ""
 
@@ -44,9 +52,9 @@ class CycleResult:
 class LoopResult:
     """The whole loop: per-cycle history plus the BEST cycle's artifacts."""
 
-    cycles: list = field(default_factory=list)
-    final_yaml: dict = field(default_factory=dict)
-    final_reconciliation: dict = field(default_factory=dict)
+    cycles: list[CycleResult] = field(default_factory=list)
+    final_yaml: RawMap = field(default_factory=dict)
+    final_reconciliation: RawMap = field(default_factory=dict)
     stop_reason: str = (
         ""  # target_reached | converged | max_cycles | deploy_failed | no_recon
     )
@@ -54,17 +62,19 @@ class LoopResult:
     best_pct: float = 0.0
 
 
-def _overall_pct(recon_report: dict) -> Optional[float]:
+def _overall_pct(recon_report: RawMap) -> Optional[float]:
     """Overall cell-alignment percentage from a reconciliation report, or None
     when nothing was scored (so the loop can stop rather than divide by zero)."""
-    overall = (recon_report or {}).get("overall") or {}
+    overall = as_map(recon_report.get("overall"))
     total = overall.get("cells_total")
     if not total:
         return None
-    return float(overall.get("overall_cell_pct", 0.0))
+    return opt_float(overall.get("overall_cell_pct")) or 0.0
 
 
-def build_refinement_feedback(recon_report: dict, target_pct: float = 100.0) -> list:
+def build_refinement_feedback(
+    recon_report: RawMap, target_pct: float = 100.0
+) -> list[RawMap]:
     """Turn a reconciliation report into per-measure feedback for the measures
     below ``target_pct``. Each item is self-contained so the DAX-translation step
     can tell the model which measure was wrong and show a few real mismatches:
@@ -76,13 +86,14 @@ def build_refinement_feedback(recon_report: dict, target_pct: float = 100.0) -> 
     as ``drift`` (PBI not refreshed) or ``known_defect`` is NOT a translation bug,
     so re-prompting on it would be noise.
     """
-    feedback: list = []
-    for view_name, view in (recon_report or {}).get("views", {}).items():
-        for measure, info in (view.get("measures") or {}).items():
-            pct = info.get("pct_aligned")
+    feedback: list[RawMap] = []
+    for view_name, view in as_map(recon_report.get("views")).items():
+        for measure, info_raw in as_map(as_map(view).get("measures")).items():
+            info = as_map(info_raw)
+            pct = opt_float(info.get("pct_aligned"))
             if pct is None or pct >= target_pct:
                 continue
-            classification = info.get("classification", "")
+            classification = str_or(info.get("classification"), "")
             if classification in ("drift", "known_defect", "aligned"):
                 continue  # not a translation problem — don't re-prompt on it
             feedback.append(
@@ -91,7 +102,7 @@ def build_refinement_feedback(recon_report: dict, target_pct: float = 100.0) -> 
                     "measure": measure,
                     "pct_aligned": pct,
                     "classification": classification,
-                    "sample_mismatches": (info.get("sample_mismatches") or [])[
+                    "sample_mismatches": as_list(info.get("sample_mismatches"))[
                         :_MAX_FEEDBACK_SAMPLES
                     ],
                 }
@@ -99,37 +110,40 @@ def build_refinement_feedback(recon_report: dict, target_pct: float = 100.0) -> 
     return feedback
 
 
-def feedback_to_prompt_map(feedback) -> dict:
+def feedback_to_prompt_map(feedback: object) -> dict[str, str]:
     """Normalise reconciliation feedback into ``{measure_name -> hint string}`` for
     the DAX-translation prompt. Accepts the ``build_refinement_feedback`` list OR a
     pre-built ``{measure: hint}`` dict; ignores junk."""
-    if isinstance(feedback, dict):
+    if isinstance(feedback, Mapping):
         return {str(k): str(v) for k, v in feedback.items() if v}
-    out: dict = {}
-    if isinstance(feedback, list):
-        for item in feedback:
-            if not isinstance(item, dict) or not item.get("measure"):
-                continue
-            parts = []
-            pct = item.get("pct_aligned")
-            if pct is not None:
-                parts.append(f"only {float(pct):.1f}% of cells matched Power BI")
-            for s in (item.get("sample_mismatches") or [])[:3]:
-                parts.append(
-                    f"[{s.get('dimension')}/{s.get('period')}] "
-                    f"UCMV={s.get('ucmv_value')} vs PBI={s.get('pbi_value')}"
-                )
-            out[str(item["measure"])] = (
-                "; ".join(parts) if parts else "did not match Power BI"
+    out: dict[str, str] = {}
+    for item_raw in as_list(feedback):
+        if not isinstance(item_raw, Mapping):
+            continue
+        item = as_map(item_raw)
+        if not item.get("measure"):
+            continue
+        parts: list[str] = []
+        pct = opt_float(item.get("pct_aligned"))
+        if pct is not None:
+            parts.append(f"only {pct:.1f}% of cells matched Power BI")
+        for s_raw in as_list(item.get("sample_mismatches"))[:3]:
+            s = as_map(s_raw)
+            parts.append(
+                f"[{s.get('dimension')}/{s.get('period')}] "
+                f"UCMV={s.get('ucmv_value')} vs PBI={s.get('pbi_value')}"
             )
+        out[str(item["measure"])] = (
+            "; ".join(parts) if parts else "did not match Power BI"
+        )
     return out
 
 
 def run_reconciliation_loop(
     *,
-    generate: Callable,
-    deploy: Callable,
-    reconcile: Callable,
+    generate: GenerateFn,
+    deploy: DeployFn,
+    reconcile: ReconcileFn,
     max_cycles: int = 5,
     target_pct: float = 100.0,
 ) -> LoopResult:
@@ -149,15 +163,15 @@ def run_reconciliation_loop(
     """
     max_cycles = max(1, int(max_cycles))
     result = LoopResult()
-    feedback: Optional[list] = None
+    feedback: Optional[list[RawMap]] = None
     prev_pct: Optional[float] = None
 
     for cycle in range(1, max_cycles + 1):
-        gen = generate(feedback) or {}
-        yaml_specs = gen.get("yaml") or {}
-        mappings = gen.get("mappings") or {}
+        gen = as_map(generate(feedback))
+        yaml_specs = as_map(gen.get("yaml"))
+        mappings = as_map(gen.get("mappings"))
 
-        deploy_out = deploy(yaml_specs) or {}
+        deploy_out = as_map(deploy(yaml_specs))
         deploy_ok = bool(deploy_out.get("ok", True))
         if not deploy_ok:
             result.cycles.append(
@@ -167,22 +181,22 @@ def run_reconciliation_loop(
                     measures_at_100=0,
                     total_measures=0,
                     deploy_ok=False,
-                    note=str(deploy_out.get("error", "deploy failed")),
+                    note=str_or(deploy_out.get("error"), "deploy failed"),
                 )
             )
             result.stop_reason = "deploy_failed"
             break
 
-        report = reconcile(yaml_specs, mappings) or {}
+        report = as_map(reconcile(yaml_specs, mappings))
         pct = _overall_pct(report)
-        overall = report.get("overall") or {}
+        overall = as_map(report.get("overall"))
         cr = CycleResult(
             cycle=cycle,
             overall_pct=pct if pct is not None else 0.0,
-            measures_at_100=overall.get("measures_at_100", 0),
-            total_measures=overall.get("total_measures", 0),
+            measures_at_100=as_int(overall.get("measures_at_100")),
+            total_measures=as_int(overall.get("total_measures")),
             failing_measures=[
-                f["measure"] for f in build_refinement_feedback(report, target_pct)
+                str(f["measure"]) for f in build_refinement_feedback(report, target_pct)
             ],
         )
         result.cycles.append(cr)

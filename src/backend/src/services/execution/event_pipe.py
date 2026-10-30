@@ -38,7 +38,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from queue import Empty
-from typing import Any
+from typing import Any, Callable, cast
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ class EventPipeWriter:
         _active_writer = self
         return self
 
-    def _make_trace_handler(self, event_type: str):
+    def _make_trace_handler(self, event_type: str) -> Callable[[Any, Any], None]:
         def _handler(source: Any, event: Any) -> None:
             self._on_trace_event(event_type, event)
 
@@ -239,6 +239,7 @@ class EventPipeWriter:
             "crew_name": _safe_str(getattr(event, "crew_name", None), 200),
             "tool_name": tool_name,
             "model": _safe_str(getattr(event, "model", None), 200),
+            "served_model": _safe_str(getattr(event, "served_model", None), 200),
             "error": _safe_str(getattr(event, "error", None), 500),
             # The SAME two fields the OTel bridge stamps, because a row has two
             # producers — this pipe live, the database on reload — and a field
@@ -246,7 +247,7 @@ class EventPipeWriter:
             # That is what "PerplexityTool (input) / PerplexityTool /
             # PerplexityTool (output) [cached]" was: the bare middle row is a
             # piped frame, the labelled ones are DB rows.
-            "operation": _TOOL_OPERATIONS.get(getattr(event, "type", None)),
+            "operation": _TOOL_OPERATIONS.get(cast(Any, getattr(event, "type", None))),
             # And without this a replayed call only earns its [cached] badge
             # after a refresh.
             "from_cache": getattr(event, "from_cache", None),
@@ -400,16 +401,17 @@ async def _relay_loop(
     group_id: Any,
     group_email: Any,
 ) -> None:
-    loop = asyncio.get_running_loop()
+    from src.services.execution.blocking_pools import EVENT_RELAY_EXECUTOR, run_in_pool
+
     invalid_streak = 0
     if group_id:
         # Everything relayed from the subprocess belongs to this workspace.
         sse_manager.register_job_owner(execution_id, group_id)
     while True:
         try:
-            frame = await loop.run_in_executor(
-                None, lambda: queue.get(block=True, timeout=0.5)
-            )
+            # Its own bounded pool: a read per running execution, forever,
+            # must not occupy the default executor Chat turns run on.
+            frame = await run_in_pool(EVENT_RELAY_EXECUTOR, queue.get, True, 0.5)
         except Empty:
             invalid_streak = 0
             continue

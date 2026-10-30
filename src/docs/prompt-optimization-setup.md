@@ -138,6 +138,107 @@ Nothing beyond what crew optimization already needs:
 Monitoring — scoring a published crew's live traffic on a schedule — is a
 separate, later step and is not part of the Optimize dialog.
 
+### Built-in judges
+
+Besides your own judges, the Optimize dialog offers some of MLflow's
+**built-in judges** under **MLflow built-in judges**. Tick the ones a run
+should use. None is selected by default, because each one adds a judge call
+for every new deliverable.
+
+| Judge | Role | What it checks |
+|---|---|---|
+| Safety | gate | The deliverable has no harmful, offensive or toxic content |
+| Relevance to query | graded | The deliverable addresses the crew's objective |
+| Guidelines | graded | The deliverable meets the tasks' expected outputs and your judging guidance (these become the judge's guidelines) |
+| Completeness | graded | Every part of the objective is answered |
+
+How they run:
+
+- **On demand, with the run's judge model.** They use the same Kasal model and
+  the same LLM manager, keys and workspace auth as your own judges. Each one
+  runs once per distinct deliverable, and its result is cached for the rest of
+  the run.
+- **Never registered.** Kasal does not register, list, schedule or monitor
+  them. They are built for the run and discarded after it, so they need no
+  grants beyond the checklist above.
+
+How the score combines:
+
+- Each built-in answers yes or no, which Kasal scores as 1 or 0.
+- A **graded** judge's answer joins the average of your judges' grades, with
+  weight 1, like one more judge.
+- A **gate** judge (Safety) does not join the average. If it answers "no",
+  the judge score becomes 0.
+- The run's overall mix is unchanged: 0.3 × format + 0.7 × judge score.
+- A built-in that fails (provider error or an unreadable answer) is logged and
+  left out. The average is taken over the judges that did answer, and the run
+  continues.
+- Each verdict and its reason is passed to GEPA's reflection model, tagged
+  `[builtin:<name>]`, so the rewrite knows why a candidate lost points.
+
+#### Labels
+
+Some built-in judges compare the deliverable with **labels**: what a good
+deliverable should contain. The picker shows them with a **needs labels**
+badge, disabled with the reason until their labels exist.
+
+| Judge | Needs |
+|---|---|
+| Correctness | Expected facts, or an expected answer |
+| Expectations guidelines | Review notes on past answers (see below) |
+
+Under the picker, **Labels** has two optional fields, one set per crew (a crew
+run has a single objective):
+
+- **Expected facts**: one point per line that every good deliverable must
+  contain. This is Correctness' main input.
+- **Expected answer**: free text, if you have a model answer.
+
+**Suggested labels.** The **Expectation** notes you wrote on past evaluation
+answers ("what SHOULD this answer contain?") are offered as suggestions. A
+suggestion is never used on its own: **Accept** adds it to the expected facts,
+and **Edit** lets you reword it first.
+
+**Expectations guidelines** needs no typing. Its guidelines are the
+requirements Kasal distils from your grades and notes on past answers (the same
+checklist that steers the run), so it is enabled once such notes exist.
+
+**Where labels are stored.** When a run starts, the labels in the fields are
+saved for the crew if they changed. They go to the MLflow Prompt Registry, next
+to your judges, as the prompt `kasal_labels__crew_<id>__<workspace>`, a new
+version per change. Only confirmed labels are stored; suggestions are not.
+
+**Workspaces.** Evaluation answers are logged as traces on both local MLflow
+and Databricks, tagged with the crew and the workspace (`kasal_crew_id`,
+`kasal_group_id`). Every read (suggestions, review notes, the answers to grade,
+alignment) filters on both tags, and stored labels are read only by the
+workspace that saved them. So workspaces that share an experiment never see
+each other's labels. Answers logged before this change carry no workspace tag
+and no longer appear.
+
+**Coverage.** A label judge counts only when at least half of the dataset's
+rows are labelled, and at least 3 rows (every row, when there are fewer than
+3). A crew run has one row, so it simply needs its labels. A judge below the
+floor is left out of the run, and the dialog says why, for example
+"Correctness skipped: not labelled". A judge is never called on a row without
+its labels.
+
+Equivalence is not offered: it compares against one exact answer, which suits
+short answers rather than crew deliverables. Retrieval sufficiency also needs
+retrieval traces and arrives in a later phase.
+
+MLflow **evaluation runs** use the same list: Relevance to query and Safety
+always, plus Correctness when the evaluation rows carry a reference answer. The
+retrieval judges are skipped with a log message. They read retrieved documents
+from trace spans, and evaluation rows only carry context as a plain column.
+
+Evaluation judges are called the same way as Optimize's: through the LLM
+manager, with a Kasal model and the workspace's keys and auth, not MLflow's own
+model routing. The model is the evaluation judge in **Configuration → MLflow**
+(inside Databricks Apps, the installed model when none is set), otherwise the
+default model. If that is not a model Kasal knows, the run skips its judges
+with a warning in the log, and still logs its dataset and baseline metrics.
+
 ## Aligning judges to your grades (MemAlign)
 
 Kasal's LLM judges score every candidate prompt set GEPA tries. A judge is

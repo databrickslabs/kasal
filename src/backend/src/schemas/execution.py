@@ -7,6 +7,7 @@ in execution-related API requests and responses.
 
 import json
 import time
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -117,7 +118,8 @@ class CrewConfig(BaseModel):
             "verification the mode implies. Absent for canvas crews."
         ),
     )
-    flow_id: Optional[str] = Field(
+    # A string on the wire; the executions router normalises it to a UUID.
+    flow_id: Optional[Union[str, uuid.UUID]] = Field(
         None, description="ID of the saved flow (for checkpoint tracking)"
     )
     crew_id: Optional[str] = Field(
@@ -127,6 +129,17 @@ class CrewConfig(BaseModel):
             "flow_id: it is what lets a resume rebuild from the current "
             "definition rather than the stored inputs snapshot. Absent for a "
             "run started from an unsaved canvas."
+        ),
+    )
+    # Only "chat": a client may say a run came from the chat, never claim to
+    # be a schedule or a trigger.
+    trigger_type: Optional[Literal["chat"]] = Field(
+        None,
+        description=(
+            "How the run was started, recorded on the run. 'chat' for a chat "
+            "run of a saved crew: the chat applies run-only changes to the "
+            "crew's definition, so its resume uses the stored snapshot rather "
+            "than rebuilding from crew_id. Absent means 'api'."
         ),
     )
     # Flow configuration fields (for flow scheduling)
@@ -219,25 +232,11 @@ class CrewConfig(BaseModel):
         return agents
 
     @model_validator(mode="after")
-    def _resolve_execution_effort(self):
-        return apply_effort_to_config(self)
+    def _resolve_execution_effort(self) -> "CrewConfig":
+        resolved: "CrewConfig" = apply_effort_to_config(self)
+        return resolved
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
-
-
-class ExecutionBase(BaseModel):
-    """Base model with common execution fields"""
-
-    execution_id: str = Field(..., description="Unique identifier for the execution")
-    status: str = Field(..., description="Current status of the execution")
-    created_at: datetime = Field(..., description="When the execution was created")
-    result: Optional[Dict[str, Any]] = Field(
-        None, description="Result data from execution"
-    )
-    error: Optional[str] = Field(None, description="Error message if execution failed")
-    run_name: Optional[str] = Field(
-        None, description="Descriptive name for the execution"
-    )
 
 
 class ExecutionResponse(BaseModel):
@@ -250,6 +249,15 @@ class ExecutionResponse(BaseModel):
         None, description="Result data from execution"
     )
     error: Optional[str] = Field(None, description="Error message if execution failed")
+    model: Optional[str] = Field(None, description="Model the run was started with")
+    result_preview: Optional[str] = Field(
+        None,
+        description=(
+            "First characters of the serialized result. Set on LIST rows, which "
+            "omit `result` and `inputs` unless `include_payload=true`; fetch "
+            "GET /executions/{execution_id} for the full result."
+        ),
+    )
     run_name: Optional[str] = Field(
         None, description="Descriptive name for the execution"
     )
@@ -329,6 +337,16 @@ class ExecutionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ModelSelectionInfo(BaseModel):
+    """Auto's pick: ``selected`` by the decision model, or the ``fallback`` default."""
+
+    requested: str = "auto"
+    model: Optional[str] = None
+    status: str
+    #: Why it fell back (``model_selection.FALLBACK_REASONS``); None when selected.
+    reason: Optional[str] = None
+
+
 class ExecutionCreateResponse(BaseModel):
     """Simple response for execution creation."""
 
@@ -338,6 +356,10 @@ class ExecutionCreateResponse(BaseModel):
     status: str = Field(..., description="Initial status of the execution")
     run_name: Optional[str] = Field(
         None, description="Descriptive name for the execution"
+    )
+    model_selection: Optional[ModelSelectionInfo] = Field(
+        None,
+        description="What Auto resolved to, when the run asked for model 'auto'",
     )
 
 
@@ -576,7 +598,7 @@ class StopExecutionResponse(BaseModel):
 
     @field_validator("partial_results", mode="before")
     @classmethod
-    def _wrap_non_dict_results(cls, value):
+    def _wrap_non_dict_results(cls, value: Any) -> Any:
         """Accept whatever the run actually produced.
 
         ``partial_results`` is filled from ``ExecutionHistory.result``, a JSON

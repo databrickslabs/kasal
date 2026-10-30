@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class KPIFilter(BaseModel):
@@ -76,6 +76,10 @@ class KPI(BaseModel):
     )
     target_uom: Optional[str] = None  # Target unit for conversion
 
+    # Transpilation metadata set by the Power BI connector. No default on
+    # purpose: it stays unset (hasattr() is False) for KPIs from other sources.
+    _advanced_parsing: Dict[str, Any] = PrivateAttr()
+
 
 class QueryFilter(BaseModel):
     """Query-level filter definition"""
@@ -101,23 +105,6 @@ class KPIDefinition(BaseModel):
     # Time intelligence and reusable calculation structures
     structures: Optional[Dict[str, Structure]] = None
     kpis: List[KPI]
-
-    def get_expanded_filters(self) -> Dict[str, str]:
-        """
-        Get all filters as a flat dictionary for variable substitution.
-
-        Returns:
-            Dictionary of filter names to filter expressions
-        """
-        expanded_filters = {}
-        if self.filters:
-            for filter_group, filters in self.filters.items():
-                if isinstance(filters, dict):
-                    for filter_name, filter_value in filters.items():
-                        expanded_filters[filter_name] = filter_value
-                else:
-                    expanded_filters[filter_group] = str(filters)
-        return expanded_filters
 
 
 class DAXMeasure(BaseModel):

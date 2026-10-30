@@ -11,7 +11,7 @@ The reuse decision itself stays with the caller and, ultimately, the human at
 the canvas — a retrieved plan is never executed unreviewed.
 """
 
-from typing import Annotated, List
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -26,6 +26,7 @@ from src.schemas.workflow_recipe import (
     RecipeSummary,
 )
 from src.services.recipes.recipes import WorkflowRecipeService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(
     prefix="/workflow-recipes",
@@ -43,12 +44,17 @@ WorkflowRecipeServiceDep = Annotated[
 ]
 
 
+def _group_ids(group_context: Optional[GroupContext]) -> List[str]:
+    """The caller's group ids; empty (matches nothing) when there are none."""
+    return list(group_context.group_ids or []) if group_context else []
+
+
 @router.post("/suggest", response_model=List[RecipeSummary])
 async def suggest_recipes(
     request: RecipeSuggestRequest,
     service: WorkflowRecipeServiceDep,
     group_context: GroupContextDep,
-) -> List[RecipeSummary]:
+) -> List[Dict[str, Any]]:
     """Recipes from THIS workspace similar enough to the prompt to be worth reusing.
 
     Empty when nothing clears the similarity floor — the honest answer when the
@@ -61,7 +67,7 @@ async def suggest_recipes(
     if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
         raise ForbiddenError("Not permitted to read workflow recipes")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     return await service.suggest_for_prompt(
         request.prompt,
         group_ids,
@@ -90,7 +96,7 @@ async def curate_recipe(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Not permitted to curate workflow recipes")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     try:
         recipe = await service.curate(
             recipe_id,
@@ -103,7 +109,8 @@ async def curate_recipe(
 
     if recipe is None:
         raise NotFoundError(f"Workflow recipe {recipe_id} not found")
-    return service.to_summary(recipe)
+    summary: RecipeSummary = service.to_summary(recipe)
+    return summary
 
 
 @router.delete("/{recipe_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -125,7 +132,7 @@ async def delete_recipe(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Not permitted to delete workflow recipes")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     if not await service.delete(recipe_id, group_ids):
         raise NotFoundError(f"Workflow recipe {recipe_id} not found")
 
@@ -146,11 +153,12 @@ async def record_reuse(
     if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
         raise ForbiddenError("Not permitted to use workflow recipes")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     recipe = await service.record_reuse(recipe_id, group_ids)
     if recipe is None:
         raise NotFoundError(f"Workflow recipe {recipe_id} not found")
-    return service.to_summary(recipe)
+    summary: RecipeSummary = service.to_summary(recipe)
+    return summary
 
 
 @router.get(
@@ -173,7 +181,7 @@ async def recipes_by_job(
     if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
         raise ForbiddenError("Not permitted to read workflow recipes")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     return await service.recipes_by_job(group_ids)
 
 
@@ -186,7 +194,7 @@ async def recipe_effectiveness(
     service: WorkflowRecipeServiceDep,
     group_context: GroupContextDep,
     days: int = Query(30, ge=1, le=365, description="Window to report over"),
-) -> RecipeEffectiveness:
+) -> Dict[str, Any]:
     """Whether reusing recipes measurably improves the crews this workspace gets.
 
     Reports three populations: generations that got exemplars, generations that
@@ -202,7 +210,7 @@ async def recipe_effectiveness(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Not permitted to read workflow recipe effectiveness")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     return await service.effectiveness(group_ids, days=days)
 
 
@@ -216,5 +224,5 @@ async def list_recipes(
     if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
         raise ForbiddenError("Not permitted to read workflow recipes")
 
-    group_ids = group_context.group_ids if group_context else []
+    group_ids = _group_ids(group_context)
     return await service.list_for_group(group_ids, limit=limit)

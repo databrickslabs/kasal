@@ -6,7 +6,7 @@ CRUD operations, name-based queries, and encryption handling.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -238,173 +238,8 @@ class TestApiKeyRepositoryFindAll:
         assert len(result) == 3
 
 
-class TestApiKeyRepositoryGetApiKeyValue:
-    """Test cases for get_api_key_value method."""
-
-    @pytest.mark.asyncio
-    async def test_get_api_key_value_success(self, api_key_repository_async):
-        """Test successful API key value retrieval."""
-        api_key = MockApiKey(name="TEST_KEY", encrypted_value="encrypted_value")
-
-        with patch.object(
-            api_key_repository_async, "find_by_name", return_value=api_key
-        ):
-            with patch(
-                "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
-                return_value="decrypted_value",
-            ):
-                result = await api_key_repository_async.get_api_key_value("TEST_KEY")
-
-                assert result == "decrypted_value"
-
-    @pytest.mark.asyncio
-    async def test_get_api_key_value_not_found(self, api_key_repository_async):
-        """Test API key value retrieval when key not found."""
-        with patch.object(api_key_repository_async, "find_by_name", return_value=None):
-            result = await api_key_repository_async.get_api_key_value("NONEXISTENT")
-
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_api_key_value_decryption_error(self, api_key_repository_async):
-        """Test API key value retrieval when decryption fails."""
-        api_key = MockApiKey(name="BAD_KEY", encrypted_value="bad_encrypted_value")
-
-        with patch.object(
-            api_key_repository_async, "find_by_name", return_value=api_key
-        ):
-            with patch(
-                "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
-                side_effect=Exception("Decryption failed"),
-            ):
-                result = await api_key_repository_async.get_api_key_value("BAD_KEY")
-
-                assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_api_key_value_import_error(self, api_key_repository_async):
-        """Test API key value retrieval when EncryptionUtils import fails."""
-        api_key = MockApiKey(name="IMPORT_ERROR_KEY", encrypted_value="encrypted_value")
-
-        # Mock the import to fail when EncryptionUtils is imported
-        def mock_import(name, *args, **kwargs):
-            if name == "src.utils.encryption_utils":
-                raise ImportError("Module not found")
-            return __import__(name, *args, **kwargs)
-
-        with patch.object(
-            api_key_repository_async, "find_by_name", return_value=api_key
-        ):
-            with patch("builtins.__import__", side_effect=mock_import):
-                result = await api_key_repository_async.get_api_key_value(
-                    "IMPORT_ERROR_KEY"
-                )
-
-                assert result is None
-
-
-class TestApiKeyRepositoryGetProviderApiKey:
-    """Test cases for get_provider_api_key method."""
-
-    @pytest.mark.asyncio
-    async def test_get_provider_api_key_success(self, api_key_repository_async):
-        """Test successful provider API key retrieval."""
-        with patch.object(
-            api_key_repository_async,
-            "get_api_key_value",
-            return_value="provider_key_value",
-        ):
-            result = await api_key_repository_async.get_provider_api_key("openai")
-
-            assert result == "provider_key_value"
-            api_key_repository_async.get_api_key_value.assert_called_once_with(
-                "OPENAI_API_KEY"
-            )
-
-    @pytest.mark.asyncio
-    async def test_get_provider_api_key_not_found(self, api_key_repository_async):
-        """Test provider API key retrieval when key not found."""
-        with patch.object(
-            api_key_repository_async, "get_api_key_value", return_value=None
-        ):
-            result = await api_key_repository_async.get_provider_api_key("nonexistent")
-
-            assert result is None
-            api_key_repository_async.get_api_key_value.assert_called_once_with(
-                "NONEXISTENT_API_KEY"
-            )
-
-    @pytest.mark.asyncio
-    async def test_get_provider_api_key_case_insensitive(
-        self, api_key_repository_async
-    ):
-        """Test provider API key handles lowercase provider names."""
-        with patch.object(
-            api_key_repository_async, "get_api_key_value", return_value="anthropic_key"
-        ):
-            result = await api_key_repository_async.get_provider_api_key("anthropic")
-
-            assert result == "anthropic_key"
-            api_key_repository_async.get_api_key_value.assert_called_once_with(
-                "ANTHROPIC_API_KEY"
-            )
-
-    @pytest.mark.asyncio
-    async def test_get_provider_api_key_mixed_case(self, api_key_repository_async):
-        """Test provider API key handles mixed case provider names."""
-        with patch.object(
-            api_key_repository_async, "get_api_key_value", return_value="databricks_key"
-        ):
-            result = await api_key_repository_async.get_provider_api_key("DataBricks")
-
-            assert result == "databricks_key"
-            api_key_repository_async.get_api_key_value.assert_called_once_with(
-                "DATABRICKS_API_KEY"
-            )
-
-
 class TestApiKeyRepositoryIntegration:
     """Integration test cases testing method interactions."""
-
-    @pytest.mark.asyncio
-    async def test_find_by_name_to_get_api_key_value_flow(
-        self, api_key_repository_async, mock_async_session
-    ):
-        """Test the flow from find_by_name to get_api_key_value."""
-        api_key = MockApiKey(
-            name="INTEGRATION_KEY", encrypted_value="encrypted_integration"
-        )
-        mock_result = MockResult([api_key])
-        mock_async_session.execute.return_value = mock_result
-
-        with patch(
-            "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
-            return_value="decrypted_integration",
-        ):
-            result = await api_key_repository_async.get_api_key_value("INTEGRATION_KEY")
-
-            assert result == "decrypted_integration"
-            mock_async_session.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_provider_to_find_by_name_flow(
-        self, api_key_repository_async, mock_async_session
-    ):
-        """Test the flow from get_provider_api_key to find_by_name."""
-        api_key = MockApiKey(
-            name="PROVIDER_API_KEY", encrypted_value="encrypted_provider"
-        )
-        mock_result = MockResult([api_key])
-        mock_async_session.execute.return_value = mock_result
-
-        with patch(
-            "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
-            return_value="decrypted_provider",
-        ):
-            result = await api_key_repository_async.get_provider_api_key("provider")
-
-            assert result == "decrypted_provider"
-            mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_find_all_with_actual_query_structure(
@@ -454,30 +289,10 @@ class TestApiKeyRepositoryErrorHandling:
         ):
             api_key_repository_async.find_by_name_sync("TEST")
 
-    @pytest.mark.asyncio
-    async def test_get_api_key_value_with_none_encrypted_value(
-        self, api_key_repository_async
-    ):
-        """Test get_api_key_value when encrypted_value is None."""
-        api_key = MockApiKey(name="NULL_VALUE_KEY", encrypted_value=None)
-
-        with patch.object(
-            api_key_repository_async, "find_by_name", return_value=api_key
-        ):
-            with patch(
-                "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
-                side_effect=Exception("Cannot decrypt None"),
-            ):
-                result = await api_key_repository_async.get_api_key_value(
-                    "NULL_VALUE_KEY"
-                )
-
-                assert result is None
-
 
 # ============================================================================
-# find_by_name_sync / find_all / get_api_key_value / delete — additional
-# branch coverage using plain mocks (async vs sync session, decrypt failure,
+# find_by_name_sync / find_all / delete — additional
+# branch coverage using plain mocks (async vs sync session,
 # delete exception/not-found/success paths).
 # ============================================================================
 
@@ -572,52 +387,6 @@ async def test_find_all_with_group():
     repo = ApiKeyRepository(session=async_session)
     result = await repo.find_all(group_id="g1")
     assert len(result) == 1
-
-
-@pytest.mark.asyncio
-async def test_get_api_key_value_returns_none_when_not_found():
-    async_session = _make_async_session()
-    async_session.execute.return_value = _make_result([])
-    repo = ApiKeyRepository(session=async_session)
-    result = await repo.get_api_key_value("MISSING_KEY")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_get_api_key_value_decryption_success():
-    async_session = _make_async_session()
-    key = _GroupScopedApiKey(encrypted_value="encrypted_123")
-    async_session.execute.return_value = _make_result([key])
-    repo = ApiKeyRepository(session=async_session)
-
-    # EncryptionUtils is imported locally inside the method
-    mock_encryption = MagicMock()
-    mock_encryption.decrypt_value.return_value = "decrypted_value"
-    with patch.dict(
-        "sys.modules",
-        {"src.utils.encryption_utils": MagicMock(EncryptionUtils=mock_encryption)},
-    ):
-        result = await repo.get_api_key_value("OPENAI_API_KEY")
-
-    assert result == "decrypted_value"
-
-
-@pytest.mark.asyncio
-async def test_get_api_key_value_decryption_fails_returns_none():
-    async_session = _make_async_session()
-    key = _GroupScopedApiKey(encrypted_value="bad_enc")
-    async_session.execute.return_value = _make_result([key])
-    repo = ApiKeyRepository(session=async_session)
-
-    mock_encryption = MagicMock()
-    mock_encryption.decrypt_value.side_effect = Exception("decrypt error")
-    with patch.dict(
-        "sys.modules",
-        {"src.utils.encryption_utils": MagicMock(EncryptionUtils=mock_encryption)},
-    ):
-        result = await repo.get_api_key_value("OPENAI_API_KEY")
-
-    assert result is None
 
 
 @pytest.mark.asyncio

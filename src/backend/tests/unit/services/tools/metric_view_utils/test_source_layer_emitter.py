@@ -25,7 +25,6 @@ from src.services.tools.metric_view_utils.source_layer_emitter import (
     emit_views,
 )
 
-
 # ---------------------------------------------------------------------------
 # _sql_lit helper
 # ---------------------------------------------------------------------------
@@ -406,10 +405,10 @@ def test_dim_country_full_pipeline():
     """Reproduce the OTC Dim_Country source-layer view shape end-to-end."""
     spec = ViewSpec(
         table_name="Dim_Country",
-        target_view="`dc_adb-landing-zone-002`.`idor`.`otc_ucm_dim_country`",
+        target_view="`acme_adb-landing-zone-002`.`idor`.`otc_ucm_dim_country`",
         source=TableSource(
             full_table_name=(
-                "`dc_datalake_prod_001`.`udm_datamart_cust_exp`.`cust_exp_dim_company`"
+                "`acme_prod`.`acme_datamart_cust_exp`.`cust_exp_dim_company`"
             )
         ),
         m_steps=[

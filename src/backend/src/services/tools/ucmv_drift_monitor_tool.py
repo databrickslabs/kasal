@@ -23,12 +23,18 @@ Logic lives in ``metric_view_utils/drift/``; this class only wires real I/O into
 
 import json
 import logging
-from typing import Any, ClassVar, Optional, Tuple, Type
+from collections.abc import Callable
+from typing import ClassVar, Optional, Tuple, Type
 
-from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
+
 logger = logging.getLogger(__name__)
+
+# Reads one setting: the task-form value, or the configured default.
+Getter = Callable[[str], object]
 
 # Forwarded verbatim to the Pipeline Config Generator.
 _PBI_KEYS = (
@@ -99,6 +105,15 @@ class UCMVDriftMonitorSchema(BaseModel):
     )
 
 
+def _as_count(value: object, default: int) -> int:
+    """An integer setting; unset/falsy values fall back to ``default``."""
+    if not value:
+        return default
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return default
+
+
 class UCMVDriftMonitorTool(BaseTool):
     """Detect drift between deployed UC metric views and their Power BI model."""
 
@@ -121,8 +136,8 @@ class UCMVDriftMonitorTool(BaseTool):
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
-    def __init__(self, **kwargs: Any) -> None:
-        default_config: dict = {}
+    def __init__(self, **kwargs: object) -> None:
+        default_config: dict[str, object] = {}
         for key in _PBI_KEYS + _OWN_KEYS:
             val = kwargs.pop(key, None)
             if val is not None:
@@ -133,7 +148,7 @@ class UCMVDriftMonitorTool(BaseTool):
     # ------------------------------------------------------------------
     # I/O wiring
     # ------------------------------------------------------------------
-    def _extract(self, get, catalog: str, schema: str) -> dict:
+    def _extract(self, get: Getter, catalog: str, schema: str) -> dict[str, object]:
         from src.services.tools.pipeline_config_generator_tool import (
             PipelineConfigGeneratorTool,
         )
@@ -141,15 +156,18 @@ class UCMVDriftMonitorTool(BaseTool):
         cfg = {k: get(k) for k in _PBI_KEYS if get(k) not in (None, "")}
         # No warehouse_id: extraction stays the deterministic, LLM-free P1 path.
         tool = PipelineConfigGeneratorTool(catalog=catalog, schema_name=schema, **cfg)
-        return json.loads(tool._run())
+        extraction: dict[str, object] = json.loads(tool._run())
+        return extraction
 
-    def _sql_fn(self, get, warehouse_id: str):
+    def _sql_fn(self, get: Getter, warehouse_id: str) -> Callable[[str], dict]:
         from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
         from src.utils.telemetry import KasalProduct, get_user_agent_header
         from src.utils.url_security import is_trusted_databricks_host
 
         deployer = MetricViewDeployerTool()
-        auth = deployer._authenticate(host_override=get("databricks_host") or None)
+        auth = deployer._authenticate(
+            host_override=opt_str(get("databricks_host")) or None
+        )
         if not auth:
             raise RuntimeError("Databricks authentication failed")
         url = (auth.workspace_url or "").rstrip("/")
@@ -167,13 +185,15 @@ class UCMVDriftMonitorTool(BaseTool):
 
         return _run
 
-    def _generate_fn(self, get, extraction: dict, catalog: str, schema: str):
+    def _generate_fn(
+        self, get: Getter, extraction: dict[str, object], catalog: str, schema: str
+    ) -> Callable[[list[dict]], dict]:
         from src.services.tools.uc_metric_view_generator_tool import (
             UCMetricViewGeneratorTool,
         )
 
         def _gen(measures: list[dict]) -> dict:
-            cfg = {
+            cfg: dict[str, object] = {
                 "measures_json": json.dumps(measures),
                 "mquery_json": json.dumps(extraction.get("mquery_json") or []),
                 "relationships_json": json.dumps(
@@ -193,11 +213,14 @@ class UCMVDriftMonitorTool(BaseTool):
                     cfg[k] = get(k)
             # No warehouse_id → the generator stays single-pass (no reconciliation).
             out = UCMetricViewGeneratorTool(**cfg)._run()
-            return json.loads(out) if isinstance(out, str) else (out or {})
+            if isinstance(out, str):
+                parsed: dict = json.loads(out)
+                return parsed
+            return dict(as_map(out))
 
         return _gen
 
-    def _complete_fn(self, model: str):
+    def _complete_fn(self, model: str) -> Callable[[str, str], Optional[str]]:
         from src.services.tools.async_bridge import run_async_with_context
         from src.services.tools.metric_view_utils.dax_llm_fallback import _call_llm
 
@@ -206,21 +229,22 @@ class UCMVDriftMonitorTool(BaseTool):
                 _call_llm(user_prompt, system_prompt, model, max_tokens=4000),
                 timeout=300,
             )
-            return (res or {}).get("content")
+            content = as_map(res).get("content")
+            return content if isinstance(content, str) else None
 
         return _complete
 
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
-    def _run(self, **kwargs: Any) -> str:
+    def _run(self, **kwargs: object) -> str:
         from src.services.tools.metric_view_utils.drift import run_drift_check
         from src.services.tools.metric_view_utils.drift.baseline import (
             parse_view_names,
             split_full_name,
         )
 
-        def get(key: str) -> Any:
+        def get(key: str) -> object:
             # Agents often pass their own empty placeholders; never let "" shadow
             # the value configured in the task form.
             val = kwargs.get(key)
@@ -229,7 +253,7 @@ class UCMVDriftMonitorTool(BaseTool):
             return val
 
         def _fail(msg: str) -> str:
-            logger.error(f"[UCMVDrift] {msg}")
+            logger.error("[UCMVDrift] %s", msg)
             return json.dumps(
                 {
                     "drift_monitor": True,
@@ -247,27 +271,27 @@ class UCMVDriftMonitorTool(BaseTool):
         bad = [v for v in views if not split_full_name(v)]
         if bad:
             return _fail(f"not catalog.schema.view names: {bad}")
-        warehouse_id = get("warehouse_id")
+        warehouse_id = str(get("warehouse_id") or "")
         if not warehouse_id:
             return _fail("warehouse_id is required to read the deployed metric views.")
 
         first = split_full_name(views[0]) or ("main", "default", "")
-        catalog = get("catalog") or first[0]
-        schema = get("schema_name") or first[1]
+        catalog = str(get("catalog") or first[0])
+        schema = str(get("schema_name") or first[1])
 
         try:
             extraction = self._extract(get, catalog, schema)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — returned as error
             return _fail(f"Power BI extraction failed: {exc}")
         if extraction.get("error"):
             return _fail(f"Power BI extraction failed: {extraction['error']}")
 
         try:
             sql_fn = self._sql_fn(get, warehouse_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — returned as error
             return _fail(f"cannot connect to Databricks: {exc}")
 
-        model = get("llm_model") or _DEFAULT_LLM
+        model = str(get("llm_model") or _DEFAULT_LLM)
         compare_legacy = get("llm_compare_legacy")
         complete_fn = (
             self._complete_fn(model)
@@ -283,9 +307,9 @@ class UCMVDriftMonitorTool(BaseTool):
             generate_fn=self._generate_fn(get, extraction, catalog, schema),
             complete_fn=complete_fn,
             apply_suspected_changes=apply_suspected,
-            max_semantic_measures=int(get("max_semantic_measures") or 300),
+            max_semantic_measures=_as_count(get("max_semantic_measures"), 300),
         )
-        summary = extraction.get("summary") or {}
+        summary = as_map(extraction.get("summary"))
         report["pbi"] = {
             "workspace_id": get("workspace_id"),
             "dataset_id": get("dataset_id"),

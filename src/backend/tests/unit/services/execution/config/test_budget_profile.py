@@ -3,6 +3,7 @@
 import pytest
 
 from src.services.execution.config.budget_profile import resolve_budget_profile
+from src.services.settings import engine_settings
 
 
 class TestProfiles:
@@ -59,15 +60,23 @@ class TestProfiles:
         assert resolve_budget_profile("  DEEP  ") == resolve_budget_profile("deep")
 
 
-class TestEnvOverrides:
+def _configure(monkeypatch, field, value):
+    monkeypatch.setitem(
+        engine_settings._snapshot, engine_settings.budget_key("deep", field), value
+    )
+
+
+class TestConfiguredOverrides:
+    """Overrides a system admin set in Configuration → Engines → Advanced."""
+
     def test_override_applies(self, monkeypatch):
         # Deliberately not the shipped default, or the test would pass with the
         # override wired to nothing.
-        monkeypatch.setenv("KASAL_BUDGET_DEEP_RUN_WALL_CLOCK", "5400")
+        _configure(monkeypatch, "run_wall_clock", "5400")
         assert resolve_budget_profile("deep").run_wall_clock == 5400
 
     def test_override_is_scoped_to_its_mode(self, monkeypatch):
-        monkeypatch.setenv("KASAL_BUDGET_DEEP_MAX_ITER", "99")
+        _configure(monkeypatch, "max_iter", "99")
         assert resolve_budget_profile("deep").max_iter == 99
         assert resolve_budget_profile("research").max_iter == 15
 
@@ -75,7 +84,7 @@ class TestEnvOverrides:
     def test_unusable_override_falls_back_to_the_default(self, monkeypatch, bad):
         """Zero would mean 'no rounds at all' rather than 'unlimited' — a
         footgun disguised as a kill switch."""
-        monkeypatch.setenv("KASAL_BUDGET_DEEP_MAX_ITER", bad)
+        _configure(monkeypatch, "max_iter", bad)
         assert resolve_budget_profile("deep").max_iter == 30
 
 
@@ -433,8 +442,9 @@ class TestSavedAgentEffort:
             AgentService, "get_with_group_check", AsyncMock(return_value=row)
         )
         config = CrewConfig(agents_yaml={f"agent_agent-{agent_id}": {"max_iter": 5}})
+        session = object()  # the service is patched; any session will do
         await snapshot_agent_settings(
-            config, None, SimpleNamespace(primary_group_id="space")
+            config, session, SimpleNamespace(primary_group_id="space")
         )
         snapshot = config.model_dump(mode="json")
         agent = next(iter(snapshot["agents_yaml"].values()))
@@ -446,6 +456,13 @@ class TestSavedAgentEffort:
         assert agent["execution_effort"] == {"tier": "high"}
         other = CrewConfig(agents_yaml={agent_id: {}})
         await snapshot_agent_settings(
-            other, None, SimpleNamespace(primary_group_id="another")
+            other, session, SimpleNamespace(primary_group_id="another")
         )
         assert other.agents_yaml[agent_id] == {}
+        # No session (GEPA evals, chat fast path): nothing is frozen and nothing
+        # is read; the worker's group-checked read fills the row in instead.
+        unfrozen = CrewConfig(agents_yaml={agent_id: {}})
+        await snapshot_agent_settings(
+            unfrozen, None, SimpleNamespace(primary_group_id="space")
+        )
+        assert unfrozen.agents_yaml[agent_id] == {}

@@ -118,7 +118,7 @@ export class GenieService {
    */
   static getDefaultSpaceId(): string {
     // This could be configured in environment variables or settings
-    return '01efdd2cd03211d0ab74f620f0023b77';
+    return '01ef0000000000000000000000000000';
   }
 }
 

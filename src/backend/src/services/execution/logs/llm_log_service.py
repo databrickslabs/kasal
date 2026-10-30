@@ -162,7 +162,7 @@ class LLMLogService:
         page: int = 0,
         per_page: int = 10,
         endpoint: Optional[str] = None,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> List[LLMLog]:
         """
         Get paginated logs with optional endpoint filtering for a specific group.
@@ -185,7 +185,9 @@ class LLMLogService:
         )
 
     async def count_logs_by_group(
-        self, endpoint: Optional[str] = None, group_context: GroupContext = None
+        self,
+        endpoint: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> int:
         """
         Count logs with optional endpoint filtering for a specific group.
@@ -205,7 +207,7 @@ class LLMLogService:
         )
 
     async def get_unique_endpoints_by_group(
-        self, group_context: GroupContext = None
+        self, group_context: Optional[GroupContext] = None
     ) -> List[str]:
         """
         Get list of unique endpoints in the logs for a specific group.
@@ -224,7 +226,7 @@ class LLMLogService:
         )
 
     async def get_log_stats_by_group(
-        self, days: int = 30, group_context: GroupContext = None
+        self, days: int = 30, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
         """
         Get statistics about LLM usage for a specific group.

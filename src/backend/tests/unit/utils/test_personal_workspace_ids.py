@@ -26,14 +26,6 @@ class TestTheDisambiguatedForm:
         assert da.startswith("user_alice_smith_example_com_")
         assert da == GroupContext.disambiguated_individual_group_id(A.upper())
 
-    def test_either_form_is_recognised_as_the_users_own(self):
-        legacy, dis = GroupContext.personal_workspace_candidates(A)
-        assert GroupContext.is_personal_workspace_of(legacy, A)
-        assert GroupContext.is_personal_workspace_of(dis, A)
-        assert GroupContext.is_personal_workspace_of(dis.upper(), A)
-        assert not GroupContext.is_personal_workspace_of("team_x", A)
-        assert not GroupContext.is_personal_workspace_of(None, A)
-
     def test_the_stored_id_wins_over_the_derivation(self):
         row = SimpleNamespace(personal_group_id=STORED)
         assert GroupContext.personal_workspace_id_of(row, A) == STORED

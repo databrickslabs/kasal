@@ -14,11 +14,13 @@ task as needed; this seed set targets decision/outcome workloads.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict, List
 
 from sqlalchemy import select
 
 from src.db.session import async_session_factory
 from src.models.schema import Schema
+from src.seeds.errors import SeederIncomplete
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ OBSOLETE_SCHEMA_NAMES = [
 ]
 
 # Whole-crew workload outcomes with routing-friendly fields.
-SAMPLE_SCHEMAS = [
+SAMPLE_SCHEMAS: List[Dict[str, Any]] = [
     # ── Action / automation outcomes ────────────────────────────────────────────
     {
         "name": "OperationResult",
@@ -287,13 +289,14 @@ SAMPLE_SCHEMAS = [
 ]
 
 
-async def seed_async():
+async def seed_async() -> None:
     """Seed schemas into the database (upsert by name) and prune obsolete ones."""
     logger.info("Seeding schemas...")
 
     schemas_added = 0
     schemas_updated = 0
     schemas_removed = 0
+    schemas_failed = 0
 
     for schema_data in SAMPLE_SCHEMAS:
         try:
@@ -324,6 +327,7 @@ async def seed_async():
                 await session.commit()
         except Exception as e:
             logger.error(f"Error processing schema {schema_data['name']}: {e}")
+            schemas_failed += 1
 
     # Prune schemas from earlier seed versions that no longer fit the routing model.
     for name in OBSOLETE_SCHEMA_NAMES:
@@ -339,18 +343,27 @@ async def seed_async():
                     schemas_removed += 1
         except Exception as e:
             logger.error(f"Error removing obsolete schema {name}: {e}")
+            schemas_failed += 1
 
     logger.info(
-        f"Schemas: {schemas_added} added, {schemas_updated} updated, {schemas_removed} removed"
+        f"Schemas: {schemas_added} added, {schemas_updated} updated, "
+        f"{schemas_removed} removed, {schemas_failed} failed"
     )
+    if schemas_failed:
+        raise SeederIncomplete(
+            "schemas",
+            schemas_failed,
+            len(SAMPLE_SCHEMAS) + len(OBSOLETE_SCHEMA_NAMES),
+        )
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding schemas."""
     try:
         await seed_async()
     except Exception as e:
         logger.error(f"Schema seeding error: {e}")
+        raise
 
 
 if __name__ == "__main__":

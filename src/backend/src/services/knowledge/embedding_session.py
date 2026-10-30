@@ -12,7 +12,6 @@ embedding storage/search when Lakebase is the active backend.
 """
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, Tuple
 
@@ -104,8 +103,9 @@ async def ensure_lakebase_doc_table(session: AsyncSession) -> None:
     result = await session.execute(
         text(
             "SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{_KNOWLEDGE_TABLE}'"
-        )
+            "WHERE table_name = :table_name"
+        ),
+        {"table_name": _KNOWLEDGE_TABLE},
     )
     existing = {row[0] for row in result.fetchall()}
 
@@ -150,7 +150,9 @@ async def resolve_lakebase_instance(
             lakebase_config = getattr(config, "lakebase_config", None)
             if lakebase_config is not None:
                 instance = getattr(lakebase_config, "instance_name", None)
-            resolved = instance or os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+            from src.core.databricks_app import resolve_lakebase_instance_name
+
+            resolved = resolve_lakebase_instance_name(instance)
             logger.info(
                 f"[KNOWLEDGE] resolve_lakebase_instance: group={group_id} "
                 f"backend=LAKEBASE -> instance={resolved}"
@@ -192,16 +194,33 @@ import re  # noqa: E402 - import follows module initialization
 # Lakebase objects (tables, schema) created by Databricks are owned by the
 # databricks_superuser role; individual principals are NOINHERIT members of it,
 # so DDL/DML on those objects only works after explicitly assuming the role.
-# Configurable / disable with empty string.
-_KNOWLEDGE_DB_ROLE = os.getenv("LAKEBASE_KNOWLEDGE_ROLE", "databricks_superuser")
+# Configured on the memory backend's Lakebase settings (``db_role``; it replaced
+# the LAKEBASE_KNOWLEDGE_ROLE env var); an empty string assumes no role.
+DEFAULT_KNOWLEDGE_DB_ROLE = "databricks_superuser"
 _SAFE_ROLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-async def _assume_knowledge_role(session: AsyncSession) -> None:
+async def resolve_knowledge_role(
+    app_session: AsyncSession, group_id: Optional[str]
+) -> Optional[str]:
+    """The role to assume on this group's Lakebase instance, or None for none."""
+    try:
+        from src.services.memory.config.config_service import MemoryConfigService
+
+        config = await MemoryConfigService(app_session).get_active_config(group_id)
+        role = getattr(getattr(config, "lakebase_config", None), "db_role", None)
+    except Exception as exc:  # noqa: BLE001 — the default is always usable
+        logger.debug("[KNOWLEDGE] Could not read db_role (%s); using default", exc)
+        role = None
+    if not isinstance(role, str):
+        return DEFAULT_KNOWLEDGE_DB_ROLE
+    return role.strip() or None
+
+
+async def _assume_knowledge_role(session: AsyncSession, role: Optional[str]) -> None:
     """Best-effort ``SET ROLE`` so the Lakebase session operates as the role that
     owns the kasal objects (databricks_superuser by default). Savepoint-guarded so
     a non-member / missing role leaves the session usable."""
-    role = _KNOWLEDGE_DB_ROLE
     if not role or not _SAFE_ROLE.match(role):
         return
     from sqlalchemy import text
@@ -240,6 +259,8 @@ async def knowledge_embedding_session(
     if instance:
         from src.db.lakebase_session import get_lakebase_session
 
+        role = await resolve_knowledge_role(app_session, group_id)
+
         logger.info(
             f"[KNOWLEDGE] Using Lakebase instance '{instance}' for document embeddings"
         )
@@ -250,7 +271,7 @@ async def knowledge_embedding_session(
         async with get_lakebase_session(
             instance_name=instance, group_id=group_id, user_token=user_token
         ) as lb_session:
-            await _assume_knowledge_role(lb_session)
+            await _assume_knowledge_role(lb_session, role)
             yield lb_session, True
     else:
         # App-DB fallback. Previously SILENT — the single biggest blind spot:

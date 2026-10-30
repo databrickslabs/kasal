@@ -470,9 +470,7 @@ class TestFlowRunnerServiceFreshSession:
                 "src.services.flow_builder.flow_runner_service.FlowExecutionService",
                 side_effect=track_fes,
             ),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as mock_api_keys,
+            patch("src.services.settings.api_keys.ApiKeysService") as mock_api_keys,
             patch(
                 "src.services.flow_builder.backend_flow.BackendFlow"
             ) as mock_backend_flow_class,
@@ -544,9 +542,7 @@ class TestFlowRunnerServiceFreshSession:
                 "src.services.flow_builder.flow_runner_service.FlowExecutionService",
                 side_effect=track_fes,
             ),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as mock_api_keys,
+            patch("src.services.settings.api_keys.ApiKeysService") as mock_api_keys,
             patch(
                 "src.services.flow_builder.backend_flow.BackendFlow"
             ) as mock_backend_flow_class,
@@ -613,9 +609,7 @@ class TestFlowRunnerServiceFreshSession:
                 "src.services.flow_builder.flow_runner_service.FlowExecutionService",
                 side_effect=track_fes,
             ),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as mock_api_keys,
+            patch("src.services.settings.api_keys.ApiKeysService") as mock_api_keys,
             patch(
                 "src.services.flow_builder.backend_flow.BackendFlow"
             ) as mock_backend_flow_class,

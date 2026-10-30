@@ -15,14 +15,16 @@ Two cooperating pieces:
    their facts live on in the summary, so the preamble finally has a true
    upper bound.
 
-Kill-switch: ``CHAT_COMPACTION=false`` disables summarization (the hard
+Kill switch: Configuration → Engines → Advanced → Chat disables summarization (the hard
 budget in the preamble still applies — that alone prevents the overflow
 drops, at the cost of forgetting instead of summarizing).
 """
 
 import logging
-import os
+from datetime import datetime
 from typing import Any, List, Optional, Sequence, Tuple
+
+from src.services.settings.engine_settings import setting as engine_setting
 
 logger = logging.getLogger(__name__)
 
@@ -43,25 +45,21 @@ _SUMMARIZE_INSTRUCTIONS = (
 
 
 def compaction_enabled() -> bool:
-    return os.getenv("CHAT_COMPACTION", "true").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-    )
+    return bool(engine_setting("chat_compaction"))
 
 
 def keep_recent_rows() -> int:
     """How many newest chat_history rows stay OUT of the summary (verbatim)."""
-    return int(os.getenv("CHAT_COMPACTION_KEEP_ROWS", "24"))
+    return int(engine_setting("chat_compaction_keep_rows"))
 
 
 def trigger_chars() -> int:
     """Fold when the to-be-folded turns exceed this many characters."""
-    return int(os.getenv("CHAT_COMPACTION_TRIGGER_CHARS", "8000"))
+    return int(engine_setting("chat_compaction_trigger_chars"))
 
 
 def summary_max_chars() -> int:
-    return int(os.getenv("CHAT_SUMMARY_MAX_CHARS", "2000"))
+    return int(engine_setting("chat_summary_max_chars"))
 
 
 def transcript_of(rows: Sequence[Any], per_turn_cap: int = 700) -> str:
@@ -86,7 +84,7 @@ def transcript_of(rows: Sequence[Any], per_turn_cap: int = 700) -> str:
 
 def split_for_compaction(
     rows: Sequence[Any],
-    summary_upto,
+    summary_upto: Optional[datetime],
     keep_rows: int,
 ) -> Tuple[List[Any], List[Any]]:
     """(to_fold, verbatim): rows newer than the fold marker, split so the
@@ -140,7 +138,7 @@ async def maintain_session_summary(
             ).get_recent_by_session_and_group(
                 session_id,
                 group_ids,
-                limit=int(os.getenv("CHAT_HISTORY_RECENT_LIMIT", "120")),
+                limit=int(engine_setting("chat_history_recent_limit")),
             )
             existing_summary = getattr(session_record, "context_summary", None)
             summary_upto = getattr(session_record, "context_summary_upto", None)
@@ -152,7 +150,7 @@ async def maintain_session_summary(
         if len(fold_transcript) < trigger_chars():
             return False
 
-        model = os.getenv("CHAT_COMPACTION_MODEL") or model_name
+        model = model_name
         if not model:
             return False
         new_summary = await LLMManager.completion(

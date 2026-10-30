@@ -16,6 +16,7 @@ import pytest
 from src.core.events import LLMStreamChunkEvent
 from src.core.events.bus import event_bus
 from src.services.a2ui import runner
+from src.services.a2ui import settings as _a2ui_settings
 from src.services.a2ui.stream import apply_messages
 
 # A dashboard with several components, so the stream has real batches to split.
@@ -78,7 +79,7 @@ def wired(monkeypatch):
     llm = FakeStreamingLLM(json.dumps(DECK))
 
     async def _resolve_config(group_id, query):
-        return True, CATALOG, ""
+        return True, CATALOG, "", _a2ui_settings.effective()
 
     async def _get_llm(*a, **k):
         return llm
@@ -124,14 +125,16 @@ async def test_the_llm_is_opted_into_streaming(wired):
 
 
 @pytest.mark.asyncio
-async def test_components_ship_before_the_surface_is_returned(wired, monkeypatch):
+async def test_components_ship_before_the_surface_is_returned(
+    engine_setting, wired, monkeypatch
+):
     """The point: components arrive as they are written, not in one lump.
 
     The rescan throttle has to come off — the fake emits a whole surface in
     microseconds, so at the production cadence every chunk lands inside one
     window and the result would be a single batch no matter how well this works.
     """
-    monkeypatch.setenv("A2UI_STREAM_INTERVAL_MS", "0")
+    engine_setting("a2ui_stream_interval_ms", 0)
     _, sent = await _compose()
     batches = [m for m in sent if "updateComponents" in m]
     assert len(batches) >= 2, "everything arrived in a single batch"
@@ -148,8 +151,8 @@ async def test_the_handler_is_removed_afterwards(wired):
 
 
 @pytest.mark.asyncio
-async def test_streaming_can_be_switched_off(wired, monkeypatch):
-    monkeypatch.setenv("A2UI_STREAMING", "false")
+async def test_streaming_can_be_switched_off(engine_setting, wired, monkeypatch):
+    engine_setting("a2ui_streaming", False)
     surface, sent = await _compose()
     assert surface == DECK  # the answer is unaffected
     assert sent == []
@@ -160,7 +163,7 @@ async def test_a_shell_is_retracted_when_no_surface_is_delivered(wired, monkeypa
     """A prose turn must not strand the instant shell frame on screen."""
 
     async def _off(group_id, query):
-        return False, {}, ""
+        return False, {}, "", _a2ui_settings.effective()
 
     monkeypatch.setattr(runner, "_resolve_config", _off)
     surface, sent = await _compose(shell_shipped=True)
@@ -171,7 +174,7 @@ async def test_a_shell_is_retracted_when_no_surface_is_delivered(wired, monkeypa
 @pytest.mark.asyncio
 async def test_no_retraction_when_no_shell_was_shipped(wired, monkeypatch):
     async def _off(group_id, query):
-        return False, {}, ""
+        return False, {}, "", _a2ui_settings.effective()
 
     monkeypatch.setattr(runner, "_resolve_config", _off)
     _, sent = await _compose(shell_shipped=False)

@@ -2,6 +2,7 @@
 Service for deploying crews to Databricks Model Serving.
 """
 
+import asyncio
 import json
 import logging
 import shutil
@@ -22,6 +23,13 @@ from src.schemas.crew_export import (
     DeploymentResponse,
     DeploymentStatus,
     ModelServingConfig,
+)
+from src.services.deployment.endpoint_ownership import (
+    ServingEndpointOwnershipService,
+)
+from src.services.deployment.endpoints import (
+    delete_endpoint_blocking,
+    endpoint_status,
 )
 from src.utils.user_context import GroupContext
 
@@ -46,6 +54,7 @@ class CrewDeploymentService:
         self.agent_repository = AgentRepository(session)
         self.task_repository = TaskRepository(session)
         self.tool_repository = ToolRepository(session)
+        self.endpoint_ownership = ServingEndpointOwnershipService(session)
 
     async def deploy_to_model_serving(
         self,
@@ -73,7 +82,7 @@ class CrewDeploymentService:
 
         # Check group authorization
         if group_context and group_context.is_valid():
-            if crew.group_id not in group_context.group_ids:
+            if crew.group_id not in (group_context.group_ids or []):
                 raise ValueError(f"Crew {crew_id} not found")
 
         # Get agents and tasks
@@ -135,8 +144,20 @@ class CrewDeploymentService:
     async def _create_mlflow_model(
         self, crew_data: Dict[str, Any], config: ModelServingConfig
     ) -> tuple[str, str]:
+        """Create and log the MLflow model, off the event loop.
+
+        MLflow logging and registry polling are synchronous network calls
+        that take tens of seconds; run on the loop they froze every request.
         """
-        Create and log MLflow model
+        return await asyncio.to_thread(
+            self._create_mlflow_model_blocking, crew_data, config
+        )
+
+    def _create_mlflow_model_blocking(
+        self, crew_data: Dict[str, Any], config: ModelServingConfig
+    ) -> tuple[str, str]:
+        """
+        Create and log MLflow model (blocking; call via _create_mlflow_model)
 
         Args:
             crew_data: Crew configuration data
@@ -240,8 +261,20 @@ class CrewDeploymentService:
     async def _deploy_to_endpoint(
         self, model_name: str, model_version: str, config: ModelServingConfig
     ) -> tuple[str, DeploymentStatus]:
+        """Deploy to a Model Serving endpoint, off the event loop.
+
+        The Databricks SDK client is synchronous.
         """
-        Deploy model to Model Serving endpoint
+        return await asyncio.to_thread(
+            self._deploy_to_endpoint_blocking, model_name, model_version, config
+        )
+
+    def _deploy_to_endpoint_blocking(
+        self, model_name: str, model_version: str, config: ModelServingConfig
+    ) -> tuple[str, DeploymentStatus]:
+        """
+        Deploy model to Model Serving endpoint (blocking; call via
+        _deploy_to_endpoint)
 
         Args:
             model_name: Name of registered model
@@ -307,6 +340,8 @@ class CrewDeploymentService:
             w.serving_endpoints.create(
                 name=endpoint_name,
                 config=EndpointCoreConfigInput(
+                    # Required by the SDK dataclass; omitting it was a TypeError.
+                    name=endpoint_name,
                     served_entities=[served_entity],
                     auto_capture_config=(
                         AutoCaptureConfigInput(
@@ -368,7 +403,7 @@ class CrewDeploymentService:
 
         return tool_names
 
-    async def _agent_to_dict(self, agent) -> Dict[str, Any]:
+    async def _agent_to_dict(self, agent: Any) -> Dict[str, Any]:
         """Convert agent model to dictionary"""
         # Convert tool IDs to tool names
         tool_names = await self._convert_tool_ids_to_names(agent.tools or [])
@@ -386,7 +421,7 @@ class CrewDeploymentService:
             "allow_delegation": agent.allow_delegation,
         }
 
-    async def _task_to_dict(self, task) -> Dict[str, Any]:
+    async def _task_to_dict(self, task: Any) -> Dict[str, Any]:
         """Convert task model to dictionary"""
         # Convert tool IDs to tool names
         tool_names = await self._convert_tool_ids_to_names(task.tools or [])
@@ -400,6 +435,29 @@ class CrewDeploymentService:
             "tools": tool_names,
             "async_execution": task.async_execution,
             "context": task.context or [],
+        }
+
+    async def get_endpoint_status(
+        self, crew_id: str, endpoint_name: str, group_context: GroupContext
+    ) -> Dict[str, Any]:
+        """Status of this group's deployment of the crew (else ``NotFoundError``)."""
+        endpoint = await self.endpoint_ownership.assert_endpoint_belongs_to_crew(
+            crew_id, endpoint_name, group_context
+        )
+        return endpoint_status(endpoint_name, endpoint)
+
+    async def delete_endpoint(
+        self, crew_id: str, endpoint_name: str, group_context: GroupContext
+    ) -> Dict[str, str]:
+        """Delete this group's deployment of the crew (else ``NotFoundError``)."""
+        await self.endpoint_ownership.assert_endpoint_belongs_to_crew(
+            crew_id, endpoint_name, group_context
+        )
+        await asyncio.to_thread(delete_endpoint_blocking, endpoint_name)
+        logger.info(f"Deleted endpoint {endpoint_name} for crew {crew_id}")
+        return {
+            "message": f"Endpoint {endpoint_name} has been deleted successfully",
+            "endpoint_name": endpoint_name,
         }
 
     def _generate_usage_example(self, endpoint_url: str, endpoint_name: str) -> str:
@@ -452,10 +510,11 @@ print("Result:", response)
 """
 
 
-class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
+# mlflow.pyfunc binds PythonModel lazily; its stubs do not declare it.
+class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):  # type: ignore[name-defined]
     """MLflow PyFunc wrapper for CrewAI crews"""
 
-    def __init__(self, crew_config: Dict[str, Any]):
+    def __init__(self, crew_config: Dict[str, Any]) -> None:
         """
         Initialize wrapper with crew configuration
 
@@ -464,7 +523,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         """
         self.crew_config = crew_config
 
-    def load_context(self, context):
+    def load_context(self, context: Any) -> None:
         """
         Load model context
 
@@ -479,7 +538,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
             with open(crew_config_path, "r") as f:
                 self.crew_config = json.load(f)
 
-    def predict(self, context, model_input):
+    def predict(self, context: Any, model_input: Any) -> Any:
         """
         Predict method for MLflow model
 
@@ -566,16 +625,16 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         for task_config in self.crew_config.get("tasks", []):
             # Find agent by ID
             agent_id = task_config.get("agent_id")
-            agent = None
+            task_agent: Optional[Agent] = None
             for idx, a_config in enumerate(self.crew_config.get("agents", [])):
                 if a_config.get("id") == agent_id:
-                    agent = agents[idx]
+                    task_agent = agents[idx]
                     break
 
             task = Task(
                 description=task_config["description"],
                 expected_output=task_config["expected_output"],
-                agent=agent,
+                agent=task_agent,
                 async_execution=task_config.get("async_execution", False),
             )
             tasks.append(task)

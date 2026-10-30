@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import AsyncIterator, Dict, Optional
 
 # CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
 # This must be done before importing any modules that might create database connections
@@ -28,6 +28,11 @@ from fastapi.responses import (  # noqa: E402 - import follows module initializa
     JSONResponse,
 )
 from sqlalchemy import text  # noqa: E402 - import follows module initialization
+from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
+    AsyncSession,
+    async_sessionmaker,
+)
+from starlette.types import ASGIApp, Receive, Scope, Send  # noqa: E402
 
 from src.api import api_router  # noqa: E402 - import follows module initialization
 from src.config.settings import (  # noqa: E402 - import follows module initialization
@@ -36,9 +41,9 @@ from src.config.settings import (  # noqa: E402 - import follows module initiali
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
 )
+from src.core.paths import BACKEND_ROOT  # noqa: E402
 from src.db.session import (  # noqa: E402 - import follows module initialization
     async_session_factory,
-    get_db,
 )
 from src.services.execution.cleanup import (  # noqa: E402 - import follows module initialization
     ExecutionCleanupService,
@@ -46,9 +51,7 @@ from src.services.execution.cleanup import (  # noqa: E402 - import follows modu
 from src.services.scheduling.scheduler import (  # noqa: E402 - import follows module initialization
     SchedulerService,
 )
-from src.utils.databricks_url_utils import (  # noqa: E402 - import follows module initialization
-    DatabricksURLUtils,
-)
+from src.utils.memory_paths import warn_if_local_memory_is_ephemeral  # noqa: E402
 
 # Get logger after configuration
 logger = logging.getLogger(__name__)
@@ -68,26 +71,86 @@ os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
 # Prevent MLflow from creating local mlruns directories
 # This MUST be set before MLflow is imported anywhere to ensure Databricks backend is used.
-# Preserve the launch value first: prompt optimization's local-registry mode
-# (MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI=<local server>) reads the
-# value the process was STARTED with, which this override would otherwise erase.
-if os.environ.get("MLFLOW_TRACKING_URI"):
-    os.environ.setdefault(
-        "KASAL_LAUNCH_MLFLOW_TRACKING_URI", os.environ["MLFLOW_TRACKING_URI"]
-    )
+# A local MLflow server is configured per workspace in Configuration → MLflow,
+# not with MLFLOW_TRACKING_URI at launch.
 os.environ["MLFLOW_TRACKING_URI"] = "databricks"
 
 # Set log directory environment variable
 log_path = os.path.join(
     os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "logs"
 )
-os.environ["LOG_DIR"] = log_path
+# setdefault, not overwrite: a LOG_DIR the launcher (or the test suite, which
+# points it at tests/.artifacts/logs) already chose must win. Overwriting it made
+# every test after the first in-process ``import src.main`` write log files into
+# src/backend/logs/, which the test-artifact guard then failed on a clean checkout.
+_log_dir = os.environ.setdefault("LOG_DIR", log_path)
 # Create logs directory if it doesn't exist
-os.makedirs(log_path, exist_ok=True)
+os.makedirs(_log_dir, exist_ok=True)
+
+
+def _trigger_interval() -> int:
+    """Seconds between trigger-queue ticks (Event triggers → Advanced)."""
+    from src.services.settings.engine_settings import setting
+
+    return int(setting("event_triggers_interval"))
+
+
+def _trigger_batch() -> int:
+    from src.services.settings.engine_settings import setting
+
+    return int(setting("event_triggers_batch"))
+
+
+async def _on_database_ready(system_logger: logging.Logger) -> None:
+    """Startup steps that need the database. Neither may stop the app starting."""
+    # Configuration → Engines settings for synchronous readers (Jev URL, run
+    # budgets, agent time limit). Never raises: defaults apply on failure.
+    from src.services.settings import engine_settings_loader
+
+    await engine_settings_loader.load()
+
+    system_logger.info("Cleaning up stale jobs from previous run...")
+    try:
+        cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
+        if cleaned_jobs > 0:
+            system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
+    except Exception as e:
+        system_logger.error(f"Error cleaning up stale jobs: {e}")
+
+
+async def _heal_activated_lakebase(
+    session_factory: async_sessionmaker[AsyncSession], system_logger: logging.Logger
+) -> None:
+    """Self-heal the ACTIVE Lakebase schema. Best-effort.
+
+    init_db() already ran the same pass, but against the local/default engine
+    BEFORE the hot-swap — so it never touched the Lakebase. Re-running it here
+    (create-missing-tables + add-missing-columns, all idempotent and
+    NON-DESTRUCTIVE) is the only path that heals a customer's PRE-EXISTING
+    Lakebase, e.g. adding powerbi_extraction without the destructive DROP SCHEMA
+    the migrate UI would do. "complete" is logged only when every step applied.
+    """
+    try:
+        from src.db.session import run_schema_self_heal
+
+        async with session_factory() as heal_session:
+            gaps = await run_schema_self_heal(await heal_session.connection())
+            await heal_session.commit()
+    except Exception as heal_err:
+        system_logger.warning(f"Lakebase schema self-heal skipped: {heal_err}")
+        return
+    if gaps:
+        system_logger.warning(
+            "Lakebase schema self-heal incomplete: %d step(s) did not apply "
+            "(see the ERROR above; /health/db lists them)",
+            len(gaps),
+        )
+    else:
+        system_logger.info("Lakebase schema self-heal complete")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Lifespan manager for the FastAPI application.
 
@@ -111,16 +174,8 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         system_logger.warning(f"Failed to adjust module log levels: {_e}")
 
-    # Validate and fix Databricks environment variables early in startup
-    try:
-        system_logger.info("Validating Databricks environment configuration...")
-        await DatabricksURLUtils.validate_and_fix_environment()
-    except Exception as e:
-        system_logger.warning(f"Error validating Databricks environment: {e}")
-
-    # CrewAI monkey-patches removed: kasal_engine carries the behavior
-    # natively (event execution_context propagation, memory save hooks,
-    # instructor per-call credentials, tolerant analyze models).
+    # Inside Apps, local (DEFAULT) memory is lost on redeploy: say so once.
+    warn_if_local_memory_is_ephemeral()
 
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
@@ -181,16 +236,14 @@ async def lifespan(app: FastAPI):
     try:
         # Simple check for tables - just check if the database file exists with content
         if str(settings.DATABASE_URI).startswith("sqlite") and not installed_database:
-            db_path = settings.SQLITE_DB_PATH
+            db_path = settings.SQLITE_DB_PATH or str(BACKEND_ROOT / "app.db")
 
-            # Get absolute path if relative
             if not os.path.isabs(db_path):
                 db_path = os.path.abspath(db_path)
 
             system_logger.info(f"Checking database at: {db_path}")
 
             if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
-                # Try to execute a simple query to verify tables
                 try:
                     # Direct SQLite check - more reliable than trying to use SQLAlchemy
                     import sqlite3
@@ -227,16 +280,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         system_logger.error(f"Error checking database: {e}")
 
-    # Clean up stale jobs from previous run
     if db_initialized:
-        system_logger.info("Cleaning up stale jobs from previous run...")
-        try:
-            cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
-            if cleaned_jobs > 0:
-                system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
-        except Exception as e:
-            system_logger.error(f"Error cleaning up stale jobs: {e}")
-            # Don't raise - allow app to start even if cleanup fails
+        await _on_database_ready(system_logger)
 
     # Bound here, unconditionally, because the background tasks below are NOT
     # all conditional. This import used to sit inside the `if db_initialized`
@@ -251,7 +296,7 @@ async def lifespan(app: FastAPI):
     # status update silently failed after subprocess completion.
     if db_initialized:
 
-        async def _zombie_cleanup_loop():
+        async def _zombie_cleanup_loop() -> None:
             import asyncio as _asyncio
 
             while True:
@@ -271,9 +316,9 @@ async def lifespan(app: FastAPI):
     # Knowledge retention. Expiry was already applied at search time and before
     # each upload, which makes expired uploads unreachable but not gone — a
     # workspace where nobody uploads again keeps them indefinitely. This sweep
-    # is what makes "we keep uploads for KNOWLEDGE_TTL_DAYS" true of the
+    # is what makes "we keep uploads for the knowledge TTL" true of the
     # database rather than only of what search will show.
-    async def _knowledge_ttl_loop():
+    async def _knowledge_ttl_loop() -> None:
         import asyncio as _a
 
         from src.services.knowledge.retention import sweep_expired_knowledge
@@ -298,8 +343,8 @@ async def lifespan(app: FastAPI):
     # scopes that have gone longest without maintenance, so every workspace is
     # eventually reached, and gives the expensive passes (the LLM merge,
     # supersession, forgetting) somewhere to run that is not a user's teardown
-    # path. Kill-switch: KASAL_MEMORY_SWEEP=false.
-    async def _memory_sweep_loop():
+    # path. Kill switch: Configuration → Engines → Advanced.
+    async def _memory_sweep_loop() -> None:
         import asyncio as _a
 
         from src.services.memory.maintenance.sweep import (
@@ -335,7 +380,7 @@ async def lifespan(app: FastAPI):
     # predates the feature.
     if db_initialized:
 
-        async def _workflow_recipe_backfill():
+        async def _workflow_recipe_backfill() -> None:
             from src.services.recipes.mining import mine_now
 
             try:
@@ -352,63 +397,36 @@ async def lifespan(app: FastAPI):
             "[WorkflowRecipes] Mining on run completion; back-filling history once"
         )
 
-    # Run database seeders after DB initialization
+    # Run database seeders after DB initialization.
+    #
+    # Whether a seeding failure blocks startup is decided per path:
+    # - a fresh Lakebase installation awaits seeding and REFUSES to start when
+    #   an essential seeder (models, tools, prompts) failed — it has nothing to
+    #   fall back on (seeds/installation.py);
+    # - everywhere else seeding runs in the background and a failure is logged
+    #   as an ERROR naming the failed seeders while the server keeps serving:
+    #   seeding upserts shipped defaults, and a failed demo-crew seed must not
+    #   take the dev server or an existing install down (seeds/startup.py).
     if db_initialized:
-        # Import needed for seeders
-        # pylint: disable=unused-import,import-outside-toplevel
-        from src.seeds.seed_runner import run_all_seeders
-
-        # Check if seeding is enabled
         should_seed = settings.AUTO_SEED_DATABASE
         system_logger.info(f"AUTO_SEED_DATABASE setting: {settings.AUTO_SEED_DATABASE}")
 
-        # Run seeders if enabled
         if should_seed and installed_database:
-            # A fresh installation must have its defaults before its first user
-            # request. This awaits async DB work on the server's own event loop.
             from src.seeds.installation import seed_installed_database
 
             await seed_installed_database()
         elif should_seed:
-            system_logger.info("Running database seeders...")
-            try:
-                # Always run seeders in background to avoid blocking startup
-                import asyncio
+            import asyncio
 
-                system_logger.info("Starting seeders in background...")
+            from src.seeds.startup import run_seeders_in_background
 
-                async def run_seeders_background():
-                    try:
-                        system_logger.info("Background seeders started...")
-                        await run_all_seeders()
-                        system_logger.info(
-                            "Background database seeding completed successfully!"
-                        )
-                    except Exception as e:
-                        system_logger.error(
-                            f"Error running background seeders: {str(e)}"
-                        )
-                        import traceback
-
-                        error_trace = traceback.format_exc()
-                        system_logger.error(
-                            f"Background seeder error trace: {error_trace}"
-                        )
-
-                # Create the background task and KEEP A REFERENCE: the loop holds
-                # tasks weakly, and an unreferenced one can be garbage-collected
-                # before it finishes (issue #9).
-                app.state.seeder_task = asyncio.create_task(run_seeders_background())
-                system_logger.info(
-                    "Seeders started in background, application startup continues..."
-                )
-            except Exception as e:
-                system_logger.error(f"Error starting seeders: {str(e)}")
-                import traceback
-
-                error_trace = traceback.format_exc()
-                system_logger.error(f"Seeder startup error trace: {error_trace}")
-                # Don't raise so app can start even if seeding fails
+            # KEEP A REFERENCE: the loop holds tasks weakly, and an
+            # unreferenced one can be garbage-collected before it finishes
+            # (issue #9).
+            app.state.seeder_task = asyncio.create_task(run_seeders_in_background())
+            system_logger.info(
+                "Seeders started in background, application startup continues..."
+            )
         else:
             system_logger.info("Database seeding skipped (AUTO_SEED_DATABASE is False)")
     else:
@@ -443,14 +461,16 @@ async def lifespan(app: FastAPI):
 
             if await is_lakebase_enabled():
                 config = await get_lakebase_config_from_db()
-                instance_name = (config or {}).get("instance_name") or os.environ.get(
-                    "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-                )
+                from src.core.databricks_app import lakebase_instance_from_config
+
+                instance_name = lakebase_instance_from_config(config)
                 from src.db.lakebase_session import LakebaseSessionFactory
 
                 lb_factory = LakebaseSessionFactory(instance_name)
                 await lb_factory.create_engine()
-                async_session_factory.activate_lakebase(lb_factory._session_factory)
+                lb_session_factory = lb_factory._session_factory
+                assert lb_session_factory is not None  # create_engine() set it
+                async_session_factory.activate_lakebase(lb_session_factory)
                 from src.db.lakebase_state import mark_lakebase_activated
 
                 mark_lakebase_activated()
@@ -458,25 +478,7 @@ async def lifespan(app: FastAPI):
                     f"Activated Lakebase session factory (instance: {instance_name})"
                 )
 
-                # Self-heal the ACTIVE Lakebase schema. init_db() already ran the
-                # same pass, but against the local/default engine BEFORE this
-                # hot-swap — so it never touched the Lakebase. Re-running it here
-                # (create-missing-tables + add-missing-columns, all idempotent and
-                # NON-DESTRUCTIVE) is the only path that heals a customer's
-                # PRE-EXISTING Lakebase, e.g. adding powerbi_extraction without the
-                # destructive DROP SCHEMA the migrate UI would do. Best-effort.
-                try:
-                    from src.db.session import run_schema_self_heal
-
-                    async with lb_factory._session_factory() as _heal_session:
-                        conn = await _heal_session.connection()
-                        await run_schema_self_heal(conn)
-                        await _heal_session.commit()
-                    system_logger.info("Lakebase schema self-heal complete")
-                except Exception as _heal_err:
-                    system_logger.warning(
-                        f"Lakebase schema self-heal skipped: {_heal_err}"
-                    )
+                await _heal_activated_lakebase(lb_session_factory, system_logger)
         except Exception as e:
             system_logger.warning(f"Lakebase activation skipped: {e}")
 
@@ -484,13 +486,11 @@ async def lifespan(app: FastAPI):
     if db_initialized:
         system_logger.info("Initializing scheduler...")
         try:
-            # Get database connection
-            db_gen = get_db()
-            db = await anext(db_gen)
-
-            # Initialize scheduler service
-            scheduler = SchedulerService(db)
-            await scheduler.start_scheduler()
+            # The scheduler loop opens a routed session per tick; nothing it
+            # runs queries the session it is constructed with.
+            async with async_session_factory() as db:
+                scheduler = SchedulerService(db)
+                await scheduler.start_scheduler()
             system_logger.info("Scheduler started successfully.")
         except Exception as e:
             system_logger.error(f"Failed to start scheduler: {e}")
@@ -509,8 +509,6 @@ async def lifespan(app: FastAPI):
             from src.services.triggers import TriggerQueueConsumerService
 
             _trigger_consumer = TriggerQueueConsumerService()
-            _tq_interval = int(os.environ.get("KASAL_EVENT_TRIGGERS_INTERVAL", "5"))
-            _tq_batch = int(os.environ.get("KASAL_EVENT_TRIGGERS_BATCH", "5"))
 
             async def _event_triggers_enabled() -> bool:
                 """Read the admin toggle; default OFF, never raise."""
@@ -525,13 +523,13 @@ async def lifespan(app: FastAPI):
                 except Exception:  # noqa: BLE001
                     return False
 
-            async def _trigger_queue_loop():
-                await asyncio.sleep(_tq_interval)  # let the app finish booting
+            async def _trigger_queue_loop() -> None:
+                await asyncio.sleep(_trigger_interval())  # let the app finish booting
                 ticks = 0
                 while True:
                     try:
                         if await _event_triggers_enabled():
-                            await _trigger_consumer.claim_and_dispatch(_tq_batch)
+                            await _trigger_consumer.claim_and_dispatch(_trigger_batch())
                             ticks += 1
                             if ticks >= 12:  # housekeeping: crashed rows + retention
                                 await _trigger_consumer.reclaim()
@@ -539,7 +537,7 @@ async def lifespan(app: FastAPI):
                                 ticks = 0
                     except Exception as _tq_err:  # noqa: BLE001
                         system_logger.error(f"[TriggerQueue] loop error: {_tq_err}")
-                    await asyncio.sleep(_tq_interval)
+                    await asyncio.sleep(_trigger_interval())
 
             # Keep a strong reference on app.state: the event loop holds only
             # weak refs to tasks, so a bare create_task here can be garbage-
@@ -550,8 +548,8 @@ async def lifespan(app: FastAPI):
             system_logger.info(
                 "Event-trigger consumer loop started (gated on Configuration "
                 "setting; interval=%ss, batch=%s)",
-                _tq_interval,
-                _tq_batch,
+                _trigger_interval(),
+                _trigger_batch(),
             )
         except Exception as e:
             system_logger.error(f"Failed to start event-trigger consumer: {e}")
@@ -726,8 +724,8 @@ app = FastAPI(
     # Move API docs to /api-docs
     docs_url="/api-docs" if settings.DOCS_ENABLED else None,
     redoc_url="/api-redoc" if settings.DOCS_ENABLED else None,
+    # OpenAPI 3.1.0 is the default; FastAPI 0.148 rejects an openapi_version kwarg.
     openapi_url="/api-openapi.json" if settings.DOCS_ENABLED else None,
-    openapi_version="3.1.0",  # Explicitly set OpenAPI version
 )
 
 # Add CORS middleware using origins from settings
@@ -763,9 +761,9 @@ def _local_dev_auth_enabled() -> bool:
     """
     explicit = os.getenv("LOCAL_DEV_AUTH", "").strip().lower()
     wanted = explicit in ("1", "true", "yes", "on")
-    production = bool(os.getenv("DATABRICKS_APP_NAME")) or os.getenv(
-        "ENVIRONMENT", ""
-    ).strip().lower() in ("production", "prod")
+    from src.core.databricks_app import is_production
+
+    production = is_production()
     if production:
         if wanted:
             logger.error(
@@ -785,7 +783,7 @@ class LocalDevAuthMiddleware:
     outside production, refused inside it.
     """
 
-    def __init__(self, app, enabled: Optional[bool] = None):
+    def __init__(self, app: ASGIApp, enabled: Optional[bool] = None) -> None:
         self.app = app
         self.enabled = _local_dev_auth_enabled() if enabled is None else enabled
         if self.enabled:
@@ -793,10 +791,10 @@ class LocalDevAuthMiddleware:
                 "[LOCAL_DEV_AUTH] Development identity fallback is ACTIVE: a "
                 "request without an identity header runs as %s. Unset "
                 "LOCAL_DEV_AUTH to disable it.",
-                settings.LOCAL_DEV_USER_EMAIL or "dev@localhost",
+                settings.LOCAL_DEV_USER_EMAIL,
             )
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.enabled and scope["type"] == "http":
             headers = dict(scope.get("headers", []))
             if (
@@ -806,11 +804,11 @@ class LocalDevAuthMiddleware:
                 scope["headers"] = list(scope.get("headers", [])) + [
                     (
                         b"x-forwarded-email",
-                        (settings.LOCAL_DEV_USER_EMAIL or "dev@localhost").encode(),
+                        settings.LOCAL_DEV_USER_EMAIL.encode(),
                     )
                 ]
                 logger.debug(
-                    f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL or 'dev@localhost'}"
+                    f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL}"
                 )
         await self.app(scope, receive, send)
 
@@ -843,66 +841,20 @@ from src.core.rate_limit import RateLimitMiddleware  # noqa: E402
 app.add_middleware(RateLimitMiddleware)
 
 
-# ---------------------------------------------------------------------------
-# Pure ASGI security headers middleware (NOT BaseHTTPMiddleware) to avoid
-# buffering StreamingResponse bodies — critical for SSE compatibility.
-# See: https://github.com/encode/starlette/issues/1012
-# ---------------------------------------------------------------------------
-
-
-class SecurityHeadersMiddleware:
-    """Pure ASGI middleware to add HTTP security headers to all responses.
-
-    Adds Content-Security-Policy, X-Content-Type-Options, X-Frame-Options,
-    and Referrer-Policy headers as recommended by the Databricks AI Security
-    team (Security advice for LLM usage in Databricks Apps, Feb 2026).
-
-    CSP design notes:
-    - unsafe-inline required for MUI (Material-UI) inline styles
-    - connect-src includes ws:/wss: for SSE streams and WebSocket connections
-    - frame-src 'self' allows the HTML-preview srcdoc iframe
-    - frame-ancestors omitted intentionally: Databricks Apps embeds Kasal
-      inside the workspace UI iframe; setting frame-ancestors 'none' or
-      'self' would break that embedding. Restrict once deployment context
-      is confirmed.
-    """
-
-    _CSP = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; "
-        "connect-src 'self' ws: wss:; "
-        "frame-src 'self';"
-    )
-
-    _SECURITY_HEADERS = [
-        (b"content-security-policy", _CSP.encode()),
-        (b"x-content-type-options", b"nosniff"),
-        # SAMEORIGIN (not DENY) — Databricks workspace may embed Kasal in an iframe
-        (b"x-frame-options", b"SAMEORIGIN"),
-        (b"referrer-policy", b"strict-origin-when-cross-origin"),
-    ]
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        async def send_with_security_headers(message):
-            if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
-                headers.extend(self._SECURITY_HEADERS)
-                message = {**message, "headers": headers}
-            await send(message)
-
-        await self.app(scope, receive, send_with_security_headers)
-
+# Security headers (CSP, nosniff, X-Frame-Options, Referrer-Policy), recommended
+# by the Databricks AI Security team (Security advice for LLM usage in Databricks
+# Apps, Feb 2026). The policy and why each directive is there live in
+# src/core/security_headers.py; entrypoint.py sends the same set on the SPA page.
+from src.core.security_headers import SecurityHeadersMiddleware  # noqa: E402
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Added LAST so it is OUTERMOST: inside Databricks Apps it drops the
+# client-supplied X-Auth-Request-* headers before the rate limiter, the context
+# middleware or any dependency can read them (audit C1).
+from src.utils.request_identity import UntrustedIdentityHeadersMiddleware  # noqa: E402
+
+app.add_middleware(UntrustedIdentityHeadersMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -986,8 +938,8 @@ from src.api.mcp_jsonrpc_router import (  # noqa: E402 - import follows module i
 app.include_router(_mcp_jsonrpc_router)
 
 
-@app.get("/health")
-async def health():
+@app.get("/health", response_model=None)
+async def health() -> Dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
 

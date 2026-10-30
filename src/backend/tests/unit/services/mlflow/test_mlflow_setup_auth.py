@@ -93,7 +93,7 @@ def _make_group_context(primary_group_id="grp-1"):
 _SPN_ENV = {
     "DATABRICKS_CLIENT_ID": "test-client-id",
     "DATABRICKS_CLIENT_SECRET": "test-secret",
-    "DATABRICKS_HOST": "e2-demo-west.cloud.databricks.com",
+    "DATABRICKS_HOST": "example-west.cloud.databricks.com",
 }
 
 

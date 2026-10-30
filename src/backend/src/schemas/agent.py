@@ -60,7 +60,7 @@ class AgentBase(BaseModel):
 
     @field_validator("skills", mode="before")
     @classmethod
-    def _skills_never_none(cls, value):
+    def _skills_never_none(cls, value: Any) -> Any:
         return value if value is not None else []
 
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(
@@ -112,7 +112,7 @@ class AgentBase(BaseModel):
 
     @field_validator("max_rpm", mode="before")
     @classmethod
-    def coerce_max_rpm_none_to_default(cls, v):
+    def coerce_max_rpm_none_to_default(cls, v: Any) -> Any:
         """Convert None to default value for max_rpm."""
         if v is None:
             return 10
@@ -120,67 +120,67 @@ class AgentBase(BaseModel):
 
     @field_validator("llm", mode="before")
     @classmethod
-    def coerce_llm_none_to_default(cls, v):
+    def coerce_llm_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else DEFAULT_ENGINE_MODEL
 
     @field_validator("max_iter", mode="before")
     @classmethod
-    def coerce_max_iter_none_to_default(cls, v):
+    def coerce_max_iter_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else 25
 
     @field_validator("verbose", mode="before")
     @classmethod
-    def coerce_verbose_none_to_default(cls, v):
+    def coerce_verbose_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else False
 
     @field_validator("allow_delegation", mode="before")
     @classmethod
-    def coerce_allow_delegation_none_to_default(cls, v):
+    def coerce_allow_delegation_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else False
 
     @field_validator("cache", mode="before")
     @classmethod
-    def coerce_cache_none_to_default(cls, v):
+    def coerce_cache_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else True
 
     @field_validator("memory", mode="before")
     @classmethod
-    def coerce_memory_none_to_default(cls, v):
+    def coerce_memory_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else True
 
     @field_validator("code_execution_mode", mode="before")
     @classmethod
-    def coerce_code_execution_mode_none_to_default(cls, v):
+    def coerce_code_execution_mode_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else "safe"
 
     @field_validator("max_retry_limit", mode="before")
     @classmethod
-    def coerce_max_retry_limit_none_to_default(cls, v):
+    def coerce_max_retry_limit_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else 2
 
     @field_validator("use_system_prompt", mode="before")
     @classmethod
-    def coerce_use_system_prompt_none_to_default(cls, v):
+    def coerce_use_system_prompt_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else True
 
     @field_validator("respect_context_window", mode="before")
     @classmethod
-    def coerce_respect_context_window_none_to_default(cls, v):
+    def coerce_respect_context_window_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else True
 
     @field_validator("knowledge_sources", mode="before")
     @classmethod
-    def coerce_knowledge_sources_none_to_default(cls, v):
+    def coerce_knowledge_sources_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else []
 
     @field_validator("inject_date", mode="before")
     @classmethod
-    def coerce_inject_date_none_to_default(cls, v):
+    def coerce_inject_date_none_to_default(cls, v: Any) -> Any:
         return v if v is not None else True
 
     @field_validator("allow_code_execution", mode="before")
     @classmethod
-    def force_code_execution_false(cls, v):
+    def force_code_execution_false(cls, v: Any) -> Any:
         """SECURITY: Always force allow_code_execution to False for safety."""
         if v is True:
             print(
@@ -195,7 +195,7 @@ class AgentCreate(AgentBase):
 
     @model_validator(mode="before")
     @classmethod
-    def effort_defaults(cls, value):
+    def effort_defaults(cls, value: Any) -> Any:
         return agent_effort_defaults(value) if isinstance(value, dict) else value
 
 
@@ -208,7 +208,7 @@ class AgentUpdate(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def effort_defaults(cls, value):
+    def effort_defaults(cls, value: Any) -> Any:
         return agent_effort_defaults(value) if isinstance(value, dict) else value
 
     role: Optional[str] = None
@@ -287,7 +287,7 @@ class AgentUpdate(BaseModel):
 
     @field_validator("allow_code_execution", mode="before")
     @classmethod
-    def force_code_execution_false(cls, v):
+    def force_code_execution_false(cls, v: Any) -> Any:
         """SECURITY: Always force allow_code_execution to False for safety."""
         if v is not None and v is True:
             print(

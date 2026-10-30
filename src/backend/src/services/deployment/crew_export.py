@@ -3,7 +3,7 @@ Service for exporting CrewAI crews to various formats.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Collection, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,7 +121,7 @@ class CrewExportService:
 
         # Check group authorization
         if group_context and group_context.is_valid():
-            if crew.group_id not in group_context.group_ids:
+            if crew.group_id not in (group_context.group_ids or []):
                 raise ValueError(f"Crew {crew_id} not found")  # Don't reveal existence
 
         # Get agents (collect any MCP servers they explicitly reference)
@@ -309,7 +309,9 @@ class CrewExportService:
         return [str(s).strip() for s in servers if s]
 
     async def _get_crew_mcp_servers(
-        self, server_names, group_context: Optional[GroupContext] = None
+        self,
+        server_names: Collection[str],
+        group_context: Optional[GroupContext] = None,
     ) -> List[Dict[str, Any]]:
         """Resolve ONLY the MCP servers the crew explicitly references, for export.
 
@@ -412,7 +414,7 @@ class CrewExportService:
             safe[key] = value
         return safe
 
-    async def _agent_to_dict(self, agent) -> Dict[str, Any]:
+    async def _agent_to_dict(self, agent: Any) -> Dict[str, Any]:
         """Convert agent model to dictionary"""
         # Convert tool IDs to tool names
         tool_names = await self._convert_tool_ids_to_names(agent.tools or [])
@@ -442,7 +444,7 @@ class CrewExportService:
             ),
         }
 
-    async def _task_to_dict(self, task) -> Dict[str, Any]:
+    async def _task_to_dict(self, task: Any) -> Dict[str, Any]:
         """Convert task model to dictionary"""
         # Convert tool IDs to tool names
         tool_names = await self._convert_tool_ids_to_names(task.tools or [])

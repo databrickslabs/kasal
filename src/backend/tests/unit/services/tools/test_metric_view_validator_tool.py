@@ -323,9 +323,6 @@ class TestResolvedMeasuresPairing:
                     ]
                 }
 
-        # Isolate from real DB / tmp side-channels that would override ucmv_output
-        import os as _os
-
         with (
             patch(
                 "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
@@ -342,7 +339,6 @@ class TestResolvedMeasuresPairing:
             patch.object(
                 MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]
             ),
-            patch.object(_os.path, "exists", return_value=False),
         ):
             result = tool._run(ucmv_output=ucmv_output)
 
@@ -366,7 +362,6 @@ class TestCompactAgentReturn:
     def _run_with_fake_pipeline(self, ucmv_output, evaluated_by_table):
         """Run the tool with a fake validation pipeline that returns a given
         `evaluated` list per table (keyed by yaml order)."""
-        import os as _os
 
         calls = {"i": 0}
         tables = list(evaluated_by_table.keys())
@@ -401,7 +396,6 @@ class TestCompactAgentReturn:
             patch.object(
                 MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]
             ),
-            patch.object(_os.path, "exists", return_value=False),
         ):
             return json.loads(tool._run(ucmv_output=ucmv_output))
 
@@ -510,7 +504,6 @@ class TestCompactAgentReturn:
         (with a reason, not counted). Regression: the tool discarded the skipped
         bucket, so the UI showed only a few 'validated' measures with no
         explanation for the rest."""
-        import os as _os
 
         ucmv = json.dumps(
             {
@@ -574,7 +567,6 @@ class TestCompactAgentReturn:
             patch.object(
                 MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]
             ),
-            patch.object(_os.path, "exists", return_value=False),
         ):
             data = json.loads(tool._run(ucmv_output=ucmv))
 

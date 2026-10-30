@@ -43,7 +43,8 @@ class Artifact:
         """The prose part, which is what a human-facing client shows."""
         for part in self.parts:
             if part.kind == "text":
-                return part.content
+                result: str | None = part.content
+                return result
         return None
 
     def as_dict(self) -> Dict[str, Any]:

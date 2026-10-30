@@ -26,6 +26,7 @@ import remarkGfm from 'remark-gfm';
 import { useNavigate, useLocation } from 'react-router-dom';
 import mermaid from 'mermaid';
 import { CodeBlock } from '../../workflow/assistant/components/CodeBlock';
+import { MarkdownImage } from '../../../shared/a2ui/lib/safeImage';
 import './Documentation.css';
 
 interface DocSection {
@@ -53,15 +54,18 @@ const docSections: DocSection[] = [
       { label: 'LLM Architecture', file: 'LLM_ARCHITECTURE' },
       { label: 'Code Structure', file: 'CODE_STRUCTURE_GUIDE' },
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'Continuous Integration', file: 'continuous-integration' },
     ],
   },
   {
     label: 'Reference',
     items: [
       { label: 'API Reference', file: 'api_endpoints' },
+      { label: 'Configuration', file: 'CONFIGURATION' },
       { label: 'Tools', file: 'TOOLS' },
       { label: 'MCP Servers', file: 'MCP' },
       { label: 'Models', file: 'MODELS' },
+      { label: 'Decision Model', file: 'DECISION_MODEL' },
       { label: 'Memory', file: 'MEMORY' },
       { label: 'Checkpointing', file: 'CHECKPOINTING' },
       { label: 'Security', file: 'SECURITY' },
@@ -324,7 +328,7 @@ const Documentation: React.FC = () => {
               components={{
                 // github-markdown-css styles every standard element; we only
                 // override the ones that carry app-specific behavior.
-                img: ({ src, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
+                img: ({ src, alt, title }: React.ImgHTMLAttributes<HTMLImageElement>) => {
                   // Markdown uses paths relative to the doc (e.g. images/x.png).
                   // The browser would otherwise resolve them against the current
                   // page URL (or the SPA serves index.html for them), so rewrite
@@ -341,7 +345,8 @@ const Documentation: React.FC = () => {
                       ? `/docs/${currentDir}/${relativePart}`
                       : `/docs/${relativePart}`;
                   }
-                  return <img src={resolved} {...props} />;
+                  // A remote image waits for a click (shared image policy).
+                  return <MarkdownImage src={resolved} alt={alt} title={title} />;
                 },
                 a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
                   if (!href) return <a {...props}>{children}</a>;

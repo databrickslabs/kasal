@@ -17,7 +17,6 @@ from src.schemas.template import (
     PromptTemplateUpdate,
     ResetResponse,
     TemplateCreate,
-    TemplateListResponse,
     TemplateUpdate,
 )
 
@@ -280,105 +279,6 @@ class TestPromptTemplateResponse:
         assert isinstance(response.updated_at, datetime)
 
 
-class TestTemplateListResponse:
-    """Test cases for TemplateListResponse schema."""
-
-    def test_valid_template_list_response(self):
-        """Test valid TemplateListResponse creation."""
-        now = datetime.now()
-        templates = [
-            PromptTemplateResponse(
-                id=1,
-                name="Template 1",
-                template="Content 1 {param}",
-                created_at=now,
-                updated_at=now,
-            ),
-            PromptTemplateResponse(
-                id=2,
-                name="Template 2",
-                template="Content 2 {param}",
-                created_at=now,
-                updated_at=now,
-            ),
-        ]
-
-        list_response_data = {"templates": templates, "count": 2}
-        list_response = TemplateListResponse(**list_response_data)
-        assert len(list_response.templates) == 2
-        assert list_response.count == 2
-        assert list_response.templates[0].id == 1
-        assert list_response.templates[1].id == 2
-
-    def test_template_list_response_empty(self):
-        """Test TemplateListResponse with empty template list."""
-        list_response_data = {"templates": [], "count": 0}
-        list_response = TemplateListResponse(**list_response_data)
-        assert len(list_response.templates) == 0
-        assert list_response.count == 0
-
-    def test_template_list_response_count_mismatch(self):
-        """Test TemplateListResponse with mismatched count and list length."""
-        now = datetime.now()
-        templates = [
-            PromptTemplateResponse(
-                id=1,
-                name="Template 1",
-                template="Content 1 {param}",
-                created_at=now,
-                updated_at=now,
-            )
-        ]
-
-        # Count doesn't match actual list length - this should still be valid
-        # as the count might represent total available, not just current page
-        list_response_data = {"templates": templates, "count": 10}
-        list_response = TemplateListResponse(**list_response_data)
-        assert len(list_response.templates) == 1
-        assert list_response.count == 10
-
-    def test_template_list_response_missing_fields(self):
-        """Test TemplateListResponse validation with missing fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            TemplateListResponse(templates=[])
-
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "count" in missing_fields
-
-        with pytest.raises(ValidationError) as exc_info:
-            TemplateListResponse(count=0)
-
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "templates" in missing_fields
-
-    def test_template_list_response_with_dicts(self):
-        """Test TemplateListResponse creation with template dicts."""
-        now = datetime.now()
-        list_response_data = {
-            "templates": [
-                {
-                    "id": 1,
-                    "name": "Template 1",
-                    "template": "Content 1 {param}",
-                    "is_active": True,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            ],
-            "count": 1,
-        }
-        list_response = TemplateListResponse(**list_response_data)
-        assert len(list_response.templates) == 1
-        assert isinstance(list_response.templates[0], PromptTemplateResponse)
-        assert list_response.templates[0].name == "Template 1"
-
-
 class TestResetResponse:
     """Test cases for ResetResponse schema."""
 
@@ -505,51 +405,6 @@ class TestSchemaIntegration:
         assert response_schema.id == 1
         assert isinstance(response_schema.created_at, datetime)
         assert isinstance(response_schema.updated_at, datetime)
-
-    def test_template_list_with_mixed_templates(self):
-        """Test TemplateListResponse with templates of different states."""
-        now = datetime.now()
-        templates = [
-            PromptTemplateResponse(
-                id=1,
-                name="Active Template",
-                template="Active {content}",
-                is_active=True,
-                created_at=now,
-                updated_at=now,
-            ),
-            PromptTemplateResponse(
-                id=2,
-                name="Inactive Template",
-                description="This template is inactive",
-                template="Inactive {content}",
-                is_active=False,
-                created_at=now,
-                updated_at=now,
-            ),
-            PromptTemplateResponse(
-                id=3,
-                name="Minimal Template",
-                template="Minimal",
-                is_active=True,
-                created_at=now,
-                updated_at=now,
-            ),
-        ]
-
-        list_response = TemplateListResponse(templates=templates, count=3)
-
-        # Verify all templates are present with correct attributes
-        assert len(list_response.templates) == 3
-        assert list_response.count == 3
-
-        active_templates = [t for t in list_response.templates if t.is_active]
-        inactive_templates = [t for t in list_response.templates if not t.is_active]
-
-        assert len(active_templates) == 2
-        assert len(inactive_templates) == 1
-        assert inactive_templates[0].description == "This template is inactive"
-        assert active_templates[0].name == "Active Template"
 
     def test_reset_response_scenarios(self):
         """Test ResetResponse for different reset scenarios."""

@@ -6,12 +6,13 @@ from the database. Sensitive data (credentials, secrets, tokens) is automaticall
 masked when returning traces to prevent credential leakage.
 """
 
-import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
+from src.core.process_role import in_run_subprocess
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.schemas.execution_trace import (
@@ -31,7 +32,9 @@ logger = LoggerManager.get_instance().system
 class ExecutionTraceService:
     """Service for accessing and managing execution traces."""
 
-    def __init__(self, session, auth_session=None):
+    def __init__(
+        self, session: AsyncSession, auth_session: Optional[AsyncSession] = None
+    ) -> None:
         """
         Initialize the service with session(s).
 
@@ -61,13 +64,18 @@ class ExecutionTraceService:
         """
         return await self.repository.outputs_containing(job_id, needle)
 
-    async def latest_output_for_span_prefix(self, prefix: str) -> Optional[str]:
-        """The most recent trace ``output`` whose ``span_name`` starts with ``prefix``.
+    async def latest_output_for_span_prefix(
+        self, prefix: str, *, group_ids: Sequence[str], job_id: Optional[str] = None
+    ) -> Optional[str]:
+        """The most recent trace ``output`` in ``group_ids`` whose ``span_name``
+        starts with ``prefix``; with ``job_id``, from that run only.
 
         Serves the PowerBI/UCMV tools, which hand a later step the output of an
-        earlier one; they used to build ``ExecutionTraceRepository`` for this.
+        earlier one. Scoped to the caller's groups; no groups, no result.
         """
-        return await self.repository.latest_output_for_span_prefix(prefix)
+        return await self.repository.latest_output_for_span_prefix(
+            prefix, group_ids=group_ids, job_id=job_id
+        )
 
     async def get_event_shape_by_job_id(self, job_id: str) -> List[Any]:
         """Per-event (source, context, type) rows for a run — the trace SHAPE.
@@ -79,8 +87,12 @@ class ExecutionTraceService:
         return await self.repository.get_event_shape_by_job_id(job_id)
 
     async def get_traces_by_run_id(
-        self, group_context=None, run_id: int = None, limit: int = 100, offset: int = 0
-    ) -> ExecutionTraceResponseByRunId:
+        self,
+        group_context: Optional[GroupContext] = None,
+        run_id: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Optional[ExecutionTraceResponseByRunId]:
         """
         Get traces for an execution by run_id with pagination and authorization.
 
@@ -93,6 +105,8 @@ class ExecutionTraceService:
         Returns:
             ExecutionTraceResponseByRunId with traces for the execution if authorized
         """
+        if run_id is None:  # no run to authorize against: same result as "not found"
+            return None
         try:
             # First check if the execution exists and belongs to the user's group
 
@@ -140,14 +154,14 @@ class ExecutionTraceService:
 
     async def get_traces_by_job_id(
         self,
-        group_context=None,
-        job_id: str = None,
+        group_context: Optional[GroupContext] = None,
+        job_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
         since_id: int = 0,
         preview_chars: int = 0,
         event_type_prefix: Optional[str] = None,
-    ) -> ExecutionTraceResponseByJobId:
+    ) -> Optional[ExecutionTraceResponseByJobId]:
         """
         Get traces for an execution by job_id with pagination and authorization.
 
@@ -170,6 +184,8 @@ class ExecutionTraceService:
         Returns:
             ExecutionTraceResponseByJobId with traces for the execution if authorized
         """
+        if job_id is None:  # no run to authorize against: same result as "not found"
+            return None
         try:
             # First check if the execution exists and belongs to the user's group
 
@@ -256,9 +272,9 @@ class ExecutionTraceService:
 
     async def get_state_events_by_job_id(
         self,
-        group_context=None,
-        job_id: str = None,
-        event_types: List[str] = None,
+        group_context: Optional[GroupContext] = None,
+        job_id: Optional[str] = None,
+        event_types: Optional[List[str]] = None,
     ) -> Optional[List[ExecutionTraceItem]]:
         """Authorized fetch of ONLY the state-transition events for a job.
 
@@ -270,6 +286,8 @@ class ExecutionTraceService:
         Returns None when the execution doesn't exist or the caller lacks
         access; an empty list when authorized but no matching events yet.
         """
+        if job_id is None:  # no run to authorize against: same result as "not found"
+            return None
         try:
             group_ids = group_context.group_ids if group_context else None
 
@@ -484,7 +502,7 @@ class ExecutionTraceService:
             # 1. Subprocess has its own SSE manager instance with no connected clients
             # 2. Clients connect to the main process's SSE manager
             # 3. Broadcasting in subprocess is wasteful and produces misleading logs
-            is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+            is_subprocess = in_run_subprocess()
 
             if is_subprocess:
                 logger.debug(
@@ -515,44 +533,6 @@ class ExecutionTraceService:
             # Log the error but don't re-raise for missing jobs
             logger.warning(f"Trace creation skipped: {str(e)}")
             raise
-        except SQLAlchemyError as e:
-            logger.error(f"Database error creating trace: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error creating trace: {str(e)}")
-            raise
-
-    async def create_trace_with_group(
-        self, trace_data: Dict[str, Any], group_context: GroupContext
-    ) -> ExecutionTraceItem:
-        """
-        Create a new trace with group verification.
-
-        Args:
-            trace_data: Dictionary with trace data
-            group_context: Group context for authorization
-
-        Returns:
-            Created ExecutionTraceItem
-        """
-        try:
-            # If job_id is provided, verify it belongs to the group
-            if (
-                "job_id" in trace_data
-                and trace_data["job_id"]
-                and group_context
-                and group_context.group_ids
-            ):
-                execution = await self.execution_service.get_run_by_job_id(
-                    trace_data["job_id"], group_ids=group_context.group_ids
-                )
-                if not execution:
-                    raise ValueError("Not authorized to create trace for this job")
-
-            trace = await self.repository.create(trace_data)
-
-            return ExecutionTraceItem.model_validate(trace)
-
         except SQLAlchemyError as e:
             logger.error(f"Database error creating trace: {str(e)}")
             raise

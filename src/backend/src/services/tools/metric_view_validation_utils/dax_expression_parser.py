@@ -260,7 +260,8 @@ class DAXExpressionParser:
                             "DAX variable substitution for '%s' exceeded %d chars "
                             "(likely exponential VAR-chain expansion); aborting to "
                             "avoid a parser hang.",
-                            var["variable_name"], _MAX_EXPANDED_EXPR_CHARS,
+                            var["variable_name"],
+                            _MAX_EXPANDED_EXPR_CHARS,
                         )
                         raise RuntimeError(
                             "DAX variable substitution exceeded maximum expression "
@@ -409,6 +410,10 @@ class DAXExpressionParser:
         Returns:
             Hierarchical parse tree
         """
+        return self.parse_function_call(self.resolved_expression(dax_expr))
+
+    def resolved_expression(self, dax_expr: str) -> str:
+        """The DAX with comments removed and every VAR substituted into RETURN."""
         cleaned = self.clean_dax_comments(dax_expr)
         toplevel_components = self.decompose_toplevel(cleaned)
 
@@ -426,8 +431,7 @@ class DAXExpressionParser:
             resulting_return_expr = toplevel_components["return_expr"]
         else:
             resulting_return_expr = toplevel_components["expr"]
-
-        return self.parse_function_call(resulting_return_expr)
+        return str(resulting_return_expr)
 
     def _parse_condition(self, condition: str) -> Dict[str, Any]:
         """Parse a DAX filter condition."""
@@ -490,7 +494,7 @@ class DAXExpressionParser:
         """Extract aggregation functions from hierarchical tree."""
         aggregations = []
 
-        def traverse(node: Dict[str, Any], position: int = 0):
+        def traverse(node: Dict[str, Any], position: int = 0) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
                 # Check if this is an aggregation function
@@ -515,7 +519,7 @@ class DAXExpressionParser:
         """Extract FILTER clauses from hierarchical tree."""
         filters = []
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
 
@@ -555,7 +559,7 @@ class DAXExpressionParser:
         """Extract table[column] references from hierarchical tree."""
         references = set()
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "value" in node:
                 # Check if this value contains a table[column] reference
                 value = node["value"]
@@ -586,7 +590,7 @@ class DAXExpressionParser:
         operations = []
         operations_set = set()
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
 
@@ -627,7 +631,7 @@ class DAXExpressionParser:
             "complexity": "simple",
         }
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
 

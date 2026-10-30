@@ -466,46 +466,6 @@ async def test_toggle_global_exception():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_effective_servers(monkeypatch):
-    svc = MCPService(session=SimpleNamespace())
-    svc.server_repository = AsyncMock()
-
-    import src.services.mcp.mcp_client.service as module
-
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec")
-
-    global_server = mk_server(
-        id=1, name="global_srv", global_enabled=True, encrypted_api_key="enc"
-    )
-    explicit_server = mk_server(id=2, name="explicit_srv", encrypted_api_key="enc")
-
-    svc.server_repository.find_global_enabled = AsyncMock(return_value=[global_server])
-    svc.server_repository.find_by_names = AsyncMock(
-        return_value=[global_server, explicit_server]
-    )
-
-    results = await svc.get_effective_servers(["explicit_srv"])
-    assert len(results) == 2
-
-
-@pytest.mark.asyncio
-async def test_get_effective_servers_empty_explicit(monkeypatch):
-    svc = MCPService(session=SimpleNamespace())
-    svc.server_repository = AsyncMock()
-
-    import src.services.mcp.mcp_client.service as module
-
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec")
-
-    global_server = mk_server(id=1, name="global_srv", global_enabled=True)
-    svc.server_repository.find_global_enabled = AsyncMock(return_value=[global_server])
-    svc.server_repository.find_by_names = AsyncMock(return_value=[global_server])
-
-    results = await svc.get_effective_servers([])
-    assert len(results) == 1
-
-
 # ---------------------------------------------------------------------------
 # get_servers_by_names - empty list
 # ---------------------------------------------------------------------------

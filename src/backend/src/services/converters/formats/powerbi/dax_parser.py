@@ -87,7 +87,7 @@ class DAXExpressionParser:
         "MAXX",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize parser with transpilation engine."""
         self.logger = logging.getLogger(__name__)
         # Lazy import to avoid circular dependency
@@ -176,17 +176,12 @@ class DAXExpressionParser:
         # Step 2: Generate signatures
         signature, generic_signature = self._generate_signature(tokens)
 
-        # Step 3: Check transpilability
-        is_transpilable, transpilability_reason = (
-            self.transpilation_engine.can_transpile(tokens)
+        # Steps 3-4: Transpile, or record why the measure is a gap. A measure
+        # is transpilable only when SQL actually came out.
+        transpiled_sql, transpilability_reason = self.transpilation_engine.translate(
+            generic_signature, tokens
         )
-
-        # Step 4: Transpile if possible
-        transpiled_sql = None
-        if is_transpilable:
-            transpiled_sql = self.transpilation_engine.transpile(
-                generic_signature, tokens
-            )
+        is_transpilable = transpiled_sql is not None
 
         # Step 5: Extract components (for backward compatibility)
         simple_parse = self.parse(expression)
@@ -210,22 +205,6 @@ class DAXExpressionParser:
             "source_table": simple_parse["source_table"],
             "aggregation_type": simple_parse["aggregation_type"],
         }
-
-    def check_transpilability(
-        self, expression: str, measures_list: Optional[List[str]] = None
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Quick check if expression can be transpiled to SQL.
-
-        Args:
-            expression: DAX expression
-            measures_list: List of known measure names
-
-        Returns:
-            (is_transpilable, reason_if_not)
-        """
-        tokens = self._tokenize(expression, measures_list or [])
-        return self.transpilation_engine.can_transpile(tokens)
 
     def _empty_advanced_result(self) -> Dict[str, Any]:
         """Return empty result structure for advanced parsing."""
@@ -437,7 +416,7 @@ class DAXExpressionParser:
                 elif tokens and tokens[-1].type == "table":
                     is_measure = False
 
-                token_type = "measure" if is_measure else "column"
+                token_type = ("measure" if is_measure else "column")  # fmt: skip # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 tokens.append(
                     DaxToken(
                         type=token_type,
@@ -509,13 +488,13 @@ class DAXExpressionParser:
 
                 # Check if it's a function
                 if word_upper in FUNCTIONS:
-                    token_type = "function"
+                    token_type = "function"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 # Check if it's followed by '[' (table name)
                 elif new_i < len(expr) and expr[new_i : new_i + 1].strip() == "[":
-                    token_type = "table"
+                    token_type = "table"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 # Check if it's a known measure name
                 elif word in measures_list:
-                    token_type = "measure"
+                    token_type = "measure"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 # Check if it looks like an interval keyword
                 elif word_upper in [
                     "DAY",
@@ -529,11 +508,11 @@ class DAXExpressionParser:
                 ]:
                     # Check context - if in DATEDIFF, it's an interval
                     if self._is_interval_context(tokens, current_group):
-                        token_type = "interval"
+                        token_type = "interval"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                     else:
-                        token_type = "function"
+                        token_type = "function"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 else:
-                    token_type = "word"
+                    token_type = "word"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
                 tokens.append(
                     DaxToken(
@@ -594,7 +573,9 @@ class DAXExpressionParser:
 
         # Build generic signature with placeholders
         generic_parts = []
-        type_counters = {}  # Track count of each type for numbering
+        type_counters: Dict[str, Dict[str, int]] = (
+            {}
+        )  # Track count of each type for numbering
 
         for token in tokens:
             if token.type in [
@@ -743,7 +724,7 @@ class DAXExpressionParser:
         # Mark all tokens in comparison groups
         for token in tokens:
             if token.group in comparison_groups:
-                token.group_type = "comparison"
+                token.group_type = "comparison"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
     def _extract_aggregation(self, expression: str) -> str:
         """Extract aggregation type from expression."""
@@ -808,7 +789,7 @@ class DAXExpressionParser:
         Example:
             CALCULATE(SUM(Sales[Amount]), Region[Name] = "EMEA") -> ["Region[Name] = \"EMEA\""]
         """
-        filters = []
+        filters: List[str] = []
 
         # Check if this is a CALCULATE expression
         if "CALCULATE" not in expression.upper():

@@ -62,7 +62,6 @@ Key features:
 
 **LEGACY FUNCTIONS (Being Deprecated)**:
 - `get_databricks_auth_headers()`: Get auth headers for API calls (use get_auth_context().get_headers() instead)
-- `setup_environment_variables()`: **DEPRECATED** - causes race conditions, use get_auth_context() instead
 - `get_mcp_auth_headers()`: Get auth headers for MCP server calls (use get_auth_context().get_mcp_headers() instead)
 
 **UTILITY FUNCTIONS**:
@@ -147,21 +146,9 @@ auth = await get_auth_context(user_token=user_token)
 headers = auth.get_headers()
 ```
 
-#### OLD: setup_environment_variables() → NEW: get_auth_context()
-```python
-# OLD (causes race conditions - DO NOT USE)
-setup_environment_variables(user_token=user_token)
-response = litellm.completion(model="databricks/model", messages=[...])
-
-# NEW (thread-safe, no race conditions)
-auth = await get_auth_context(user_token=user_token)
-params = auth.get_litellm_params()
-response = litellm.completion(
-    model="databricks/model",
-    messages=[...],
-    **params
-)
-```
+`setup_environment_variables()` has been DELETED: it wrote a token into the
+process environment, which every workspace shares. Use get_auth_context() and
+pass `auth.get_litellm_params()` / `auth.get_headers()` explicitly.
 
 ## Token Management
 
@@ -214,14 +201,19 @@ import hashlib
 import logging
 import os
 import time
-from typing import Dict, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
+from sqlalchemy.ext.asyncio import AsyncSession
+
+# Re-exported: callers and tests reach it as src.utils.databricks_auth.*
+from src.utils.databricks_mcp_cli import get_mcp_access_token
 
 logger = logging.getLogger(__name__)
+_OptStr = Optional[str]
 
 #: True while this task is already resolving auth, so a DB read made from INSIDE
 #: the auth path must not go back through the database router.
@@ -245,7 +237,7 @@ _RESOLVING_AUTH: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
 
 
 @contextlib.asynccontextmanager
-async def _auth_scoped_session():
+async def _auth_scoped_session() -> AsyncIterator[AsyncSession]:
     """A session for a read made from inside the auth path.
 
     Uses the router when it is safe (so a runtime ``/lakebase/enable`` is picked up
@@ -273,9 +265,9 @@ async def _auth_scoped_session():
 
     token = _RESOLVING_AUTH.set(True)
     try:
-        async for session in get_smart_db_session():
+        # Not `async for ...: yield; break` — see routed_scoped_session.
+        async with contextlib.asynccontextmanager(get_smart_db_session)() as session:
             yield session
-            break
     finally:
         _RESOLVING_AUTH.reset(token)
 
@@ -303,15 +295,14 @@ def _obo_cache_get(token_hash: str) -> Optional[Tuple[Optional[str]]]:
 
 def _obo_cache_put(token_hash: str, identity: Optional[str]) -> None:
     if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
-        now = time.time()
-        for key in [k for k, (_, exp) in _OBO_VALIDATION_CACHE.items() if exp <= now]:
+        # Scan a copy: request, LLM and telemetry threads write the live dict.
+        now, snapshot = time.time(), _OBO_VALIDATION_CACHE.copy()
+        for key in [k for k, (_, exp) in snapshot.items() if exp <= now]:
             _OBO_VALIDATION_CACHE.pop(key, None)
         if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
             _OBO_VALIDATION_CACHE.clear()
-    _OBO_VALIDATION_CACHE[token_hash] = (
-        identity,
-        time.time() + _OBO_VALIDATION_TTL_SECONDS,
-    )
+    expires_at = time.time() + _OBO_VALIDATION_TTL_SECONDS
+    _OBO_VALIDATION_CACHE[token_hash] = (identity, expires_at)
 
 
 # PAT lookup cache (PERF-005). Without it, every LLM completion paid a fresh
@@ -409,7 +400,7 @@ class AuthContext:
             )
         return headers
 
-    def get_litellm_params(self) -> Dict[str, str]:
+    def get_litellm_params(self) -> Dict[str, Optional[str]]:
         """
         Get parameters for liteLLM completion calls.
         Use these parameters instead of environment variables to avoid race conditions.
@@ -445,7 +436,7 @@ class AuthContext:
 class DatabricksAuth:
     """Enhanced Databricks authentication class supporting PAT and OAuth OBO."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._api_token: Optional[str] = None
         self._workspace_host: Optional[str] = None
         self._config_loaded = False
@@ -537,7 +528,7 @@ class DatabricksAuth:
             logger.error(f"Failed to load configuration: {e}")
             return False
 
-    def _check_oauth_environment(self):
+    def _check_oauth_environment(self) -> None:
         """Check for OAuth credentials in environment variables (for service principal auth)."""
         try:
             # Check for OAuth environment variables
@@ -565,7 +556,7 @@ class DatabricksAuth:
         except Exception as e:
             logger.debug(f"Error checking OAuth environment: {e}")
 
-    def set_user_access_token(self, user_token: str):
+    def set_user_access_token(self, user_token: str) -> None:
         """Set user access token for OBO authentication."""
         self._user_access_token = user_token
         logger.info("User access token set for OBO authentication")
@@ -574,8 +565,6 @@ class DatabricksAuth:
         """Check if the cached service principal token is expired or about to expire."""
         if not self._service_token or not self._service_token_fetched_at:
             return True
-
-        import time
 
         elapsed = time.time() - self._service_token_fetched_at
         # Consider token expired if it's within the refresh buffer of actual expiration
@@ -602,7 +591,7 @@ class DatabricksAuth:
             return None
 
     async def get_auth_headers(
-        self, mcp_server_url: str = None, user_token: str = None
+        self, mcp_server_url: Optional[str] = None, user_token: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
         Get authentication headers for Databricks API calls.
@@ -621,31 +610,28 @@ class DatabricksAuth:
             if not await self._load_config():
                 return None, "Failed to load Databricks configuration"
 
-            # Set user token if provided
-            if user_token:
-                self.set_user_access_token(user_token)
-
-            # Use unified authentication fallback chain: OBO → PAT → SPN
-            return await self._get_unified_auth_headers(mcp_server_url)
+            # Pass the user token per call, never store it: this instance is the
+            # process-wide singleton, so a stored token would serve the NEXT
+            # tokenless caller (memory sweep, MCP fallback) as this user.
+            return await self._get_unified_auth_headers(mcp_server_url, user_token)
 
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
             return None, str(e)
 
     async def _get_unified_auth_headers(
-        self, mcp_server_url: str = None
+        self, mcp_server_url: Optional[str] = None, user_token: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
         Get authentication headers using unified fallback chain.
         Tries in order: OBO (user token) → PAT → SPN (service principal)
         """
         try:
-            # Method 1: Try OBO (On-Behalf-Of) with user access token
-            if self._user_access_token:
+            # Method 1: OBO — this call's token, else one set on a private instance
+            obo_token = user_token or self._user_access_token
+            if obo_token:
                 logger.info("Using OBO authentication with user access token")
-                return self._create_bearer_headers(
-                    self._user_access_token, mcp_server_url
-                )
+                return self._create_bearer_headers(obo_token, mcp_server_url)
 
             # Method 2: Try PAT (Personal Access Token)
             if self._api_token:
@@ -667,7 +653,7 @@ class DatabricksAuth:
                         return self._create_bearer_headers(token, mcp_server_url)
                     else:
                         logger.warning("Failed to obtain service principal OAuth token")
-                else:
+                elif self._service_token:  # always set when not expired
                     logger.info("Using cached service principal OAuth token")
                     return self._create_bearer_headers(
                         self._service_token, mcp_server_url
@@ -683,7 +669,7 @@ class DatabricksAuth:
             return None, str(e)
 
     def _create_bearer_headers(
-        self, token: str, mcp_server_url: str = None
+        self, token: str, mcp_server_url: Optional[str] = None
     ) -> Tuple[Dict[str, str], None]:
         """Create Bearer token headers with optional MCP server headers."""
         headers = {
@@ -761,8 +747,8 @@ class DatabricksAuth:
     async def _manual_oauth_flow(self) -> Optional[str]:
         """Manual OAuth client credentials flow for service principal."""
         try:
-            if not self._workspace_host:
-                logger.error("No workspace host available for OAuth")
+            if not (self._workspace_host and self._client_id and self._client_secret):
+                logger.error("No workspace host / SPN credentials available for OAuth")
                 return None
 
             # OAuth token endpoint
@@ -809,10 +795,8 @@ class DatabricksAuth:
 
             if response.status_code == 200:
                 token_data = response.json()
-                access_token = token_data.get("access_token")
+                access_token: Optional[str] = token_data.get("access_token")
                 if access_token:
-                    import time
-
                     self._service_token = access_token
                     self._service_token_fetched_at = time.time()
                     # Get expires_in from response, default to 3600 (1 hour)
@@ -875,10 +859,6 @@ class DatabricksAuth:
             await self._load_config()
         return self._workspace_host
 
-    def get_api_token(self) -> Optional[str]:
-        """Get the API token."""
-        return self._api_token
-
 
 # Global instance for easy access
 _databricks_auth = DatabricksAuth()
@@ -899,7 +879,7 @@ def reset_auth_config_cache() -> None:
 
 
 async def get_databricks_auth_headers(
-    host: str = None, mcp_server_url: str = None, user_token: str = None
+    host: _OptStr = None, mcp_server_url: _OptStr = None, user_token: _OptStr = None
 ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
     Get authentication headers for Databricks API calls.
@@ -913,41 +893,6 @@ async def get_databricks_auth_headers(
         Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
     """
     return await _databricks_auth.get_auth_headers(mcp_server_url, user_token)
-
-
-def get_databricks_auth_headers_sync(
-    host: str = None, mcp_server_url: str = None, user_token: str = None
-) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    """
-    Synchronous version of get_databricks_auth_headers.
-
-    Args:
-        host: Optional host (for compatibility, ignored since we get it from config)
-        mcp_server_url: Optional MCP server URL
-        user_token: Optional user access token for OBO authentication
-
-    Returns:
-        Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
-    """
-    try:
-        import asyncio
-
-        # Check if there's already a running event loop
-        try:
-            asyncio.get_running_loop()
-            # If we're already in an async context, we can't use asyncio.run()
-            # This shouldn't happen in a sync function, but let's handle it gracefully
-            logger.warning("Sync function called from async context - returning error")
-            return None, "Cannot call sync version from async context"
-        except RuntimeError:
-            # No running loop, safe to create one
-            return asyncio.run(
-                get_databricks_auth_headers(host, mcp_server_url, user_token)
-            )
-
-    except Exception as e:
-        logger.error(f"Error in sync auth headers: {e}")
-        return None, str(e)
 
 
 async def validate_databricks_connection() -> Tuple[bool, Optional[str]]:
@@ -972,100 +917,29 @@ async def validate_databricks_connection() -> Tuple[bool, Optional[str]]:
         return False, str(e)
 
 
-def setup_environment_variables(user_token: Optional[str] = None) -> bool:
+def local_dev_pat() -> Optional[str]:
+    """A PAT from ``DATABRICKS_TOKEN`` / ``DATABRICKS_API_KEY`` — local dev only.
+
+    A developer running Kasal outside Databricks Apps may export a PAT in their
+    shell; that is single-user, so honouring it is safe. Inside Apps this always
+    returns None: the environment there is shared by every workspace, and a PAT
+    comes only from the workspace's own API keys.
     """
-    DEPRECATED: Set up Databricks environment variables for compatibility with other libraries.
+    from src.core.databricks_app import is_databricks_app
 
-    **WARNING**: This function causes race conditions in multi-threaded environments.
-    Process-wide environment variables (os.environ) are NOT thread-safe.
-
-    **Use get_auth_context() instead**:
-    - For liteLLM: Use auth.get_litellm_params() and pass api_key/api_base directly
-    - For WorkspaceClient: Use auth.get_workspace_client()
-    - For REST APIs: Use auth.get_headers()
-
-    **MLflow**: Configure ONCE at application startup with service-level credentials,
-    not per-request with user tokens.
-
-    Args:
-        user_token: Optional user access token for OBO authentication
-
-    Returns:
-        bool: True if successful, False otherwise
-
-    Migration Example:
-        # OLD (race condition):
-        setup_environment_variables(user_token=user_token)
-        response = litellm.completion(model="databricks/model", messages=[...])
-
-        # NEW (thread-safe):
-        auth = await get_auth_context(user_token=user_token)
-        params = auth.get_litellm_params()
-        response = litellm.completion(model="databricks/model", messages=[...], **params)
-    """
-    import warnings
-
-    warnings.warn(
-        "setup_environment_variables() is deprecated and causes race conditions. "
-        "Use get_auth_context() instead. "
-        "See module docstring for migration examples.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    try:
-        import asyncio
-
-        async def _setup():
-            if not await _databricks_auth._load_config():
-                return False
-
-            # Set environment variables for host first
-            if _databricks_auth._workspace_host:
-                os.environ["DATABRICKS_HOST"] = _databricks_auth._workspace_host
-                # Also set API_BASE for LiteLLM compatibility - must include /serving-endpoints
-                os.environ["DATABRICKS_API_BASE"] = (
-                    f"{_databricks_auth._workspace_host}/serving-endpoints"
-                )
-
-            # Prefer OBO user token if provided
-            if user_token:
-                try:
-                    _databricks_auth.set_user_access_token(user_token)
-                except Exception:
-                    # Best-effort; still export token to env for SDKs
-                    pass
-                os.environ["DATABRICKS_TOKEN"] = user_token
-                os.environ["DATABRICKS_API_KEY"] = user_token
-            elif _databricks_auth._api_token:
-                # Fall back to service PAT
-                os.environ["DATABRICKS_TOKEN"] = _databricks_auth._api_token
-                os.environ["DATABRICKS_API_KEY"] = _databricks_auth._api_token
-
-            return True
-
-        # Check if we're already in an event loop
-        try:
-            asyncio.get_running_loop()
-            # We're in an event loop — offload with ContextVars copied so the
-            # OBO user token from UserContext survives the thread hop
-            import concurrent.futures
-            import contextvars
-
-            ctx = contextvars.copy_context()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(ctx.run, asyncio.run, _setup())
-                return future.result()
-        except RuntimeError:
-            # No event loop running, safe to use asyncio.run
-            return asyncio.run(_setup())
-
-    except Exception as e:
-        logger.error(f"Error setting up environment variables: {e}")
-        return False
+    if is_databricks_app():
+        return None
+    for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+        env_val = os.environ.get(env_key)
+        if env_val:
+            logger.info(
+                f"[AUTH] Priority 2b: PAT from environment ({env_key}), local dev"
+            )
+            return env_val
+    return None
 
 
-def extract_user_token_from_request(request) -> Optional[str]:
+def extract_user_token_from_request(request: Any) -> Optional[str]:
     """
     Extract user access token from request headers for OBO authentication.
 
@@ -1078,7 +952,7 @@ def extract_user_token_from_request(request) -> Optional[str]:
     try:
         # Check for X-Forwarded-Access-Token header (Databricks Apps standard)
         if hasattr(request, "headers"):
-            token = request.headers.get("X-Forwarded-Access-Token")
+            token: Optional[str] = request.headers.get("X-Forwarded-Access-Token")
             if token:
                 logger.debug(
                     "Found user access token in X-Forwarded-Access-Token header"
@@ -1087,7 +961,7 @@ def extract_user_token_from_request(request) -> Optional[str]:
 
         # Fallback to Authorization header if no forwarded token
         if hasattr(request, "headers"):
-            auth_header = request.headers.get("Authorization")
+            auth_header: Optional[str] = request.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
                 logger.debug("Found user access token in Authorization header")
@@ -1327,22 +1201,13 @@ async def get_auth_context(
             except Exception as e:
                 logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
 
-        # Priority 2b: Check environment variable as PAT fallback
-        # In subprocess contexts, MLflow setup converts SPN creds into a
-        # DATABRICKS_TOKEN env var.  This is a valid PAT-equivalent token.
+        # Priority 2b (LOCAL DEV ONLY): a PAT exported in the developer's shell.
+        # Never inside Databricks Apps: there the process environment is shared
+        # by every workspace this server serves, so a token found in it belongs
+        # to nobody in particular (reading it once let workspace B act with
+        # workspace A's PAT). Kasal itself never writes one there.
         if not pat_token:
-            for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                env_val = os.environ.get(env_key)
-                if env_val:
-                    pat_token = env_val
-                    logger.info(
-                        f"[AUTH] Priority 2b: ✓ PAT loaded from environment variable ({env_key})"
-                    )
-                    break
-            if not pat_token:
-                logger.debug(
-                    "[AUTH] Priority 2b: No PAT found in environment variables"
-                )
+            pat_token = local_dev_pat()
 
         if pat_token:
             return AuthContext(
@@ -1510,52 +1375,6 @@ async def get_workspace_client_with_fallback(
     except Exception as e:
         logger.error(f"[{operation_name}] Error creating workspace client: {e}")
         return None, None
-
-
-async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
-    """
-    Get an MCP access token by calling the Databricks CLI directly.
-    This is the most reliable approach since we know 'databricks auth token -p mcp' works.
-
-    Returns:
-        Tuple[Optional[str], Optional[str]]: (access_token, error_message)
-    """
-    try:
-        import json
-        import subprocess
-
-        logger.info("Getting MCP token using Databricks CLI")
-
-        # Call the CLI command that we know works
-        result = subprocess.run(
-            ["databricks", "auth", "token", "-p", "mcp"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        # Parse the JSON output
-        token_data = json.loads(result.stdout)
-        access_token = token_data.get("access_token")
-
-        if not access_token:
-            return None, "No access token found in CLI response"
-
-        # Verify this is a JWT token (should start with eyJ)
-        if access_token.startswith("eyJ"):
-            logger.info("Successfully obtained JWT token from CLI for MCP")
-            return access_token, None
-        else:
-            logger.warning(f"Token doesn't look like JWT: {access_token[:20]}...")
-            return access_token, None
-
-    except subprocess.CalledProcessError as e:
-        return None, f"CLI command failed: {e.stderr}"
-    except json.JSONDecodeError as e:
-        return None, f"Failed to parse CLI output: {e}"
-    except Exception as e:
-        logger.error(f"Error getting MCP token from CLI: {e}")
-        return None, str(e)
 
 
 async def get_current_databricks_user(

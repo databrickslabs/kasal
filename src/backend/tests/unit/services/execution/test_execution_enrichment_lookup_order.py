@@ -1,8 +1,9 @@
 """Regression test for PERF-034: entity enrichment in prepare_and_run_crew
-must look up agents/tasks by ID FIRST (the YAML key embeds the DB UUID and
-virtually always hits). The old name-first order was a guaranteed miss —
-find_by_name is exact-equality and YAML configs carry no 'name' — doubling
-sequential DB round trips for every agent and task on every execution.
+looks up agents/tasks by ID (the YAML key embeds the DB UUID). The old
+name-first order was a guaranteed miss — find_by_name is exact-equality and
+YAML configs carry no 'name' — doubling sequential DB round trips for every
+agent and task on every execution. The name lookup is now gone entirely, and
+the id read is group-checked (test_run_lookups_workspace_scoped.py).
 
 Also pins the payload-vs-row ``tool_configs`` precedence, which runs in the
 same enrichment pass: an explicit ``{}`` in the payload is kept, only a
@@ -14,6 +15,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.execution.kasal_service import KasalExecutionService
+from src.utils.user_context import GroupContext
+
+CTX = GroupContext(group_ids=["ws-a"])
 
 
 @pytest.mark.asyncio
@@ -44,10 +48,10 @@ async def test_agent_and_task_lookup_is_id_first():
     db_task = SimpleNamespace(tool_configs={})
 
     agent_service = MagicMock()
-    agent_service.get = AsyncMock(return_value=db_agent)
+    agent_service.get_with_group_check = AsyncMock(return_value=db_agent)
     agent_service.find_by_name = AsyncMock()
     task_service = MagicMock()
-    task_service.get = AsyncMock(return_value=db_task)
+    task_service.get_with_group_check = AsyncMock(return_value=db_task)
     task_service.find_by_name = AsyncMock()
 
     session_cm = MagicMock()
@@ -87,26 +91,29 @@ async def test_agent_and_task_lookup_is_id_first():
     ):
         try:
             await service.prepare_and_run_crew(
-                execution_id="e1", config=config, group_context=None
+                execution_id="e1", config=config, group_context=CTX
             )
         except Exception:
             pass  # later stages may fail; enrichment already ran
 
-    # ID lookups hit -> name lookups must never fire.
-    agent_service.get.assert_awaited_once_with(agent_uuid)
+    # One group-checked read by id each; never a name lookup (a name is not
+    # unique across workspaces) and never the unchecked get.
+    agent_service.get_with_group_check.assert_awaited_once_with(agent_uuid, CTX)
     agent_service.find_by_name.assert_not_awaited()
-    task_service.get.assert_awaited_once_with(task_uuid)
+    task_service.get_with_group_check.assert_awaited_once_with(task_uuid, CTX)
     task_service.find_by_name.assert_not_awaited()
+    agent_service.get.assert_not_called()
+    task_service.get.assert_not_called()
 
 
 async def _enrich(config, db_agent, db_task) -> None:
     """Run prepare_and_run_crew up to the end of enrichment (the same harness
     as the lookup-order test, factored so the precedence tests stay short)."""
     agent_service = MagicMock()
-    agent_service.get = AsyncMock(return_value=db_agent)
+    agent_service.get_with_group_check = AsyncMock(return_value=db_agent)
     agent_service.find_by_name = AsyncMock()
     task_service = MagicMock()
-    task_service.get = AsyncMock(return_value=db_task)
+    task_service.get_with_group_check = AsyncMock(return_value=db_task)
     task_service.find_by_name = AsyncMock()
 
     session_cm = MagicMock()
@@ -143,7 +150,7 @@ async def _enrich(config, db_agent, db_task) -> None:
     ):
         try:
             await service.prepare_and_run_crew(
-                execution_id="e1", config=config, group_context=None
+                execution_id="e1", config=config, group_context=CTX
             )
         except Exception:
             pass  # later stages may fail; enrichment already ran

@@ -1,23 +1,14 @@
 """
-Coverage tests for process_crew_executor.py - Part 6.
+The finally block of run_crew_isolated, and shutdown's error handling.
 
-Targets the finally block of run_crew_isolated (lines 2015-2130):
-  2015-2029  terminate exception → psutil fallback
-  2047-2063  psutil cleanup: orphaned process by cmdline
-  2085-2090  psutil cleanup: orphaned Python orphan (ppid=1)
-  2092-2127  ImportError fallback (subprocess ps aux)
-  2166-2170  relay_task_events general exception handling
-
-Also targets:
-  1541-1542  shutdown with alive processes
-  1552-1574  shutdown with ERROR on process terminate
-  2514-2520  _terminate_orphaned_process NoSuchProcess/AccessDenied on iter
+Cleanup stops only the tracked tree (``terminate_process_tree``); nothing here
+scans the host, so there is no ``psutil.process_iter`` to patch.
 """
 
 import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import psutil
 import pytest
 
 
@@ -43,43 +34,28 @@ async def _always_cancel():
 
 
 class TestRunCrewIsolatedFinallyTerminateError:
+    """A failure while stopping the tree must not turn a finished run into an error."""
+
+    @staticmethod
+    def _executor(pid):
+        executor = _make_executor()
+        mock_process = MagicMock()
+        mock_process.pid = pid
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+        mock_q = MagicMock()
+        mock_q.get = MagicMock(return_value={"status": "COMPLETED"})
+        executor._ctx.Queue = MagicMock(side_effect=[mock_q, MagicMock()])
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+        return executor, mock_process
 
     @pytest.mark.asyncio
-    async def test_terminate_exception_uses_psutil_fallback(self):
-        """When process.terminate() raises in finally, psutil.Process(pid).kill() is used."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 12345
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        # is_alive returns True in finally block check (process still alive)
-        # First call: in result check block (process.exitcode != -15/-9, so check queue)
-        # Second call: in finally block (True → trigger terminate)
-        # Third call: after terminate (still alive → kill)
-        mock_process.is_alive = MagicMock(side_effect=[False, True, True, False])
-        mock_process.terminate = MagicMock(side_effect=OSError("no permission"))
-        mock_process.kill = MagicMock()
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        mock_psutil_proc = MagicMock()
-        mock_psutil_proc.kill = MagicMock()
-
-        psutil_call_count = {"n": 0}
-
-        def psutil_process_side_effect(pid):
-            psutil_call_count["n"] += 1
-            return mock_psutil_proc
+    @pytest.mark.parametrize(
+        "error", [OSError("no permission"), psutil.AccessDenied(12345)]
+    )
+    async def test_stop_failure_in_finally_is_logged_not_raised(self, error):
+        executor, mock_process = self._executor(12345)
+        group_ctx = MagicMock(primary_group_id="grp", access_token=None)
 
         with (
             patch(
@@ -88,258 +64,16 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.Process", side_effect=psutil_process_side_effect),
-            patch("psutil.process_iter", return_value=[]),
+            patch(
+                "src.services.agent_builder.process_executor.terminate_process_tree",
+                side_effect=error,
+            ) as stop_tree,
         ):
             result = await executor.run_crew_isolated("exec-term-err", {}, group_ctx)
 
-        # psutil.Process was called and kill was attempted
-        # Either mock_psutil_proc.kill was called, or the exception was caught gracefully
-        assert result is not None
-
-    @pytest.mark.asyncio
-    async def test_orphaned_process_by_cmdline_is_terminated(self):
-        """Orphaned process with execution_id in cmdline is terminated in finally."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 99
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        mock_process.is_alive = MagicMock(return_value=False)
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        exec_id = "exec-orphan-cmdline"
-
-        # An orphaned process with exec_id in cmdline
-        orphan_proc = MagicMock()
-        orphan_proc.info = {
-            "pid": 55555,
-            "name": "python",
-            "cmdline": ["python", f"--exec-id={exec_id}"],
-            "ppid": 1,
-        }
-        orphan_proc.terminate = MagicMock()
-        orphan_proc.wait = MagicMock()
-
-        # Normal python proc (orphaned ppid=1) for the second loop
-        normal_proc = MagicMock()
-        normal_proc.info = {
-            "pid": 66666,
-            "name": "python",
-            "ppid": 1,
-            "create_time": time.time() - 60,  # 1 minute ago (< 10 min)
-        }
-        normal_proc.create_time = MagicMock(return_value=time.time() - 60)
-
-        def mock_process_iter(attrs):
-            if "cmdline" in attrs:
-                return [orphan_proc]
-            return [normal_proc]
-
-        with (
-            patch(
-                "src.db.database_router.is_lakebase_enabled",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", side_effect=mock_process_iter),
-        ):
-            await executor.run_crew_isolated(exec_id, {}, group_ctx)
-
-        orphan_proc.terminate.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_psutil_timeout_expired_force_kills(self):
-        """When proc.wait() times out, proc.kill() is called."""
-        import psutil as _psutil
-
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 101
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        mock_process.is_alive = MagicMock(return_value=False)
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        exec_id = "exec-timeout-psutil"
-
-        # Orphaned proc that times out on wait()
-        orphan_proc = MagicMock()
-        orphan_proc.info = {
-            "pid": 77777,
-            "name": "python",
-            "cmdline": ["python", f"exec_id={exec_id}"],
-            "ppid": 1,
-        }
-        orphan_proc.terminate = MagicMock()
-        orphan_proc.wait = MagicMock(side_effect=_psutil.TimeoutExpired(77777, 2))
-        orphan_proc.kill = MagicMock()
-
-        def mock_process_iter(attrs):
-            if "cmdline" in attrs:
-                return [orphan_proc]
-            return []
-
-        with (
-            patch(
-                "src.db.database_router.is_lakebase_enabled",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", side_effect=mock_process_iter),
-        ):
-            await executor.run_crew_isolated(exec_id, {}, group_ctx)
-
-        orphan_proc.kill.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_psutil_import_error_falls_back_to_subprocess(self):
-        """When psutil ImportError occurs, uses subprocess ps aux fallback."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 102
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        mock_process.is_alive = MagicMock(return_value=False)
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        # Mock subprocess.run to return success
-        mock_subprocess_result = MagicMock()
-        mock_subprocess_result.returncode = 0
-        mock_subprocess_result.stdout = ""  # No matching processes
-
-        with (
-            patch(
-                "src.db.database_router.is_lakebase_enabled",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", side_effect=ImportError("no psutil")),
-            patch("subprocess.run", return_value=mock_subprocess_result),
-        ):
-            result = await executor.run_crew_isolated("exec-nopsutil", {}, group_ctx)
-
-        assert result is not None
-
-    @pytest.mark.asyncio
-    async def test_subprocess_ps_finds_orphaned_process(self):
-        """The ps aux fallback finds and kills matching orphaned process."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 103
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        mock_process.is_alive = MagicMock(return_value=False)
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        exec_id = "exec-ps-find"
-
-        # ps aux output with matching process
-        ps_output = (
-            f"user  99999  0.0  0.0  python  multiprocessing.spawn {exec_id[:8]}\n"
-        )
-        mock_subprocess_result = MagicMock()
-        mock_subprocess_result.returncode = 0
-        mock_subprocess_result.stdout = ps_output
-
-        with (
-            patch(
-                "src.db.database_router.is_lakebase_enabled",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", side_effect=ImportError("no psutil")),
-            patch("subprocess.run", return_value=mock_subprocess_result),
-            patch("os.kill") as mock_os_kill,
-        ):
-            await executor.run_crew_isolated(exec_id, {}, group_ctx)
-
-        # os.kill should have been called on the matching process
-        mock_os_kill.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_cleanup_error_logged_not_raised(self):
-        """Exception during cleanup is logged, not raised."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 104
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        mock_process.is_alive = MagicMock(return_value=False)
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        with (
-            patch(
-                "src.db.database_router.is_lakebase_enabled",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", side_effect=RuntimeError("psutil crashed")),
-        ):
-            result = await executor.run_crew_isolated("exec-cleanup-err", {}, group_ctx)
-
-        # Should complete without raising
-        assert result is not None
+        stop_tree.assert_called_once_with(mock_process)
+        assert result["status"] == "COMPLETED"
+        assert "exec-term-err" not in executor._running_processes
 
 
 # ---------------------------------------------------------------------------
@@ -395,40 +129,3 @@ class TestShutdownTerminateError:
             executor.shutdown(wait=True)
 
         mock_proc.kill.assert_called()
-
-
-# ---------------------------------------------------------------------------
-# _terminate_orphaned_process — NoSuchProcess/AccessDenied on process iteration
-# ---------------------------------------------------------------------------
-
-
-class TestTerminateOrphanedProcessIteration:
-
-    def test_no_such_process_during_proc_check_continues(self):
-        """NoSuchProcess during process environ/cmdline access is caught."""
-        executor = _make_executor()
-        import psutil
-
-        mock_proc = MagicMock()
-        mock_proc.info = {"pid": 1111, "name": "python", "cmdline": []}
-        # Accessing environ raises NoSuchProcess
-        mock_proc.environ = MagicMock(side_effect=psutil.NoSuchProcess(1111))
-
-        with patch("psutil.process_iter", return_value=[mock_proc]):
-            result = executor._terminate_orphaned_process("exec-no-such")
-
-        assert result is False
-
-    def test_access_denied_during_proc_check_continues(self):
-        """AccessDenied during environ access is caught."""
-        executor = _make_executor()
-        import psutil
-
-        mock_proc = MagicMock()
-        mock_proc.info = {"pid": 2222, "name": "python", "cmdline": []}
-        mock_proc.environ = MagicMock(side_effect=psutil.AccessDenied(2222))
-
-        with patch("psutil.process_iter", return_value=[mock_proc]):
-            result = executor._terminate_orphaned_process("exec-access-denied")
-
-        assert result is False

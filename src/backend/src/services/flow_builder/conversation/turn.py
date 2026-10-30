@@ -127,7 +127,8 @@ def _reply_text(result: Any) -> str:
     dump = getattr(result, "model_dump_json", None)
     if callable(dump):
         try:
-            return dump()
+            text: str = dump()
+            return text
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[flow-thread] could not serialize turn result: {exc}")
     return str(result)

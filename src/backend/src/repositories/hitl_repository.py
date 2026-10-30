@@ -6,11 +6,14 @@ This module provides database operations for HITL approval and webhook models.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import delete, desc, func
+from sqlalchemy import delete, desc, func, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm.attributes import set_committed_value
+from sqlalchemy.orm.util import identity_key
 
 from src.models.execution_history import ExecutionHistory
 from src.models.hitl_approval import (
@@ -55,7 +58,7 @@ class HITLApprovalRepository:
         stmt = delete(HITLApproval).where(HITLApproval.execution_id.in_(old_job_ids))
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def create(self, approval: HITLApproval) -> HITLApproval:
         """
@@ -99,35 +102,6 @@ class HITLApprovalRepository:
             filters.append(HITLApproval.group_id == group_id)
 
         stmt = select(HITLApproval).where(*filters)
-        result = await self.session.execute(stmt)
-        return result.scalars().first()
-
-    async def get_pending_for_execution(
-        self, execution_id: str, group_id: Optional[str] = None
-    ) -> Optional[HITLApproval]:
-        """
-        Get pending HITL approval for an execution.
-
-        Args:
-            execution_id: Job ID of the execution
-            group_id: Optional group ID for filtering
-
-        Returns:
-            Pending HITLApproval if found, None otherwise
-        """
-        if not self.session:
-            raise RuntimeError("HITLApprovalRepository requires a session")
-
-        filters = [
-            HITLApproval.execution_id == execution_id,
-            HITLApproval.status == HITLApprovalStatus.PENDING,
-        ]
-        if group_id:
-            filters.append(HITLApproval.group_id == group_id)
-
-        stmt = (
-            select(HITLApproval).where(*filters).order_by(desc(HITLApproval.created_at))
-        )
         result = await self.session.execute(stmt)
         return result.scalars().first()
 
@@ -205,7 +179,13 @@ class HITLApprovalRepository:
         rejection_action: Optional[str] = None,
     ) -> bool:
         """
-        Update the status of an HITL approval.
+        Record a decision on an approval that is still pending.
+
+        One conditional UPDATE: the row changes only while its status is
+        ``pending``. Approve, reject and the timeout sweep all decide through
+        here, so of two decisions racing for one approval exactly one changes
+        it; reading the status first and writing it after let both through.
+        An instance already loaded in this session is updated in place.
 
         Args:
             approval_id: ID of the approval
@@ -216,32 +196,50 @@ class HITLApprovalRepository:
             rejection_action: Action to take on rejection (reject/retry)
 
         Returns:
-            True if successful, False if not found
+            True if this call decided the approval; False if it does not exist
+            or was already decided
         """
         if not self.session:
             raise RuntimeError("HITLApprovalRepository requires a session")
 
-        stmt = select(HITLApproval).where(HITLApproval.id == approval_id)
-        result = await self.session.execute(stmt)
-        approval = result.scalars().first()
+        values: Dict[str, object] = {
+            "status": status,
+            "responded_at": datetime.now(timezone.utc),
+        }
+        if responded_by:
+            values["responded_by"] = responded_by
+        if approval_comment:
+            values["approval_comment"] = approval_comment
+        if rejection_reason:
+            values["rejection_reason"] = rejection_reason
+        if rejection_action:
+            values["rejection_action"] = rejection_action
 
-        if not approval:
-            logger.warning(f"HITL approval {approval_id} not found for status update")
+        stmt = (
+            update(HITLApproval)
+            .where(
+                HITLApproval.id == approval_id,
+                HITLApproval.status == HITLApprovalStatus.PENDING,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.session.execute(stmt)
+        if not isinstance(result, CursorResult) or result.rowcount != 1:
+            logger.warning(
+                f"HITL approval {approval_id} not found or already decided; "
+                f"{status} not recorded"
+            )
             return False
 
-        approval.status = status
-        approval.responded_at = datetime.now(timezone.utc)
+        # The caller usually holds the row already (approve() hands it to the
+        # resume), so bring that copy up to date: but only here, once this
+        # decision is the one the database kept.
+        loaded = self.session.identity_map.get(identity_key(HITLApproval, approval_id))
+        if loaded is not None:
+            for key, value in values.items():
+                set_committed_value(loaded, key, value)
 
-        if responded_by:
-            approval.responded_by = responded_by
-        if approval_comment:
-            approval.approval_comment = approval_comment
-        if rejection_reason:
-            approval.rejection_reason = rejection_reason
-        if rejection_action:
-            approval.rejection_action = rejection_action
-
-        await self.session.flush()
         logger.info(f"Updated HITL approval {approval_id} status to {status}")
         return True
 
@@ -260,6 +258,17 @@ class HITLApprovalRepository:
             HITLApproval.status == HITLApprovalStatus.PENDING,
             HITLApproval.expires_at.isnot(None),
             HITLApproval.expires_at < now,
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_all_pending(self) -> List[HITLApproval]:
+        """Every pending approval, in any group (the startup reap's input)."""
+        if not self.session:
+            raise RuntimeError("HITLApprovalRepository requires a session")
+
+        stmt = select(HITLApproval).where(
+            HITLApproval.status == HITLApprovalStatus.PENDING
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -313,7 +322,7 @@ class HITLApprovalRepository:
         stmt = delete(HITLApproval).where(HITLApproval.execution_id == execution_id)
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
 
 class HITLWebhookRepository:

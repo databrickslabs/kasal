@@ -7,4 +7,11 @@ and ``frontend_static/`` (the built React UI). ``kasal.cli`` puts ``_app`` on
 the name never leaks into site-packages.
 """
 
-__version__ = "0.1.1"
+from importlib.metadata import PackageNotFoundError, version
+
+# The installed distribution's version, which the build takes from the root
+# pyproject.toml, so this never needs bumping by hand.
+try:
+    __version__ = version("kasal")
+except PackageNotFoundError:  # imported from a source checkout, not installed
+    __version__ = "0+unknown"

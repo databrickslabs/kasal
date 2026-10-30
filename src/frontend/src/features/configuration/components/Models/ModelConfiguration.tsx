@@ -33,6 +33,8 @@ import {
   ButtonGroup,
   DialogContentText
 } from '@mui/material';
+import ModelEndpointFields from './ModelEndpointFields';
+import { endpointError } from './modelEndpoint';
 import SearchIcon from '@mui/icons-material/Search';
 import ModelIcon from '@mui/icons-material/ModelTraining';
 import SaveIcon from '@mui/icons-material/Save';
@@ -46,7 +48,8 @@ import { ModelService } from '../../../../api/config/ModelService';
 import { ModelConfig, Models } from '../../../../types/config/models';
 import ThinkingFields from '../../models/components/ThinkingFields';
 import { useModelConfig } from '../../../../hooks/global/useModelConfig';
-import { useSnackbar } from 'notistack';
+import { notifyModelsChanged } from '../../../../store/models';
+import toast from 'react-hot-toast';
 
 interface ModelEditDialogProps {
   open: boolean;
@@ -156,6 +159,8 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
     const newErrors: Record<string, string> = {};
     if (!editedModel.key) newErrors.key = 'Key is required';
     if (!editedModel.name) newErrors.name = 'Name is required';
+    const endpoint = typeof editedModel.params?.api_base === 'string' ? editedModel.params.api_base : '';
+    if (endpointError(endpoint)) newErrors.api_base = endpointError(endpoint) as string;
 
     if (Object.keys(newErrors).length > 0 || Object.keys(errors).length > 0) {
       setErrors({ ...errors, ...newErrors });
@@ -264,11 +269,22 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
               <MenuItem value="gemini">Gemini</MenuItem>
               <MenuItem value="mistral">Mistral</MenuItem>
               <MenuItem value="ollama">Ollama</MenuItem>
+              <MenuItem value="vllm">vLLM</MenuItem>
+              <MenuItem value="custom">Custom OpenAI-compatible (e.g. KAT Coder)</MenuItem>
+              <MenuItem value="deepseek">DeepSeek</MenuItem>
+              <MenuItem value="kimi">Kimi</MenuItem>
+              <MenuItem value="openrouter">OpenRouter</MenuItem>
               <MenuItem value="cohere">Cohere</MenuItem>
               <MenuItem value="databricks">Databricks</MenuItem>
               <MenuItem value="local">Local</MenuItem>
             </Select>
           </FormControl>
+
+          <ModelEndpointFields
+            provider={editedModel.provider}
+            params={editedModel.params}
+            onChange={params => setEditedModel(prev => (prev ? { ...prev, params } : null))}
+          />
 
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="subtitle1" color="text.primary" fontWeight="medium" sx={{ pt: 1.5 }}>
@@ -436,8 +452,14 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
     setError,
     incrementRefreshKey,
   } = useModelConfig();
-  const { enqueueSnackbar } = useSnackbar();
   const [modelToDelete, setModelToDelete] = React.useState<string | null>(null);
+
+  // Every mutation below ends here: open chats, builders and other tabs pick
+  // up the new list from the shared models store without a reload.
+  const modelsChanged = () => {
+    incrementRefreshKey();
+    void notifyModelsChanged();
+  };
 
   const [providerFilter, setProviderFilter] = React.useState<string>('all');
   const uniqueProviders = React.useMemo(() => {
@@ -518,7 +540,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setEditDialogOpen(false);
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error('Error saving model:', err);
       setError(err instanceof Error ? err.message : 'Failed to save model');
@@ -552,22 +574,19 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setModels(refreshed);
 
       // Show success message
-      enqueueSnackbar(
-        t('configuration.models.modelDeleted', { defaultValue: 'Model deleted successfully' }),
-        { variant: 'success' }
+      toast.success(
+        t('configuration.models.modelDeleted', { defaultValue: 'Model deleted successfully' })
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
 
       // Schedule a background refresh after a delay to ensure consistency
       setTimeout(() => {
-        console.log('[ModelConfiguration] Running background refresh after deletion');
         modelService.getGlobalModels()
           .then(refreshedModels => {
-            console.log('[ModelConfiguration] Background refresh complete, updating models');
             setModels(refreshedModels);
-            incrementRefreshKey();
+            modelsChanged();
           })
           .catch(err => {
             console.warn('[ModelConfiguration] Background refresh failed:', err);
@@ -577,9 +596,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       console.error('Error deleting model:', err);
       setError(err instanceof Error ? err.message : 'Failed to delete model');
 
-      enqueueSnackbar(
-        t('configuration.models.deleteFailed', { defaultValue: 'Failed to delete model' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.deleteFailed', { defaultValue: 'Failed to delete model' })
       );
     } finally {
       setSaving(false);
@@ -613,21 +631,19 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
         setModels(filtered);
       }
 
-      enqueueSnackbar(
+      toast.success(
         enabled
           ? t('configuration.models.modelEnabled', { defaultValue: 'Model enabled successfully' })
-          : t('configuration.models.modelDisabled', { defaultValue: 'Model disabled successfully' }),
-        { variant: 'success' }
+          : t('configuration.models.modelDisabled', { defaultValue: 'Model disabled successfully' })
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error(`Error toggling model ${key}:`, err);
       setError(err instanceof Error ? err.message : 'Failed to update model status');
-      enqueueSnackbar(
-        t('configuration.models.toggleFailed', { defaultValue: 'Failed to toggle model status' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.toggleFailed', { defaultValue: 'Failed to toggle model status' })
       );
     } finally {
       setSaving(false);
@@ -643,21 +659,19 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setError(null);
 
       // Show success feedback to the user
-      enqueueSnackbar(
-        t('configuration.models.allModelsEnabled', { defaultValue: 'All models have been enabled' }),
-        { variant: 'success' }
+      toast.success(
+        t('configuration.models.allModelsEnabled', { defaultValue: 'All models have been enabled' })
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error('Error enabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to enable all models');
 
       // Show error feedback
-      enqueueSnackbar(
-        t('configuration.models.enableAllFailed', { defaultValue: 'Failed to enable all models' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.enableAllFailed', { defaultValue: 'Failed to enable all models' })
       );
     } finally {
       setSaving(false);
@@ -673,21 +687,19 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setError(null);
 
       // Show success feedback to the user
-      enqueueSnackbar(
-        t('configuration.models.allModelsDisabled', { defaultValue: 'All models have been disabled' }),
-        { variant: 'success' }
+      toast.success(
+        t('configuration.models.allModelsDisabled', { defaultValue: 'All models have been disabled' })
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error('Error disabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to disable all models');
 
       // Show error feedback
-      enqueueSnackbar(
-        t('configuration.models.disableAllFailed', { defaultValue: 'Failed to disable all models' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.disableAllFailed', { defaultValue: 'Failed to disable all models' })
       );
     } finally {
       setSaving(false);

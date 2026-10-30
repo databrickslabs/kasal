@@ -1,21 +1,24 @@
-"""A skill draft as a run — the run record and the trace rows behind it.
+"""A skill draft as a run — the run record behind its trace.
 
 The chat shows drafting as run activity, and the activity's expanded body is
 the run's TRACE, read from the trace API by job id. A draft that made its LLM
 calls outside any run left nothing to open. So a draft IS a run — see
-:mod:`src.services.execution.generation_run`, which owns the mechanics; this
-module only says what a skill draft's run looks like.
+:mod:`src.services.execution.generation_run`, which owns the record's
+mechanics. The trace rows themselves are NOT written here: the draft's LLM
+calls reach the event bus like every other call, and the scoped
+``OTelEventBridge`` (``otel_tracing.generation_scope``) files them under this
+run. This module only says what a skill draft's run looks like.
 """
 
 from typing import Any, Dict, Optional
 
 from src.services.execution import generation_run
 
-#: How the rows are attributed in the timeline (its lanes are event sources).
-EVENT_SOURCE = "Skills"
-EVENT_CONTEXT = "skill draft"
 #: Recorded on the run so the Jobs page can tell a draft from a chat turn.
 TRIGGER_TYPE = "skill_draft"
+#: The key the full draft is stored under in the run's result — what a caller
+#: that started the draft in the background (:mod:`draft_job`) polls for.
+RESULT_KEY = "skill_draft"
 _MAX_RUN_NAME = 80
 
 
@@ -52,37 +55,16 @@ async def open_run(
     )
 
 
-async def record_call(
-    job_id: Optional[str],
-    *,
-    attempt: int,
-    model: Optional[str],
-    prompt: str,
-    response: str,
-    duration_ms: float,
-    group_context: Any,
-) -> None:
-    """One LLM call as a request row and a response row."""
-    await generation_run.record_call(
-        job_id,
-        source=EVENT_SOURCE,
-        context=EVENT_CONTEXT,
-        attempt=attempt,
-        model=model,
-        prompt=prompt,
-        response=response,
-        duration_ms=duration_ms,
-        group_context=group_context,
-    )
-
-
 async def close_run(
     job_id: Optional[str],
     *,
     result: Optional[Dict[str, Any]] = None,
     error: Optional[str] = None,
 ) -> None:
-    """COMPLETED with the draft's summary as the result, or FAILED with the reason."""
+    """COMPLETED with the draft as the result, or FAILED with the reason.
+
+    The summary fields make the Jobs page self-describing; ``skill_draft`` is
+    the whole draft, which is the answer for a caller that polls the run."""
     if error:
         await generation_run.close_run(job_id, error=error)
         return
@@ -99,5 +81,6 @@ async def close_run(
             "errors": draft.get("errors") or [],
             "model": draft.get("model"),
             "attempts": draft.get("attempts"),
+            RESULT_KEY: draft,
         },
     )

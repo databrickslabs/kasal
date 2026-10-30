@@ -12,8 +12,6 @@ from src.services.converters.formats.mquery.models import (
     ColumnDataType,
     ConversionResult,
     ExpressionType,
-    Hierarchy,
-    HierarchyLevel,
     MQueryConversionConfig,
     MQueryExpression,
     PowerBITable,
@@ -324,34 +322,3 @@ def test_mquery_conversion_config_custom():
 # ---------------------------------------------------------------------------
 # Hierarchy tests
 # ---------------------------------------------------------------------------
-
-
-def test_hierarchy_get_columns_ordered():
-    """Hierarchy.get_columns_ordered returns columns sorted by ordinal."""
-    h = Hierarchy(
-        name="CalendarHierarchy",
-        table_name="Date",
-        levels=[
-            HierarchyLevel(name="Year", ordinal=0, column_name="Year"),
-            HierarchyLevel(name="Quarter", ordinal=1, column_name="Quarter"),
-            HierarchyLevel(name="Month", ordinal=2, column_name="Month"),
-        ],
-    )
-    cols = h.get_columns_ordered()
-    assert cols == ["Year", "Quarter", "Month"]
-
-
-def test_hierarchy_to_sql_comment():
-    """Hierarchy.to_sql_comment generates readable SQL comment."""
-    h = Hierarchy(
-        name="ProductHierarchy",
-        table_name="Products",
-        levels=[
-            HierarchyLevel(name="Category", ordinal=0, column_name="Category"),
-            HierarchyLevel(name="Subcategory", ordinal=1, column_name="Subcategory"),
-        ],
-    )
-    comment = h.to_sql_comment()
-    assert "ProductHierarchy" in comment
-    assert "Category" in comment
-    assert "Subcategory" in comment

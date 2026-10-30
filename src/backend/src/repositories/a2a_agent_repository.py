@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -153,7 +154,7 @@ class A2AAgentRepository(BaseRepository[A2AAgent]):
                 self.model.name == name, self.model.group_id.isnot(None)
             )
         )
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def find_by_name(self, name: str, group_ids: List[str]) -> Optional[A2AAgent]:
         if not group_ids:
@@ -161,23 +162,6 @@ class A2AAgentRepository(BaseRepository[A2AAgent]):
         result = await self.session.execute(
             select(self.model).where(
                 self.model.name == name, self.model.group_id.in_(group_ids)
-            )
-        )
-        return result.scalars().first()
-
-    async def find_for_group(
-        self, agent_id: int, group_ids: List[str]
-    ) -> Optional[A2AAgent]:
-        """One agent, or None — including when it exists but belongs elsewhere.
-
-        The caller turns None into a 404 rather than a 403, so an id cannot be
-        probed to learn what other workspaces have configured.
-        """
-        if not group_ids:
-            return None
-        result = await self.session.execute(
-            select(self.model).where(
-                self.model.id == agent_id, self.model.group_id.in_(group_ids)
             )
         )
         return result.scalars().first()

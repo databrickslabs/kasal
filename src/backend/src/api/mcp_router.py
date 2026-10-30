@@ -5,9 +5,10 @@ This module provides endpoints for managing MCP (Model Context Protocol) servers
 """
 
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.permissions import check_role_in_context, is_system_admin
@@ -23,7 +24,10 @@ from src.schemas.mcp import (
     MCPTestConnectionResponse,
     MCPToggleResponse,
 )
+from src.services.mcp.mcp_client.databricks_presets import GENIE_ONE_PATH
+from src.services.mcp.mcp_client.legacy_urls import MCPLegacyUrlService
 from src.services.mcp.mcp_client.service import MCPService
+from src.utils.user_context import GroupContext
 
 # Create router instance
 router = APIRouter(
@@ -56,7 +60,7 @@ async def get_mcp_service(session: SessionDep) -> MCPService:
 MCPServiceDep = Annotated[MCPService, Depends(get_mcp_service)]
 
 
-def _is_global_admin(group_context) -> bool:
+def _is_global_admin(group_context: Optional[GroupContext]) -> bool:
     """
     Whether the caller may manage GLOBAL (base) MCP servers: system admins only.
 
@@ -77,7 +81,7 @@ def _require_enabled_flag(payload: Dict[str, Any]) -> bool:
 
 @router.get("/servers", response_model=MCPServerListResponse)
 async def get_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
     Get MCP servers effective for the current workspace (group).
@@ -178,7 +182,10 @@ async def _list_external_mcp_options(
             for parent in dict.fromkeys(service_parents or []):
                 page_token: Optional[str] = None
                 while True:
-                    params = {"parent": parent, "max_results": 100}
+                    params: Dict[str, Union[str, int]] = {
+                        "parent": parent,
+                        "max_results": 100,
+                    }
                     if page_token:
                         params["page_token"] = page_token
                     async with http.get(
@@ -230,84 +237,18 @@ def _mcp_service_parent(name: str) -> Optional[str]:
     return f"schemas/{parts[0]}.{parts[1]}"
 
 
-async def _heal_external_mcp_urls(
-    session,
-    options: List[Dict[str, Any]],
-    group_id: Optional[str],
-    include_base: bool,
-) -> int:
-    """Migrate confirmed MCP services off the legacy external proxy.
-
-    Only rows in the caller's workspace are changed. A system administrator may
-    additionally heal the base row. Custom endpoints are never rewritten: the
-    old URL must be a Databricks ``/api/2.0/mcp/external/`` proxy and the new
-    service must have been returned by the schema-scoped UC API.
-    """
-    from src.repositories.mcp_repository import MCPServerRepository
-
-    replacements = {
-        str(option.get("name", "")).lower(): option.get("server_url")
-        for option in options
-        if "/ai-gateway/mcp-services/" in str(option.get("server_url", ""))
-    }
-    if not replacements:
-        return 0
-
-    repository = MCPServerRepository(session)
-    changed = 0
-    for server in await repository.list():
-        in_scope = (group_id is not None and server.group_id == group_id) or (
-            include_base and server.group_id is None
-        )
-        new_url = replacements.get(str(server.name).lower())
-        if (
-            not in_scope
-            or not new_url
-            or "/api/2.0/mcp/external/" not in str(server.server_url)
-            or server.server_url == new_url
-        ):
-            continue
-        await repository.update(server.id, {"server_url": new_url})
-        changed += 1
-    if changed:
-        logger.info("Migrated %s MCP registration(s) to AI Gateway", changed)
-    return changed
-
-
-@router.get("/databricks/available")
-async def get_databricks_mcp_options(
-    request: Request, session: SessionDep, group_context: GroupContextDep = None
-) -> Dict[str, Any]:
-    """
-    The Databricks MCP catalog for this workspace, grouped for the chat's
-    two-step picker:
-
-    - ``external``: MCP servers registered IN DATABRICKS as UC HTTP
-      connections (proxied at ``/api/2.0/mcp/external/{name}``), listed with
-      the caller's credentials so only the ones they have permission on appear.
-    - ``managed``: the workspace's managed MCP server TYPES. Leaf types carry
-      a ``server_url`` and are selectable directly:
-        * Databricks SQL  → ``/api/2.0/mcp/sql``
-        * Unity Catalog Functions → ``/api/2.0/mcp/functions/{catalog}/{schema}``
-          using the catalog/schema from the workspace's Databricks
-          configuration (only offered when configured).
-      Expandable types (``expandable: true``) have a second step — Genie
-      spaces can number in the thousands, so they are NOT enumerated here:
-        * Genie     → drill into /mcp/databricks/genie-spaces (search+paging)
-        * AI Search → drill into /mcp/databricks/ai-search-indexes
-
-    Selecting any leaf registers it as a Kasal MCP server with
-    ``auth_type=databricks_spn`` and ``server_type=streamable``.
-
-    Browsing/registering Databricks MCP servers is a workspace-admin action, so
-    this catalog is admin-only (enforced here, not just hidden in the UI).
-    """
+def _require_catalog_admin(group_context: GroupContext) -> None:
     if not (
         check_role_in_context(group_context, ["admin"])
         or _is_global_admin(group_context)
     ):
         raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
+
+async def _resolve_catalog_workspace(
+    request: Request, group_context: Optional[GroupContext]
+) -> tuple[str, Optional[str]]:
+    """``(workspace_url, user_token)`` for the Databricks MCP catalog, or 503."""
     from src.utils.databricks_auth import (
         extract_user_token_from_request,
         get_auth_context,
@@ -333,58 +274,105 @@ async def get_databricks_mcp_options(
             "Configuration, then retry. Diagnostic: MCP-DISCOVERY-v1",
             status_code=503,
         )
+    return workspace_url, user_token
+
+
+async def _discover_external_options(
+    session: AsyncSession,
+    workspace_url: str,
+    user_token: Optional[str],
+    group_id: Optional[str],
+) -> List[Dict[str, Any]]:
+    """The workspace's external MCP options (read-only)."""
+    service_parents: List[str] = []
+
+    # The list API is schema-scoped. Seed it from the configured schema and
+    # from existing three-part registrations so a service can be re-homed
+    # even when it lives outside the app's default catalog/schema.
+    try:
+        from src.repositories.databricks_config_repository import (
+            DatabricksConfigRepository,
+        )
+
+        config = await DatabricksConfigRepository(session).get_active_config(
+            group_id=group_id
+        )
+        catalog = getattr(config, "catalog", None) if config else None
+        schema = getattr(config, "schema", None) if config else None
+        if isinstance(catalog, str) and isinstance(schema, str):
+            service_parents.append(f"schemas/{catalog}.{schema}")
+    except Exception as e:
+        logger.warning(f"Could not resolve configured MCP Service schema: {e}")
+
+    try:
+        from src.repositories.mcp_repository import MCPServerRepository
+
+        registered = await MCPServerRepository(session).list_for_group_scope(group_id)
+        for server in registered:
+            parent = _mcp_service_parent(server.name)
+            if parent:
+                service_parents.append(parent)
+    except Exception as e:
+        logger.warning(f"Could not resolve registered MCP Service schemas: {e}")
+
+    try:
+        return await _list_external_mcp_options(
+            workspace_url, user_token, list(dict.fromkeys(service_parents))
+        )
+    except Exception as e:
+        logger.warning(f"Could not enumerate external Databricks MCP servers: {e}")
+        return []
+
+
+@router.get("/databricks/available")
+async def get_databricks_mcp_options(
+    request: Request, session: SessionDep, group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    The Databricks MCP catalog for this workspace, grouped for the chat's
+    two-step picker:
+
+    - ``external``: MCP servers registered IN DATABRICKS as UC HTTP
+      connections (proxied at ``/api/2.0/mcp/external/{name}``), listed with
+      the caller's credentials so only the ones they have permission on appear.
+    - ``managed``: the workspace's managed MCP server TYPES. Leaf types carry
+      a ``server_url`` and are selectable directly:
+        * Databricks SQL  → ``/api/2.0/mcp/sql``
+        * Unity Catalog Functions → ``/api/2.0/mcp/functions/{catalog}/{schema}``
+          using the catalog/schema from the workspace's Databricks
+          configuration (only offered when configured).
+      Expandable types (``expandable: true``) have a second step — Genie
+      spaces can number in the thousands, so they are NOT enumerated here:
+        * Genie     → drill into /mcp/databricks/genie-spaces (search+paging)
+        * AI Search → drill into /mcp/databricks/ai-search-indexes
+
+    Selecting any leaf registers it as a Kasal MCP server with
+    ``auth_type=databricks_obo`` and ``server_type=streamable``.
+
+    Browsing/registering Databricks MCP servers is a workspace-admin action, so
+    this catalog is admin-only (enforced here, not just hidden in the UI).
+    """
+    _require_catalog_admin(group_context)
+    workspace_url, user_token = await _resolve_catalog_workspace(request, group_context)
 
     external: List[Dict[str, Any]] = []
     managed: List[Dict[str, Any]] = []
+    legacy_external_count = 0
     if workspace_url:
         group_id = (
             getattr(group_context, "primary_group_id", None) if group_context else None
         )
-        service_parents: List[str] = []
-
-        # The list API is schema-scoped. Seed it from the configured schema and
-        # from existing three-part registrations so a service can be re-homed
-        # even when it lives outside the app's default catalog/schema.
+        external = await _discover_external_options(
+            session, workspace_url, user_token, group_id
+        )
+        # Read-only: a GET never rewrites registrations. The UI calls
+        # POST /databricks/migrate-external-urls when this is non-zero.
         try:
-            from src.repositories.databricks_config_repository import (
-                DatabricksConfigRepository,
-            )
-
-            config = await DatabricksConfigRepository(session).get_active_config(
-                group_id=group_id
-            )
-            catalog = getattr(config, "catalog", None) if config else None
-            schema = getattr(config, "schema", None) if config else None
-            if isinstance(catalog, str) and isinstance(schema, str):
-                service_parents.append(f"schemas/{catalog}.{schema}")
-        except Exception as e:
-            logger.warning(f"Could not resolve configured MCP Service schema: {e}")
-
-        try:
-            from src.repositories.mcp_repository import MCPServerRepository
-
-            registered = await MCPServerRepository(session).list_for_group_scope(
-                group_id
-            )
-            for server in registered:
-                parent = _mcp_service_parent(server.name)
-                if parent:
-                    service_parents.append(parent)
-        except Exception as e:
-            logger.warning(f"Could not resolve registered MCP Service schemas: {e}")
-
-        try:
-            external = await _list_external_mcp_options(
-                workspace_url, user_token, list(dict.fromkeys(service_parents))
-            )
-            await _heal_external_mcp_urls(
-                session,
-                external,
-                group_id,
-                include_base=_is_global_admin(group_context),
+            legacy_external_count = await MCPLegacyUrlService(session).count_pending(
+                external, group_id, include_base=_is_global_admin(group_context)
             )
         except Exception as e:
-            logger.warning(f"Could not enumerate external Databricks MCP servers: {e}")
+            logger.warning(f"Could not count legacy external MCP registrations: {e}")
 
         managed.append(
             {
@@ -413,17 +401,20 @@ async def get_databricks_mcp_options(
             }
         )
 
-        # Genie One — the workspace-wide managed Genie MCP (no space id): one
-        # endpoint that reaches every Genie space the caller can see, so it is
-        # directly selectable, unlike the per-space servers listed on drill-in
-        # below. Same host as the per-space servers, minus the /{space_id} tail.
+        # Genie One — the workspace-wide Genie MCP (no space id): one endpoint
+        # that reaches every Genie space the caller can see, so it is directly
+        # selectable, unlike the per-space servers listed on drill-in below.
+        # Registered at the GA Unity Gateway service system.ai.genie_one_mcp;
+        # the Beta /api/2.0/mcp/genie is retired on 2026-10-31 and rows still
+        # pointing there are re-pointed by the startup self-heal. id, kind and
+        # name are unchanged, so the registered row keeps its name.
         managed.append(
             {
                 "id": "genie-one",
                 "kind": "genie",
                 "name": "Genie One",
                 "description": "Ask across all your Genie spaces (workspace-wide)",
-                "server_url": f"{workspace_url}/api/2.0/mcp/genie",
+                "server_url": f"{workspace_url}{GENIE_ONE_PATH}",
                 "expandable": False,
                 # No tool-convention config here: the catalog names Databricks
                 # PRODUCTS only. The start+poll follow convention is supplied
@@ -454,15 +445,45 @@ async def get_databricks_mcp_options(
             }
         )
 
-    return {"workspace_url": workspace_url, "external": external, "managed": managed}
+    return {
+        "workspace_url": workspace_url,
+        "external": external,
+        "managed": managed,
+        "legacy_external_count": legacy_external_count,
+    }
+
+
+@router.post("/databricks/migrate-external-urls")
+async def migrate_external_mcp_urls(
+    request: Request, session: SessionDep, group_context: GroupContextDep
+) -> Dict[str, int]:
+    """Re-point this workspace's MCP registrations from the legacy
+    ``/api/2.0/mcp/external/`` proxy to their UC MCP Service (AI Gateway) URL.
+
+    Only rows in the caller's workspace change; a system admin's call also
+    migrates the base rows. This is the explicit write that
+    ``GET /databricks/available`` used to perform as a side effect.
+    """
+    _require_catalog_admin(group_context)
+    workspace_url, user_token = await _resolve_catalog_workspace(request, group_context)
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    external = await _discover_external_options(
+        session, workspace_url, user_token, group_id
+    )
+    migrated = await MCPLegacyUrlService(session).migrate(
+        external, group_id, include_base=_is_global_admin(group_context)
+    )
+    return {"migrated": migrated}
 
 
 @router.get("/databricks/genie-spaces")
 async def list_genie_mcp_spaces(
     request: Request,
+    group_context: GroupContextDep,
     search: Optional[str] = None,
     page_token: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     Second step of the Genie managed-MCP picker: the caller's Genie spaces as
@@ -539,9 +560,9 @@ def _functions_mcp_option(
 async def list_function_mcp_schemas(
     request: Request,
     session: SessionDep,
+    group_context: GroupContextDep,
     catalog: Optional[str] = None,
     search: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     Second step of the Unity Catalog Functions managed-MCP picker: the
@@ -645,8 +666,8 @@ async def list_schema_functions(
     session: SessionDep,
     catalog: str,
     schema: str,
+    group_context: GroupContextDep,
     search: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     The individual Unity Catalog functions in a ``catalog.schema`` — a preview
@@ -704,7 +725,7 @@ async def list_schema_functions(
 
 @router.get("/databricks/ai-search-indexes")
 async def list_ai_search_mcp_indexes(
-    request: Request, group_context: GroupContextDep = None
+    request: Request, group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     Second step of the AI Search managed-MCP picker: the workspace's vector
@@ -736,7 +757,7 @@ async def list_ai_search_mcp_indexes(
 
     auth = await get_auth_context(user_token=user_token)
     workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
-    if not workspace_url:
+    if auth is None or not workspace_url:
         return {"options": []}
 
     headers = auth.get_headers()
@@ -793,33 +814,38 @@ async def list_ai_search_mcp_indexes(
 
 @router.get("/servers/enabled", response_model=MCPServerListResponse)
 async def get_enabled_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
-    Get all enabled MCP servers.
+    Get the enabled MCP servers of the caller's groups, plus the base servers.
     """
     logger.info("Getting enabled MCP servers")
-    servers_response = await service.get_enabled_servers()
+    servers_response = await service.get_enabled_servers(
+        getattr(group_context, "group_ids", None) or []
+    )
     logger.info(f"Found {servers_response.count} enabled MCP servers")
     return servers_response
 
 
 @router.get("/servers/global", response_model=MCPServerListResponse)
 async def get_global_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
-    Get all globally enabled MCP servers.
+    Get the globally enabled MCP servers of the caller's groups, plus the base
+    servers.
     """
     logger.info("Getting globally enabled MCP servers")
-    servers_response = await service.get_global_servers()
+    servers_response = await service.get_global_servers(
+        getattr(group_context, "group_ids", None) or []
+    )
     logger.info(f"Found {servers_response.count} globally enabled MCP servers")
     return servers_response
 
 
 @router.get("/servers/base", response_model=MCPServerListResponse)
 async def get_base_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
     Get the base/global MCP servers (group_id IS NULL) — the system-admin
@@ -839,7 +865,7 @@ async def get_base_mcp_servers(
 async def create_global_mcp_server(
     server_data: MCPServerCreate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Create a base/global MCP server (group_id IS NULL), available to all
@@ -855,7 +881,7 @@ async def create_global_mcp_server(
 
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerResponse:
     """
     Get an MCP server by ID.
@@ -872,7 +898,7 @@ async def get_mcp_server(
 async def create_mcp_server(
     server_data: MCPServerCreate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Create a new MCP server.
@@ -905,7 +931,7 @@ async def update_mcp_server(
     server_id: int,
     server_data: MCPServerUpdate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Update an existing MCP server.
@@ -926,7 +952,7 @@ async def update_mcp_server(
 
 @router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mcp_server(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> None:
     """
     Delete an MCP server.
@@ -946,7 +972,7 @@ async def delete_mcp_server(
 
 @router.patch("/servers/{server_id}/toggle-enabled", response_model=MCPToggleResponse)
 async def toggle_mcp_server_enabled(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPToggleResponse:
     """
     Toggle the enabled status of an MCP server.
@@ -967,7 +993,7 @@ async def toggle_mcp_server_enabled(
     "/servers/{server_id}/toggle-global-enabled", response_model=MCPToggleResponse
 )
 async def toggle_mcp_server_global_enabled(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPToggleResponse:
     """
     Toggle the global enabled status of an MCP server.
@@ -988,7 +1014,7 @@ async def toggle_mcp_server_global_enabled(
     "/servers/{server_id}/enable-for-workspace", response_model=MCPServerResponse
 )
 async def enable_mcp_server_for_workspace(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerResponse:
     """
     Create or update a workspace-scoped override for this server and enable it.
@@ -1009,7 +1035,7 @@ async def set_mcp_server_global_availability(
     server_id: int,
     payload: Dict[str, Any],
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     System admin: set whether a base/global MCP server is available to all
@@ -1029,7 +1055,7 @@ async def set_mcp_server_workspace_enabled(
     server_id: int,
     payload: Dict[str, Any],
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Workspace admin: enable/disable a server FOR THIS WORKSPACE only.
@@ -1055,7 +1081,7 @@ async def set_mcp_server_workspace_enabled(
 async def test_mcp_connection(
     test_data: MCPTestConnectionRequest,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPTestConnectionResponse:
     """
     Test connection to an MCP server.
@@ -1080,7 +1106,7 @@ async def test_mcp_connection(
 
 @router.get("/settings", response_model=MCPSettingsResponse)
 async def get_mcp_settings(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPSettingsResponse:
     """
     Get global MCP settings.
@@ -1095,7 +1121,7 @@ async def get_mcp_settings(
 async def update_mcp_settings(
     settings_data: MCPSettingsUpdate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPSettingsResponse:
     """
     Update global MCP settings.

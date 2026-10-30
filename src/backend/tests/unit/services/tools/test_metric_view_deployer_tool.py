@@ -248,9 +248,9 @@ class TestCatalogRemap:
     def test_catalog_remap_replaces_old_catalog(self):
         """catalog_remap replaces old catalog name strings in YAML content."""
         yaml_with_old_cat = json.dumps(
-            {"fact_pe002": "source: dc_datalake_prod_001.schema.fact_pe002\n"}
+            {"fact_pe002": "source: acme_prod.schema.fact_pe002\n"}
         )
-        remap = json.dumps({"dc_datalake_prod_001": "david_test_metrics"})
+        remap = json.dumps({"acme_prod": "main"})
         tool = MetricViewDeployerTool()
         result = tool._run(
             yaml_specs_json=yaml_with_old_cat,
@@ -259,8 +259,8 @@ class TestCatalogRemap:
         )
         data = json.loads(result)
         # The yaml key in output should have remapped content
-        assert "david_test_metrics" in data["yaml"]["fact_pe002"]
-        assert "dc_datalake_prod_001" not in data["yaml"]["fact_pe002"]
+        assert "source: main.schema.fact_pe002" in data["yaml"]["fact_pe002"]
+        assert "acme_prod" not in data["yaml"]["fact_pe002"]
 
     def test_catalog_remap_multiple_replacements(self):
         yaml_content = json.dumps(

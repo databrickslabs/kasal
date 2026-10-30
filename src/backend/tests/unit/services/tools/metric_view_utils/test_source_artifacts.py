@@ -20,12 +20,12 @@ class TestBuildSourceLayer:
                 source_table="cat.sch.nps",
             )
         }
-        out = build_source_layer(specs, mq, {}, "dc_adb-landing-zone-002", "idor")
+        out = build_source_layer(specs, mq, {}, "acme_adb-landing-zone-002", "idor")
         assert "Fact_NPS" in out
         ddl = out["Fact_NPS"]["ddl"]
         assert "CREATE OR REPLACE VIEW" in ddl
         # catalog with a hyphen must be back-quoted
-        assert "`dc_adb-landing-zone-002`.`idor`.`src_fact_nps`" in ddl
+        assert "`acme_adb-landing-zone-002`.`idor`.`src_fact_nps`" in ddl
         # native SQL (with its derived column) is what the view reads
         assert "b/c AS r" in ddl
 

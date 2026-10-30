@@ -50,22 +50,8 @@ import DatabaseOverview, { type DatabaseInfo } from './DatabaseOverview';
 import LakebaseSetupOptions from './LakebaseSetupOptions';
 import LakebasePreflightPanel from './LakebasePreflightPanel';
 import { APIKeysService } from '../../../api/config/APIKeysService';
-
-// Type guard for Axios errors with response data
-interface ErrorWithResponse {
-  response?: {
-    status?: number;
-    data?: {
-      detail?: string;
-      error?: string;
-    };
-  };
-  message?: string;
-}
-
-function isErrorWithResponse(error: unknown): error is ErrorWithResponse {
-  return typeof error === 'object' && error !== null && 'response' in error;
-}
+import { apiErrorMessage, isErrorWithResponse } from './apiErrorMessage';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 
 interface BackupFile {
@@ -367,9 +353,7 @@ const DatabaseManagement: React.FC = () => {
       setLakebaseConfig(response.data);
       setSuccess('Lakebase configuration saved successfully!');
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.detail || 'Failed to save Lakebase configuration'
-        : 'Failed to save Lakebase configuration';
+      const errorMessage = apiErrorMessage(err, 'Failed to save Lakebase configuration');
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -411,10 +395,7 @@ const DatabaseManagement: React.FC = () => {
       });
       setBackups(response.data);
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.error || 'Failed to load backups'
-        : 'Failed to load backups';
-      setError(errorMessage);
+      setError(apiErrorMessage(err, 'Failed to load backups'));
     } finally {
       setLoading(false);
     }
@@ -439,10 +420,7 @@ const DatabaseManagement: React.FC = () => {
         setError(response.data.error || 'Export failed');
       }
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.error || 'Failed to export database'
-        : 'Failed to export database';
-      setError(errorMessage);
+      setError(apiErrorMessage(err, 'Failed to export database'));
     } finally {
       setLoading(false);
     }
@@ -472,10 +450,7 @@ const DatabaseManagement: React.FC = () => {
         setError(response.data.error || 'Import failed');
       }
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.error || 'Failed to import database'
-        : 'Failed to import database';
-      setError(errorMessage);
+      setError(apiErrorMessage(err, 'Failed to import database'));
     } finally {
       setLoading(false);
     }
@@ -500,11 +475,9 @@ const DatabaseManagement: React.FC = () => {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Add group context if available
-      const selectedGroupId = localStorage.getItem('selectedGroupId');
-      if (selectedGroupId) {
-        headers['group_id'] = selectedGroupId;
-      }
+      // Add this tab's group context if available
+      const selectedGroupId = getTabGroupId();
+      if (selectedGroupId) headers['group_id'] = selectedGroupId;
 
       // Use streaming endpoint with backend URL from config
       const response = await fetch(`${config.apiUrl}/database-management/lakebase/migrate/stream`, {
@@ -649,9 +622,7 @@ const DatabaseManagement: React.FC = () => {
       // Reload database info to reflect the backend change in the General tab
       await loadDatabaseInfo();
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.detail || 'Failed to disable Lakebase'
-        : 'Failed to disable Lakebase';
+      const errorMessage = apiErrorMessage(err, 'Failed to disable Lakebase');
       setError(errorMessage);
       // Revert the UI state on error
       setLakebaseBackend('lakebase');
@@ -706,6 +677,8 @@ const DatabaseManagement: React.FC = () => {
     );
   }
 
+  // In-app backup covers SQLite and PostgreSQL 'public'; the server refuses Lakebase (400).
+  const onLakebase = databaseInfo?.database_type === 'lakebase';
   return (
     <Box sx={{ maxWidth: 880, '& > .MuiAccordion-root': { mb: 1 }, '& .MuiAccordionSummary-content': { my: 1 } }}>
       <Typography data-settings-page-title variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
@@ -1170,9 +1143,7 @@ const DatabaseManagement: React.FC = () => {
                                 await migrateLakebase(true, migrateData);
                               }
                             } catch (err: unknown) {
-                              const errorMessage = isErrorWithResponse(err)
-                                ? err.response?.data?.detail || 'Failed to connect to instance. Please verify the instance name and ensure it is running.'
-                                : 'Failed to connect to instance. Please verify the instance name and ensure it is running.';
+                              const errorMessage = apiErrorMessage(err, 'Failed to connect to instance. Please verify the instance name and ensure it is running.');
                               setError(errorMessage);
                             } finally {
                               setLoading(false);
@@ -1240,13 +1211,16 @@ const DatabaseManagement: React.FC = () => {
             {!hasDatabricksApiKey && <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Add a Databricks API key in API Keys to import or export backups.
             </Typography>}
+            {onLakebase && <Alert severity="info" sx={{ mb: 2 }}>
+              In-app backup and restore do not cover Lakebase. Protect this database with Lakebase point-in-time restore.
+            </Alert>}
             <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                 <Button
                   variant="contained"
                   startIcon={<UploadIcon />}
                   onClick={() => setExportDialog(true)}
-                  disabled={!hasDatabricksApiKey}
+                  disabled={!hasDatabricksApiKey || onLakebase}
                 >
                   Export to Volume
                 </Button>
@@ -1259,7 +1233,7 @@ const DatabaseManagement: React.FC = () => {
                     loadBackups();
                     setImportDialog(true);
                   }}
-                  disabled={!hasDatabricksApiKey}
+                  disabled={!hasDatabricksApiKey || onLakebase}
                 >
                   Import from Volume
                 </Button>
@@ -1419,7 +1393,7 @@ const DatabaseManagement: React.FC = () => {
                   if (isErrorWithResponse(err)) {
                     setHousekeepingResult({
                       success: false,
-                      error: err.response?.data?.detail || err.response?.data?.error || err.message || 'Housekeeping failed',
+                      error: apiErrorMessage(err, err.message || 'Housekeeping failed'),
                     });
                   } else {
                     setHousekeepingResult({ success: false, error: 'Housekeeping failed' });
@@ -1645,9 +1619,7 @@ const DatabaseManagement: React.FC = () => {
                       setError(pf?.remediation?.summary || response.data.message || 'Lakebase did not connect: preflight diagnostics did not pass. Run diagnostics for details.');
                     }
                   } catch (err: unknown) {
-                    const errorMessage = isErrorWithResponse(err)
-                      ? err.response?.data?.detail || 'Failed to enable Lakebase'
-                      : 'Failed to enable Lakebase';
+                    const errorMessage = apiErrorMessage(err, 'Failed to enable Lakebase');
                     setError(errorMessage);
                   } finally {
                     setLoading(false);

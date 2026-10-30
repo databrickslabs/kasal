@@ -61,9 +61,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -129,9 +127,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -179,9 +175,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -231,9 +225,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -285,9 +277,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -352,9 +342,7 @@ class TestRunDynamicFlowOuter:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -394,9 +382,7 @@ class TestRunDynamicFlowOuter:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session"
             ) as mock_smart,
@@ -653,7 +639,8 @@ class TestTaskConfigSupplemental:
 
     @pytest.mark.asyncio
     async def test_resolve_agent_from_edges_no_agent_data(self):
-        """Agent inferred from edges but not found in DB."""
+        """Agent inferred from edges but not found through the run's bundle:
+        no agent, and no second read of the table past the bundle's scope."""
         agent_id = str(uuid.uuid4())
         task_id = str(uuid.uuid4())
 
@@ -671,20 +658,13 @@ class TestTaskConfigSupplemental:
         agent_repo.get = AsyncMock(return_value=None)
 
         with patch("src.db.session.routed_scoped_session") as MockSess:
-            mock_session_ctx = MagicMock()
-            mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.scalar_one_or_none = MagicMock(return_value=None)
-            mock_session.execute = AsyncMock(return_value=mock_result)
-            mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-            MockSess.return_value = mock_session_ctx
-
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, flow_data, {"agent": agent_repo}
             )
 
         assert result is None
+        agent_repo.get.assert_awaited_once_with(agent_id)
+        MockSess.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_configure_task_no_expected_output(self):

@@ -87,19 +87,25 @@ class TestImplicitColumnMeasureStep:
                         "raw_expr": "SUM(source.nps_contribution_per_driver)",
                         "comment": "Aggregated column as measure (Sum) — no named PBI measure",
                         "used_in_visuals": [
-                            {"page": "NPS Overview", "visual_type": "card", "role": "drawn"}
+                            {
+                                "page": "NPS Overview",
+                                "visual_type": "card",
+                                "role": "drawn",
+                            }
                         ],
                         "pbi_kind": "raw_column",
                         "pbi_sources": [
-                            {"kind": "raw_column", "table": "fact_test", "column": "NPS_Contribution_per_Driver"}
+                            {
+                                "kind": "raw_column",
+                                "table": "fact_test",
+                                "column": "NPS_Contribution_per_Driver",
+                            }
                         ],
                     }
                 ]
             }
         }
-        spec = _run(
-            "fact_test", _make_table_info(), [], _make_context(config)
-        )
+        spec = _run("fact_test", _make_table_info(), [], _make_context(config))
         implicit = [m for m in spec.measures if m.category == "implicit_visual_column"]
         assert len(implicit) == 1
         m = implicit[0]
@@ -131,7 +137,11 @@ class TestImplicitColumnMeasureStep:
         config = {
             "implicit_column_measures": {
                 "fact_test": [
-                    {"name": "amount", "original_name": "Amount", "raw_expr": "SUM(source.amount)"}
+                    {
+                        "name": "amount",
+                        "original_name": "Amount",
+                        "raw_expr": "SUM(source.amount)",
+                    }
                 ]
             }
         }
@@ -155,7 +165,11 @@ class TestImplicitColumnMeasureStep:
                         "raw_expr": "SUM(source.nps_contribution_per_driver)",
                         "comment": "Aggregated column as measure (Sum) — no named PBI measure",
                         "used_in_visuals": [
-                            {"page": "NPS Overview", "visual_type": "card", "role": "drawn"}
+                            {
+                                "page": "NPS Overview",
+                                "visual_type": "card",
+                                "role": "drawn",
+                            }
                         ],
                     }
                 ]

@@ -118,3 +118,27 @@ describe('unclosed fence lifecycle', () => {
     expect(screen.getByText(/I left out nothing/)).toBeInTheDocument();
   });
 });
+
+describe('images in the answer', () => {
+  const remote = 'https://images.example.org/c.png?d=1';
+  const md = `Here is the chart: ![chart](${remote})\n\n![logo](/logo192.png)\n\n[the source](https://example.com/page)`;
+
+  it('shows a remote image as a placeholder and makes no request until clicked', () => {
+    const { container } = render(<MessageContent content={md} />);
+    // A rendered <img> is what makes the browser fetch it.
+    expect(container.querySelector(`img[src="${remote}"]`)).toBeNull();
+    const load = screen.getByRole('link', { name: 'Load image' });
+    expect(load).toHaveAttribute('href', remote);
+    expect(load).toHaveAttribute('target', '_blank');
+    expect(screen.getByText(/images\.example\.org/)).toBeInTheDocument();
+  });
+
+  it('renders same-origin images directly and leaves links unchanged', () => {
+    const { container } = render(<MessageContent content={md} />);
+    expect(container.querySelector('img[src="/logo192.png"]')).not.toBeNull();
+    const link = screen.getByRole('link', { name: 'the source' });
+    expect(link).toHaveAttribute('href', 'https://example.com/page');
+    // The chat answer's links never had a target; they still do not.
+    expect(link).not.toHaveAttribute('target');
+  });
+});

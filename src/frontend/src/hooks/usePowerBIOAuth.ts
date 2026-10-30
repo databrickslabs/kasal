@@ -256,24 +256,4 @@ export function usePowerBIOAuth(config?: PowerBIOAuthConfig): UsePowerBIOAuthRet
   };
 }
 
-/**
- * Check if URL contains OAuth callback parameters
- */
-export function isPowerBIOAuthCallback(): boolean {
-  const params = new URLSearchParams(window.location.search);
-  return params.has('code') && params.has('state');
-}
-
-/**
- * Get OAuth code from callback URL
- */
-export function getPowerBIOAuthCode(): { code: string | null; state: string | null; error: string | null } {
-  const params = new URLSearchParams(window.location.search);
-  return {
-    code: params.get('code'),
-    state: params.get('state'),
-    error: params.get('error_description') || params.get('error'),
-  };
-}
-
 export default usePowerBIOAuth;

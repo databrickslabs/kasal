@@ -5,6 +5,7 @@ import { useChatEffortStore } from '../../../store/chatEffort';
 import { dispatch } from '../api/dispatcher';
 import { generateId } from '../utils/markdown';
 import { useExecutionStore } from '../store/executionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import type { DispatchResult, GenerationCompleteData } from '../types/dispatcher';
 
 vi.mock('../api/dispatcher', () => ({
@@ -115,6 +116,25 @@ describe('useDispatcher', () => {
     expect(mockedDispatch).toHaveBeenCalledTimes(1);
   });
 
+  it('a failed session create says so and does not block every later message', async () => {
+    const ensure = vi.fn().mockRejectedValueOnce(new Error('Service unavailable')).mockResolvedValue('session-1');
+    const opts = makeOptions({ ensureSession: ensure });
+    mockedDispatch.mockResolvedValue(result('conversation', { message: 'Done' }));
+    useSessionStore.setState({ currentSessionId: null, messages: [] });
+    const { result: hook } = renderHook(() => useDispatcher(opts));
+    await act(async () => { await hook.current.sendMessage('First question\nwith detail'); });
+    expect(mockedDispatch).not.toHaveBeenCalled();
+    // The typed text comes back to copy, and no session is created for the notice.
+    expect(opts.addMessage).not.toHaveBeenCalled();
+    const notice = useSessionStore.getState().messages.at(-1)?.content ?? '';
+    expect(notice).toContain('could not be sent');
+    expect(notice).toContain('> First question\n> with detail');
+    expect(useSessionStore.getState().currentSessionId).toBeNull();
+    await act(async () => { await hook.current.sendMessage('First question'); });
+    expect(mockedDispatch).toHaveBeenCalledTimes(1);
+    expect(hook.current.isDispatching.current).toBe(false);
+  });
+
   it('exposes sendMessage, isDispatching ref, and setLastGenerated', () => {
     const { result: hook } = renderHook(() => useDispatcher(makeOptions()));
     expect(typeof hook.current.sendMessage).toBe('function');
@@ -191,6 +211,7 @@ describe('useDispatcher', () => {
         undefined,
         expect.objectContaining({ session_id: 'created-session' }),
         'build me a crew',
+        expect.any(AbortSignal),
       );
     });
   });
@@ -259,7 +280,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('/help');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined, RUN_SETTINGS, '/help');
+      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined, RUN_SETTINGS, '/help', expect.any(AbortSignal));
     });
 
     it('does NOT augment messages already containing a crew hint', async () => {
@@ -271,7 +292,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('build me a crew', 'my-model');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined, RUN_SETTINGS, 'build me a crew');
+      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined, RUN_SETTINGS, 'build me a crew', expect.any(AbortSignal));
     });
 
     it('does NOT augment in chat (light agent) mode — sends the literal message', async () => {
@@ -290,6 +311,7 @@ describe('useDispatcher', () => {
         undefined,
         RUN_SETTINGS,
         'do something cool',
+        expect.any(AbortSignal),
       );
     });
 
@@ -316,6 +338,7 @@ describe('useDispatcher', () => {
         ['DatabricksKnowledgeSearchTool'],
         RUN_SETTINGS,
         'build me a crew',
+        expect.any(AbortSignal),
       );
     });
 
@@ -338,6 +361,7 @@ describe('useDispatcher', () => {
           undefined,
           { ...RUN_SETTINGS, agentbricks_endpoints: ['ep-1'] },
           'do something cool',
+          expect.any(AbortSignal),
         );
       } finally {
         // Reset so the shared store doesn't leak into other tests.
@@ -944,7 +968,7 @@ describe('useDispatcher', () => {
       // The displayed user message uses displayAs, not the raw message.
       expect(opts.saveUserMessage).toHaveBeenCalledWith('session-1', 'Open crew: My Plan', undefined);
       // The raw message is still dispatched (slash command -> not augmented).
-      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined, RUN_SETTINGS, '/crew open p1');
+      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined, RUN_SETTINGS, '/crew open p1', expect.any(AbortSignal));
     });
   });
 

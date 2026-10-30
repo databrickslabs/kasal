@@ -51,7 +51,7 @@ except Exception:
 try:
     import builtins as _kasal_builtins_mod
 
-    def _kasal_noinput_global(prompt=None):
+    def _kasal_noinput_global(prompt: object = None) -> str:
         try:
             if prompt:
                 print(
@@ -70,7 +70,7 @@ try:
     import click as _kasal_click
 
     _kasal_click.confirm = lambda *a, **k: False
-    _kasal_click.prompt = lambda *a, **k: ""
+    _kasal_click.prompt = lambda *a, **k: ""  # type: ignore[assignment]  # monkeypatch
 except Exception:
     pass
 
@@ -78,16 +78,34 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
-import queue as queue_mod
 import signal
-import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime
+from multiprocessing.process import BaseProcess
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
+from src.services.execution.process_tree import (
+    terminate_owned_processes,
+    terminate_process_tree,
+)
+from src.services.execution.run_admission import (
+    RunCancelledWhileQueued,
+    queue_status_callbacks,
+    run_admission,
+    stopped_while_queued,
+)
+from src.services.execution.run_wait import (
+    collect_result,
+    flush_queues_before_exit,
+    run_deadline,
+)
 from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
+from src.services.flow_builder.completion_payload import is_paused_for_approval
+from src.services.flow_builder.run_outcome import (
+    early_announcement,
+    failure_message,
+    is_failed,
+)
 
 # Use the flow logger for all flow-related operations
 logger = LoggerManager.get_instance().flow
@@ -133,7 +151,7 @@ def run_flow_in_process(
         to ensure proper cleanup of child processes (including crew processes) on termination.
 
     Environment Variables Set:
-        - FLOW_SUBPROCESS_MODE: Marks subprocess execution mode
+        - the run-subprocess role (core.process_role): direct DB writes
         - DATABASE_TYPE: Ensures correct database configuration
         - CREWAI_VERBOSE: Controls CrewAI output verbosity
     """
@@ -141,28 +159,18 @@ def run_flow_in_process(
     import os
     import sys
 
-    # Mark that we're in subprocess mode for logging purposes
-    os.environ["FLOW_SUBPROCESS_MODE"] = "true"
-    # CRITICAL: Set CREW_SUBPROCESS_MODE so the OTel exporter writes directly to the DB
-    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    # FIRST: allow-listed environment, subprocess mode (flow AND crew, so the
+    # OTel exporter writes directly to the DB), debug tracing, execution id and
+    # the base DATABASE_TYPE (subprocess_bootstrap.prepare_child_environment).
+    from src.services.execution.subprocess_bootstrap import prepare_child_environment
+
+    prepare_child_environment(execution_id, "flow")
 
     # Pin this interpreter's engine from the payload — same contract as the crew
     # subprocess; see services/execution/harness_choice.py.
     from src.services.execution.harness_choice import adopt_in_subprocess
 
     adopt_in_subprocess(flow_config if isinstance(flow_config, dict) else None)
-    # Set debug tracing flag (default to true for comprehensive logging)
-    os.environ["CREWAI_DEBUG_TRACING"] = "true"
-    # CRITICAL: Store execution_id in environment for orphaned process detection
-    # This allows us to find and terminate this process even after server reloads
-    os.environ["KASAL_EXECUTION_ID"] = execution_id
-
-    # Ensure DATABASE_TYPE is set correctly in subprocess
-    if "DATABASE_TYPE" not in os.environ:
-        from src.config.settings import settings
-
-        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
-        print(f"[FLOW_SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
     # Early validation of parameters
     import json
@@ -218,6 +226,7 @@ def run_flow_in_process(
     # Configure logging
     from src.services.execution.subprocess_bootstrap import (
         configure_subprocess_logging,
+        open_child_database,
         restore_stdout_stderr,
         suppress_stdout_stderr,
     )
@@ -226,7 +235,7 @@ def run_flow_in_process(
     original_stdout, original_stderr, captured_output = suppress_stdout_stderr()
 
     # Set up signal handlers for graceful shutdown with child process cleanup
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: Any) -> None:
         # Kill all child processes spawned by this subprocess (including crew processes)
         try:
             import psutil
@@ -337,15 +346,13 @@ def run_flow_in_process(
                 )
 
         # Run the flow execution asynchronously (with initialization in same loop)
-        async def run_async_flow():
+        async def run_async_flow() -> Any:
             """Execute the flow in an async context with LogWriterTask in same event loop"""
 
             # Activate Lakebase on async_session_factory so ALL callers
             # (FlowRunnerService, tools, etc.) automatically use Lakebase.
             try:
-                from src.db.database_router import activate_lakebase_in_subprocess
-
-                lb_ok = await activate_lakebase_in_subprocess()
+                lb_ok = await open_child_database()  # Lakebase + engine settings
                 if lb_ok:
                     async_logger.info(
                         "[FLOW_SUBPROCESS] Lakebase activated on async_session_factory"
@@ -477,7 +484,7 @@ def run_flow_in_process(
 
                         _bridge_tracer = otel_provider.get_tracer("kasal-event-bridge")
                         _otel_bridge = OTelEventBridge(
-                            _bridge_tracer, execution_id, group_context
+                            _bridge_tracer, execution_id, group_context, flow_config
                         )
                         _otel_bridge.register(event_bus)
                         async_logger.info(
@@ -718,7 +725,7 @@ def run_flow_in_process(
                         )
 
                     async_logger.info(
-                        "[FLOW_SUBPROCESS] Flow execution completed successfully"
+                        "[FLOW_SUBPROCESS] Flow body returned; reading its outcome"
                     )
 
                     # The checkpoint is KEPT, not dropped: a flow checkpoint is
@@ -739,49 +746,30 @@ def run_flow_in_process(
                     #
                     # The status write relays over the event pipe, so the parent
                     # broadcasts it on SSE straight away. The parent still
-                    # finalises afterwards; this only moves the good news
+                    # finalises afterwards; this only moves the news
                     # earlier. Fail-open.
                     try:
-                        from src.models.execution_status import ExecutionStatus
                         from src.services.execution.status import (
                             ExecutionStatusService,
                         )
 
-                        # WITH the answer, not just the status: an
-                        # announcement that carries only the status leaves the
-                        # answer to a later write that may never happen, and the
-                        # UI finalises on the first one either way. See
-                        # flow_builder/completion_payload for both failures this
-                        # caused.
-                        from src.services.flow_builder.completion_payload import (
-                            answer_from_result,
-                            is_paused_for_approval,
-                        )
-
-                        # A flow that stopped at a HITL gate has NOT finished.
-                        # It returns success=True and status="COMPLETED"
-                        # alongside paused_for_approval, so announcing on the
-                        # status alone marked a waiting run as done — and once
-                        # the announcement carried a payload, the approval
-                        # bookkeeping (approval_id, gate_node_id) was shown to
-                        # the reader as their answer. The parent already reads
-                        # the pause markers this way.
-                        if is_paused_for_approval(result):
+                        # COMPLETED with its answer, FAILED with its error (a
+                        # failed flow is RETURNED by run_flow, not raised), or
+                        # nothing for a HITL pause. See flow_builder/run_outcome.
+                        announcement = early_announcement(result)
+                        if announcement is None:
                             async_logger.info(
                                 f"[FLOW_SUBPROCESS] {execution_id} paused for "
                                 f"approval — not announcing completion"
                             )
                         else:
                             await ExecutionStatusService.update_status(
-                                job_id=execution_id,
-                                status=ExecutionStatus.COMPLETED.value,
-                                message="Flow execution completed",
-                                result=answer_from_result(result),
+                                job_id=execution_id, **announcement
                             )
-                        async_logger.info(
-                            f"[FLOW_SUBPROCESS] Announced COMPLETED for "
-                            f"{execution_id} ahead of teardown"
-                        )
+                            async_logger.info(
+                                f"[FLOW_SUBPROCESS] Announced {announcement['status']}"
+                                f" for {execution_id} ahead of teardown"
+                            )
                     except Exception as _announce_err:  # noqa: BLE001
                         async_logger.warning(
                             f"[FLOW_SUBPROCESS] Early completion announcement "
@@ -893,23 +881,10 @@ def run_flow_in_process(
             # Run the flow
             result = loop.run_until_complete(run_async_flow())
 
-            # Check if the result indicates failure BEFORE logging success
-            flow_failed = False
-            flow_error = None
-            if isinstance(result, dict):
-                # Check for explicit failure indicators
-                if result.get("success") is False:
-                    flow_failed = True
-                    flow_error = result.get("error", "Flow execution failed")
-                elif result.get("error"):
-                    flow_failed = True
-                    flow_error = result.get("error")
-                elif result.get("status") == "FAILED":
-                    flow_failed = True
-                    flow_error = result.get(
-                        "error", result.get("message", "Flow execution failed")
-                    )
-
+            # Check if the result indicates failure BEFORE logging success, the
+            # same way the early announcement did (run_outcome).
+            flow_failed = is_failed(result)
+            flow_error = failure_message(result) if flow_failed else None
             if flow_failed:
                 async_logger.error(
                     f"[FLOW_SUBPROCESS] Flow execution failed: {flow_error}"
@@ -976,11 +951,8 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] paused_for_approval value: {result.get('paused_for_approval')}"
                 )
 
-            # Check if flow was paused for HITL approval
-            # IMPORTANT: Check both hitl_paused AND paused_for_approval - the subprocess uses paused_for_approval
-            if isinstance(result, dict) and (
-                result.get("hitl_paused") or result.get("paused_for_approval")
-            ):
+            # Paused at a HITL gate: the same test the early announcement uses
+            if is_paused_for_approval(result):
                 async_logger.info("[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
                 return_dict = {
                     "status": "WAITING_FOR_APPROVAL",
@@ -1268,7 +1240,7 @@ class ProcessFlowExecutor:
 
     Features:
         - One process per execution (no shared pool)
-        - Concurrent execution management with configurable limits
+        - One concurrent-run limit shared with Agent Builder (run_admission)
         - Graceful and forceful termination support
         - Child process tracking and cleanup (including crew subprocesses)
         - Async/await interface for non-blocking operations
@@ -1277,13 +1249,10 @@ class ProcessFlowExecutor:
     Attributes:
         _ctx: Multiprocessing context using 'spawn' for better isolation
         _running_processes: Dictionary tracking active processes by execution ID
-        _running_futures: Dictionary of asyncio futures for execution results
-        _running_executors: Dictionary of process pool executors
-        _max_concurrent: Maximum number of concurrent flow executions
         _metrics: Dictionary tracking execution statistics
 
     Example:
-        >>> executor = ProcessFlowExecutor(max_concurrent=2)
+        >>> executor = ProcessFlowExecutor()
         >>> result = await executor.run_flow_isolated(
         ...     execution_id="exec_123",
         ...     flow_config=config
@@ -1292,15 +1261,11 @@ class ProcessFlowExecutor:
         >>> stopped = await executor.terminate_execution("exec_123")
     """
 
-    def __init__(self, max_concurrent: int = 2):
-        """Initialize the process executor with concurrency control.
+    def __init__(self) -> None:
+        """Initialize the process executor.
 
-        Sets up the multiprocessing context, tracking structures, and
-        concurrency management primitives.
-
-        Args:
-            max_concurrent: Maximum number of concurrent flow executions.
-                Defaults to 2 to balance resource usage (flows can spawn multiple crews).
+        How many runs may go at once is not decided here: flow and crew runs
+        share one limit, ``run_admission`` in ``services/execution``.
 
         Note:
             Uses 'spawn' context instead of 'fork' for better isolation
@@ -1314,15 +1279,10 @@ class ProcessFlowExecutor:
         os.environ["CREWAI_VERBOSE"] = "false"
 
         # NO POOL - we create individual processes per execution
-        self._max_concurrent = max_concurrent
-
-        # Track running processes and their executors
-        self._running_processes: Dict[str, mp.Process] = {}
-        self._running_futures: Dict[str, Any] = {}
-        self._running_executors: Dict[str, ProcessPoolExecutor] = {}
+        self._running_processes: Dict[str, BaseProcess] = {}
 
         # Metrics
-        self._metrics = {
+        self._metrics: Dict[str, int] = {
             "total_executions": 0,
             "active_executions": 0,
             "completed_executions": 0,
@@ -1330,9 +1290,7 @@ class ProcessFlowExecutor:
             "terminated_executions": 0,
         }
 
-        logger.info(
-            f"ProcessFlowExecutor initialized for per-execution processes (max concurrent: {max_concurrent})"
-        )
+        logger.info("ProcessFlowExecutor initialized for per-execution processes")
 
     @staticmethod
     def _run_flow_wrapper(
@@ -1342,7 +1300,7 @@ class ProcessFlowExecutor:
         group_context: Any,
         result_queue: mp.Queue,
         log_queue: mp.Queue,
-    ):
+    ) -> None:
         """
         Wrapper to run flow in subprocess and put result in queue.
 
@@ -1361,24 +1319,6 @@ class ProcessFlowExecutor:
                 {"status": "FAILED", "execution_id": execution_id, "error": str(e)}
             )
         finally:
-            # CRITICAL: flush the result THROUGH the queue's feeder thread before
-            # the hard os._exit(0) below. mp.Queue.put() is asynchronous — it only
-            # hands the object to a background feeder thread that writes it to the
-            # OS pipe. os._exit(0) terminates immediately without running that
-            # thread to completion, so a large result (one that cannot fit the
-            # ~64 KB pipe buffer in a single write) is silently discarded and the
-            # parent sees an empty queue → a FALSE "Process ended without producing
-            # result" even though the flow succeeded and already persisted its
-            # result to the database. close() + join_thread() waits for the feeder
-            # to finish; the parent drains the queue concurrently (see
-            # _wait_for_result, which now reads BEFORE join), so a full pipe cannot
-            # deadlock this.
-            try:
-                result_queue.close()
-                result_queue.join_thread()
-            except Exception:
-                pass
-
             # CRITICAL: Explicitly exit the subprocess after putting result in queue
             # Without this, the process stays alive waiting for background threads/tasks
             # This prevents zombie subprocess accumulation
@@ -1400,6 +1340,11 @@ class ProcessFlowExecutor:
             except Exception:
                 pass
 
+            # put() only hands the result to a feeder thread; os._exit kills
+            # that thread wherever it is. Flush both queues first (the parent
+            # is reading them) or the result can be lost or cut short.
+            flush_queues_before_exit(result_queue, log_queue)
+
             # CRITICAL: Use os._exit(0) instead of sys.exit(0)
             # os._exit(0) forcefully terminates without waiting for non-daemon threads
             # This is necessary because HITL flows leave background tasks running
@@ -1419,12 +1364,16 @@ class ProcessFlowExecutor:
         """
         Run a flow in an isolated process using direct Process control.
 
+        Waits for a run slot first (``run_admission``). While queued the run
+        is PENDING and holds no thread; a stop request removes it from the
+        queue. ``timeout`` counts from when the subprocess starts.
+
         Args:
             execution_id: Unique identifier for the execution
             flow_config: Configuration to build the flow
             group_context: Group context for tenant isolation (MANDATORY)
             inputs: Optional inputs for the flow
-            timeout: Optional timeout in seconds
+            timeout: Optional timeout in seconds of run time
 
         Returns:
             Dictionary with execution results
@@ -1432,11 +1381,28 @@ class ProcessFlowExecutor:
         logger.info(
             f"[ProcessFlowExecutor] run_flow_isolated called for {execution_id}"
         )
+        try:
+            async with run_admission.slot(
+                execution_id, "flow", **queue_status_callbacks(execution_id)
+            ):
+                return await self._run_admitted(
+                    execution_id, flow_config, group_context, inputs, timeout
+                )
+        except RunCancelledWhileQueued:
+            self._metrics["terminated_executions"] += 1
+            return stopped_while_queued(execution_id)
 
+    async def _run_admitted(
+        self,
+        execution_id: str,
+        flow_config: Dict[str, Any],
+        group_context: Any,
+        inputs: Optional[Dict[str, Any]],
+        timeout: Optional[float],
+    ) -> Dict[str, Any]:
+        """Spawn and supervise one flow run that holds a run slot."""
         self._metrics["total_executions"] += 1
         self._metrics["active_executions"] += 1
-
-        datetime.now()
 
         # Use multiprocessing.Queue to get results from the subprocess
         result_queue = self._ctx.Queue()
@@ -1491,33 +1457,10 @@ class ProcessFlowExecutor:
             f"[ProcessFlowExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance"
         )
 
-        # Propagate Lakebase config to subprocess so the OTel trace exporter
-        # writes traces to Lakebase instead of the local DB when Lakebase is active.
-        old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
-        old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
-        try:
-            from src.db.database_router import (
-                get_lakebase_config_from_db,
-                is_lakebase_enabled,
-            )
-
-            lakebase_enabled = await is_lakebase_enabled()
-            if lakebase_enabled:
-                os.environ["LAKEBASE_ACTIVE"] = "true"
-                lakebase_config = await get_lakebase_config_from_db()
-                if lakebase_config:
-                    inst = lakebase_config.get("instance_name") or os.environ.get(
-                        "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-                    )
-                    os.environ["LAKEBASE_INSTANCE_NAME"] = inst
-                logger.info(
-                    f"[ProcessFlowExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
-                    f"LAKEBASE_INSTANCE_NAME={os.environ.get('LAKEBASE_INSTANCE_NAME')}"
-                )
-            else:
-                os.environ.pop("LAKEBASE_ACTIVE", None)
-        except Exception as e:
-            logger.debug(f"[ProcessFlowExecutor] Could not check Lakebase status: {e}")
+        # Lakebase is NOT propagated through the environment: the child reads
+        # the same configuration and re-activates it itself
+        # (activate_lakebase_in_subprocess). Mutating os.environ here raced
+        # every other concurrent spawn.
 
         try:
             # Create and start the subprocess
@@ -1534,11 +1477,13 @@ class ProcessFlowExecutor:
                 daemon=False,  # Don't make daemon so it can spawn its own child processes (crews)
             )
 
-            # Store the process
+            run_admission.claim_start(execution_id)  # a stop since admission wins
             self._running_processes[execution_id] = process
 
-            # Start the process
+            # Start the process. The run clock starts here, not before the
+            # run was admitted: time spent queued is not run time.
             process.start()
+            deadline = run_deadline(timeout)
             logger.info(
                 f"[ProcessFlowExecutor] Started flow process {process.pid} for execution {execution_id}"
             )
@@ -1556,20 +1501,6 @@ class ProcessFlowExecutor:
                 os.environ["KASAL_EXECUTION_ID"] = old_kasal_exec_id
             else:
                 os.environ.pop("KASAL_EXECUTION_ID", None)
-            # Restore Lakebase env vars
-            if old_lakebase_active is not None:
-                os.environ["LAKEBASE_ACTIVE"] = old_lakebase_active
-            else:
-                os.environ.pop("LAKEBASE_ACTIVE", None)
-            if old_lakebase_instance is not None:
-                os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
-
-        # Wait for result in background
-        loop = asyncio.get_event_loop()
-        future = loop.run_in_executor(
-            None, self._wait_for_result, execution_id, process, result_queue, timeout
-        )
-        self._running_futures[execution_id] = future
 
         # Live event relay (LLM token chunks + lifecycle trace frames → SSE).
         # The flow path never had a child→parent reader; the crew path's
@@ -1581,7 +1512,10 @@ class ProcessFlowExecutor:
         )
 
         try:
-            result = await future
+            # Read the result while the child runs, then wait for its exit;
+            # never join first (see services/execution/run_wait.py).
+            drained = await collect_result(process, result_queue, deadline)
+            result = drained[0] if drained else self._no_result(execution_id, process)
 
             # The child has exited; append a parent-side EOF so the relay
             # drains the final frames and stops deterministically.
@@ -1635,9 +1569,13 @@ class ProcessFlowExecutor:
                     pass
 
             self._metrics["active_executions"] -= 1
-            # Clean up tracking
-            self._running_processes.pop(execution_id, None)
-            self._running_futures.pop(execution_id, None)
+            # Clean up tracking; a timed-out or failed run may still be alive.
+            tracked = self._running_processes.pop(execution_id, None)
+            if tracked is not None and tracked.is_alive():
+                try:
+                    await asyncio.to_thread(terminate_process_tree, tracked)
+                except Exception as e:
+                    logger.error(f"Error terminating flow process {execution_id}: {e}")
 
             # CRITICAL: Close the per-execution multiprocessing queues so their
             # internal semaphores (rlock/wlock/sem -> 3 named POSIX semaphores
@@ -1647,7 +1585,7 @@ class ProcessFlowExecutor:
             self._close_queue(log_queue)
 
     @staticmethod
-    def _close_queue(queue) -> None:
+    def _close_queue(queue: Any) -> None:
         """Safely close a multiprocessing.Queue and release its semaphores.
 
         A spawn-context ``mp.Queue`` is backed by three SemLock primitives
@@ -1666,87 +1604,20 @@ class ProcessFlowExecutor:
         except Exception as e:
             logger.debug(f"[ProcessFlowExecutor] Error closing queue: {e}")
 
-    def _wait_for_result(
-        self,
-        execution_id: str,
-        process: mp.Process,
-        result_queue: mp.Queue,
-        timeout: Optional[float],
-    ) -> Dict[str, Any]:
-        """
-        Wait for process to complete and return result.
-
-        This runs in a thread pool executor.
-        """
-        try:
-            # Drain the result WHILE the child is still alive, BEFORE joining it.
-            # mp.Queue delivers via a background feeder thread that writes to a
-            # small (~64 KB) OS pipe; a large result only lands once the reader
-            # drains the pipe. The old order (join first, then read) deadlocked the
-            # child's feeder on a full pipe for large results, so the child's
-            # os._exit discarded them and this method reported a false "ended
-            # without producing result". Reading first lets the feeder flush the
-            # whole payload regardless of size.
-            result = None
-            deadline = (time.monotonic() + timeout) if timeout else None
-            while True:
-                try:
-                    result = result_queue.get(timeout=1.0)
-                    break
-                except queue_mod.Empty:
-                    if not process.is_alive():
-                        # Child has exited. Attempt one final read in case the
-                        # feeder flushed the last bytes just before exit.
-                        try:
-                            result = result_queue.get(timeout=1.0)
-                        except queue_mod.Empty:
-                            result = None
-                        break
-                    if deadline is not None and time.monotonic() > deadline:
-                        logger.warning(
-                            f"Flow process {process.pid} for {execution_id} still running after timeout"
-                        )
-                        process.terminate()
-                        process.join(timeout=5)
-                        if process.is_alive():
-                            process.kill()
-                            process.join()
-                        raise TimeoutError(
-                            f"Flow execution timed out after {timeout} seconds"
-                        )
-
-            # Result drained (or the child is gone). Reap the process. It should
-            # exit promptly now that the queue has been emptied; force-reap if a
-            # very large payload left the feeder lingering.
-            process.join(timeout=10)
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=5)
-                if process.is_alive():
-                    process.kill()
-                    process.join()
-
-            if result is not None:
-                return result
-
-            # No result even after draining and the process is gone. This is a
-            # genuine early death (crash/kill before put), NOT the large-result
-            # race above. The parent (flow_execution_runner) additionally falls
-            # back to the DB-persisted status before declaring the run failed.
-            exit_code = process.exitcode
-            logger.info(
-                f"[_wait_for_result] Process {process.pid} ended without result. Exit code: {exit_code}. This is normal if the flow was stopped."
-            )
-            return {
-                "status": "FAILED",
-                "execution_id": execution_id,
-                "error": "Process ended without producing result (may have been stopped)",
-                "exit_code": exit_code,
-            }
-
-        except Exception as e:
-            logger.error(f"Error waiting for flow result: {e}")
-            return {"status": "FAILED", "execution_id": execution_id, "error": str(e)}
+    @staticmethod
+    def _no_result(execution_id: str, process: Any) -> Dict[str, Any]:
+        """The result for a child that exited without writing one."""
+        exit_code = process.exitcode
+        logger.info(
+            f"Flow process {process.pid} ended without a result (exit code "
+            f"{exit_code}). This is normal if the flow was stopped."
+        )
+        return {
+            "status": "FAILED",
+            "execution_id": execution_id,
+            "error": "Process ended without producing result (may have been stopped)",
+            "exit_code": exit_code,
+        }
 
     async def terminate_execution(
         self, execution_id: str, graceful: bool = False
@@ -1755,9 +1626,11 @@ class ProcessFlowExecutor:
         Terminate a running flow execution.
 
         This method handles termination in multiple ways:
-        1. First tries the in-memory process tracking (for non-reloaded servers)
-        2. Falls back to psutil to find orphaned processes by execution_id
-           (handles server reloads where tracking is lost)
+        1. The tracked process and its own descendants (the flow's crews)
+        2. When untracked, this server's own subprocesses whose
+           KASAL_EXECUTION_ID equals execution_id exactly. A process left
+           behind by a previous server (e.g. after a reload) is not ours to
+           find, and is not touched.
 
         Args:
             execution_id: ID of the execution to terminate
@@ -1766,6 +1639,9 @@ class ProcessFlowExecutor:
         Returns:
             True if termination successful, False otherwise
         """
+        if run_admission.cancel_waiting(execution_id):
+            logger.info(f"[FLOW_STOP] {execution_id} was queued; removed it")
+            return True
         logger.info("[FLOW_STOP] ========== FLOW STOP REQUESTED ==========")
         logger.info(f"[FLOW_STOP] execution_id: {execution_id}")
         logger.info(f"[FLOW_STOP] graceful: {graceful}")
@@ -1774,68 +1650,39 @@ class ProcessFlowExecutor:
         )
         terminated = False
 
-        # First, try to terminate via in-memory tracking
-        process = self._running_processes.get(execution_id)
-        if process:
+        # First, the tracked process and its own descendants (the flow's crews)
+        process = self._running_processes.pop(execution_id, None)
+        if process is not None:
             logger.info(
                 f"[FLOW_STOP] Found process in tracking: PID={process.pid}, alive={process.is_alive()}"
             )
             try:
-                if process.is_alive():
-                    pid = process.pid
-                    logger.info(f"[FLOW_STOP] Process {pid} is alive, terminating...")
-
-                    if graceful:
-                        # Send SIGTERM for graceful shutdown
-                        process.terminate()
-                        logger.info(f"[FLOW_STOP] Sent SIGTERM to flow process {pid}")
-                        # Wait a bit for graceful shutdown
-                        process.join(timeout=5)
-
-                    # Force kill if still alive
-                    if process.is_alive():
-                        process.kill()
-                        logger.info(f"[FLOW_STOP] Sent SIGKILL to flow process {pid}")
-                        process.join(timeout=2)
-
-                    logger.info(f"[FLOW_STOP] ✅ Successfully terminated process {pid}")
-                    terminated = True
-                else:
-                    logger.info(f"[FLOW_STOP] Process {process.pid} already terminated")
-                    terminated = True
-
+                terminated = await asyncio.to_thread(
+                    terminate_process_tree,
+                    process,
+                    graceful=graceful,
+                    grace_timeout=5,
+                )
+                logger.info(f"[FLOW_STOP] Process {process.pid} stopped: {terminated}")
             except Exception as e:
                 logger.error(f"[FLOW_STOP] Error terminating tracked process: {e}")
-                # Try psutil as fallback for the tracked process
-                try:
-                    import psutil
-
-                    if process.pid:
-                        psutil_proc = psutil.Process(process.pid)
-                        psutil_proc.kill()
-                        logger.info(
-                            f"[FLOW_STOP] ✅ Force killed process {process.pid} using psutil"
-                        )
-                        terminated = True
-                except Exception as psutil_err:
-                    logger.warning(
-                        f"[FLOW_STOP] psutil fallback for tracked process failed: {psutil_err}"
-                    )
-
-            # Clean up tracking
-            self._running_processes.pop(execution_id, None)
-            self._running_futures.pop(execution_id, None)
         else:
             logger.info(
                 "[FLOW_STOP] Process NOT found in tracking (server may have reloaded)"
             )
 
-        # If not found in tracking (e.g., server reloaded), search ALL processes
+        # Untracked: only this server's own subprocesses whose
+        # KASAL_EXECUTION_ID equals execution_id exactly. Never a host-wide scan.
         if not terminated:
-            logger.info(
-                f"[FLOW_STOP] Searching ALL processes for orphaned flow with execution_id {execution_id}..."
-            )
-            terminated = await self._terminate_orphaned_process(execution_id, graceful)
+            try:
+                terminated = (
+                    await asyncio.to_thread(
+                        terminate_owned_processes, execution_id, graceful=graceful
+                    )
+                    > 0
+                )
+            except Exception as e:
+                logger.error(f"[FLOW_STOP] Error terminating owned processes: {e}")
 
         if terminated:
             self._metrics["terminated_executions"] += 1
@@ -1847,166 +1694,9 @@ class ProcessFlowExecutor:
 
         return terminated
 
-    async def _terminate_orphaned_process(
-        self, execution_id: str, graceful: bool = False
-    ) -> bool:
-        """
-        Find and terminate orphaned flow processes by searching all running processes.
-
-        This handles the case where the server was reloaded and we lost the process reference.
-        It searches for processes that have the execution_id in their command line or environment.
-
-        Args:
-            execution_id: The execution ID to search for
-            graceful: If True, try SIGTERM first
-
-        Returns:
-            True if a matching process was found and terminated
-        """
-        try:
-            import psutil
-
-            # Use short execution_id for matching (first 8 chars is common in logs)
-            exec_id_short = execution_id[:8]
-            killed_count = 0
-            python_processes_checked = 0
-
-            logger.info(
-                f"[FLOW_STOP] Searching for orphaned processes with KASAL_EXECUTION_ID={exec_id_short}..."
-            )
-
-            # Search ALL processes, not just children of current process
-            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-                try:
-                    # Skip non-Python processes for efficiency
-                    proc_name = proc.info.get("name", "").lower()
-                    if "python" not in proc_name:
-                        continue
-
-                    python_processes_checked += 1
-
-                    # Check command line for execution_id
-                    cmdline = proc.info.get("cmdline", [])
-                    cmdline_str = " ".join(cmdline) if cmdline else ""
-
-                    # Check environment variables for process identification
-                    kasal_exec_id = None
-                    is_flow_subprocess = False
-                    try:
-                        env = proc.environ()
-                        kasal_exec_id = env.get("KASAL_EXECUTION_ID", "")
-                        # Also check FLOW_SUBPROCESS_MODE for legacy processes (before KASAL_EXECUTION_ID was added)
-                        is_flow_subprocess = (
-                            env.get("FLOW_SUBPROCESS_MODE", "") == "true"
-                        )
-                    except (psutil.AccessDenied, psutil.NoSuchProcess):
-                        pass
-
-                    # Check if this process matches our execution
-                    # Priority: KASAL_EXECUTION_ID env var > cmdline match
-                    is_match = False
-                    if kasal_exec_id:
-                        is_match = (
-                            kasal_exec_id == execution_id
-                            or kasal_exec_id.startswith(exec_id_short)
-                        )
-                        if is_match:
-                            logger.info(
-                                f"[FLOW_STOP] Found process {proc.info['pid']} with matching KASAL_EXECUTION_ID={kasal_exec_id}"
-                            )
-                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
-                        is_match = True
-                        logger.info(
-                            f"[FLOW_STOP] Found process {proc.info['pid']} with execution_id in cmdline"
-                        )
-                    elif is_flow_subprocess and not kasal_exec_id:
-                        # Log legacy processes for visibility (but don't kill them - can't identify which execution)
-                        logger.warning(
-                            f"[FLOW_STOP] Found legacy flow subprocess {proc.info['pid']} without KASAL_EXECUTION_ID - cannot verify execution match"
-                        )
-
-                    if is_match:
-                        pid = proc.info["pid"]
-                        logger.info(
-                            f"[FLOW_STOP] Terminating orphaned process {pid}..."
-                        )
-
-                        # Also kill all children of this process (crews spawned by flow)
-                        try:
-                            parent = psutil.Process(pid)
-                            children = parent.children(recursive=True)
-                            logger.info(
-                                f"[FLOW_STOP] Process {pid} has {len(children)} child processes"
-                            )
-
-                            # Terminate children first
-                            for child in children:
-                                try:
-                                    if graceful:
-                                        child.terminate()
-                                    else:
-                                        child.kill()
-                                    logger.info(
-                                        f"[FLOW_STOP] Terminated child process {child.pid}"
-                                    )
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-
-                            # Give children time to terminate
-                            if children:
-                                psutil.wait_procs(children, timeout=2)
-
-                            # Now terminate the parent
-                            if graceful:
-                                parent.terminate()
-                                try:
-                                    parent.wait(timeout=5)
-                                except psutil.TimeoutExpired:
-                                    parent.kill()
-                            else:
-                                parent.kill()
-
-                            logger.info(
-                                f"[FLOW_STOP] ✅ Successfully terminated orphaned process {pid}"
-                            )
-                            killed_count += 1
-
-                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                            logger.warning(
-                                f"[FLOW_STOP] Could not terminate process {pid}: {e}"
-                            )
-
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-            logger.info(
-                f"[FLOW_STOP] Checked {python_processes_checked} Python processes"
-            )
-            if killed_count > 0:
-                logger.info(
-                    f"[FLOW_STOP] ✅ Terminated {killed_count} orphaned processes for {execution_id}"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"[FLOW_STOP] No orphaned processes found for {execution_id}"
-                )
-                return False
-
-        except ImportError:
-            logger.error(
-                "[ProcessFlowExecutor] psutil not available for orphaned process cleanup"
-            )
-            return False
-        except Exception as e:
-            logger.error(
-                f"[ProcessFlowExecutor] Error searching for orphaned processes: {e}"
-            )
-            return False
-
     async def _process_log_queue(
-        self, log_queue, execution_id: str, group_context=None
-    ):
+        self, log_queue: Any, execution_id: str, group_context: Any = None
+    ) -> None:
         """
         Process logs from flow.log file and write them to the execution_logs table.
 
@@ -2048,19 +1738,6 @@ class ProcessFlowExecutor:
                 "[ProcessFlowExecutor] Logs are still available in flow.log file"
             )
 
-    def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
-        """Get information about a running execution."""
-        process = self._running_processes.get(execution_id)
-        if not process:
-            return None
-
-        return {
-            "execution_id": execution_id,
-            "pid": process.pid,
-            "is_alive": process.is_alive(),
-            "exitcode": process.exitcode,
-        }
-
     def get_metrics(self) -> Dict[str, int]:
         """Get executor metrics."""
         return self._metrics.copy()
@@ -2076,26 +1753,18 @@ class ProcessFlowExecutor:
         logger.info("Shutting down ProcessFlowExecutor")
         for execution_id, process in list(self._running_processes.items()):
             try:
-                if process.is_alive():
-                    logger.info(
-                        f"Terminating flow process {process.pid} for execution {execution_id}"
-                    )
-                    process.terminate()
-                    if wait:
-                        process.join(timeout=2)
-                        if process.is_alive():
-                            process.kill()
-                            process.join(timeout=1)
+                logger.info(
+                    f"Terminating flow process {process.pid} for execution {execution_id}"
+                )
+                terminate_process_tree(process, wait=wait)
             except Exception as e:
                 logger.error(f"Error terminating flow process for {execution_id}: {e}")
 
         self._running_processes.clear()
-        self._running_futures.clear()
-        self._running_executors.clear()
         logger.info(
             f"ProcessFlowExecutor shutdown complete. Final metrics: {self.get_metrics()}"
         )
 
 
 # Global executor instance
-process_flow_executor = ProcessFlowExecutor(max_concurrent=2)
+process_flow_executor = ProcessFlowExecutor()

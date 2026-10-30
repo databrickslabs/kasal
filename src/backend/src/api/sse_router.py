@@ -7,7 +7,7 @@ Provides SSE endpoints for:
 - HITL notifications
 """
 
-from typing import Optional
+from typing import Any, Dict, Mapping, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
@@ -15,13 +15,14 @@ from fastapi.responses import StreamingResponse
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.core.sse_manager import (
+    DEFAULT_HEARTBEAT_SECONDS,
     event_stream_generator,
-    get_heartbeat_seconds,
     sse_manager,
 )
 from src.dependencies.admin_auth import SystemAdminUserDep
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().system
 
@@ -43,12 +44,10 @@ SSE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 
-# Default heartbeat cadence for the stream endpoints. Env-tunable via
-# SSE_HEARTBEAT_SECONDS (resolved once at import — a deploy-time knob, not a
-# per-request one). An explicit ?heartbeat= query param always wins. The
-# generation endpoint has a tighter le=60 bound, so its default is clamped.
-_DEFAULT_HEARTBEAT = get_heartbeat_seconds(15)
-_DEFAULT_GEN_HEARTBEAT = min(get_heartbeat_seconds(10), 60)
+# Default heartbeat cadence for the stream endpoints (well inside the Databricks
+# Apps proxy's idle window). An explicit ?heartbeat= query param always wins.
+_DEFAULT_HEARTBEAT = DEFAULT_HEARTBEAT_SECONDS
+_DEFAULT_GEN_HEARTBEAT = 10
 
 
 def _parse_last_event_id(request: Request) -> Optional[int]:
@@ -83,12 +82,12 @@ _LOGGABLE_HEADERS = frozenset(
 )
 
 
-def _loggable_headers(headers) -> dict:
+def _loggable_headers(headers: Mapping[str, str]) -> Dict[str, str]:
     """The allowlisted subset of a request's headers, for diagnostics."""
     return {k: v for k, v in headers.items() if k.lower() in _LOGGABLE_HEADERS}
 
 
-def _require_owned(stream_id: str, group_context) -> None:
+def _require_owned(stream_id: str, group_context: GroupContext) -> None:
     """A generation (or a job id handed to the generation routes) belongs to
     a workspace; only that workspace's callers may read it. Unknown ids read
     as not found — the id space is not an authorization (audit F04)."""
@@ -111,7 +110,7 @@ async def stream_execution_updates(
     heartbeat: int = Query(
         _DEFAULT_HEARTBEAT, ge=5, le=120, description="Heartbeat interval in seconds"
     ),
-):
+) -> StreamingResponse:
     """
     Stream real-time updates for a specific execution via Server-Sent Events.
 
@@ -165,7 +164,7 @@ async def stream_all_executions(
     group_context: GroupContextDep,
     timeout: int = Query(3600, ge=30, le=7200),
     heartbeat: int = Query(_DEFAULT_HEARTBEAT, ge=5, le=120),
-):
+) -> StreamingResponse:
     """
     Stream updates for all executions in the user's groups.
 
@@ -206,7 +205,7 @@ async def stream_generation_updates(
     heartbeat: int = Query(
         _DEFAULT_GEN_HEARTBEAT, ge=5, le=60, description="Heartbeat interval in seconds"
     ),
-):
+) -> StreamingResponse:
     """
     Stream real-time updates for a progressive crew generation via SSE.
 
@@ -232,11 +231,11 @@ async def stream_generation_updates(
     )
 
 
-@router.get("/generations/{generation_id}/result")
+@router.get("/generations/{generation_id}/result", response_model=None)
 async def get_generation_result(
     generation_id: str,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Non-streaming fallback to recover a generation's terminal outcome.
 
@@ -261,7 +260,9 @@ async def get_generation_result(
     if event is None:
         return {"status": "pending", "generation_id": generation_id}
 
-    payload = dict(event.data) if isinstance(event.data, dict) else {"data": event.data}
+    payload: Dict[str, Any] = (
+        dict(event.data) if isinstance(event.data, dict) else {"data": event.data}
+    )
     payload.setdefault("generation_id", generation_id)
     # Normalize a top-level status so the client can branch without inspecting
     # the SSE event name.
@@ -272,8 +273,8 @@ async def get_generation_result(
     return payload
 
 
-@router.get("/stats")
-async def get_sse_stats(admin: SystemAdminUserDep):
+@router.get("/stats", response_model=None)
+async def get_sse_stats(admin: SystemAdminUserDep) -> Dict[str, Any]:
     """
     Get SSE connection statistics.
 
@@ -285,8 +286,8 @@ async def get_sse_stats(admin: SystemAdminUserDep):
     return sse_manager.get_statistics()
 
 
-@router.get("/health")
-async def sse_health():
+@router.get("/health", response_model=None)
+async def sse_health() -> Dict[str, Any]:
     """
     Health check endpoint for SSE infrastructure.
 

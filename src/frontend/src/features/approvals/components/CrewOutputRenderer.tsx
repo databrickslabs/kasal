@@ -11,6 +11,8 @@ import React, { useMemo } from 'react';
 import { Box, Paper, useTheme } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { MarkdownImage } from '../../../shared/a2ui/lib/safeImage';
+import { withFramePolicy } from '../utils/framePolicy';
 
 interface CrewOutputRendererProps {
   content: string;
@@ -35,6 +37,7 @@ export const CrewOutputRenderer: React.FC<CrewOutputRendererProps> = ({
 }) => {
   const theme = useTheme();
   const isHtml = useMemo(() => looksLikeHtmlDocument(content), [content]);
+  const framed = useMemo(() => (isHtml ? withFramePolicy(content) : ''), [isHtml, content]);
 
   if (isHtml) {
     // Sandboxed iframe with NO allow-scripts: renders HTML/CSS visually for the
@@ -46,7 +49,7 @@ export const CrewOutputRenderer: React.FC<CrewOutputRendererProps> = ({
       >
         <iframe
           title="Previous Crew Output"
-          srcDoc={content}
+          srcDoc={framed}
           sandbox=""
           style={{
             width: '100%',
@@ -145,6 +148,7 @@ export const CrewOutputRenderer: React.FC<CrewOutputRendererProps> = ({
                 {children}
               </a>
             ),
+            img: MarkdownImage,
           }}
         >
           {content}

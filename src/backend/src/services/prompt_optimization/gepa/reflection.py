@@ -10,10 +10,9 @@ both need it, and duplicating a bridge that owns shared module state
 
 import asyncio
 import logging
-import os
 import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.utils.user_context import GroupContext
 
@@ -56,13 +55,13 @@ def _install_gepa_reflection_bridge() -> None:
         return
     original = gepa.optimize
 
-    def bridged(*args, **kwargs):
+    def bridged(*args: Any, **kwargs: Any) -> Any:
         override = getattr(_GEPA_REFLECTION_STATE, "reflection_fn", None)
         if override is not None:
             kwargs["reflection_lm"] = override
         return original(*args, **kwargs)
 
-    bridged._kasal_reflection_bridge = True
+    setattr(bridged, "_kasal_reflection_bridge", True)
     gepa.optimize = bridged
 
 
@@ -71,7 +70,7 @@ def _make_reflection_fn(
     model: str,
     group_context: Optional[GroupContext],
     user_token: Optional[str],
-):
+) -> Callable[[Any], str]:
     """Build GEPA's reflection callable, backed by LLMManager.
 
     `model` is a plain Kasal model key — LLMManager resolves provider,
@@ -111,23 +110,17 @@ def _make_reflection_fn(
     return reflection_fn
 
 
-def _judge_sample_count() -> int:
-    """How many times to sample the correctness judge (GEPA_JUDGE_SAMPLES).
+def _judge_sample_count(configured: Optional[int] = None) -> int:
+    """How many times to sample the correctness judge.
 
-    Bounded to 1-9: sampling multiplies judge cost per DISTINCT candidate, and
-    1 is an explicit opt-out that must not pay any median overhead.
+    ``configured`` is Configuration → MLflow → Advanced ("Judge samples"),
+    passed in by the caller; None means the default. Bounded to 1-9: sampling
+    multiplies judge cost per DISTINCT candidate, and 1 is an explicit opt-out
+    that must not pay any median overhead.
     """
-    raw = os.getenv("GEPA_JUDGE_SAMPLES")
-    if raw is None or not str(raw).strip():
+    if configured is None:
         return DEFAULT_JUDGE_SAMPLES
-    try:
-        return max(1, min(9, int(str(raw).strip())))
-    except (TypeError, ValueError):
-        logger.warning(
-            f"Ignoring non-integer GEPA_JUDGE_SAMPLES={raw!r}; "
-            f"using {DEFAULT_JUDGE_SAMPLES}"
-        )
-        return DEFAULT_JUDGE_SAMPLES
+    return max(1, min(9, int(configured)))
 
 
 def _preflight_reflection(

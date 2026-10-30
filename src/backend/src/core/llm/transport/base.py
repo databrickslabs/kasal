@@ -37,6 +37,7 @@ from .constants import (
     DEFAULT_CONTEXT_WINDOW_SIZE,
     LLM_CONTEXT_WINDOW_SIZES,
 )
+from .served_model import served_model_if_different
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ class BaseLLM(BaseModel):
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "cached_prompt_tokens": 0,
+            "cache_creation_tokens": 0,
             "successful_requests": 0,
         }
     )
@@ -121,6 +123,10 @@ class BaseLLM(BaseModel):
     #: Why the model stopped on the most recent call ("stop", "length",
     #: "tool_calls", …), carried from the response to the completed event.
     _finish_reason: str | None = PrivateAttr(default=None)
+    #: The ``model`` the provider's response named on the most recent call. A
+    #: router (OpenRouter's Jev Router) answers with a model of its choosing;
+    #: see ``src.core.llm.transport.served_model`` for when that is worth reporting.
+    _served_model: str | None = PrivateAttr(default=None)
     #: Who the CURRENT call is for — ``(from_task, from_agent)`` — so a
     #: streamed delta can say whose turn it belongs to. Thread-local because
     #: one LLM object is shared: the agent answers on a worker thread while
@@ -129,6 +135,17 @@ class BaseLLM(BaseModel):
     #: top-level call that names nobody is an internal call — memory's recall
     #: planner, memory labelling, an LLM guardrail — and stays unattributed.
     _call_scope: threading.local = PrivateAttr(default_factory=threading.local)
+
+    def _note_served_model(self, response: object) -> None:
+        """Remember the model a response (or stream chunk) says answered."""
+        served = getattr(response, "model", None)
+        if isinstance(served, str) and served:
+            self._served_model = served
+
+    @property
+    def served_model(self) -> str | None:
+        """The last call's served model, only when it differs from ``model``."""
+        return served_model_if_different(self.model, self._served_model)
 
     @contextmanager
     def _attributed(self, from_task: Any, from_agent: Any) -> Iterator[None]:
@@ -288,6 +305,9 @@ class BaseLLM(BaseModel):
             self._usage["cached_prompt_tokens"] += (
                 usage.get("cached_prompt_tokens", 0) or 0
             )
+            self._usage["cache_creation_tokens"] += (
+                usage.get("cache_creation_tokens", 0) or 0
+            )
             self._usage["successful_requests"] += 1
 
     def get_usage_metrics(self) -> dict[str, Any]:
@@ -382,6 +402,7 @@ class BaseLLM(BaseModel):
                 from_agent=from_agent,
                 finish_reason=finish_reason,
                 reasoning=reasoning,
+                served_model=self.served_model,
             ),
         )
 

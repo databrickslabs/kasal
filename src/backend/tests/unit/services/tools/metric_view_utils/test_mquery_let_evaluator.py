@@ -11,20 +11,18 @@ from src.services.tools.metric_view_utils.mquery_let_evaluator import (
 class TestExtractParameterDefaults:
     def test_extracts_simple_parameter(self):
         exprs = {
-            "Catalog_Name": '"dc_datalake_prod_001" meta [IsParameterQuery = true, Type = "Text"]'
+            "Catalog_Name": '"acme_prod" meta [IsParameterQuery = true, Type = "Text"]'
         }
-        assert extract_parameter_defaults(exprs) == {
-            "Catalog_Name": "dc_datalake_prod_001"
-        }
+        assert extract_parameter_defaults(exprs) == {"Catalog_Name": "acme_prod"}
 
     def test_extracts_multiple_parameters_ignores_non_parameters(self):
         exprs = {
-            "Catalog_Name": '"dc_prod_001" meta [IsParameterQuery=true, Type="Text"]',
+            "Catalog_Name": '"acme_prod" meta [IsParameterQuery=true, Type="Text"]',
             "Database": '"golden_schema" meta [IsParameterQuery = true, IsParameterQueryRequired=false]',
             "SomeSharedQuery": "let Source = Databricks.Catalogs() in Source",
         }
         params = extract_parameter_defaults(exprs)
-        assert params == {"Catalog_Name": "dc_prod_001", "Database": "golden_schema"}
+        assert params == {"Catalog_Name": "acme_prod", "Database": "golden_schema"}
 
     def test_unquotes_doubled_quotes_in_value(self):
         exprs = {"P": '"a""b" meta [IsParameterQuery = true]'}
@@ -38,7 +36,7 @@ class TestExtractParameterDefaults:
 class TestResolveViaLetEvaluation:
     def _params(self):
         return {
-            "Catalog_Name": "dc_datalake_prod_001",
+            "Catalog_Name": "acme_prod",
             "Database": "application_golden",
             "Table_Version": "v2",
             "Version_Type": "official",
@@ -62,7 +60,7 @@ class TestResolveViaLetEvaluation:
         )
         sql = resolve_via_let_evaluation(m, self._params())
         assert sql == (
-            "select * from dc_datalake_prod_001.application_golden.hub_product_v2 "
+            "select * from acme_prod.application_golden.hub_product_v2 "
             "WHERE bu = 'gr' AND version = 'official'"
         )
 
@@ -108,7 +106,7 @@ class TestResolveViaLetEvaluation:
 
 class TestExtractSourceTableParametricIntegration:
     """extract_source_table falls back to the let-evaluator when a source's
-    physical table is BUILT from parameters (nehme's literal extractor can't)."""
+    physical table is BUILT from parameters (the literal extractor can't)."""
 
     _M = (
         'let Object = "hub_product_" & Table_Version, '

@@ -30,10 +30,11 @@ A completed run persists either a plain string or a `{text, a2ui: Surface}` enve
 The surface **is** the canonical rendering, so the raw text must NOT also show:
 
 - Backend gate — `services/a2ui/runner.py::compose_surface` drops a
-  `dashboard`/`document` surface that has **no deliverable component** (`_has_data_component`
-  / `_DATA_COMPONENTS`). This stops prose-only surfaces from double-rendering **but** means
-  any new deliverable component MUST be added to `_DATA_COMPONENTS` or its surface gets
-  dropped back to plain text (this is the "Album rendered as markdown, not a carousel" bug).
+  `dashboard`/`document` surface that has **no deliverable component** (`_has_data_component`,
+  over `DATA_COMPONENTS` in `services/a2ui/stream.py`, which runner.py imports as
+  `_DATA_COMPONENTS`). This stops prose-only surfaces from double-rendering **but** means
+  any new deliverable component MUST be added to `stream.py::DATA_COMPONENTS` or its surface
+  gets dropped back to plain text (this is the "Album rendered as markdown, not a carousel" bug).
 - Frontend drop — `features/chat/store/executionStore.ts::completeExecution` posts an
   empty message body when a surface exists **and the reader never saw the text**
   (`const body = surface && !readerSawText ? '' : resultText`). The condition matters: a
@@ -50,7 +51,11 @@ The surface **is** the canonical rendering, so the raw text must NOT also show:
 Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 `src/backend/src`.
 
-1. **Renderer** — `shared/a2ui/components.tsx`. Implement `function Foo({node, render, resolve}: NodeProps)`.
+1. **Renderer** — `shared/a2ui/components/` (a directory, split by concern: `primitives.tsx`,
+   `data.tsx`, `diagrams.tsx`, `media.tsx`, `geo.tsx`, `interactive.tsx`, `kanban.tsx`,
+   `mindmap.tsx`, …, re-exported from `components/index.ts`). Put the component in the file
+   for its concern and export it from `index.ts`. Implement
+   `function Foo({node, render, resolve}: NodeProps)`.
    - Resolve bindings with `resolve(node.x)` — literals AND `{path:"/k"}` both work. **A prop
      that can be data MUST go through `resolve`** (missing this is why the Table header was
      blank when `columns` was bound). Coerce with `asStr` / `asArr` / `asNum`.
@@ -71,9 +76,10 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
    - Add trigger words to `RICH_INTENT` (so a chat request even *invokes* the composer).
    - Add to `DELIVERABLE_KEYWORDS` if it's its own deliverable (order matters — specific
      multi-word keys before bare ones, e.g. `network graph` before a bare `graph`).
-6. **Prose gate** — `backend/src/services/a2ui/runner.py`: add the component to
-   `_DATA_COMPONENTS` if it's a genuine deliverable (chart/table/diagram/gallery/map), or its
-   `dashboard`/`document` surface will be dropped as "prose-only".
+6. **Prose gate** — `backend/src/services/a2ui/stream.py`: add the component to
+   `DATA_COMPONENTS` (runner.py imports it as `_DATA_COMPONENTS`) if it's a genuine
+   deliverable (chart/table/diagram/gallery/map), or its `dashboard`/`document` surface will
+   be dropped as "prose-only".
 7. **Legacy adapter** — `features/chat/utils/surfaceAdapter.ts`: add to `UiComponentType`
    + `VALID_TYPES`. If it's a deliverable, add to `DELIVERABLE_BY_COMPONENT` +
    `DELIVERABLE_TO_SURFACE_KIND`.
@@ -87,20 +93,22 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
      inherits the dashboard/document palette).
 9. **New surfaceKind ONLY** (skip if it's a component): `catalog.json` `surfaceKinds`,
    `A2uiSurface.tsx` `SURFACE_TO_DELIVERABLE` (+ token-vs-deck theming set), the export
-   `app/App.tsx` `RICH` set (`test_a2ui_rich_surface_kinds_cover_live_renderer` guards it), and
+   `frontend/src/App.tsx` `RICH` set (`test_a2ui_rich_surface_kinds_cover_live_renderer` guards it), and
    `surfaceAdapter.ts` maps.
 10. **Exported app — RE-VENDOR (do not forget):** the exported Databricks App ships its OWN
     byte-identical copy of the renderer.
-    - Copy every changed `shared/a2ui/*` file (NOT `*.test.*`) to
-      `backend/src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/`.
-      `test_vendor_in_sync_with_frontend_source` fails until you do.
+    - Copy every changed `shared/a2ui/**` file (NOT `*.test.*`, NOT this CLAUDE.md), keeping
+      the same relative path (e.g. `components/data.tsx`), to
+      `backend/src/services/export/templates/databricks_app/frontend/src/a2ui/`.
+      `test_vendor_in_sync_with_frontend_source`
+      (`tests/unit/services/export/test_databricks_app_exporter.py`) fails until you do.
     - `catalog.json` and `compose.py` are copied **live** at export time — no vendoring.
     - Export parity (kept in sync with Kasal chat — preserve when editing the template):
-      the double-render dedup (`app/App.tsx` shows the surface XOR the text bubble — the
+      the double-render dedup (`frontend/src/App.tsx` shows the surface XOR the text bubble — the
       exported app does NOT stream, so the reader never sees the text first and the plain
       XOR stays correct there; this is the one place the two intentionally differ), the prose
       gate (`agent.py::_schedule_a2ui` drops prose-only dashboard/document surfaces via
-      `_a2ui_has_data_component`), and palette-by-root-component (`app/App.tsx`
+      `_a2ui_has_data_component`), and palette-by-root-component (`frontend/src/App.tsx`
       `ROOT_COMPONENT_TO_DELIVERABLE` / `deliverableForSurface`).
     - See memory `a2ui-renderer-vendored-copy`.
 11. **Tests:**
@@ -108,21 +116,23 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
       are fully assertable; **recharts components need a `ResizeObserver` polyfill** in jsdom
       (see the top of that file) and can't assert SVG internals (0-size container) — assert the
       title + empty-guard instead.
-    - Backend: extend `test_a2ui_runner.py` (`_has_data_component`, `compose_surface` keep/drop)
-      and `tests/unit/shared/a2ui/` (catalog/keywords). Every change ships with a regression test.
+    - Backend: extend `tests/unit/services/a2ui/test_runner.py` (`_has_data_component`,
+      `compose_surface` keep/drop) and the other tests in `tests/unit/services/a2ui/`
+      (catalog/keywords/intent, e.g. `test_compose_resolvers.py`, `test_wants_rich_surface.py`).
+      Every change ships with a regression test.
 
 ## Quick file map
 
 | Concern | File |
 |---|---|
-| Component renderers | `frontend/src/shared/a2ui/components.tsx` |
+| Component renderers | `frontend/src/shared/a2ui/components/` (by concern; `index.ts` re-exports) |
 | Registry (name→renderer) | `frontend/src/shared/a2ui/registry.tsx` |
 | Composer + prompt + intent + deliverable keywords | `backend/src/services/a2ui/compose.py` |
 | Catalog (what the model may emit) | `backend/src/services/a2ui/catalog.json` |
-| Prose gate / `{text,a2ui}` envelope build | `backend/src/services/a2ui/runner.py` |
+| Prose gate / `{text,a2ui}` envelope build | `backend/src/services/a2ui/runner.py` (`DATA_COMPONENTS` lives in `stream.py`) |
 | Legacy parse + component/deliverable maps | `frontend/src/features/chat/utils/surfaceAdapter.ts` |
 | Per-type branding list + settings | `frontend/src/features/configuration/components/uiConfigShared.ts` |
 | Palette resolution + root→deliverable | `frontend/src/features/chat/components/Chat/A2uiSurface.tsx` |
 | Text/surface dedup on completion | `frontend/src/features/chat/store/executionStore.ts` |
-| Exported-app vendored renderer | `backend/src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/` |
-| Exported-app composition / rendering | `…/templates/databricks_app/agent_server/agent.py`, `…/frontend/src/app/App.tsx` |
+| Exported-app vendored renderer | `backend/src/services/export/templates/databricks_app/frontend/src/a2ui/` |
+| Exported-app composition / rendering | `…/templates/databricks_app/agent_server/agent.py`, `…/templates/databricks_app/frontend/src/App.tsx` |

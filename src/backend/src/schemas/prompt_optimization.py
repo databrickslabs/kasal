@@ -63,6 +63,38 @@ class PromptOptimizationRequest(BaseModel):
     )
 
 
+class CrewLabelsPayload(BaseModel):
+    """A crew's labels: what its deliverable must contain (one label set per
+    crew, matching the crew run's single row)."""
+
+    expected_facts: List[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Points the deliverable must contain (Correctness)",
+    )
+    expected_response: str = Field(
+        "", max_length=8000, description="Optional expected answer (Correctness)"
+    )
+
+
+class CrewLabelsInfo(BaseModel):
+    """What the Optimize dialog shows for a crew's labels."""
+
+    labels: Optional[CrewLabelsPayload] = Field(
+        None, description="The labels confirmed for this crew, if any"
+    )
+    suggestions: List[str] = Field(
+        default_factory=list,
+        description="Human expectation notes on past answers, offered as "
+        "SUGGESTED labels; never used until the user confirms one",
+    )
+    has_review_notes: bool = Field(
+        False,
+        description="Whether review notes exist to distil into "
+        "ExpectationsGuidelines' guidelines",
+    )
+
+
 class CrewOptimizationRequest(BaseModel):
     """Request to GEPA-optimize a saved crew's prompt fields.
 
@@ -95,6 +127,44 @@ class CrewOptimizationRequest(BaseModel):
     execution_timeout_seconds: int = Field(
         900, ge=60, le=3600, description="Per-execution timeout"
     )
+    builtin_judges: List[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="MLflow built-in judges to grade with, by catalog id (see "
+        "GET /prompt-optimization/judges/builtin). They use the run's judge "
+        "model and run on demand; nothing is registered.",
+    )
+    labels: Optional[CrewLabelsPayload] = Field(
+        None,
+        description="The labels the user confirmed. Saved for the crew when "
+        "they changed, and used by the judges that need labels.",
+    )
+
+
+class BuiltinJudgeInfo(BaseModel):
+    """One selectable MLflow built-in judge."""
+
+    id: str = Field(..., description="The mlflow.genai.scorers class name")
+    label: str
+    description: str
+    role: Literal["gate", "graded"] = Field(
+        ...,
+        description="gate: a 'no' zeroes the judge score; graded: the yes/no "
+        "verdict joins the judge score's weighted mean",
+    )
+    weight: float = Field(..., description="Weight of a graded verdict")
+    needs_labels: bool = Field(..., description="Needs labels on the row")
+    label_fields: List[str] = Field(
+        default_factory=list,
+        description="Expectation fields it reads; any one present counts",
+    )
+    available: bool = Field(
+        ..., description="Whether the installed MLflow provides this judge"
+    )
+
+
+class BuiltinJudgeList(BaseModel):
+    judges: List[BuiltinJudgeInfo]
 
 
 class PromptOptimizationStartResponse(BaseModel):
@@ -104,6 +174,11 @@ class PromptOptimizationStartResponse(BaseModel):
     status: str = Field(..., description="Initial run status")
     dataset_size: int = Field(
         ..., description="Number of training examples the run will use"
+    )
+    skipped_judges: List[str] = Field(
+        default_factory=list,
+        description="Selected judges left out of the run, with why "
+        "(e.g. 'Correctness skipped: not labelled')",
     )
 
 

@@ -27,14 +27,35 @@ import logging
 import os
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    overload,
+)
 
 import litellm
 from litellm import CustomLogger
+from litellm.types.caching import LiteLLMCacheType
 
-from src.core.llm.transport import LLM
+from src.core.llm.transport import LLM, OpenAICompletion
+from src.core.llm.transport.completion import NO_API_KEY
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
+from src.services.llm.endpoints import require_api_base
+
+if TYPE_CHECKING:
+    from src.services.llm.handlers.model_fallback import ModelCandidate
+
+#: Concurrent blocking LLM calls per server process (was the
+#: KASAL_LLM_MAX_CONCURRENCY env var). A pool sized at import, so a constant.
+LLM_MAX_CONCURRENCY = 64
 
 # Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
 # loop's DEFAULT ThreadPoolExecutor (max ~min(32, cpu+4) workers) with every
@@ -43,12 +64,14 @@ from src.schemas.model_provider import ModelProvider
 # concurrent chat users (plus every other to_thread caller) behind it. A
 # dedicated, larger pool caps LLM concurrency without starving anyone else.
 _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=int(os.getenv("KASAL_LLM_MAX_CONCURRENCY", "64")),
+    max_workers=LLM_MAX_CONCURRENCY,
     thread_name_prefix="llm-call",
 )
 
 
-async def _run_llm_blocking(func, /, *args, **kwargs):
+async def _run_llm_blocking(
+    func: Callable[..., Any], /, *args: Any, **kwargs: Any
+) -> Any:
     """Run a blocking LLM call on the dedicated executor.
 
     Mirrors ``asyncio.to_thread`` semantics (contextvars propagate, so ambient
@@ -102,6 +125,35 @@ log_file_path = os.path.join(log_dir, "llm.log")
 
 # Configure standard Python logger to also write to the llm.log file
 logger = logging.getLogger(__name__)
+
+
+#: Thinking budget when a model enables extended thinking without one
+#: (was the KASAL_THINKING_BUDGET_TOKENS env var).
+DEFAULT_THINKING_BUDGET_TOKENS = 10240
+
+
+def _responses_output_cap(model_config: Dict[str, Any]) -> Dict[str, int]:
+    """``output_token_cap`` from the model's settings, when it sets one."""
+    cap = (model_config.get("params") or {}).get("output_token_cap")
+    return {"output_token_cap": int(cap)} if cap else {}
+
+
+def _vllm_llm(
+    llm_params: Dict[str, Any], model_config: Dict[str, Any]
+) -> Optional[VLLMFunctionCallingLLM]:
+    """The vLLM function-calling LLM, unless the model turned tool calling off.
+
+    Per-model settings (Configuration → Models), formerly the
+    VLLM_SUPPORTS_TOOLS / VLLM_TOOL_CHOICE env vars.
+    """
+    params = model_config.get("params") or {}
+    if not params.get("supports_tools", True):
+        return None
+    return VLLMFunctionCallingLLM(
+        **llm_params, tool_choice=str(params.get("tool_choice", "auto"))
+    )
+
+
 logger.setLevel(logging.DEBUG)
 
 
@@ -111,6 +163,8 @@ logger.setLevel(logging.DEBUG)
 # https://docs.databricks.com/aws/en/machine-learning/model-serving/query-openai-responses#supported-models
 _DATABRICKS_OPENAI_RESPONSES_MODELS = frozenset(
     {
+        "databricks-gpt-6-sol",
+        "databricks-gpt-6-luna",
         "databricks-gpt-6-astra",
         "databricks-gpt-5-6-sol",
         "databricks-gpt-5-6-terra",
@@ -236,6 +290,7 @@ try:
         "vllm": "openai/",
         "airllm": "openai/",
         "kimi": "openai/",
+        "openrouter": "",
         "openai": "",
         "anthropic": "anthropic/",
         "gemini": "gemini/",
@@ -246,7 +301,8 @@ try:
 
     registered_count = 0
     for model_name, config in MODEL_CONFIGS.items():
-        provider = config.get("provider")
+        # Seed rows are heterogeneous dicts (values typed ``object``).
+        provider: Any = config.get("provider")
         context_window = config.get("context_window", 128000)
         # EVERY seeded model is registered, not just the Databricks/self-hosted
         # ones. An unregistered model falls back to DEFAULT_CONTEXT_WINDOW_SIZE
@@ -312,7 +368,9 @@ logger.info(f"LLM operations log file: {log_file_path}")
 class LiteLLMFileLogger(CustomLogger):
     """Logs LiteLLM calls to the llm.log file using the module logger."""
 
-    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+    def log_success_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         model = kwargs.get("model", "unknown")
         duration = (
             (end_time - start_time).total_seconds()
@@ -332,15 +390,21 @@ class LiteLLMFileLogger(CustomLogger):
             f"LLM success: model={model}, duration={duration:.2f}s, usage={usage}"
         )
 
-    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+    def log_failure_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         model = kwargs.get("model", "unknown")
         exception = kwargs.get("exception", "unknown error")
         logger.error(f"LLM failure: model={model}, error={exception}")
 
-    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+    async def async_log_success_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         self.log_success_event(kwargs, response_obj, start_time, end_time)
 
-    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+    async def async_log_failure_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         self.log_failure_event(kwargs, response_obj, start_time, end_time)
 
 
@@ -373,54 +437,18 @@ litellm.retry_on = ["429", "timeout", "rate_limit_error"]
 
 
 def _configure_litellm_caching() -> None:
-    """Configure the legacy LiteLLM path with memory or Redis caching.
+    """In-memory response cache (1 h) for the legacy LiteLLM path.
 
-    DiskCache deserializes pickle from writable cache files. Never initialize
-    that backend, even for existing deployments explicitly requesting "disk".
-    Native chat/crew/flow calls use the transport layer, not this cache.
+    Native chat/crew/flow calls use the transport layer, not this cache. It was
+    configurable (LITELLM_CACHE_*, with a Redis option) through environment
+    variables a Databricks App never sets. Disk caching stays off: it
+    deserializes pickle from writable cache files.
     """
-    from src.config.settings import settings
-
-    if not settings.LITELLM_CACHE_ENABLED:
-        logger.info("LiteLLM caching disabled (LITELLM_CACHE_ENABLED=false)")
-        return
-
-    cache_type = (settings.LITELLM_CACHE_TYPE or "local").lower()
-    ttl = settings.LITELLM_CACHE_TTL
-
     try:
-        if cache_type == "redis":
-            host = settings.LITELLM_CACHE_REDIS_HOST
-            if not host:
-                logger.warning(
-                    "LITELLM_CACHE_TYPE=redis but LITELLM_CACHE_REDIS_HOST is not set; "
-                    "falling back to in-memory ('local') cache"
-                )
-                cache_type = "local"
-            else:
-                litellm.enable_cache(
-                    type="redis",
-                    host=host,
-                    port=settings.LITELLM_CACHE_REDIS_PORT,
-                    password=settings.LITELLM_CACHE_REDIS_PASSWORD,
-                    ttl=ttl,
-                )
-                logger.info(f"LiteLLM Redis cache enabled (host={host}, ttl={ttl}s)")
-                return
-
-        if cache_type != "local":
-            logger.warning(
-                "Unsupported LiteLLM cache backend %r; using in-memory caching. "
-                "Configure Redis for cross-process caching. Disk caching is disabled "
-                "because it deserializes pickle from writable cache files.",
-                cache_type,
-            )
-            cache_type = "local"
-
-        litellm.enable_cache(type=cache_type, ttl=ttl)
-        logger.info(f"LiteLLM cache enabled (type={cache_type}, ttl={ttl}s)")
-    except Exception as e:
-        logger.warning(f"Failed to configure LiteLLM caching ({cache_type}): {e}")
+        litellm.enable_cache(type=LiteLLMCacheType.LOCAL, ttl=3600)
+        logger.info("LiteLLM cache enabled (type=local, ttl=3600s)")
+    except Exception as e:  # noqa: BLE001 — a cache must never stop startup
+        logger.warning(f"Failed to configure LiteLLM caching: {e}")
 
 
 _configure_litellm_caching()
@@ -464,6 +492,43 @@ def _is_http_400(exc: Exception) -> bool:
     return False
 
 
+def _reply(
+    result: str, llm: object, resolved: str, with_served_model: bool
+) -> Union[str, Tuple[str, str]]:
+    """``completion``'s return. The served model is the one the response named
+    when a router (Jev Router) picked it, else ``resolved``."""
+    if not with_served_model:
+        return result
+    served = getattr(llm, "served_model", None)
+    return result, served if isinstance(served, str) and served else resolved
+
+
+async def _self_hosted_api_key(provider: str, group_id: Optional[str]) -> str:
+    """The workspace's key for a self-hosted endpoint, or a harmless placeholder.
+
+    ``provider`` names the API key (``vllm`` -> VLLM_API_KEY, ``kat`` ->
+    KAT_API_KEY in Configuration -> API Keys). Self-hosted vLLM / KAT servers
+    usually run without auth, so no key is not an error. The key is never read
+    from os.environ (shared by every workspace).
+    """
+    if group_id:
+        key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+        if key:
+            return key
+    return NO_API_KEY
+
+
+async def _required_provider_key(provider: str, group_id: str, label: str) -> str:
+    """The workspace's key for a hosted provider, or a clear error naming it."""
+    key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+    if not key:
+        raise ValueError(
+            f"No {label} API key found for workspace '{group_id}'. "
+            f"Add {provider.upper()}_API_KEY under Configuration -> API Keys."
+        )
+    return key
+
+
 class LLMManager:
     """The public facade for LLM work in kasal.
 
@@ -476,6 +541,14 @@ class LLMManager:
     The embeddings circuit-breaker state that used to be declared here moved with
     the code to ``src/core/llm/embeddings.py``.
     """
+
+    @overload
+    @staticmethod
+    def _get_group_id_from_context(required: Literal[True] = ...) -> str: ...
+
+    @overload
+    @staticmethod
+    def _get_group_id_from_context(required: bool) -> Optional[str]: ...
 
     @staticmethod
     def _get_group_id_from_context(required: bool = True) -> Optional[str]:
@@ -515,6 +588,33 @@ class LLMManager:
         # Otherwise return None
         return None
 
+    @overload
+    @staticmethod
+    async def completion(
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float = ...,
+        max_tokens: Optional[int] = ...,
+        extra_headers: Optional[Dict[str, str]] = ...,
+        fallback_drop_system_on_400: bool = ...,
+        with_served_model: Literal[False] = ...,
+        response_format: Optional[Any] = ...,
+    ) -> str: ...
+
+    @overload
+    @staticmethod
+    async def completion(
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float = ...,
+        max_tokens: Optional[int] = ...,
+        extra_headers: Optional[Dict[str, str]] = ...,
+        fallback_drop_system_on_400: bool = ...,
+        *,
+        with_served_model: Literal[True],
+        response_format: Optional[Any] = ...,
+    ) -> Tuple[str, str]: ...
+
     @staticmethod
     async def completion(
         messages: List[Dict[str, str]],
@@ -546,6 +646,7 @@ class LLMManager:
                 Databricks model on a deployment with no workspace resolves to a
                 stand-in — so callers that record which model answered (the
                 llmlog rows behind the LLM Logs table) need the resolved key.
+                A router (Jev Router) reports the model it handed the call to.
                 Opt-in so the 38+ existing call sites keep their str return.
 
         Returns:
@@ -588,8 +689,12 @@ class LLMManager:
         ):
             llm.max_tokens = 4000
         if extra_headers:
-            # Pass extra_headers to the underlying litellm call via LLM extra_headers param
-            llm.extra_headers = extra_headers
+            # Request options live in additional_params: an attribute set after
+            # construction is stored on the object and never sent.
+            llm.additional_params["extra_headers"] = {
+                **(llm.additional_params.get("extra_headers") or {}),
+                **extra_headers,
+            }
 
         # Emit an MLflow LLM span for this call so the model + messages +
         # response show up in the active trace (generation/dispatcher root, or a
@@ -641,7 +746,7 @@ class LLMManager:
                     f"LLM completion: model={served_model}, duration={duration:.2f}s, response_length={len(result) if result else 0}"
                 )
                 _set_span_outputs(_span, result)
-                return (result, _resolved) if with_served_model else result
+                return _reply(result, llm, _resolved, with_served_model)
             except Exception as e:
                 duration = time.time() - start_time
                 # On HTTP 400 with fallback enabled, retry without system messages
@@ -659,7 +764,7 @@ class LLMManager:
                                 f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
                             )
                             _set_span_outputs(_span, result)
-                            return (result, _resolved) if with_served_model else result
+                            return _reply(result, llm, _resolved, with_served_model)
                         except Exception as retry_err:
                             logger.error(
                                 f"LLM completion user-only fallback also failed: {retry_err}"
@@ -713,17 +818,10 @@ class LLMManager:
             val = getattr(llm, attr, None)
             if val:
                 call_kwargs[attr] = val
-        # litellm derives the provider from a "<provider>/" prefix on the model.
-        # configure_kasal_llm encodes it there (e.g. "databricks/<model>"), but if
-        # the model row's provider didn't map to a prefixing branch — or the LLM
-        # came back without a .model and we fell to the bare `model` arg — the name
-        # reaches litellm UNPREFIXED and it raises "LLM Provider NOT provided. You
-        # passed model=<bare>". That killed every DAX→SQL translation in the
-        # crew/flow subprocess (raw-M tables → 0 views → deploy_failed → timeout).
-        # Pin the provider explicitly so the call still routes with the auth/base
-        # already resolved above. This cached path serves only Databricks models in
-        # kasal (its sole caller is the DAX→SQL / M→SQL fallback), so default to
-        # databricks when the configured LLM doesn't name its own provider.
+        # litellm routes on a "<provider>/" model prefix. If the configured LLM
+        # came back unprefixed, litellm raises "LLM Provider NOT provided" and every
+        # DAX/M->SQL fallback in a crew subprocess fails, so pin the provider (this
+        # cached path serves Databricks models only) and log why it was needed.
         if _resolved_model and "/" not in str(_resolved_model):
             _recovered_provider = str(
                 getattr(llm, "custom_llm_provider", None)
@@ -731,11 +829,6 @@ class LLMManager:
                 or "databricks"
             )
             call_kwargs["custom_llm_provider"] = _recovered_provider
-            # Log the trigger loudly: configure_kasal_llm normally encodes the
-            # provider as a prefix, so a bare model here means it resolved a
-            # non-prefixing provider (or returned an LLM with no .model) for a model
-            # that needs one. The guard keeps the call working; this line captures
-            # WHY, so a recurrence is diagnosable without the (now-deleted) run log.
             logger.warning(
                 "[LLM] completion_with_usage: model '%s' arrived WITHOUT a provider "
                 "prefix (llm=%s, requested=%s) — pinned custom_llm_provider=%s so "
@@ -746,6 +839,9 @@ class LLMManager:
                 model,
                 _recovered_provider,
             )
+        # litellm falls back to the provider's *_API_KEY in os.environ when no
+        # key is passed; that env is shared by every workspace, so never let it.
+        call_kwargs.setdefault("api_key", NO_API_KEY)
         # Merge telemetry headers with any caller-supplied ones.
         headers = dict(getattr(llm, "extra_headers", None) or {})
         if extra_headers:
@@ -795,8 +891,8 @@ class LLMManager:
 
     @staticmethod
     async def configure_kasal_llm(
-        model_name: str, group_id: str, temperature: Optional[float] = None
-    ) -> LLM:
+        model_name: str, group_id: Optional[str], temperature: Optional[float] = None
+    ) -> OpenAICompletion:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.
 
@@ -812,20 +908,20 @@ class LLMManager:
             ValueError: If model configuration is not found or group_id is not provided
             Exception: For other configuration errors
         """
-        # SECURITY: Validate group_id is provided
-        if not group_id:
+        if not group_id:  # SECURITY: multi-tenant isolation
             raise ValueError(
                 "group_id is REQUIRED for configure_kasal_llm (multi-tenant isolation)"
             )
 
-        # Get model configuration using ModelConfigService
         from src.db.session import routed_scoped_session
+        from src.services.decisions.model_selection import resolve_leaked_auto
 
         async with routed_scoped_session() as session:
+            # "auto" is a request, never a model; see resolve_leaked_auto.
+            model_name = await resolve_leaked_auto(session, model_name, group_id)
             model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model_name)
 
-        # Check if model configuration was found
         if not model_config_dict:
             raise ValueError(f"Model {model_name} not found in the database")
 
@@ -893,13 +989,15 @@ class LLMManager:
         api_key = None
         api_base = None
 
+        model_params = model_config_dict.get("params")  # incl. the endpoint (UI)
+
         # Set the correct provider prefix based on provider
         # Note: group_id is already passed as parameter to this function
         if provider == ModelProvider.DEEPSEEK:
             api_key = await ApiKeysService.get_provider_api_key(
                 provider, group_id=group_id
             )
-            api_base = os.getenv("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
+            api_base = require_api_base("deepseek", model_params, model_name_value)
             # No prefix. DeepSeek's endpoint is OpenAI-compatible and is reached
             # by api_base, so the model field must carry the bare name — this
             # branch sent "deepseek/deepseek-v4-flash" and the API rejected every
@@ -923,9 +1021,11 @@ class LLMManager:
             api_key = await ApiKeysService.get_provider_api_key(
                 provider, group_id=group_id
             )
+            # Direct Claude uses the native Messages API, including adaptive thinking.
+            api_base = require_api_base("anthropic", model_params, model_name_value)
             prefixed_model = f"anthropic/{model_name_value}"
         elif provider == ModelProvider.OLLAMA:
-            api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            api_base = require_api_base("ollama", model_params, model_name_value)
             # Normalize model name: replace hyphen with colon for Ollama models
             normalized_model_name = model_name_value
             if "-" in normalized_model_name:
@@ -992,7 +1092,7 @@ class LLMManager:
             # Ensure the model string explicitly includes the provider for CrewAI compatibility
             # GPT-5 reasoning models need longer timeout (300s) — they can take 2-4 min on complex prompts
             # Standard Databricks models: 240s (server-side limit is 297s)
-            llm_params = {
+            llm_params: Dict[str, Any] = {
                 "model": prefixed_model,
                 "timeout": 300 if is_openai_reasoning else 297,
             }
@@ -1094,6 +1194,7 @@ class LLMManager:
                     timeout=300,
                     max_tokens=llm_params.get("max_completion_tokens")
                     or llm_params.get("max_tokens"),
+                    **_responses_output_cap(model_config_dict),
                 )
 
             # Use DatabricksRetryLLM for all other Databricks models (GPT-OSS, Llama, Claude, etc.)
@@ -1114,8 +1215,8 @@ class LLMManager:
             return DatabricksRetryLLM(**llm_params)
         elif provider == ModelProvider.VLLM:
             # Self-hosted vLLM server — OpenAI-compatible endpoint
-            api_base = os.getenv("VLLM_BASE_URL", "http://localhost:8081/v1")
-            api_key = os.getenv("VLLM_API_KEY", "vllm")
+            api_base = require_api_base("vllm", model_params, model_name_value)
+            api_key = await _self_hosted_api_key("vllm", group_id)
             # No prefix, exactly like the OpenAI branch above. This used to build
             # "openai/<model>" so litellm would route it, and the register_model
             # call that went with it is already gone (the transport asks its own
@@ -1131,25 +1232,22 @@ class LLMManager:
             prefixed_model = model_name_value
         elif provider == ModelProvider.CUSTOM:
             # Custom self-hosted OpenAI-compatible endpoint.
-            api_base = os.getenv("KAT_BASE_URL", "http://127.0.0.1:8082/v1")
-            api_key = os.getenv("KAT_API_KEY", "local-no-auth")
+            api_base = require_api_base("custom", model_params, model_name_value)
+            api_key = await _self_hosted_api_key("kat", group_id)
             prefixed_model = model_name_value
         elif provider == ModelProvider.KIMI:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
             # native "moonshot" provider, so route via the openai/ prefix with an
             # explicit api_base, exactly like the self-hosted vLLM path.
-            api_key = await ApiKeysService.get_provider_api_key(
-                provider, group_id=group_id
-            )
-            if not api_key:
-                raise ValueError(
-                    f"No Kimi API key found for workspace '{group_id}'. "
-                    f"Add KIMI_API_KEY under Configuration -> API Keys."
-                )
-            api_base = os.getenv("KIMI_ENDPOINT", "https://api.moonshot.ai/v1")
+            api_key = await _required_provider_key(provider, group_id, "Kimi")
+            api_base = require_api_base("kimi", model_params, model_name_value)
             prefixed_model = f"openai/{model_name_value}"
-            # (see the vLLM branch: the litellm.register_model call that used to
-            # be here was inert once the engine stopped reading litellm's registry)
+        elif provider == ModelProvider.OPENROUTER:
+            # OpenAI-compatible, by api_base: the model id ("typesafe/jev-router",
+            # "anthropic/...") goes on the wire as-is (see "provider" below).
+            api_key = await _required_provider_key(provider, group_id, "OpenRouter")
+            api_base = require_api_base("openrouter", model_params, model_name_value)
+            prefixed_model = model_name_value
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(
@@ -1161,9 +1259,8 @@ class LLMManager:
             # The key is passed per-request via llm_params["api_key"] below.
             if not api_key:
                 logger.warning(f"No API key found for Gemini with group_id: {group_id}")
-                # Help Instructor pick the right model family when no key is set.
-                os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
 
+            api_base = require_api_base("gemini", model_params, model_name_value)
             prefixed_model = f"gemini/{model_name_value}"
         else:
             # Default fallback for other providers
@@ -1183,6 +1280,15 @@ class LLMManager:
             "model": prefixed_model,
             "timeout": 300,
         }
+        if provider == ModelProvider.OPENROUTER:  # keeps "openai/..." ids intact
+            llm_params["provider"] = "openrouter"
+        if provider == ModelProvider.OPENAI and model_name_value in {
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+        }:
+            # GPT-6 tool calls with reasoning use the Responses API.
+            llm_params["api"] = "responses"
 
         # Temperature is OMITTED — never merely "dropped later" — for models whose
         # endpoint rejects it. There is no drop_params safety net any more:
@@ -1280,7 +1386,7 @@ class LLMManager:
             # a budget) and `thinking_effort` carries the depth instead.
             llm_params["thinking_budget_tokens"] = int(
                 model_config_dict.get("thinking_budget_tokens")
-                or os.getenv("KASAL_THINKING_BUDGET_TOKENS", "10240")
+                or DEFAULT_THINKING_BUDGET_TOKENS
             )
             effort = model_config_dict.get("reasoning_effort")
             if effort:
@@ -1303,16 +1409,17 @@ class LLMManager:
         # help from us — the transport reports every model as tool-capable — and
         # the max_tokens clamp that also lived there is now
         # OpenAICompletion._clamp_output_budget, protecting every provider.
-        if (
-            provider == ModelProvider.VLLM
-            and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true"
+        if provider == ModelProvider.VLLM and (
+            vllm := _vllm_llm(llm_params, model_config_dict)
         ):
-            return VLLMFunctionCallingLLM(**llm_params)
+            return vllm
 
         return LLM(**llm_params)
 
     @staticmethod
-    async def get_llm(model_name: str, temperature: Optional[float] = None):
+    async def get_llm(
+        model_name: str, temperature: Optional[float] = None
+    ) -> OpenAICompletion:
         """
         Create a CrewAI LLM instance for the specified model.
 
@@ -1334,7 +1441,9 @@ class LLMManager:
         return await LLMManager.configure_kasal_llm(model_name, group_id, temperature)
 
     @staticmethod
-    async def load_fallback_candidates(current_model_key: str, group_id: Optional[str]):
+    async def load_fallback_candidates(
+        current_model_key: str, group_id: Optional[str]
+    ) -> List["ModelCandidate"]:
         """Enabled models usable as fallback targets for ``DatabricksRetryLLM``.
 
         Returns ModelCandidate(name, context_window) for every enabled model

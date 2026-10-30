@@ -78,7 +78,7 @@ def require_crewai() -> Tuple[Any, str]:
     try:
         crewai = importlib.import_module("crewai")
         _reject_a_stub(crewai)
-    except Exception as e:  # noqa: BLE001 — ANY import failure is the same answer
+    except Exception as e:  # ANY import failure is the same answer
         raise HarnessUnavailableError(
             f"The CrewAI harness needs the 'crewai' package, which could not be "
             f"imported: {e}. Install it (it is declared in pyproject.toml) and "

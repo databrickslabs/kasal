@@ -1,9 +1,10 @@
 """SerperDevTool — web search via the Serper.dev API."""
 
+import importlib
+import importlib.util
 import json
 import logging
-import os
-from typing import Any
+from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,36 @@ from .web_fetch import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Result ranking lives in Kasal's decisions package, which needs the database
+# layer and is therefore NOT vendored into exported apps
+# (services/export/runtime_vendor.py). Resolve it relative to this package so
+# the lookup follows the import root (``src.`` in Kasal, the vendored package
+# in an export); where it is absent, results are returned unranked.
+_DECISIONS_PKG = "..decisions"
+_RANKER_MODULE = f"{_DECISIONS_PKG}.policies"
+
+Ranker = Callable[..., list[Any]]
+
+
+def _load_ranker() -> Optional[Ranker]:
+    """``decisions.policies.rank_sync`` when it ships, else ``None``.
+
+    Only the decisions package itself being absent is tolerated; any other
+    import failure inside it is a real bug in Kasal and propagates.
+    """
+    package = __package__ or ""
+    try:
+        policies = importlib.import_module(_RANKER_MODULE, package)
+    except ModuleNotFoundError as exc:
+        decisions = importlib.util.resolve_name(_DECISIONS_PKG, package)
+        absent = exc.name or ""
+        if absent == decisions or absent.startswith(f"{decisions}."):
+            logger.debug("Decision ranking unavailable; Serper results unranked")
+            return None
+        raise
+    ranker: Ranker = policies.rank_sync
+    return ranker
 
 
 class SerperDevToolSchema(BaseModel):
@@ -44,6 +75,11 @@ class SerperDevTool(BaseTool):
     country: str | None = ""
     location: str | None = ""
     locale: str | None = ""
+    #: The workspace's Serper key, passed in by whoever builds the tool (Kasal's
+    #: ToolFactory reads it from ApiKeysService; an exported app from its own
+    #: environment). Never read from ``os.environ`` here: Kasal serves many
+    #: workspaces from one process, and the environment is shared by all of them.
+    api_key: str | None = Field(default=None, repr=False, exclude=True)
     env_vars: list[EnvVar] = Field(
         default_factory=lambda: [
             EnvVar(
@@ -157,7 +193,12 @@ class SerperDevTool(BaseTool):
             payload["location"] = self.location
         if self.locale != "":
             payload["hl"] = self.locale
-        headers = {"X-API-KEY": os.environ["SERPER_API_KEY"]}
+        if not self.api_key:
+            raise ValueError(
+                "No Serper API key configured. Add SERPER_API_KEY in the API Keys "
+                "settings."
+            )
+        headers = {"X-API-KEY": self.api_key}
         return _http_json(search_url, payload, headers, timeout=10)
 
     def _process_search_results(
@@ -204,6 +245,13 @@ class SerperDevTool(BaseTool):
             }
         }
         formatted_results.update(self._process_search_results(results, search_type))
+        rank_sync = _load_ranker()
+        for key in ("organic", "news"):
+            candidates = formatted_results.get(key)
+            if candidates and rank_sync is not None:
+                formatted_results[key] = rank_sync(
+                    "research_triage", search_query, candidates, candidates
+                )
         formatted_results["credits"] = results.get("credits", 1)
 
         if save_file:

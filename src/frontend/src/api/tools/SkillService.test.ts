@@ -73,4 +73,38 @@ describe('SkillService', () => {
     expect(client.get).toHaveBeenCalledWith('/skills/3/export', { responseType: 'blob' });
     expect(revokeURL).toHaveBeenCalled();
   });
+
+  it('hands over the draft run id before the draft is done, then returns the draft', async () => {
+    vi.useFakeTimers();
+    try {
+      client.post.mockResolvedValue({ data: { job_id: 'job-9' } });
+      client.get
+        .mockResolvedValueOnce({ data: { status: 'RUNNING' } })
+        .mockResolvedValueOnce({
+          data: { status: 'COMPLETED', result: { skill_draft: { name: 'n', valid: true } } },
+        });
+      const started = vi.fn();
+      const pending = SkillService.draftWithTrace('a skill', [], 'm', started);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(started).toHaveBeenCalledWith('job-9');
+      expect(client.post).toHaveBeenCalledWith(
+        '/skills/drafts',
+        { request: 'a skill', transcript: null, model: 'm' },
+        { signal: undefined },
+      );
+      expect(client.get).toHaveBeenCalledWith('/executions/job-9', { signal: undefined });
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(pending).resolves.toEqual({ name: 'n', valid: true, job_id: 'job-9' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a failed draft run as an error', async () => {
+    client.post.mockResolvedValue({ data: { job_id: 'job-x' } });
+    client.get.mockResolvedValue({ data: { status: 'FAILED', error: 'endpoint down' } });
+    await expect(SkillService.draftWithTrace('a skill', undefined, undefined, vi.fn())).rejects.toThrow(
+      'endpoint down',
+    );
+  });
 });

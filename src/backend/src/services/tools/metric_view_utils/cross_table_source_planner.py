@@ -26,20 +26,48 @@ arm). A cross-fact ratio therefore translates to
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .data_classes import MetricViewSpec, TableInfo
 from .measure_allocator import _norm
 
+if TYPE_CHECKING:
+    from .pipeline import MetricViewPipeline
+
 logger = logging.getLogger(__name__)
 
 
-def _fact_grain(table_info: TableInfo) -> set:
-    return {_norm(c) for c in (getattr(table_info, "group_by_columns", None) or [])}
+@dataclass
+class _Bucket:
+    """Cross-fact measures that span the same set of facts."""
+
+    facts: list[str]
+    shared_grain: object
+    measures: list[object] = field(default_factory=list)
+
+
+def _as_str_list(value: object) -> list[str]:
+    """Items of a list-like config value as strings; anything else is empty."""
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [str(item) for item in value]
+    return []
+
+
+def _as_entries(value: object) -> list[Mapping[str, object]]:
+    """Dict entries of a list-valued report section; anything else is empty."""
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, Mapping)]
+
+
+def _fact_grain(table_info: TableInfo) -> set[str]:
+    return {_norm(c) for c in (table_info.group_by_columns or [])}
 
 
 def _is_same_grain(
-    facts: List[str], shared_grain: List[str], mquery_tables: dict
+    facts: list[str], shared_grain: list[str], mquery_tables: Mapping[str, TableInfo]
 ) -> bool:
     """True only when the shared grain equals the full group-by of EVERY fact."""
     shared = {_norm(c) for c in (shared_grain or [])}
@@ -55,8 +83,8 @@ def _is_same_grain(
 
 
 def _build_union_source(
-    facts: List[str], grain_cols: List[str], mquery_tables: dict
-) -> Tuple[str, List[Dict[str, str]]]:
+    facts: list[str], grain_cols: list[str], mquery_tables: Mapping[str, TableInfo]
+) -> tuple[str, list[dict[str, str]]]:
     """Return (union_sql, aggregate_columns) for the combined source, or ("", []).
 
     aggregate_columns are the combined view's output measure columns (one per
@@ -64,11 +92,13 @@ def _build_union_source(
     ("", []) so the caller defers the bucket rather than silently merge columns.
     """
     # Collect each fact's aggregate columns, keyed by output name; bail on collision.
-    agg: List[Tuple[str, str, str]] = []  # (fact, out_name, source_col)
-    seen: set = set()
+    agg: list[tuple[str, str, str]] = []  # (fact, out_name, source_col)
+    seen: set[str] = set()
     for f in facts:
         ti = mquery_tables.get(f)
-        for a in getattr(ti, "aggregate_columns", None) or []:
+        if ti is None:
+            continue
+        for a in ti.aggregate_columns or []:
             out_name = str(a.get("name") or a.get("source_col") or "").strip()
             src_col = str(a.get("source_col") or a.get("name") or "").strip()
             if not out_name or not src_col:
@@ -80,10 +110,12 @@ def _build_union_source(
     if not agg:
         return "", []
 
-    arms: List[str] = []
+    arms: list[str] = []
     for f in facts:
         ti = mquery_tables.get(f)
-        src_table = getattr(ti, "source_table", "") or ""
+        if ti is None:
+            return "", []
+        src_table = ti.source_table or ""
         if not src_table:
             return "", []
         cols = list(grain_cols)  # grain columns are shared (same-grain gate)
@@ -100,7 +132,106 @@ def _build_union_source(
     return union_sql, aggregate_columns
 
 
-def plan_cross_table_sources(pipeline) -> Tuple[Dict[str, MetricViewSpec], List[dict]]:
+def _group_cross_fact_buckets(
+    cross: list[Mapping[str, object]],
+) -> dict[frozenset[str], _Bucket]:
+    """Group cross-fact report entries by the SET of facts they span."""
+    buckets: dict[frozenset[str], _Bucket] = {}
+    for entry in cross:
+        facts = tuple(sorted(_as_str_list(entry.get("facts"))))
+        if len(facts) < 2:
+            continue
+        key = frozenset(facts)
+        bucket = buckets.setdefault(
+            key,
+            _Bucket(
+                facts=list(facts),
+                shared_grain=entry.get("shared_grain") or [],
+            ),
+        )
+        bucket.measures.append(entry.get("measure"))
+    return buckets
+
+
+def _limitation(
+    facts: list[str], measures: list[object], reason: str
+) -> dict[str, object]:
+    return {"facts": facts, "measures": measures, "reason": reason}
+
+
+def _plan_bucket(
+    pipeline: MetricViewPipeline, bucket: _Bucket, combined_key: str
+) -> tuple[MetricViewSpec | None, dict[str, object] | None]:
+    """Translate one same-grain bucket into a combined spec, or a limitation.
+
+    Returns ``(spec, None)`` on success, ``(None, limitation)`` when deferred and
+    ``(None, None)`` when there is nothing in the mapping to translate.
+    """
+    facts = bucket.facts
+    mquery_tables = pipeline.mquery_tables
+    if len(facts) > 2:
+        return None, _limitation(
+            facts,
+            bucket.measures,
+            "3+ fact span — needs JOIN/cardinality (Phase 2)",
+        )
+    if not _is_same_grain(facts, _as_str_list(bucket.shared_grain), mquery_tables):
+        return None, _limitation(
+            facts,
+            bucket.measures,
+            "grain mismatch — shared grain != full group-by of every fact (deferred to avoid double-counting)",
+        )
+
+    # Grain columns: the shared group-by, using the first fact's original names.
+    grain_cols = list(mquery_tables[facts[0]].group_by_columns or [])
+    union_sql, agg_cols = _build_union_source(facts, grain_cols, mquery_tables)
+    if not union_sql:
+        return None, _limitation(
+            facts,
+            bucket.measures,
+            "could not build a safe combined source (missing source table or column name collision)",
+        )
+
+    # Gather the cross-fact measures' mapping entries (their DAX) so the
+    # translator composes the ratio from the combined-source base measures.
+    wanted = {_norm(str(m)) for m in bucket.measures if m}
+    measure_dicts = [
+        e for e in pipeline.mapping if _norm(str(e.get("measure_name") or "")) in wanted
+    ]
+    if not measure_dicts:
+        return None, None
+
+    combined_info = TableInfo(
+        table_name=combined_key,
+        source_table=combined_key,
+        aggregate_columns=agg_cols,
+        group_by_columns=grain_cols,
+        calculated_columns=[],
+        is_fact=True,
+        full_sql=union_sql,
+    )
+
+    spec = pipeline._process_table(combined_key, combined_info, measure_dicts)
+    # Point the spec at the inline UNION source so the deployed view reads it.
+    spec.source_sql = union_sql
+    spec.source_table = combined_key
+    spec.view_name = combined_key
+    spec.comment = (
+        f"Combined cross-fact source (same-grain UNION ALL of {', '.join(facts)}). "
+        "Validated by PBI reconciliation."
+    )
+    logger.info(
+        "[CrossTable] built combined source %s from %s (%d measure(s))",
+        combined_key,
+        facts,
+        len(measure_dicts),
+    )
+    return spec, None
+
+
+def plan_cross_table_sources(
+    pipeline: MetricViewPipeline,
+) -> tuple[dict[str, MetricViewSpec], list[dict[str, object]]]:
     """Build combined-source specs for same-grain cross-fact buckets.
 
     Returns ``(new_specs, limitations)``. ``new_specs`` is keyed by a synthetic
@@ -108,112 +239,26 @@ def plan_cross_table_sources(pipeline) -> Tuple[Dict[str, MetricViewSpec], List[
     own ``_process_table``). ``limitations`` lists deferred buckets with a reason.
     Fail-open: any bucket that raises is deferred, never emitted.
     """
-    report = getattr(pipeline, "_allocation_report", None) or {}
-    cross = report.get("cross_fact") or []
+    report = pipeline._allocation_report or {}
+    cross = _as_entries(report.get("cross_fact"))
     if not cross:
         return {}, []
 
-    mquery_tables = pipeline.mquery_tables
+    new_specs: dict[str, MetricViewSpec] = {}
+    limitations: list[dict[str, object]] = []
 
-    # Group cross-fact measures by the SET of facts they span.
-    buckets: Dict[frozenset, Dict[str, Any]] = {}
-    for entry in cross:
-        facts = tuple(sorted(entry.get("facts") or []))
-        if len(facts) < 2:
-            continue
-        key = frozenset(facts)
-        b = buckets.setdefault(
-            key,
-            {
-                "facts": list(facts),
-                "shared_grain": entry.get("shared_grain") or [],
-                "measures": [],
-            },
-        )
-        b["measures"].append(entry.get("measure"))
-
-    new_specs: Dict[str, MetricViewSpec] = {}
-    limitations: List[dict] = []
-
-    for key, b in buckets.items():
-        facts = b["facts"]
+    for bucket in _group_cross_fact_buckets(cross).values():
+        facts = bucket.facts
         combined_key = "combined_" + "_".join(_norm(f).replace(".", "_") for f in facts)
         try:
-            if len(facts) > 2:
-                limitations.append(
-                    {
-                        "facts": facts,
-                        "measures": b["measures"],
-                        "reason": "3+ fact span — needs JOIN/cardinality (Phase 2)",
-                    }
-                )
-                continue
-            if not _is_same_grain(facts, b["shared_grain"], mquery_tables):
-                limitations.append(
-                    {
-                        "facts": facts,
-                        "measures": b["measures"],
-                        "reason": "grain mismatch — shared grain != full group-by of every fact (deferred to avoid double-counting)",
-                    }
-                )
-                continue
-
-            # Grain columns: the shared group-by, using the first fact's original names.
-            grain_cols = list(
-                getattr(mquery_tables[facts[0]], "group_by_columns", None) or []
-            )
-            union_sql, agg_cols = _build_union_source(facts, grain_cols, mquery_tables)
-            if not union_sql:
-                limitations.append(
-                    {
-                        "facts": facts,
-                        "measures": b["measures"],
-                        "reason": "could not build a safe combined source (missing source table or column name collision)",
-                    }
-                )
-                continue
-
-            # Gather the cross-fact measures' mapping entries (their DAX) so the
-            # translator composes the ratio from the combined-source base measures.
-            wanted = {_norm(m) for m in b["measures"] if m}
-            measure_dicts = [
-                e
-                for e in pipeline.mapping
-                if _norm(str(e.get("measure_name") or "")) in wanted
-            ]
-            if not measure_dicts:
-                continue
-
-            combined_info = TableInfo(
-                table_name=combined_key,
-                source_table=combined_key,
-                aggregate_columns=agg_cols,
-                group_by_columns=grain_cols,
-                calculated_columns=[],
-                is_fact=True,
-                full_sql=union_sql,
-            )
-
-            spec = pipeline._process_table(combined_key, combined_info, measure_dicts)
-            # Point the spec at the inline UNION source so the deployed view reads it.
-            spec.source_sql = union_sql
-            spec.source_table = combined_key
-            spec.view_name = combined_key
-            spec.comment = (
-                f"Combined cross-fact source (same-grain UNION ALL of {', '.join(facts)}). "
-                "Validated by PBI reconciliation."
-            )
-            new_specs[combined_key] = spec
-            logger.info(
-                "[CrossTable] built combined source %s from %s (%d measure(s))",
-                combined_key,
-                facts,
-                len(measure_dicts),
-            )
+            spec, limitation = _plan_bucket(pipeline, bucket, combined_key)
         except Exception as e:  # noqa: BLE001 — never break generation
             logger.warning("[CrossTable] bucket %s deferred (error: %s)", facts, e)
-            limitations.append(
-                {"facts": facts, "measures": b.get("measures"), "reason": f"error: {e}"}
-            )
+            limitations.append(_limitation(facts, bucket.measures, f"error: {e}"))
+            continue
+        if spec is not None:
+            new_specs[combined_key] = spec
+        elif limitation is not None:
+            limitations.append(limitation)
 
     return new_specs, limitations

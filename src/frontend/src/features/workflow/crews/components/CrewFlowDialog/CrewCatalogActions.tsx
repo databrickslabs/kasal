@@ -17,13 +17,14 @@ interface Props {
   published: boolean;
   onPublished: (published: boolean) => void;
   onOptimize: () => void;
-  onDuplicate: (event: React.MouseEvent) => void;
+  /** "Start from this crew": copies its rows; the card itself opens it in place. */
+  onOpenCopy: () => void;
   onExport: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
 }
 
 export default function CrewCatalogActions({
-  crew, canEdit, canDelete, mlflowEnabled, published, onPublished, onOptimize, onDuplicate, onExport, onDelete,
+  crew, canEdit, canDelete, mlflowEnabled, published, onPublished, onOptimize, onOpenCopy, onExport, onDelete,
 }: Props) {
   const [deployOpen, setDeployOpen] = useState(false);
   return <Box
@@ -34,6 +35,13 @@ export default function CrewCatalogActions({
       <Tooltip title="Optimize Prompts">
         <IconButton size="small" onClick={() => onOptimize()}>
           <AutoFixHighIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )}
+    {canEdit && (
+      <Tooltip title="Open as copy">
+        <IconButton size="small" aria-label={`Open ${crew.name} as copy`} onClick={() => onOpenCopy()}>
+          <ContentCopyIcon fontSize="small" />
         </IconButton>
       </Tooltip>
     )}
@@ -51,13 +59,6 @@ export default function CrewCatalogActions({
       <Tooltip title="Deploy to Databricks Apps">
         <IconButton size="small" aria-label="Deploy to Databricks Apps" onClick={() => setDeployOpen(true)}>
           <RocketLaunchIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-    )}
-    {canEdit && (
-      <Tooltip title="Duplicate Crew">
-        <IconButton size="small" aria-label="Duplicate Crew" onClick={onDuplicate}>
-          <ContentCopyIcon fontSize="small" />
         </IconButton>
       </Tooltip>
     )}

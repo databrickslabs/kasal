@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -97,4 +98,4 @@ class A2APushConfigRepository(BaseRepository[A2APushConfig]):
                 self.model.group_id.in_(group_ids),
             )
         )
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0

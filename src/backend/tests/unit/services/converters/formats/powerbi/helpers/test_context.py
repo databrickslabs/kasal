@@ -129,24 +129,6 @@ class TestDAXBaseKBIContext:
         assert "FILTER(FactSales, status = 'ACTIVE')" in filter_exprs
         assert "FILTER(FactSales, region = 'EMEA')" in filter_exprs
 
-    def test_dax_constant_selection_expressions(self):
-        """Test DAX REMOVEFILTERS generation for constant selection"""
-        kbi = KPI(
-            description="Revenue",
-            technical_name="revenue",
-            formula="revenue_amount",
-            fields_for_constant_selection=["Product", "Region"],
-            aggregation_type="SUM",
-        )
-
-        context = DAXBaseKBIContext(kbi)
-        removefilters = context.get_dax_constant_selection_expressions("FactSales")
-
-        # Should generate REMOVEFILTERS for each field
-        assert len(removefilters) == 2
-        assert "REMOVEFILTERS(FactSales[Product])" in removefilters
-        assert "REMOVEFILTERS(FactSales[Region])" in removefilters
-
     def test_context_equality(self):
         """Test context equality comparison"""
         kbi = KPI(

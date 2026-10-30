@@ -47,6 +47,9 @@ def _raw_factory(name="LOCAL_SQLITE"):
     leaked a MagicMock into that test on the same xdist worker.
     """
     sess = MagicMock(name=name)
+    # The auth branch commits on a clean exit and rolls back on an exception.
+    sess.commit = AsyncMock()
+    sess.rollback = AsyncMock()
     cm = MagicMock()
 
     async def _aenter(*_a):

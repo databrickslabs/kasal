@@ -46,7 +46,7 @@ SchemaServiceDep = Annotated[SchemaService, Depends(get_schema_service)]
 
 @router.get("", response_model=SchemaListResponse)
 async def get_all_schemas(
-    service: SchemaServiceDep, group_context: GroupContextDep = None
+    service: SchemaServiceDep, group_context: GroupContextDep
 ) -> SchemaListResponse:
     """
     Get all schemas.
@@ -61,7 +61,7 @@ async def get_all_schemas(
 
 @router.get("/by-type/{schema_type}", response_model=SchemaListResponse)
 async def get_schemas_by_type(
-    schema_type: str, service: SchemaServiceDep, group_context: GroupContextDep = None
+    schema_type: str, service: SchemaServiceDep, group_context: GroupContextDep
 ) -> SchemaListResponse:
     """
     Get schemas by type.
@@ -76,7 +76,7 @@ async def get_schemas_by_type(
 
 @router.get("/{schema_name}", response_model=SchemaResponse)
 async def get_schema_by_name(
-    schema_name: str, service: SchemaServiceDep, group_context: GroupContextDep = None
+    schema_name: str, service: SchemaServiceDep, group_context: GroupContextDep
 ) -> SchemaResponse:
     """
     Get a schema by name.
@@ -98,7 +98,7 @@ async def create_schema(
     schema_data: SchemaCreate,
     service: SchemaServiceDep,
     admin: SystemAdminUserDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> SchemaResponse:
     """
     Create a new schema.
@@ -117,7 +117,7 @@ async def update_schema(
     schema_data: SchemaUpdate,
     service: SchemaServiceDep,
     admin: SystemAdminUserDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> SchemaResponse:
     """
     Update an existing schema.
@@ -135,7 +135,7 @@ async def delete_schema(
     schema_name: str,
     service: SchemaServiceDep,
     admin: SystemAdminUserDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> None:
     """
     Delete a schema.

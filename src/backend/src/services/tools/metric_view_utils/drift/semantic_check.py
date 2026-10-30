@@ -78,7 +78,7 @@ def judge_legacy_measures(
         try:
             raw = complete_fn(SYSTEM_PROMPT, _user_prompt(batch))
         except Exception as exc:  # noqa: BLE001 — fail-open per batch
-            logger.warning(f"[UCMVDrift] semantic batch failed: {exc}")
+            logger.warning("[UCMVDrift] semantic batch failed: %s", exc)
         parsed = extract_json_dict(raw) if raw else None
         results = (parsed or {}).get("results") if isinstance(parsed, dict) else None
         if not isinstance(results, list):

@@ -6,7 +6,12 @@ Configuration Adapter for CrewAI engine.
 This module provides functionality for adapting various configuration formats
 to the format expected by the CrewAI engine.
 """
-from typing import Any, Dict  # noqa: E402 - import follows module initialization
+import logging  # noqa: E402 - import follows module initialization
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    Optional,
+)
 
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
@@ -19,7 +24,7 @@ from src.services.agent_builder.conversion_helpers import (  # noqa: E402 - impo
 )
 
 
-def get_execution_logger(config: dict = None):
+def get_execution_logger(config: Optional[dict] = None) -> logging.Logger:
     """
     Get the appropriate logger based on whether this is a flow or crew execution.
 
@@ -95,7 +100,7 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         logger.debug("Reasoning is disabled for execution")
 
     # Create engine configuration
-    engine_config = {
+    engine_config: Dict[str, Any] = {
         "agents": agents_data,
         "tasks": tasks_data,
         "tools": tools,
@@ -138,7 +143,7 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     if config.inputs and "memory_backend_config" in config.inputs:
         engine_config["memory_backend_config"] = config.inputs["memory_backend_config"]
         logger.info(
-            f"Preserving memory backend configuration: {config.inputs['memory_backend_config']}"
+            f"Preserving memory backend configuration, keys: {sorted(config.inputs['memory_backend_config'] or {})}"
         )
 
     # Handle hierarchical process configuration
@@ -242,7 +247,7 @@ def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(
         "[normalize_flow_config] Processing traditional flow config with agents/tasks/flow"
     )
-    normalized = {}
+    normalized: Dict[str, Any] = {}
 
     # Validate required sections for traditional flows
     required_sections = ["agents", "tasks", "flow"]

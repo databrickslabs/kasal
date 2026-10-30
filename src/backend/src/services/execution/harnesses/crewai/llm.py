@@ -43,16 +43,94 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
-from src.core.logger import LoggerManager
+from src.core.llm.transport.budget import end_spent_turn
+from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 from src.core.llm.transport.response_parsing import (
     merge_tool_call_metadata,
     tool_call_metadata,
 )
+from src.core.logger import LoggerManager
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
 
 logger = LoggerManager.get_instance().crew
+
+
+def _forward(
+    call: Callable[..., object],
+    messages: object,
+    tools: Optional[list],
+    callbacks: Optional[list],
+    available_functions: object,
+    from_task: object,
+    from_agent: object,
+    response_model: object,
+) -> object:
+    """``inner.call``, with a task turn's spent budget returned as its answer.
+
+    ``response_model`` MUST be keyword, not positional. DatabricksRetryLLM.call
+    accepts it via **kwargs (not a named positional), so a 7th positional arg
+    raises "takes from 2 to 7 positional arguments but 8 were given". The base
+    transport and DatabricksResponsesLLM take it as a keyword too.
+    """
+    try:
+        return call(
+            messages,
+            tools,
+            callbacks,
+            available_functions,
+            from_task,
+            from_agent,
+            response_model=response_model,
+        )
+    except ExecutionBudgetExceededError as spent:
+        if from_task is None:
+            raise  # Chat's lone agent: its caller degrades it
+        return _spent(spent, call, from_task)
+
+
+async def _aforward(
+    call: Callable[..., Awaitable[object]],
+    messages: object,
+    tools: Optional[list],
+    callbacks: Optional[list],
+    available_functions: object,
+    from_task: object,
+    from_agent: object,
+    response_model: object,
+) -> object:
+    """The async twin of :func:`_forward`."""
+    try:
+        return await call(
+            messages,
+            tools,
+            callbacks,
+            available_functions,
+            from_task,
+            from_agent,
+            response_model=response_model,
+        )
+    except ExecutionBudgetExceededError as spent:
+        if from_task is None:
+            raise
+        return _spent(spent, call, from_task)
+
+
+def _spent(
+    error: ExecutionBudgetExceededError, call: Callable[..., object], task: object
+) -> str:
+    """A task turn's spent budget as its answer, for any handler.
+
+    ``OpenAICompletion.call`` already returns this itself under delegation; a
+    handler with its own entry point (``DatabricksResponsesLLM``) raises. A
+    raise is what CrewAI turns into a failed task — or, through
+    ``max_retry_limit``, a re-run of the whole task with a fresh turn clock.
+    Same wording and the same mark on the task as the transport's.
+    """
+    logger.warning("[crewai] budget spent (%s); ending the turn degraded", error)
+    model = str(getattr(getattr(call, "__self__", None), "model", "") or "?")
+    return end_spent_turn(error, model, None, task)
 
 
 class _ToolCallHistory:
@@ -193,18 +271,15 @@ def build_kasal_backed_llm(inner: Any) -> Any:
             response_model: Any = None,
         ) -> Any:
             self._tool_call_history.restore(messages)
-            answer = self.inner.call(
+            answer = _forward(
+                self.inner.call,
                 messages,
                 tools,
                 callbacks,
                 available_functions,
                 from_task,
                 from_agent,
-                # response_model MUST be keyword, not positional. DatabricksRetryLLM.call
-                # accepts it via **kwargs (not a named positional), so a 7th positional
-                # arg raises "takes from 2 to 7 positional arguments but 8 were given".
-                # The base transport and DatabricksResponsesLLM take it as a keyword too.
-                response_model=response_model,
+                response_model,
             )
             # A list means the model chose tools and the transport handed the
             # decision back for CrewAI's executor to act on — see
@@ -225,15 +300,15 @@ def build_kasal_backed_llm(inner: Any) -> Any:
             response_model: Any = None,
         ) -> Any:
             self._tool_call_history.restore(messages)
-            answer = await self.inner.acall(
+            answer = await _aforward(
+                self.inner.acall,
                 messages,
                 tools,
                 callbacks,
                 available_functions,
                 from_task,
                 from_agent,
-                # Keyword, not positional — see the note in call() above.
-                response_model=response_model,
+                response_model,
             )
             if isinstance(answer, list):
                 self._tool_call_history.remember(answer)
@@ -264,7 +339,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
                         break
                 if isinstance(value, int) and value > 0:
                     return value
-            return super().get_context_window_size()
+            return cast(int, super().get_context_window_size())
 
         def supports_function_calling(self) -> bool:
             """Whether the model takes native tool calls. THE important one.

@@ -36,14 +36,13 @@ def _embedder(texts):
 @pytest.fixture
 def memory(tmp_path):
     backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
+    # Forgetting is opt-in per teamspace (Memory Tuning ``forgetting_enabled``).
     return Memory(
-        storage=EngineStorageAdapter(backend), root_scope="/g1", analyze_on_save=False
+        storage=EngineStorageAdapter(backend),
+        root_scope="/g1",
+        analyze_on_save=False,
+        forgetting_enabled=True,
     )
-
-
-@pytest.fixture(autouse=True)
-def _enabled(monkeypatch):
-    monkeypatch.setenv("KASAL_MEMORY_FORGETTING", "true")
 
 
 def _save(
@@ -75,12 +74,18 @@ def _remaining(memory):
 
 
 class TestOptIn:
-    def test_off_by_default(self, monkeypatch):
-        monkeypatch.delenv("KASAL_MEMORY_FORGETTING", raising=False)
+    def test_off_by_default(self):
         assert forgetting_enabled() is False
+        assert forgetting_enabled(Memory(analyze_on_save=False)) is False
 
-    def test_disabled_deletes_nothing(self, memory, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_FORGETTING", "false")
+    def test_a_mock_memory_never_switches_it_on(self):
+        """getattr on a MagicMock is truthy; the opt-in must not read it as on."""
+        from unittest.mock import MagicMock
+
+        assert forgetting_enabled(MagicMock()) is False
+
+    def test_disabled_deletes_nothing(self, memory):
+        memory.forgetting_enabled = False
         _save(memory, "ancient chatter", age_days=999)
 
         assert forget_expired_memories(memory)["forgotten"] == 0
@@ -107,8 +112,8 @@ class TestSupersededRetention:
         assert forget_expired_memories(memory)["forgotten"] == 0
         assert _remaining(memory) == {"the old deadline"}
 
-    def test_window_is_configurable(self, memory, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_SUPERSEDED_RETENTION_DAYS", "1")
+    def test_window_is_configurable(self, memory):
+        memory.superseded_retention_days = 1.0
         _save(memory, "the old deadline", kind=KIND_SEMANTIC, retired_days_ago=3)
 
         assert forget_expired_memories(memory)["forgotten"] == 1
@@ -145,20 +150,22 @@ class TestEpisodicTtl:
 
         assert forget_expired_memories(memory)["forgotten"] == 0
 
-    def test_ttl_and_floor_are_configurable(self, memory, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_EPISODIC_TTL_DAYS", "5")
-        monkeypatch.setenv("KASAL_MEMORY_IMPORTANCE_FLOOR", "0.95")
+    def test_ttl_and_floor_are_configurable(self, memory):
+        memory.episodic_ttl_days = 5.0
+        memory.importance_floor = 0.95
         _save(memory, "a week-old note", age_days=7, importance=0.9)
 
         assert forget_expired_memories(memory)["forgotten"] == 1
 
-    def test_settings_are_reported(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_EPISODIC_TTL_DAYS", "12")
-        assert retention_settings()["episodic_ttl_days"] == 12.0
+    def test_settings_are_reported(self, memory):
+        memory.episodic_ttl_days = 12
+        assert retention_settings(memory)["episodic_ttl_days"] == 12.0
 
-    def test_malformed_setting_falls_back_to_the_default(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_EPISODIC_TTL_DAYS", "soon")
-        assert retention_settings()["episodic_ttl_days"] == 180.0
+    def test_malformed_setting_falls_back_to_the_default(self):
+        from types import SimpleNamespace
+
+        odd = SimpleNamespace(episodic_ttl_days="soon")
+        assert retention_settings(odd)["episodic_ttl_days"] == 180.0
 
 
 class TestFactsAreNeverAgedOut:
@@ -194,7 +201,7 @@ class TestSafety:
     def test_listing_failure_never_propagates(self):
         from unittest.mock import MagicMock
 
-        memory = MagicMock()
+        memory = MagicMock(forgetting_enabled=True)
         memory.list_records.side_effect = RuntimeError("backend down")
 
         assert forget_expired_memories(memory) == {"scanned": 0, "forgotten": 0}
@@ -206,7 +213,7 @@ class TestSafety:
         broken = MagicMock(id="x", kind=KIND_EPISODIC, importance=0.1)
         broken.created_at = None
         broken.valid_to = None
-        fake = MagicMock()
+        fake = MagicMock(forgetting_enabled=True)
         fake.list_records.return_value = [broken]
         fake.storage.delete = MagicMock(return_value=True)
 
@@ -222,10 +229,10 @@ class TestOrchestration:
 
         assert run_memory_maintenance(memory)["forgotten"] == 1
 
-    def test_full_pass_reports_zero_when_disabled(self, memory, monkeypatch):
+    def test_full_pass_reports_zero_when_disabled(self, memory):
         from src.services.memory.maintenance.passes import run_memory_maintenance
 
-        monkeypatch.setenv("KASAL_MEMORY_FORGETTING", "false")
+        memory.forgetting_enabled = False
         _save(memory, "stale chatter", age_days=400, importance=0.1)
 
         assert run_memory_maintenance(memory)["forgotten"] == 0

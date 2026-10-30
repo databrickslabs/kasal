@@ -1,6 +1,8 @@
 import logging
 from typing import Any, Dict, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.repositories.group_tool_repository import GroupToolRepository
 from src.schemas.group_tool import (
@@ -23,7 +25,7 @@ class GroupToolService:
     - GroupTool.enabled => whether the tool is enabled within the group
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         # Tools are ToolService's domain; the group MAPPING is this service's own.
         from src.services.tools.tool_service import ToolService
 

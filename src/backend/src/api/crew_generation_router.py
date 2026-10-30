@@ -36,7 +36,7 @@ router = APIRouter(
 @router.post("/create-crew", response_model=CrewCreationResponse)
 async def create_crew(
     request: CrewGenerationRequest, group_context: GroupContextDep, session: SessionDep
-):
+) -> CrewCreationResponse:
     """
     Generate and create a crew setup with agents and tasks in the database.
 
@@ -65,7 +65,7 @@ async def create_crew_from_conversation(
     request: CrewFromConversationRequest,
     group_context: GroupContextDep,
     session: SessionDep,
-):
+) -> CrewCreationResponse:
     """Synthesize a reusable crew (agent + task) from a chat session's conversation.
 
     Reads the conversation for ``request.session_id`` and distills it into an
@@ -94,7 +94,7 @@ async def create_crew_from_conversation(
 @router.post("/create-crew-streaming", response_model=CrewStreamingResponse)
 async def create_crew_streaming(
     request: CrewStreamingRequest, group_context: GroupContextDep, session: SessionDep
-):
+) -> CrewStreamingResponse:
     """
     Start progressive crew generation with SSE streaming.
 

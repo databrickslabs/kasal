@@ -153,15 +153,16 @@ class TestConversionPipelineFormatTranspiled:
     def test_format_transpiled_sql_non_transpilable(
         self, pipeline, non_transpilable_definition
     ):
-        """Test _format_transpiled_sql falls back to original formula"""
+        """A non-transpilable measure is a reported gap with no SQL."""
         result = pipeline._format_transpiled_sql(non_transpilable_definition, {})
 
         assert isinstance(result, list)
         assert len(result) == 1
         measure = result[0]
         assert measure["is_transpilable"] is False
-        # Should use original formula when not transpilable
-        assert "CALCULATE" in measure["sql"] or measure["sql"] is not None
+        assert measure["sql"] is None
+        assert measure["status"] == "gap"
+        assert "KEEPFILTERS" in measure["gap_reason"]
 
     def test_format_transpiled_sql_missing_metadata(
         self, pipeline, missing_metadata_definition
@@ -253,17 +254,13 @@ class TestConversionPipelineFormatTranspiled:
     def test_format_transpiled_uc_metrics_non_transpilable(
         self, pipeline, non_transpilable_definition
     ):
-        """Test _format_transpiled_uc_metrics marks non-transpilable measures"""
+        """A non-transpilable measure is listed as a gap, never emitted."""
         result = pipeline._format_transpiled_uc_metrics(non_transpilable_definition, {})
 
         assert isinstance(result, str)
-        # Should include a warning comment
-        assert (
-            "WARNING" in result
-            or "warning" in result.lower()
-            or "NOT transpilable" in result.lower()
-            or "NOT transpilable" in result
-        )
+        assert "GAP: complex_revenue" in result
+        assert "KEEPFILTERS" in result
+        assert "name: complex_revenue" not in result
 
     def test_format_transpiled_uc_metrics_skips_missing_metadata(
         self, pipeline, missing_metadata_definition
@@ -400,29 +397,17 @@ class TestConversionPipelineConvertToDAX:
             ],
         )
 
-    def test_convert_to_dax_raises_or_returns_list(self, pipeline, simple_definition):
-        """Test _convert_to_dax either returns a list or raises AttributeError (known bug)"""
-        # The pipeline._convert_to_dax has a known bug: accesses dax_measure.table
-        # which doesn't exist on DAXMeasure. It will raise AttributeError.
-        try:
-            result = pipeline._convert_to_dax(simple_definition, {})
-            # If it doesn't raise, should return a list
-            assert isinstance(result, list)
-        except AttributeError as e:
-            # Expected - dax_measure.table attribute doesn't exist
-            assert "table" in str(e)
-        except Exception:
-            # Other errors are acceptable
-            pass
+    def test_convert_to_dax_returns_list(self, pipeline, simple_definition):
+        """_convert_to_dax returns one dict per measure"""
+        result = pipeline._convert_to_dax(simple_definition, {})
+        assert isinstance(result, list)
+        assert len(result) == 1
 
-    def test_convert_to_dax_known_bug_table_attribute(
-        self, pipeline, simple_definition
-    ):
-        """Test that _convert_to_dax raises AttributeError due to known bug in .table access"""
-        # Known issue: pipeline accesses dax_measure.table which doesn't exist
-        with pytest.raises(AttributeError) as exc_info:
-            pipeline._convert_to_dax(simple_definition, {})
-        assert "table" in str(exc_info.value)
+    def test_convert_to_dax_table_from_source_table(self, pipeline, simple_definition):
+        """``table`` comes from the KPI's source table (was: AttributeError on
+        the non-existent DAXMeasure.table)"""
+        result = pipeline._convert_to_dax(simple_definition, {})
+        assert result[0]["table"] == "Sales"
 
 
 class TestConversionPipelineConvertToSQL:

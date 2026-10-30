@@ -77,7 +77,7 @@ def app(mock_powerbi_service, mock_db_session, mock_group_context):
     from fastapi import FastAPI
 
     from src.api.powerbi_router import get_powerbi_service, router
-    from src.dependencies.providers import get_db, get_group_context
+    from src.dependencies.providers import get_group_context
     from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()
@@ -85,7 +85,6 @@ def app(mock_powerbi_service, mock_db_session, mock_group_context):
     register_exception_handlers(app)
 
     # Override dependencies
-    app.dependency_overrides[get_db] = lambda: mock_db_session
     app.dependency_overrides[get_powerbi_service] = (
         lambda session=None, group_context=None: mock_powerbi_service
     )

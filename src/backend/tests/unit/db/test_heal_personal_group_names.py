@@ -23,7 +23,7 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
             await conn.exec_driver_sql('CREATE TABLE "groups" (id TEXT, name TEXT)')
             await conn.exec_driver_sql(
                 'INSERT INTO "groups" VALUES '
-                "('user_u_x_com', 'Personal Workspace - u@x.com'), "
+                "('user_u_x_com', 'Personal Workspace - u@example.com'), "
                 "('user_no_mail', 'Personal Workspace'), "
                 "('acme_corp',   'Acme Corp'), "
                 "('ws_admins',   'Workspace Admins')"  # user-authored name: untouched
@@ -36,7 +36,7 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
                     await conn.exec_driver_sql('SELECT id, name FROM "groups"')
                 ).fetchall()
             }
-            assert rows["user_u_x_com"] == "Personal Space - u@x.com"
+            assert rows["user_u_x_com"] == "Personal Space - u@example.com"
             assert rows["user_no_mail"] == "Personal Space"
             assert rows["acme_corp"] == "Acme Corp"
             assert rows["ws_admins"] == "Workspace Admins"
@@ -55,11 +55,19 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_heal_noop_when_table_missing():
-    """Fresh DB (create_all not yet run): the heal must swallow the error."""
+async def test_a_missing_table_is_isolated_by_the_pass_not_swallowed():
+    """Fresh DB (create_all not yet run): the step raises so its SAVEPOINT rolls
+    back, and the pass records the gap and carries on without raising."""
+    from src.db.self_heal.runner import _run_self_heal_step
+
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            await heal._heal_personal_group_names(conn)  # must not raise
+            with pytest.raises(Exception, match="groups"):
+                await heal._heal_personal_group_names(conn)
+            assert (
+                await _run_self_heal_step(conn, heal._heal_personal_group_names)
+                is False
+            )
     finally:
         await engine.dispose()

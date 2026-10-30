@@ -1,14 +1,16 @@
 """Genie Space Generator Tool for CrewAI — deploy Genie Spaces from UC Metric Views."""
 
-import asyncio
 import json
 import logging
 import urllib.parse
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -118,45 +120,21 @@ class GenieSpaceGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain an AuthContext synchronously. Override in tests for easy mocking.
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        Runs the async get_auth_context() in a dedicated thread so this method is
-        safe to call from within a running asyncio event loop (which CrewAI always
-        provides). Using asyncio.new_event_loop().run_until_complete() in the *same*
-        thread raises "Cannot run the event loop while another loop is running".
-
-        Args:
-            host_override: If provided, patches the returned AuthContext's workspace_url
-                           so the tool targets a specific workspace rather than the one
-                           resolved from Kasal Settings / env vars.
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
         """
-        import concurrent.futures
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        from src.utils.databricks_auth import get_auth_context
+        return resolve_tool_auth(host_override)
 
-        def _run_in_thread():
-            """Run the coroutine in a fresh thread that owns its own event loop."""
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
-
-    def _run(self, **kwargs: Any) -> str:  # noqa: C901
-        def _get(key):
+    def _run(self, **kwargs: Any) -> str:
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val
@@ -317,7 +295,7 @@ class GenieSpaceGeneratorTool(BaseTool):
         # ── sample questions (config section) — IDs sorted alphabetically ─────────
         sample_question_list = sorted(
             [{"id": _new_id(), "question": [q]} for q in sample_questions],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
 
         # ── text instructions — max one block, ID sorted ───────────────────────────
@@ -325,7 +303,7 @@ class GenieSpaceGeneratorTool(BaseTool):
         if text_instructions.strip():
             text_instruction_list = sorted(
                 [{"id": _new_id(), "content": [text_instructions.strip()]}],
-                key=lambda x: x["id"],
+                key=lambda x: str(x["id"]),
             )
 
         # ── join specs — serialized_space format (left/right objects, sql list) ────
@@ -344,7 +322,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                     "sql": [cond, "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"],
                 }
             )
-        join_spec_entries = sorted(join_spec_entries, key=lambda x: x["id"])
+        join_spec_entries = sorted(join_spec_entries, key=lambda x: str(x["id"]))
 
         # ── SQL snippets — each list item has sql as a list, IDs sorted ───────────
         expressions_list = sorted(
@@ -356,7 +334,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for e in sql_expressions
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
         measures_list = sorted(
             [
@@ -368,7 +346,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for m in sql_measures
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
         filters_list = sorted(
             [
@@ -379,7 +357,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for f in sql_filters
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
 
         # ── example question SQLs ─────────────────────────────────────────────────
@@ -392,7 +370,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for eq in example_sqls
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
 
         # ── assemble serialized_space dict and JSON-encode it ─────────────────────
@@ -430,7 +408,7 @@ class GenieSpaceGeneratorTool(BaseTool):
             base_url = f"https://{actual_host}/api/2.0/genie/spaces"
 
             # List existing spaces
-            list_resp = _requests.get(base_url, headers=headers, timeout=30)
+            list_resp = _requests.get(base_url, headers=headers, timeout=30)  # workspace host allow-listed in step 5 — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
             existing_space_id: Optional[str] = None
             if list_resp.status_code == 200:
                 spaces_data = list_resp.json()
@@ -446,13 +424,13 @@ class GenieSpaceGeneratorTool(BaseTool):
             if existing_space_id:
                 # PATCH existing space
                 patch_url = f"{base_url}/{existing_space_id}"
-                resp = _requests.patch(
+                resp = _requests.patch(  # workspace host allow-listed in step 5 — nosemgrep: tmp.databricks.ssrf.requests-user-url
                     patch_url, json=space_payload, headers=headers, timeout=60
                 )
                 operation = "updated"
             else:
                 # POST new space
-                resp = _requests.post(
+                resp = _requests.post(  # workspace host allow-listed in step 5 — nosemgrep: tmp.databricks.ssrf.requests-user-url
                     base_url, json=space_payload, headers=headers, timeout=60
                 )
                 operation = "created"

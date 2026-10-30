@@ -9,11 +9,12 @@ for the prompt side and ``utils/assetRefs`` on the frontend for the other.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_isolated_db_session
+from src.models.chat_asset import ChatAsset
 from src.repositories.chat_asset_repository import ChatAssetRepository
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,8 @@ class ChatAssetService:
     def __init__(
         self,
         session: AsyncSession,
-        repository_class=ChatAssetRepository,
-    ):
+        repository_class: Type[ChatAssetRepository] = ChatAssetRepository,
+    ) -> None:
         self.session = session
         self.repository_class = repository_class
         self.repository = repository_class(session)
@@ -93,7 +94,7 @@ class ChatAssetService:
             await iso.commit()
         return described
 
-    async def get(self, asset_id: str, group_context: Any):
+    async def get(self, asset_id: str, group_context: Any) -> Optional[ChatAsset]:
         """The stored asset with its bytes, or None (missing / another tenant)."""
         return await self.repository.get(asset_id, _group_ids(group_context))
 

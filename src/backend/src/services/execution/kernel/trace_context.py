@@ -36,13 +36,14 @@ def get_current_execution_id() -> Optional[str]:
     return _CURRENT_EXECUTION_ID
 
 
-def resolve_tool_execution_id(tool: Any) -> Optional[str]:
+def resolve_tool_execution_id(tool: object) -> Optional[str]:
     """Job id for a tool: its attached ``trace_context`` first, else the
     process-scoped current execution id. Use this wherever a tool persists or
     looks up a row keyed by execution_id — it survives ToolFactory rebuilding
     the instance after ``attach_tools_trace_context`` ran on an earlier one."""
-    jid = (getattr(tool, "trace_context", None) or {}).get("job_id")
-    return jid or _CURRENT_EXECUTION_ID
+    ctx = getattr(tool, "trace_context", None)
+    jid = ctx.get("job_id") if isinstance(ctx, dict) else None
+    return jid if isinstance(jid, str) and jid else _CURRENT_EXECUTION_ID
 
 
 def attach_execution_trace_context(
@@ -74,11 +75,10 @@ def attach_execution_trace_context(
         # trace_context was not attached (e.g. ToolFactory rebuilt the instance
         # after this ran) can still recover it. Prefer the explicit job_id, else
         # the service's configured execution_id (the crew path passes a service).
-        _svc_exec_id = None
-        try:
-            _svc_exec_id = (getattr(svc, "config", None) or {}).get("execution_id")
-        except Exception:
-            _svc_exec_id = None
+        _svc_config = getattr(svc, "config", None)
+        _svc_exec_id = (
+            _svc_config.get("execution_id") if isinstance(_svc_config, dict) else None
+        )
         set_current_execution_id(job_id or _svc_exec_id)
         # memory_backend_config is unused by attach_memory_trace_context
         # (it reads only self.config); pass None.

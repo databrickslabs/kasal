@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_isolated_db_session
 from src.models.skill import Skill, SkillFile
+from src.seeds.errors import SeederIncomplete
 from src.seeds.skills_data import BUILTIN_SKILLS
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,7 @@ async def seed() -> None:
     from src.services.skills import parser
 
     created = updated = unchanged = 0
+    rejected = 0
 
     # An isolated connection: this unit of work DELETEs a builtin's files and
     # re-INSERTs them, with validation and several awaits in between. On the
@@ -116,13 +118,16 @@ async def seed() -> None:
                     entry.get("metadata"),
                 )
             except Exception as exc:  # noqa: BLE001
-                # Skipped rather than fatal: one malformed builtin must not stop
-                # startup, and the log names it precisely enough to fix.
+                # Skipped here so the other builtins still seed, then reported
+                # as a failure below: a builtin that does not conform is a bug
+                # in skills_data, and the log names it precisely enough to fix.
+                # (Startup still serves: main.py seeds in the background.)
                 logger.error(
                     "Builtin skill '%s' does not conform and was NOT seeded: %s",
                     entry.get("name"),
                     exc,
                 )
+                rejected += 1
                 continue
 
             outcome = await _upsert(session, entry)
@@ -163,3 +168,5 @@ async def seed() -> None:
         updated,
         unchanged,
     )
+    if rejected:
+        raise SeederIncomplete("skills", rejected, len(BUILTIN_SKILLS))

@@ -6,11 +6,12 @@
  * which creates a tab, forces the crew view, and lays the nodes out. Nothing new
  * is wired to open a crew; this only supplies the crew.
  *
- * Deliberately NOT the crew-library dialog's path. That one re-CREATES every
- * agent and task row and loads the copies, which is right for "start from this
- * crew" and wrong here: a flow's node points at a specific crew, and opening it
- * has to show that crew, not a duplicate that edits nowhere. It is also why this
- * does not go anywhere near `CrewFlowDialog.handleCrewSelect`.
+ * Opens the crew IN PLACE: its saved nodes and edges, bound to its id, so the
+ * canvas edits the crew's own agent and task rows and Save updates the crew. A
+ * flow's node points at a specific crew, and opening it has to show that crew.
+ * The catalog card (`CrewFlowDialog.handleCrewSelect`) opens a crew the same
+ * way; only its "Open as copy" action re-creates the rows
+ * (`cloneCatalogCrew`), and that one binds no crew id.
  */
 
 import { CrewService } from '../api/workflow/CrewService';

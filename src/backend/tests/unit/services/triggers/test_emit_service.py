@@ -240,8 +240,8 @@ class TestEmitNoOp:
 
 class TestChains:
     @pytest.mark.asyncio
-    async def test_hop_cap_stops_the_chain(self, session, monkeypatch):
-        monkeypatch.setenv("KASAL_EVENT_TRIGGERS_MAX_HOPS", "3")
+    async def test_hop_cap_stops_the_chain(self, engine_setting, session, monkeypatch):
+        engine_setting("event_triggers_max_hops", 3)
         await _emit_rule(
             session, kind="crew", target_id="c-src", event_type="completed"
         )

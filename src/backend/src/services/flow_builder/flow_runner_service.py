@@ -5,10 +5,9 @@ This file contains the FlowRunnerService which handles running flow executions i
 It uses the BackendFlow class (from backend_flow.py) to interact with the CrewAI Flow engine.
 """
 
-import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,17 +18,20 @@ from src.repositories.flow_repository import FlowRepository
 from src.schemas.flow_execution import (
     FlowExecutionStatus,
 )
+from src.services.execution.stored_inputs import strip_run_credentials
 from src.services.flow_builder.backend_flow import BackendFlow
+from src.services.flow_builder.data_access import build_flow_data_access
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.execution_service import FlowExecutionService
-from src.services.settings.api_keys import ApiKeysService
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow
 
 
 @asynccontextmanager
-async def _smart_db_session(soft_complete_on_closed: bool = False):
+async def _smart_db_session(
+    soft_complete_on_closed: bool = False,
+) -> AsyncIterator[AsyncSession]:
     """Wrap get_smart_db_session as an async context manager for 'async with' usage.
 
     get_smart_db_session is an async generator (for FastAPI DI). This wrapper
@@ -47,7 +49,7 @@ async def _smart_db_session(soft_complete_on_closed: bool = False):
     factory disposed so the next acquisition reconnects); every other error still
     propagates unchanged.
     """
-    gen = get_smart_db_session().__aiter__()
+    gen: Any = get_smart_db_session().__aiter__()  # an async generator
     session = await gen.__anext__()
     try:
         yield session
@@ -71,22 +73,15 @@ async def _smart_db_session(soft_complete_on_closed: bool = False):
                 "the run as complete and disposing the dead Lakebase factory."
             )
             try:
-                from src.db.lakebase_session import (
-                    _is_crew_thread,
-                    dispose_lakebase_factory,
-                    dispose_thread_local_lakebase_factory,
-                )
+                from src.db.lakebase_session import dispose_current_lakebase_factory
 
-                if _is_crew_thread():
-                    await dispose_thread_local_lakebase_factory()
-                else:
-                    await dispose_lakebase_factory()
+                await dispose_current_lakebase_factory()
             except Exception as disp_err:  # noqa: BLE001 — best-effort cleanup
-                logger.debug(f"Lakebase factory dispose skipped: {disp_err}")
+                logger.debug("Lakebase factory dispose skipped: %s", disp_err)
             try:
                 await gen.aclose()
             except Exception:  # noqa: BLE001 — teardown of a dead connection
-                pass
+                logger.debug("Closing the dead session generator failed", exc_info=True)
 
 
 class FlowRunnerService:
@@ -106,7 +101,7 @@ class FlowRunnerService:
         error_msg: str,
         group_id: Optional[str] = None,
         group_email: Optional[str] = None,
-    ):
+    ) -> None:
         """Emit an error span via OTel so it appears in the trace timeline.
 
         Routes through the same OTel pipeline (TracerProvider → KasalDBSpanExporter)
@@ -160,7 +155,7 @@ class FlowRunnerService:
 
     @staticmethod
     @asynccontextmanager
-    async def _safe_session():
+    async def _safe_session() -> AsyncIterator[AsyncSession]:
         """Create a smart-routed session with safe cleanup.
 
         Routes through get_smart_db_session (Lakebase when enabled, local DB otherwise).
@@ -173,58 +168,6 @@ class FlowRunnerService:
         """
         async with _smart_db_session(soft_complete_on_closed=True) as session:
             yield session
-
-    async def create_flow_execution(
-        self,
-        flow_id: Union[uuid.UUID, str],
-        job_id: str,
-        config: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Create a new flow execution record and prepare for execution.
-
-        Args:
-            flow_id: The ID of the flow to execute
-            job_id: Job ID for tracking
-            config: Optional configuration for the execution
-
-        Returns:
-            Dictionary with execution details
-        """
-        logger.info(f"Creating flow execution for flow {flow_id}, job {job_id}")
-
-        try:
-            # Extract group_id from config for multi-tenant isolation
-            group_id = config.get("group_id") if config else None
-
-            # Create flow execution via service layer
-            flow_execution = await self.flow_execution_service.create_execution(
-                flow_id=flow_id, job_id=job_id, config=config, group_id=group_id
-            )
-
-            return {
-                "success": True,
-                "execution_id": flow_execution.id,
-                "job_id": job_id,
-                "flow_id": flow_execution.flow_id,
-                "status": flow_execution.status,
-            }
-        except ValueError as e:
-            logger.error(f"Invalid UUID format for flow_id: {flow_id}")
-            return {
-                "success": False,
-                "error": str(e),
-                "job_id": job_id,
-                "flow_id": flow_id,
-            }
-        except Exception as e:
-            logger.error(f"Error creating flow execution: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e),
-                "job_id": job_id,
-                "flow_id": flow_id,
-            }
 
     async def run_flow(
         self,
@@ -245,20 +188,14 @@ class FlowRunnerService:
         Returns:
             Execution result
         """
-        logger.info("=" * 100)
-        logger.info("FLOW RUNNER SERVICE - run_flow() CALLED")
-        logger.info(f"  flow_id: {flow_id}")
-        logger.info(f"  job_id: {job_id}")
-        logger.info(f"  run_name: {run_name}")
         if config:
-            logger.info(f"  config type: {type(config)}")
-            logger.info(f"  config keys: {list(config.keys())}")
-            logger.info(f"  nodes: {len(config.get('nodes', []))}")
-            logger.info(f"  edges: {len(config.get('edges', []))}")
-            logger.info(f"  flow_config present: {'flow_config' in config}")
-        logger.info("=" * 100)
+            logger.info(
+                f"run_flow: config keys {list(config.keys())}, "
+                f"{len(config.get('nodes', []))} nodes, "
+                f"{len(config.get('edges', []))} edges, "
+                f"flow_config present: {'flow_config' in config}"
+            )
         try:
-            # Add detailed logging about inputs
             logger.info(
                 f"run_flow called with flow_id={flow_id}, job_id={job_id}, run_name={run_name}"
             )
@@ -329,9 +266,14 @@ class FlowRunnerService:
 
             # Extract group_id from config for multi-tenant isolation
             group_id = config.get("group_id") if config else None
+            # "auto" anywhere in the flow becomes one enabled model for the run.
+            from src.services.execution.config import run_freeze
 
-            # Create a sanitized config for database storage (remove non-serializable objects)
-            sanitized_config = {k: v for k, v in config.items() if k != "group_context"}
+            group_context = config.get("group_context")
+            auto = await run_freeze.resolve_mapping(config, self.db, group_context)
+
+            # The stored record drops the credentials; the flow body gets them.
+            sanitized_config = strip_run_credentials(config)
 
             # Check if this is a resume scenario - if so, use existing execution record
             resume_from_execution_id = (
@@ -424,6 +366,7 @@ class FlowRunnerService:
                 logger.info(
                     f"Created flow execution record with ID {execution.id} for group {group_id}"
                 )
+                run_freeze.record(auto, job_id, group_context)
 
             # Start the appropriate execution method based on flow_id
             # IMPORTANT: Use await instead of create_task to ensure subprocess waits for completion
@@ -512,51 +455,20 @@ class FlowRunnerService:
                     execution_id=execution_id, status=FlowExecutionStatus.PREPARING
                 )
 
-                # Initialize API keys before execution
-                try:
-                    # SECURITY: Get group_id from config for multi-tenant isolation
-                    group_id = config.get("group_id") if config else None
-
-                    # Initialize all the API keys needed for execution
-                    for provider in ["OPENAI", "ANTHROPIC", "PERPLEXITY", "SERPER"]:
-                        try:
-                            # Since this is an async method in a sync context, use sync approach
-                            provider_key = await ApiKeysService.get_provider_api_key(
-                                provider, group_id=group_id
-                            )
-                            if not provider_key:
-                                logger.warning(
-                                    f"No API key found for provider: {provider}"
-                                )
-                            else:
-                                # Set the environment variable for the provider
-                                env_var_name = f"{provider}_API_KEY"
-                                os.environ[env_var_name] = provider_key
-                                logger.info(
-                                    f"Set {env_var_name} for dynamic flow execution"
-                                )
-                        except Exception as key_error:
-                            logger.warning(
-                                f"Error loading API key for {provider}: {key_error}"
-                            )
-
-                    logger.info(
-                        "API keys have been initialized for dynamic flow execution"
-                    )
-                except Exception as e:
-                    logger.warning(f"Error initializing API keys: {e}")
-                    # Continue with execution, as keys might be available through other means
+                # Provider API keys are NOT exported into os.environ: the
+                # process env is shared by every workspace. Each LLM and tool
+                # receives this workspace's key explicitly (LLMManager and
+                # ToolFactory read ApiKeysService for the run's group).
 
                 # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
                 from src.services.flow_builder.backend_flow import BackendFlow
-                from src.services.flow_builder.data_access import (
-                    build_flow_data_access,
-                )
 
                 # Initialize BackendFlow with the job_id (no flow_id for dynamic flows)
                 backend_flow = BackendFlow(job_id=job_id, flow_id=None)
-                # Owning SERVICES, not other domains' repositories — see data_access.
-                backend_flow.repositories = build_flow_data_access(session)
+                # Owning SERVICES bound to the run's workspace — see data_access.
+                backend_flow.repositories = build_flow_data_access(
+                    session, (config or {}).get("group_context")
+                )
 
                 # CRITICAL: For dynamic flows, we need to populate _flow_data from config
                 # (not load from database since there's no flow_id)
@@ -817,83 +729,6 @@ class FlowRunnerService:
                 )
                 return {"success": False, "error": str(e), "execution_id": execution_id}
 
-    async def _get_required_providers(
-        self,
-        session: AsyncSession,
-        config: Dict[str, Any],
-        group_id: Optional[str] = None,
-    ) -> List[str]:
-        """
-        Extract unique providers required for this flow execution based on configured models.
-
-        Args:
-            session: Database session to use for lookups
-            config: Flow configuration containing model information
-            group_id: Group ID for multi-tenant isolation
-
-        Returns:
-            List of unique provider names (uppercase) needed for this execution
-        """
-        providers = set()
-
-        # Extract all model names from config
-        model_names = []
-
-        # Main model
-        if "model" in config:
-            model_names.append(config["model"])
-
-        # Check for crew config models
-        crew_config = config.get("crew", {})
-        if "reasoning_llm" in crew_config:
-            model_names.append(crew_config["reasoning_llm"])
-        if "manager_llm" in crew_config:
-            model_names.append(crew_config["manager_llm"])
-
-        # Check for models in top-level config (alternative location)
-        if "reasoning_llm" in config:
-            model_names.append(config["reasoning_llm"])
-        if "manager_llm" in config:
-            model_names.append(config["manager_llm"])
-
-        logger.info(
-            f"Extracted {len(model_names)} model references from config: {model_names}"
-        )
-
-        # Get provider for each model using the provided session
-        from src.services.settings.models import ModelConfigService
-
-        for model_name in model_names:
-            if not model_name:
-                continue
-
-            try:
-                # Use the existing session rather than acquiring another
-                model_service = ModelConfigService(session, group_id=group_id)
-                model_config = await model_service.get_model_config(model_name)
-
-                if model_config and "provider" in model_config:
-                    provider = model_config["provider"]
-                    if provider:
-                        # Convert provider to uppercase for consistency (OPENAI, ANTHROPIC, etc.)
-                        provider_upper = provider.upper()
-                        providers.add(provider_upper)
-                        logger.info(
-                            f"Model '{model_name}' uses provider: {provider_upper}"
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"Could not determine provider for model '{model_name}': {e}"
-                )
-                # Continue with other models rather than failing
-
-        provider_list = list(providers)
-        logger.info(
-            f"Flow execution requires {len(provider_list)} unique providers: {provider_list}"
-        )
-
-        return provider_list
-
     async def _run_flow_execution(
         self,
         execution_id: int,
@@ -943,60 +778,17 @@ class FlowRunnerService:
                     execution_id=execution_id, status=FlowExecutionStatus.PREPARING
                 )
 
-                # Initialize API keys before execution
-                try:
-                    # SECURITY: Get group_id from config for multi-tenant isolation
-                    group_id = config.get("group_id") if config else None
-
-                    # Get only the providers actually needed for this flow's configured models
-                    required_providers = await self._get_required_providers(
-                        session, config, group_id
-                    )
-
-                    if not required_providers:
-                        logger.warning(
-                            "No providers identified from model configuration - flow may not have models configured"
-                        )
-                    else:
-                        logger.info(
-                            f"Initializing API keys for {len(required_providers)} required providers: {required_providers}"
-                        )
-
-                    # Initialize only the API keys needed for the configured models
-                    for provider in required_providers:
-                        try:
-                            provider_key = await ApiKeysService.get_provider_api_key(
-                                provider, group_id=group_id
-                            )
-                            if not provider_key:
-                                logger.warning(
-                                    f"No API key found for provider: {provider} with group_id: {group_id}"
-                                )
-                            else:
-                                # Set the environment variable for the provider
-                                env_var_name = f"{provider}_API_KEY"
-                                os.environ[env_var_name] = provider_key
-                                logger.info(f"Set {env_var_name} for flow execution")
-                        except Exception as key_error:
-                            logger.warning(
-                                f"Error loading API key for {provider}: {key_error}"
-                            )
-
-                    logger.info(
-                        f"API keys initialized for {len(required_providers)} providers"
-                    )
-                except Exception as e:
-                    logger.warning(f"Error initializing API keys: {e}")
-                    # Continue with execution, as keys might be available through other means
+                # Provider API keys are NOT exported into os.environ: the
+                # process env is shared by every workspace. Each LLM and tool
+                # receives this workspace's key explicitly (LLMManager and
+                # ToolFactory read ApiKeysService for the run's group).
 
                 # Initialize BackendFlow with the flow_id and job_id
                 backend_flow = BackendFlow(job_id=job_id, flow_id=flow_id)
-                # Owning SERVICES, not other domains' repositories — see data_access.
-                from src.services.flow_builder.data_access import (
-                    build_flow_data_access,
+                # Owning SERVICES bound to the run's workspace — see data_access.
+                backend_flow.repositories = build_flow_data_access(
+                    session, (config or {}).get("group_context")
                 )
-
-                backend_flow.repositories = build_flow_data_access(session)
 
                 # Log what we have in the config BEFORE loading from database
                 logger.info(
@@ -1354,7 +1146,8 @@ class FlowRunnerService:
                     "result": execution.result,
                     "error": execution.error,
                     "created_at": execution.created_at,
-                    "updated_at": execution.updated_at,
+                    # ExecutionHistory has no updated_at (reading it raised, so
+                    # every details request failed); the list view omits it too.
                     "completed_at": execution.completed_at,
                     "nodes": [
                         {

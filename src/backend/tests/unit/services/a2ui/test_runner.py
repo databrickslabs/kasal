@@ -10,6 +10,7 @@ import json
 from types import SimpleNamespace
 
 from src.services.a2ui import runner as R
+from src.services.a2ui import settings as _a2ui_settings
 from src.services.a2ui.compose import (
     MINIMAL_COMPONENTS,
     a2ui_system_prompt,
@@ -37,26 +38,6 @@ def test_subset_catalog_keeps_only_named_components():
     assert set(mini) == set(MINIMAL_COMPONENTS) & FULL
     assert "SlideDeck" not in mini and "Quiz" not in mini  # rich dropped
     assert "Markdown" in mini and "Table" in mini  # essentials kept
-
-
-# --- _infer_deliverable ----------------------------------------------------
-def test_infer_deliverable_first_keyword_wins():
-    assert R._infer_deliverable("make a slide deck about Q3") is None  # decks left A2UI
-    assert R._infer_deliverable("build a KPI dashboard") == "dashboard"
-    assert R._infer_deliverable("quiz me on history") == "quiz"
-    assert R._infer_deliverable("a mind map of the org") == "mindmap"
-    assert R._infer_deliverable("just answer in prose") is None
-
-
-def test_infer_deliverable_routes_new_component_deliverables():
-    # The new data-viz / diagram / gallery deliverables must route so their
-    # per-type directives + branding apply (and rule 5 emits the right component).
-    assert R._infer_deliverable("forecast the expected loss by region") == "forecast"
-    assert R._infer_deliverable("show a dependency graph of the services") == "graph"
-    assert R._infer_deliverable("a sequence diagram of the login flow") == "sequence"
-    assert R._infer_deliverable("build a ferrari photo album") == "album"
-    # A bare "bar graph" must NOT hijack the node-link Graph — it's a plain chart.
-    assert R._infer_deliverable("draw a bar graph of sales") != "graph"
 
 
 # --- _resolve_catalog ------------------------------------------------------
@@ -199,7 +180,7 @@ def _stub_compose_surface(monkeypatch, surface):
     gate: A2UI enabled, a rich-intent turn, and a composer that returns `surface`."""
 
     async def _resolve(group_id, query):
-        return True, CATALOG, ""
+        return True, CATALOG, "", _a2ui_settings.effective()
 
     monkeypatch.setattr(R, "_resolve_config", _resolve)
     monkeypatch.setattr(R, "wants_rich_surface", lambda text, intent: True)
@@ -307,7 +288,7 @@ class TestStructuredResultReachesTheComposer:
         class CrewOutput:
             raw = "# The answer"
 
-            def model_dump_json(self):  # noqa: D102 — must NOT be reached
+            def model_dump_json(self):  # must NOT be reached
                 return '{"unexpected": true}'
 
         assert _result_text(CrewOutput()) == "# The answer"

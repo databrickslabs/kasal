@@ -40,7 +40,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             )
 
             result = await self.session.execute(query)
-            return result.scalars().all()
+            return list(result.scalars().all())
         except Exception as e:
             logger.error(f"Error getting memory backends for group {group_id}: {e}")
             raise
@@ -156,7 +156,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             )
 
             result = await self.session.execute(query)
-            return result.scalars().all()
+            return list(result.scalars().all())
         except Exception as e:
             logger.error(f"Error getting memory backends by type {backend_type}: {e}")
             raise
@@ -171,7 +171,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
         try:
             query = select(self.model).order_by(self.model.created_at.desc())
             result = await self.session.execute(query)
-            return result.scalars().all()
+            return list(result.scalars().all())
         except Exception as e:
             logger.error(f"Error getting all memory backends: {e}")
             raise

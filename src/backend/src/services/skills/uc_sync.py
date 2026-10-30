@@ -117,9 +117,7 @@ class SkillUcSyncService:
                 try:
                     await self._push_one(client, headers, host, skill, catalog, schema)
                     results.append({"name": skill.name, "status": "ok"})
-                except (
-                    Exception
-                ) as exc:  # noqa: BLE001 - one failure can't stop the batch
+                except Exception as exc:  # one failure can't stop the batch
                     results.append(
                         {
                             "name": skill.name,
@@ -186,7 +184,8 @@ class SkillUcSyncService:
         )
         if final.status_code != 200:
             self._raise("finalize skill", final)
-        return final.json()
+        result: dict[str, Any] = final.json()
+        return result
 
     async def _put_file(
         self,
@@ -240,14 +239,6 @@ class SkillUcSyncService:
 
     # ── import (pull): UC -> Kasal ───────────────────────────────────────────
 
-    async def import_skill(self, catalog: str, schema: str, skill_id: str) -> Any:
-        """Pull one UC skill into this workspace (download → parse → upsert)."""
-        headers, host = await self._auth()
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            return await self._import_one(
-                client, headers, host, catalog, schema, skill_id
-            )
-
     async def import_all_skills(
         self, catalog: str, schema: str
     ) -> List[Dict[str, Any]]:
@@ -270,9 +261,7 @@ class SkillUcSyncService:
                 try:
                     await self._import_one(client, headers, host, catalog, schema, sid)
                     results.append({"name": sid, "status": "ok"})
-                except (
-                    Exception
-                ) as exc:  # noqa: BLE001 - one failure can't stop the batch
+                except Exception as exc:  # one failure can't stop the batch
                     results.append(
                         {
                             "name": sid,

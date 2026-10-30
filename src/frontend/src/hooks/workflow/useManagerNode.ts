@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { getDefaultModel } from '../../config/defaultModel';
 import { useEffect, useCallback, useRef } from 'react';
 import { Node, Edge } from 'reactflow';
@@ -16,8 +17,14 @@ interface UseManagerNodeProps {
  * Hook to manage manager node creation/removal based on process type
  */
 export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerNodeProps) => {
-  const { layoutOrientation } = useUILayoutStore();
-  const { managerLLM, processType, managerNodeId, setManagerNodeId, isLoadingCrew } = useCrewExecutionStore();
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
+  const { managerLLM, processType, managerNodeId, setManagerNodeId, isLoadingCrew } = useCrewExecutionStore(useShallow(state => ({
+    managerLLM: state.managerLLM,
+    processType: state.processType,
+    managerNodeId: state.managerNodeId,
+    setManagerNodeId: state.setManagerNodeId,
+    isLoadingCrew: state.isLoadingCrew,
+  })));
 
   // Track previous layout orientation to detect changes
   const prevLayoutOrientationRef = useRef<'vertical' | 'horizontal' | undefined>(undefined);

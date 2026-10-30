@@ -169,7 +169,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
 
     def _extract_value(
         self, output: Union[str, Any, Dict[str, Any]]
-    ) -> Optional[Union[int, float, str]]:
+    ) -> Any:  # whatever the output holds under the field; validate() coerces it
         """
         Extract the value to check from various output types.
 
@@ -350,7 +350,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
 
     def _get_value_from_dict(
         self, data: Dict[str, Any]
-    ) -> Optional[Union[int, float, str]]:
+    ) -> Any:  # the raw JSON value found for the field, or None
         """Extract the value from a dictionary using the field name."""
         logger.info(f"Extracting value from dict with keys: {list(data.keys())}")
 
@@ -479,12 +479,12 @@ class MinimumNumberGuardrail(BaseGuardrail):
         )
         json_matches = re.search(json_pattern, text)
         if json_matches:
-            logger.info(f"Found JSON-like match: {json_matches.group(0)}")
+            logger.info("Found JSON-like match: %s", json_matches.group(0))
             try:
                 value = json_matches.group(1)
                 return int(value) if value.isdigit() else float(value)
             except (ValueError, IndexError) as e:
-                logger.warning(f"Error converting JSON-like match to number: {e}")
+                logger.warning("Error converting JSON-like match to number: %s", e)
 
         # If the field is count-related, look for items/results count statements
         if any(

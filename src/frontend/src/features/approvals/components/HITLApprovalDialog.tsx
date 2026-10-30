@@ -358,8 +358,8 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
     setActionLoading(true);
     try {
-      // Save edited Genie config to checkpoint_data.edited_config
-      // The HITL gate reads this and passes it as previous_output to the next crew
+      // Save edited Genie config to checkpoint_data.edited_config. The server
+      // tags it with this approval, so only THIS gate hands it to the next crew.
       await runService.updateExecutionResult(approval.execution_id, editedGenieConfig as unknown as Record<string, unknown>);
       await HITLService.approveGate(approval.id, {
         comment: comment.trim() || 'Genie Space config reviewed and edited',
@@ -379,7 +379,8 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
     setActionLoading(true);
     try {
-      // Save edited UCMV result to checkpoint_data.edited_config
+      // Save edited UCMV result to checkpoint_data.ucmv_yaml_edits; this run's
+      // Metric View Validator reads it (no other run does).
       await runService.updateExecutionResult(approval.execution_id, editedUCMV as unknown as Record<string, unknown>);
       // Approve the gate
       await HITLService.approveGate(approval.id, {

@@ -7,12 +7,14 @@ does with it is tested with the resume.
 """
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.schemas.execution import CrewConfig
 from src.services.execution.service import ExecutionService
+from src.utils.user_context import GroupContext
 
 CREW_ID = str(uuid.uuid4())
 
@@ -23,6 +25,20 @@ def crew_config(**overrides) -> CrewConfig:
         tasks_yaml={"task_1": {"description": "do it"}},
         execution_type="crew",
         **overrides,
+    )
+
+
+RUN_GROUP = "ws-run"
+RUN_CONTEXT = GroupContext(group_ids=[RUN_GROUP], group_email="u@example.com")
+
+
+async def _crew_of_the_runs_group(crew_id, group_context):
+    """CrewService.get_by_group, for a catalog holding CREW_ID in RUN_GROUP."""
+    in_group = group_context.primary_group_id == RUN_GROUP
+    return (
+        SimpleNamespace(id=crew_id)
+        if in_group and crew_id == uuid.UUID(CREW_ID)
+        else None
     )
 
 
@@ -37,11 +53,15 @@ async def created_execution_data(config: CrewConfig) -> dict:
         ) as create,
         patch.object(ExecutionService, "_run_in_background", new_callable=AsyncMock),
         patch("src.services.execution.service.ExecutionNameService") as names,
+        patch(
+            "src.services.catalog.crews.CrewService.get_by_group",
+            new=AsyncMock(side_effect=_crew_of_the_runs_group),
+        ),
     ):
         names.return_value.generate_execution_name = AsyncMock(
             return_value=MagicMock(name="run")
         )
-        await service.create_execution(config, group_context=None)
+        await service.create_execution(config, group_context=RUN_CONTEXT)
         return create.await_args.args[0]
 
 
@@ -54,17 +74,44 @@ class TestCrewLink:
         assert data["crew_id"] == uuid.UUID(CREW_ID)
 
     @pytest.mark.asyncio
+    async def test_a_crew_outside_the_runs_workspace_is_not_recorded(self):
+        # The id comes with the request; the run records it only for a crew of
+        # the workspace the run is filed in.
+        other = str(uuid.uuid4())
+        data = await created_execution_data(crew_config(crew_id=other))
+        assert data["crew_id"] is None
+
+    @pytest.mark.asyncio
     async def test_unsaved_canvas_records_nothing(self):
         # There is no crew row to point at, and that absence is what makes the
         # stored snapshot the fallback rather than the source.
         assert "crew_id" not in await created_execution_data(crew_config())
 
     @pytest.mark.asyncio
+    async def test_a_chat_run_is_recorded_as_one(self):
+        # What tells its resume to keep the snapshot (resume_config.py).
+        data = await created_execution_data(
+            crew_config(crew_id=CREW_ID, trigger_type="chat")
+        )
+        assert data["trigger_type"] == "chat"
+        assert data["crew_id"] == uuid.UUID(CREW_ID)
+
+    @pytest.mark.asyncio
+    async def test_a_run_without_a_trigger_type_keeps_the_default(self):
+        assert "trigger_type" not in await created_execution_data(crew_config())
+
+    def test_a_client_cannot_claim_another_trigger(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            crew_config(trigger_type="scheduled")
+
+    @pytest.mark.asyncio
     async def test_unparseable_crew_id_does_not_fail_the_run(self):
         # The link is optional context for a LATER resume. Refusing to start a
         # crew over a malformed optional reference would be a far worse trade.
         data = await created_execution_data(crew_config(crew_id="not-a-uuid"))
-        assert "crew_id" not in data
+        assert data.get("crew_id") is None
 
     @pytest.mark.asyncio
     @patch(
@@ -75,9 +122,8 @@ class TestCrewLink:
         # A flow already records flow_id; crew_id on a flow row would be a
         # second, contradictory answer to "what definition was this built from".
         #
-        # flow_id is given explicitly because omitting it sends create_execution
-        # to get_most_recent_flow() — a real database read, which is not what
-        # this test is about and which fails under xdist.
+        # flow_id is given explicitly: a flow run without flow_id or nodes is
+        # rejected before anything is written.
         config = CrewConfig(
             execution_type="flow",
             crew_id=CREW_ID,

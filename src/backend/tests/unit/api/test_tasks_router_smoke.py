@@ -19,7 +19,7 @@ from src.utils.user_context import GroupContext
 
 def gc(role="user"):
     return GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+        group_ids=["g1"], group_email="u@x", email_domain="example.com", user_role=role
     )
 
 
@@ -40,7 +40,9 @@ async def test_list_and_create_permissions_and_success():
     svc = AsyncMock()
 
     svc.find_by_group = AsyncMock(return_value=[make_task("t1")])
-    out = await list_tasks(service=svc, group_context=gc("operator"))
+    out = await list_tasks(
+        service=svc, group_context=gc("operator"), secrets_visible=True
+    )
     assert isinstance(out, list) and out[0].id == "t1"
 
     # create forbidden for user
@@ -68,9 +70,14 @@ async def test_get_update_delete_paths():
     # get 404 and success
     svc.get_with_group_check = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await get_task("missing", service=svc, group_context=gc("operator"))
+        await get_task(
+            "missing", service=svc, group_context=gc("operator"), secrets_visible=True
+        )
     svc.get_with_group_check = AsyncMock(return_value=make_task("t3"))
-    assert (await get_task("t3", service=svc, group_context=gc("operator"))).id == "t3"
+    got = await get_task(
+        "t3", service=svc, group_context=gc("operator"), secrets_visible=True
+    )
+    assert got.id == "t3"
 
     # update full forbidden, 404, success
     with pytest.raises(Exception):

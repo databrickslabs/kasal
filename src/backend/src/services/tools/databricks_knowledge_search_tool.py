@@ -68,7 +68,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
     _user_email: Optional[str] = PrivateAttr(default=None)
     _service: Optional[Any] = PrivateAttr(default=None)
     # What this agent has already searched, and how much searching is left.
-    _budget: Any = PrivateAttr(default=None)
+    _budget: KnowledgeSearchBudget = PrivateAttr(default_factory=KnowledgeSearchBudget)
 
     def __init__(
         self,
@@ -78,8 +78,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         file_paths: Optional[List[str]] = None,
         agent_id: Optional[str] = None,
         user_email: Optional[str] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the Databricks Knowledge Search Tool.
 
@@ -154,7 +154,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         logger.info(f"  Configured file paths (from tool_configs): {file_paths}")
         logger.info(f"  Agent ID (for access control): {agent_id}")
 
-    def _resolve_file_paths(self, agent_file_paths: List[str]) -> List[str]:
+    def _resolve_file_paths(self, agent_file_paths: List[str]) -> Optional[List[str]]:
         """
         Resolve agent-provided file paths to full volume paths.
 

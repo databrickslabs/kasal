@@ -1543,14 +1543,14 @@ export const useExecutionStore = create<ExecutionStore>()(
       return { runningJobBySession: next };
     });
 
+    // Stamped with the run, so a reload can tell this run was already reported
+    // and does not post its failure again (see utils/runOutcome).
+    const failExtra = jobId ? { executionId: jobId } : undefined;
+    const failText = `Execution failed: ${error}`;
     if (ownerSession) {
-      sessionStore.addMessageToTargetSession(
-        ownerSession,
-        'assistant',
-        `Execution failed: ${error}`,
-      );
+      sessionStore.addMessageToTargetSession(ownerSession, 'assistant', failText, failExtra);
     } else {
-      sessionStore.addMessage('assistant', `Execution failed: ${error}`);
+      sessionStore.addMessage('assistant', failText, failExtra);
     }
 
     if (isViewingOwner) {

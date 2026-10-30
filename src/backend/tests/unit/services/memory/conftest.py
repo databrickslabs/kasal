@@ -159,3 +159,17 @@ def _reset_lakebase_schema_cache():
     reset_schema_cache()
     yield
     reset_schema_cache()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _forget_recent_graph_texts():
+    """Graph memory remembers the exchanges it was just handed (process-wide),
+    so one test's turn must not read as another's duplicate."""
+    from src.services.memory.engine.graph_memory import clear_recent_texts
+
+    clear_recent_texts()
+    yield
+    clear_recent_texts()

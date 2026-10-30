@@ -4,11 +4,13 @@ Seed the prompt_templates table with default template definitions.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 
 from src.db.session import async_session_factory
 from src.models.template import PromptTemplate
+from src.seeds.errors import SeederIncomplete
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -508,7 +510,7 @@ shapes that fit it.
 never replace one with a data URL or a path.
 """
 
-DEFAULT_TEMPLATES = [
+DEFAULT_TEMPLATES: List[Dict[str, Any]] = [
     {
         "name": "generate_agent",
         "description": "Template for generating an AI agent based on user description",
@@ -596,14 +598,44 @@ DEFAULT_TEMPLATES = [
 ]
 
 
-async def seed_async():
-    """Seed prompt templates into the database using async session."""
+def _global_row(name: str) -> Select[Tuple[PromptTemplate]]:
+    """SELECT the global (``group_id IS NULL``) template called ``name``."""
+    return (
+        select(PromptTemplate)
+        .where(PromptTemplate.name == name, PromptTemplate.group_id.is_(None))
+        .order_by(PromptTemplate.id)
+        .limit(1)
+    )
+
+
+def _refresh_global_template(
+    template: PromptTemplate, description: str, text: str
+) -> None:
+    """Refresh a shipped template's text; leave ``is_active`` as it was set.
+
+    The text is Kasal's and is overwritten, so an improved prompt reaches every
+    install (a workspace that wants its own has its own row, never touched
+    here). Whether the template is active is not part of what ships.
+    """
+    template.description = description
+    template.template = text
+    template.updated_at = datetime.now().replace(tzinfo=None)
+
+
+async def seed_async() -> None:
+    """Seed the global prompt templates (``group_id IS NULL``) only."""
     logger.info("Seeding prompt_templates table (async)...")
 
-    # Get existing template names to avoid duplicates (outside the loop to reduce DB queries)
+    # Names of the GLOBAL rows. A workspace's same-name row (its customised or
+    # GEPA-applied prompt) is theirs: it must neither count as "exists" nor be
+    # what the update below rewrites.
     async with async_session_factory() as session:
-        result = await session.execute(select(PromptTemplate.name))
-        existing_names = {row[0] for row in result.scalars().all()}
+        name_result = await session.execute(
+            select(PromptTemplate.name).where(PromptTemplate.group_id.is_(None))
+        )
+        # scalars() already yields the name strings; indexing row[0] took each
+        # name's FIRST CHARACTER, so no real name ever matched.
+        existing_names = set(name_result.scalars().all())
 
     # Insert new templates
     templates_added = 0
@@ -619,19 +651,16 @@ async def seed_async():
                 if template_data["name"] not in existing_names:
                     # Check again to be extra sure - this helps with race conditions
                     check_result = await session.execute(
-                        select(PromptTemplate).filter(
-                            PromptTemplate.name == template_data["name"]
-                        )
+                        _global_row(template_data["name"])
                     )
                     existing_template = check_result.scalars().first()
 
                     if existing_template:
                         # If it exists now (race condition), update it instead
-                        existing_template.description = template_data["description"]
-                        existing_template.template = template_data["template"]
-                        existing_template.is_active = template_data["is_active"]
-                        existing_template.updated_at = datetime.now().replace(
-                            tzinfo=None
+                        _refresh_global_template(
+                            existing_template,
+                            template_data["description"],
+                            template_data["template"],
                         )
                         logger.debug(
                             f"Updating existing template: {template_data['name']}"
@@ -652,19 +681,14 @@ async def seed_async():
                         templates_added += 1
                 else:
                     # Update existing template
-                    result = await session.execute(
-                        select(PromptTemplate).filter(
-                            PromptTemplate.name == template_data["name"]
-                        )
-                    )
+                    result = await session.execute(_global_row(template_data["name"]))
                     existing_template = result.scalars().first()
 
                     if existing_template:
-                        existing_template.description = template_data["description"]
-                        existing_template.template = template_data["template"]
-                        existing_template.is_active = template_data["is_active"]
-                        existing_template.updated_at = datetime.now().replace(
-                            tzinfo=None
+                        _refresh_global_template(
+                            existing_template,
+                            template_data["description"],
+                            template_data["template"],
                         )
                         logger.debug(
                             f"Updating existing template: {template_data['name']}"
@@ -694,9 +718,13 @@ async def seed_async():
     logger.info(
         f"Prompt templates seeding summary: Added {templates_added}, Updated {templates_updated}, Skipped {templates_skipped}, Errors {templates_error}"
     )
+    if templates_error:
+        raise SeederIncomplete(
+            "prompt_templates", templates_error, len(DEFAULT_TEMPLATES)
+        )
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding prompt templates."""
     logger.info("Starting prompt templates seeding process...")
     try:
@@ -707,7 +735,8 @@ async def seed():
         import traceback
 
         logger.error(f"Prompt templates seeding traceback: {traceback.format_exc()}")
-        # Don't re-raise - allow other seeds to run
+        # Re-raise: the runner still runs the other seeders, then reports this.
+        raise
 
 
 # For backwards compatibility or direct command-line usage

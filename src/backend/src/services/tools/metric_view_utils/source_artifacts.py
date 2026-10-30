@@ -12,9 +12,13 @@ module only adapts pipeline shapes to their inputs.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Optional
 
 from .utils import to_snake_case
+
+if TYPE_CHECKING:
+    from .pbi_validation import EvaluateFn, Rows
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,7 @@ def _bq(fqn: str) -> str:
     """Back-quote each dotted part of a UC name (``a.b-c.d`` → `` `a`.`b-c`.`d` ``).
 
     A resolved PBI source catalog frequently contains characters that are not
-    valid unquoted SQL (e.g. ``dc_adb-landing-zone-002``), so every emitted
+    valid unquoted SQL (e.g. ``acme_adb-landing-zone-002``), so every emitted
     target/source name is quoted part-by-part.
     """
     parts = [p for p in str(fqn).split(".") if p]
@@ -63,7 +67,7 @@ def build_source_layer(
             emit_views,
         )
     except Exception as e:  # module import must never break generation
-        logger.warning(f"[source_layer] emitter import failed: {e}")
+        logger.warning("[source_layer] emitter import failed: %s", e, exc_info=True)
         return {}
 
     calc_cfg = (config or {}).get("calculated_columns") or {}
@@ -94,7 +98,12 @@ def build_source_layer(
                 if getattr(_folder, "transform_todos", None):
                     fold_todos[key] = list(_folder.transform_todos)
             except Exception as _fe:
-                logger.debug(f"[source_layer] transform fold failed for {key}: {_fe}")
+                logger.debug(
+                    "[source_layer] transform fold failed for %s: %s",
+                    key,
+                    _fe,
+                    exc_info=True,
+                )
         try:
             source = (
                 TableSource(native_sql=native)
@@ -102,6 +111,7 @@ def build_source_layer(
                 else TableSource(full_table_name=_bq(src_tbl))
             )
         except Exception:
+            logger.debug("[source_layer] unusable source for %s", key, exc_info=True)
             continue
         calc_columns = [
             CalcColumn(
@@ -128,7 +138,7 @@ def build_source_layer(
     try:
         emitted = emit_views(specs)
     except Exception as e:
-        logger.warning(f"[source_layer] emit_views failed: {e}")
+        logger.warning("[source_layer] emit_views failed: %s", e, exc_info=True)
         return {}
     return {
         e.table_name: {
@@ -155,7 +165,7 @@ def detect_pbi_only_tables(
     try:
         from .pbi_only_ingestion import build_ingestion_task, detect_pbi_only_source
     except Exception as e:
-        logger.warning(f"[pbi_only] import failed: {e}")
+        logger.warning("[pbi_only] import failed: %s", e, exc_info=True)
         return []
     tasks: list[dict] = []
     for table, mquery in (mquery_expressions or {}).items():
@@ -177,7 +187,9 @@ def detect_pbi_only_tables(
                 }
             )
         except Exception as e:
-            logger.debug(f"[pbi_only] detection failed for {table}: {e}")
+            logger.debug(
+                "[pbi_only] detection failed for %s: %s", table, e, exc_info=True
+            )
     return tasks
 
 
@@ -187,8 +199,8 @@ def build_pbi_evaluate_fn(
     dataset_id: Optional[str],
     *,
     base_url: Optional[str] = None,
-    uc_sql_fn: Optional[Callable[[str], Any]] = None,
-) -> Optional[Callable[[str], list]]:
+    uc_sql_fn: Optional[Callable[[str], Rows | None]] = None,
+) -> Optional[EvaluateFn]:
     """Build the ``evaluate_fn`` the validation loop (rec#4) needs, or ``None``
     when the PBI credentials required to run it aren't present.
 
@@ -208,7 +220,7 @@ def build_pbi_evaluate_fn(
     api_base = (base_url or "https://api.powerbi.com/v1.0/myorg").rstrip("/")
     url = f"{api_base}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
 
-    def _evaluate(query: str) -> list:
+    def _evaluate(query: str) -> Rows:
         q = (query or "").strip()
         if not q.upper().startswith(("EVALUATE", "DEFINE")):
             # Generated UC SQL — needs a live warehouse + deployed view.
@@ -217,7 +229,7 @@ def build_pbi_evaluate_fn(
             try:
                 return list(uc_sql_fn(query) or [])
             except Exception as e:
-                logger.debug(f"[pbi_validation] uc_sql_fn failed: {e}")
+                logger.debug("[pbi_validation] uc_sql_fn failed: %s", e, exc_info=True)
                 return []
         try:
             import httpx
@@ -235,12 +247,13 @@ def build_pbi_evaluate_fn(
                 resp.raise_for_status()
                 data = resp.json()
             if isinstance(data, dict) and "error" in data:
-                logger.debug(f"[pbi_validation] PBI error: {data['error']}")
+                logger.debug("[pbi_validation] PBI error: %s", data["error"])
                 return []
             tables = (data.get("results", [{}]) or [{}])[0].get("tables", [])
-            return tables[0].get("rows", []) if tables else []
+            rows: Rows = tables[0].get("rows", []) if tables else []
+            return rows
         except Exception as e:
-            logger.debug(f"[pbi_validation] executeQueries failed: {e}")
+            logger.debug("[pbi_validation] executeQueries failed: %s", e, exc_info=True)
             return []
 
     return _evaluate
@@ -249,7 +262,7 @@ def build_pbi_evaluate_fn(
 def run_pbi_validation(
     all_specs: dict,
     yaml_output: dict,
-    evaluate_fn: Optional[Callable[[str], Any]] = None,
+    evaluate_fn: Optional[EvaluateFn] = None,
 ) -> dict:
     """Validation loop hook (rec #4).
 
@@ -276,14 +289,17 @@ def run_pbi_validation(
     try:
         from .pbi_validation import validate_view
 
-        results: dict = {}
+        results: dict[str, str] = {}
         for view_name, sql in (yaml_output or {}).items():
             try:
                 res = validate_view(view_name, sql, evaluate_fn)
-                results[view_name] = getattr(res, "status", None) and res.status.value
+                results[view_name] = res.status.value
             except Exception as e:
+                logger.warning(
+                    "[pbi_validation] view %s failed: %s", view_name, e, exc_info=True
+                )
                 results[view_name] = f"error: {e}"
         return {"status": "ran", "views": results}
     except Exception as e:
-        logger.warning(f"[pbi_validation] failed: {e}")
+        logger.warning("[pbi_validation] failed: %s", e, exc_info=True)
         return {"status": "error", "reason": str(e)}

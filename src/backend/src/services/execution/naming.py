@@ -7,22 +7,63 @@ for executions based on agents and tasks configuration.
 
 import logging
 import traceback
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.execution import (
+    CrewConfig,
     ExecutionNameGenerationRequest,
     ExecutionNameGenerationResponse,
 )
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 
+if TYPE_CHECKING:
+    from src.services.catalog.templates import TemplateService
+    from src.utils.user_context import GroupContext
+
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+async def run_name_model(
+    config: CrewConfig, session: Optional[AsyncSession], group_id: Optional[str]
+) -> Optional[str]:
+    """The model to name a run with: the run's, the first agent's, or the workspace's.
+
+    A published crew has no top-level model — each agent carries its own
+    ``llm`` — and naming with a made-up placeholder id failed with "Model
+    configuration not found". None is a valid answer: the naming call then
+    falls back to a timestamp name.
+    """
+    if config.model:
+        return config.model
+    agents = config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
+    for agent in agents.values():
+        llm = agent.get("llm") if isinstance(agent, dict) else None
+        if isinstance(llm, str) and llm:
+            return llm
+    if not group_id or session is None:
+        return None
+    try:
+        from src.services.decisions.model_selection import workspace_default
+
+        return await workspace_default(session, group_id)
+    except Exception as exc:  # noqa: BLE001 — naming is never worth failing a run
+        logger.debug("No workspace default model for run naming: %s", exc)
+        return None
 
 
 class ExecutionNameService:
     """Service for execution name generation operations."""
 
-    def __init__(self, log_service, template_service, session=None):
+    def __init__(
+        self,
+        log_service: Optional[LLMLogService],
+        template_service: Optional["TemplateService"],
+        session: Optional[AsyncSession] = None,
+    ) -> None:
         """
         Initialize the service.
 
@@ -37,7 +78,7 @@ class ExecutionNameService:
         self._session = session
 
     @classmethod
-    def create(cls, session) -> "ExecutionNameService":
+    def create(cls, session: Optional[AsyncSession]) -> "ExecutionNameService":
         """
         Factory method to create a properly configured instance of the service.
 
@@ -67,17 +108,22 @@ class ExecutionNameService:
             log_service=log_service, template_service=template_service, session=session
         )
 
-    async def _get_name_template(self) -> str:
-        """Fetch the ``generate_job_name`` template, opening a standalone session
-        when none was injected (so the read never hits a ``None`` session)."""
+    async def _get_name_template(
+        self, group_context: Optional["GroupContext"] = None
+    ) -> str:
+        """Fetch the ``generate_job_name`` template — the workspace's own when it
+        has one — opening a standalone session when none was injected (so the
+        read never hits a ``None`` session)."""
         if self.template_service is not None:
-            return await self.template_service.get_template_content("generate_job_name")
+            return await self.template_service.get_template_content(
+                "generate_job_name", group_context=group_context
+            )
         from src.db.session import routed_scoped_session
         from src.services.catalog.templates import TemplateService
 
         async with routed_scoped_session() as session:
             return await TemplateService(session).get_template_content(
-                "generate_job_name"
+                "generate_job_name", group_context=group_context
             )
 
     async def _log_llm_interaction(
@@ -127,13 +173,16 @@ class ExecutionNameService:
                 pass
 
     async def generate_execution_name(
-        self, request: ExecutionNameGenerationRequest
+        self,
+        request: ExecutionNameGenerationRequest,
+        group_context: Optional["GroupContext"] = None,
     ) -> ExecutionNameGenerationResponse:
         """
         Generate a descriptive name for an execution based on agents and tasks configuration.
 
         Args:
             request: Request containing agents and tasks configuration
+            group_context: The workspace; its own ``generate_job_name`` wins
 
         Returns:
             Response containing the generated name
@@ -143,7 +192,7 @@ class ExecutionNameService:
             # was injected — the chat auto-execute path builds this service with
             # session=None). This template already includes instructions to only
             # return the name without explanations.
-            system_message = await self._get_name_template()
+            system_message = await self._get_name_template(group_context)
 
             # Fallback if template is not found (shouldn't happen if seeds are run)
             if not system_message:
@@ -179,9 +228,12 @@ Tasks: {", ".join(task_names)}"""
             # For models without reasoning tokens, we'll truncate to ensure concise names.
             from src.utils.telemetry import KasalProduct, get_user_agent_header
 
+            model = request.model
+            if not model:  # handled below like any failed call: a timestamp name
+                raise ValueError("No model to generate the execution name with")
             name = await LLMManager.completion(
                 messages=messages,
-                model=request.model,
+                model=model,
                 temperature=0.7,
                 max_tokens=100,
                 extra_headers=get_user_agent_header(KasalProduct.NAME_GENERATION),
@@ -202,7 +254,7 @@ Tasks: {", ".join(task_names)}"""
                     endpoint="generate-execution-name",
                     prompt=f"System: {system_message}\nUser: {prompt}",
                     response=name,
-                    model=request.model,
+                    model=model,
                 )
             except Exception as e:
                 # Just log the error, don't fail the request

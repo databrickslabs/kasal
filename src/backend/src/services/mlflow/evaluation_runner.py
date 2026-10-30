@@ -10,11 +10,34 @@ This module contains:
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from src.core.logger import LoggerManager
 
+if TYPE_CHECKING:
+    from src.services.prompt_optimization.builtin_judges.bridge import JudgeRoute
+
 logger = LoggerManager.get_instance().system
+
+
+def _find_text(d: dict, keys: List[str]) -> Optional[str]:
+    """The first non-blank string among ``keys`` of ``d``."""
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
+
+
+def _find_list_or_str(d: dict, keys: List[str]) -> Optional[List[str]]:
+    """The first non-empty list (stringified) or non-blank string among ``keys``."""
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, list) and v:
+            return [str(x) for x in v]
+        if isinstance(v, str) and v.strip():
+            return [v]
+    return None
 
 
 class MLflowEvaluationRunner:
@@ -36,6 +59,9 @@ class MLflowEvaluationRunner:
         judge_model_route: str,
         judge_model_defaulted: bool,
         experiment_name: Optional[str] = None,
+        max_rows: int = 200,
+        judge_model: Optional[str] = None,
+        judge_route: Optional["JudgeRoute"] = None,
     ):
         """
         Initialize evaluation runner.
@@ -49,8 +75,12 @@ class MLflowEvaluationRunner:
             judge_model_defaulted: Whether judge model is using default value
             experiment_name: The crew-traces experiment to evaluate against,
                 resolved from the MLflow configuration (Configuration.tsx) by the
-                async caller — the source of truth. Falls back to the env/default
-                when not supplied (None) so out-of-band callers still work.
+                async caller — the source of truth. Without one, the
+                per-teamspace fallback (``fallback_trace_experiment``).
+            max_rows: Most trace rows to score (Configuration → MLflow → Advanced).
+            judge_model: The Kasal model key the built-in judges call through
+                LLMManager (``evaluation_judges``); None skips the judges.
+            judge_route: The event loop, group and user those calls run under.
         """
         self.exec_obj = exec_obj
         self.job_id = job_id
@@ -59,6 +89,9 @@ class MLflowEvaluationRunner:
         self.judge_model_route = judge_model_route
         self.judge_model_defaulted = judge_model_defaulted
         self.experiment_name = experiment_name
+        self.max_rows = max_rows
+        self.judge_model = judge_model
+        self.judge_route = judge_route
 
     def create_run(self, auth_ctx: Optional[Any]) -> Dict[str, Any]:
         """
@@ -84,9 +117,7 @@ class MLflowEvaluationRunner:
             # experiment (Configuration.tsx) is the source of truth; env/default
             # only when the caller supplied nothing.
             mlflow.set_tracking_uri("databricks")
-            eval_exp_name = self.experiment_name or os.getenv(
-                "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
-            )
+            eval_exp_name = self._experiment()
 
             mlflow.set_experiment(eval_exp_name)
 
@@ -130,7 +161,7 @@ class MLflowEvaluationRunner:
 
                 # Register dataset as MLflow input
                 try:
-                    ds = mlflow.data.from_pandas(
+                    ds = mlflow.data.from_pandas(  # type: ignore[attr-defined]  # lazy re-export
                         df=eval_df,
                         name="agent_eval_dataset",
                         predictions="predictions",
@@ -141,7 +172,7 @@ class MLflowEvaluationRunner:
 
                 return {
                     "experiment_id": str(
-                        getattr(run, "info", object()).experiment_id
+                        cast(Any, getattr(run, "info", object())).experiment_id
                         if hasattr(getattr(run, "info", object()), "experiment_id")
                         else ""
                     ),
@@ -167,8 +198,8 @@ class MLflowEvaluationRunner:
         """
         import mlflow
 
-        related_trace_ids = []
-        records = []
+        related_trace_ids: List[str] = []
+        records: List[Dict[str, Any]] = []
 
         # First, try to get trace ID from execution history
         stored_trace_id = None
@@ -192,10 +223,7 @@ class MLflowEvaluationRunner:
             try:
                 search_traces = getattr(mlflow, "search_traces", None)
                 if callable(search_traces):
-                    traces_exp_name = self.experiment_name or os.getenv(
-                        "MLFLOW_CREW_TRACES_EXPERIMENT",
-                        "/Shared/kasal-crew-execution-traces",
-                    )
+                    traces_exp_name = self._experiment()
 
                     traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
 
@@ -222,13 +250,13 @@ class MLflowEvaluationRunner:
         return related_trace_ids, records
 
     def _extract_records_from_traces(
-        self, df
+        self, df: Any
     ) -> tuple[List[str], List[Dict[str, Any]]]:
         """Extract evaluation records from trace dataframe."""
         import json as _json
 
-        related_trace_ids = []
-        records = []
+        related_trace_ids: List[str] = []
+        records: List[Dict[str, Any]] = []
 
         df_sel = df
         if "attributes" in df.columns:
@@ -249,15 +277,14 @@ class MLflowEvaluationRunner:
 
         # Build records from trace rows
         try:
-            max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
-            for _, r in df_sel.head(max_rows).iterrows():
+            for _, r in df_sel.head(self.max_rows).iterrows():
                 attrs = (
                     r.get("attributes", {})
                     if isinstance(r.get("attributes", {}), dict)
                     else {}
                 )
 
-                def _pick(keys):
+                def _pick(keys: List[str]) -> Any:
                     for kk in keys:
                         v = attrs.get(kk) if isinstance(attrs, dict) else None
                         if (v is None) and (kk in r):
@@ -326,7 +353,7 @@ class MLflowEvaluationRunner:
         except Exception as e:
             logger.warning(f"[MLflowEvaluationRunner] Failed to log parameters: {e}")
 
-    def _log_baseline_metrics(self, eval_df) -> None:
+    def _log_baseline_metrics(self, eval_df: Any) -> None:
         """Log simple baseline metrics."""
         import mlflow
 
@@ -348,7 +375,7 @@ class MLflowEvaluationRunner:
                 mlflow.log_metric("prediction_length_max", float(max(pred_lengths)))
 
             # Word count metrics
-            def _wc(s):
+            def _wc(s: Any) -> float:
                 try:
                     return float(len(str(s).split()))
                 except Exception:
@@ -401,35 +428,66 @@ class MLflowEvaluationRunner:
         except Exception:
             pass
 
+    def _experiment(self) -> str:
+        """The configured experiment, else the per-teamspace fallback.
+
+        Never the old shared ``/Shared/kasal-crew-execution-traces``: it was
+        readable by every workspace user and shared by every teamspace.
+        """
+        from src.core.databricks_app import fallback_trace_experiment
+
+        name = self.experiment_name or fallback_trace_experiment(
+            getattr(self.exec_obj, "group_id", None)
+        )
+        if not name:
+            raise ValueError(
+                "No MLflow experiment is configured for this teamspace: set one "
+                "in Configuration -> MLflow"
+            )
+        return name
+
+    #: Non-secret endpoint URLs the judge path reads from the environment.
+    _URL_ENV_KEYS = (
+        "DATABRICKS_BASE_URL",
+        "DATABRICKS_API_BASE",
+        "DATABRICKS_ENDPOINT",
+    )
+
     def _save_environment_vars(self) -> Dict[str, Optional[str]]:
-        """Save current environment variables."""
-        return {
-            "DATABRICKS_HOST": os.environ.get("DATABRICKS_HOST"),
-            "DATABRICKS_TOKEN": os.environ.get("DATABRICKS_TOKEN"),
-            "DATABRICKS_BASE_URL": os.environ.get("DATABRICKS_BASE_URL"),
-            "DATABRICKS_API_BASE": os.environ.get("DATABRICKS_API_BASE"),
-            "DATABRICKS_ENDPOINT": os.environ.get("DATABRICKS_ENDPOINT"),
-        }
+        """Save the (non-secret) endpoint URL variables this run overrides."""
+        return {k: os.environ.get(k) for k in self._URL_ENV_KEYS}
 
     def _set_environment_vars(self, auth_ctx: Any) -> None:
-        """Set environment variables from auth context."""
+        """Present ``auth_ctx`` to MLflow for the rest of this call.
+
+        The host and token are scoped to this call through ``single_auth_env``
+        (a context-local credential, never written to the process environment,
+        so a concurrent evaluation for another identity neither waits for nor
+        sees this one's) and the scope is closed by
+        :meth:`_restore_environment_vars`. Must be closed on the same thread.
+        """
+        from contextlib import ExitStack
+
+        from src.services.mlflow.sp_auth import single_auth_env
         from src.utils.databricks_url_utils import DatabricksURLUtils
 
-        os.environ["DATABRICKS_HOST"] = auth_ctx.workspace_url
-        os.environ["DATABRICKS_TOKEN"] = auth_ctx.token
+        window = ExitStack()
+        self._auth_window: Optional[ExitStack] = window
+        window.enter_context(
+            single_auth_env(host=auth_ctx.workspace_url, token=auth_ctx.token)
+        )
 
         api_base = (
             DatabricksURLUtils.construct_llm_base_url(auth_ctx.workspace_url) or ""
         )
         if api_base:
-            os.environ["DATABRICKS_BASE_URL"] = api_base
-            os.environ["DATABRICKS_API_BASE"] = api_base
-            os.environ["DATABRICKS_ENDPOINT"] = api_base
+            for key in self._URL_ENV_KEYS:
+                os.environ[key] = api_base
 
     def _restore_environment_vars(
         self, old_env: Dict[str, Optional[str]], auth_ctx: Optional[Any]
     ) -> None:
-        """Restore original environment variables."""
+        """Close the auth window and restore the endpoint URL variables."""
         if not auth_ctx:
             return
 
@@ -438,6 +496,10 @@ class MLflowEvaluationRunner:
                 os.environ[key] = value
             elif key in os.environ:
                 del os.environ[key]
+        window = getattr(self, "_auth_window", None)
+        if window is not None:
+            self._auth_window = None
+            window.close()
 
     def complete_evaluation(self, run_id: str, auth_ctx: Optional[Any]) -> None:
         """
@@ -489,7 +551,7 @@ class MLflowEvaluationRunner:
             try:
                 if "contexts" in eval_df.columns:
                     try:
-                        has_ctx_col = (
+                        has_ctx_col = bool(
                             eval_df["contexts"]
                             .astype(str)
                             .str.strip()
@@ -503,7 +565,7 @@ class MLflowEvaluationRunner:
                         )
                 if "references" in eval_df.columns:
                     try:
-                        has_ref_col = (
+                        has_ref_col = bool(
                             eval_df["references"]
                             .astype(str)
                             .str.strip()
@@ -580,22 +642,6 @@ class MLflowEvaluationRunner:
                                     resp_obj = {}
 
                                 # Heuristics to extract query and contexts from request JSON
-                                def _find_text(d: dict, keys):
-                                    for k in keys:
-                                        v = d.get(k)
-                                        if isinstance(v, str) and v.strip():
-                                            return v
-                                    return None
-
-                                def _find_list_or_str(d: dict, keys):
-                                    for k in keys:
-                                        v = d.get(k)
-                                        if isinstance(v, list) and v:
-                                            return [str(x) for x in v]
-                                        if isinstance(v, str) and v.strip():
-                                            return [v]
-                                    return None
-
                                 inputs_obj = (
                                     req_obj.get("inputs", {})
                                     if isinstance(req_obj.get("inputs", {}), dict)
@@ -699,7 +745,7 @@ class MLflowEvaluationRunner:
                                 )
 
                                 if query or response or all_ctx:
-                                    rec = {
+                                    rec: Dict[str, Any] = {
                                         "inputs": {"query": query},
                                         "outputs": {"response": response},
                                     }
@@ -793,72 +839,19 @@ class MLflowEvaluationRunner:
                         }
                     ]
 
-                # Build GenAI scorers
-                scorers = []
-                try:
-                    genai_ns = getattr(mlflow, "genai", None)
-                    m_scorers = getattr(genai_ns, "scorers", None) if genai_ns else None
+                # Built-in judges from the shared catalog (the one Optimize
+                # uses), called through LLMManager via the judge bridge.
+                from src.services.mlflow.evaluation_judges import (
+                    judge_scorers,
+                    judging,
+                )
 
-                    def _to_scorer_model_uri(route: Optional[str]) -> Optional[str]:
-                        if not route:
-                            return None
-                        try:
-                            if ":/" in route:
-                                return route
-                            if "/" in route:
-                                provider, model = route.split("/", 1)
-                                return f"{provider}:/" + model
-                            if route == "databricks":
-                                return route
-                        except Exception:
-                            pass
-                        return route
-
-                    def _add_scorer(name: str):
-                        if m_scorers is None:
-                            return
-                        cls = getattr(m_scorers, name, None)
-                        if cls is None:
-                            logger.warning(
-                                f"[MLflowEvaluationRunner] Scorer '{name}' not found - skipping"
-                            )
-                            return
-                        try:
-                            model_uri = _to_scorer_model_uri(self.judge_model_route)
-                            kw = {"model": model_uri} if model_uri else {}
-                            scorers.append(cls(**kw))
-                            logger.info(
-                                f"[MLflowEvaluationRunner] Added scorer: {name}"
-                            )
-                        except Exception as _e:
-                            logger.warning(
-                                f"[MLflowEvaluationRunner] Failed to init scorer {name}: {_e}"
-                            )
-
-                    # Core evaluation scorers
-                    _add_scorer("RelevanceToQuery")
-                    _add_scorer("Safety")
-
-                    # Correctness scorer (requires reference answers)
-                    if has_ref_col:
-                        _add_scorer("Correctness")
-
-                    # Retrieval-specific scorers (require contexts)
-                    if has_ctx_col:
-                        _add_scorer("Groundedness")
-                        _add_scorer("Relevance")
-                        if has_ref_col:
-                            _add_scorer("ContextSufficiency")
-
-                    try:
-                        scorer_names = [type(s).__name__ for s in scorers]
-                        logger.info(
-                            f"[MLflowEvaluationRunner] Using scorers: {scorer_names}"
-                        )
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                scorers = judge_scorers(
+                    self.judge_model,
+                    self.judge_route,
+                    has_reference=has_ref_col,
+                    has_context=has_ctx_col,
+                )
 
                 # Ensure we attach to the same run/environment safely
                 try:
@@ -877,7 +870,7 @@ class MLflowEvaluationRunner:
 
                 try:
                     ar = mlflow.active_run()
-                    if ar and getattr(ar, "info", object()).run_id != run_id:
+                    if ar and cast(Any, getattr(ar, "info", object())).run_id != run_id:
                         mlflow.end_run()
                 except Exception:
                     pass
@@ -896,7 +889,7 @@ class MLflowEvaluationRunner:
                             f"[MLflowEvaluationRunner] Running mlflow.genai.evaluate for job_id={self.job_id}"
                         )
 
-                        eval_kwargs = {
+                        eval_kwargs: Dict[str, Any] = {
                             "data": eval_data,
                             "scorers": scorers if scorers else [],
                         }
@@ -904,7 +897,6 @@ class MLflowEvaluationRunner:
                         # Pre-evaluation debug
                         try:
                             list(eval_data[0].keys()) if eval_data else []
-                            scorer_names = [type(s).__name__ for s in (scorers or [])]
                             from_types = (
                                 "trace"
                                 if (eval_data and "trace" in eval_data[0])
@@ -916,7 +908,8 @@ class MLflowEvaluationRunner:
                         except Exception:
                             pass
 
-                        eval_result = mlflow.genai.evaluate(**eval_kwargs)
+                        with judging(self.judge_route):
+                            eval_result = mlflow.genai.evaluate(**eval_kwargs)
                         logger.info(
                             "[MLflowEvaluationRunner] mlflow.genai.evaluate completed successfully"
                         )
@@ -932,32 +925,13 @@ class MLflowEvaluationRunner:
                         # Log scorer info
                         try:
 
-                            def _to_scorer_model_uri(route):
-                                try:
-                                    if not route:
-                                        return None
-                                    if ":/" in route:
-                                        return route
-                                    if "/" in route:
-                                        p, m = route.split("/", 1)
-                                        return f"{p}:/" + m
-                                    return route
-                                except Exception:
-                                    return route
-
                             mlflow.log_params(
                                 {
                                     "genai_scorers": ",".join(
                                         [type(s).__name__ for s in (scorers or [])]
                                     )
                                     or "",
-                                    "genai_judge_model": str(
-                                        self.judge_model_route or ""
-                                    ),
-                                    "genai_judge_model_uri": str(
-                                        _to_scorer_model_uri(self.judge_model_route)
-                                        or ""
-                                    ),
+                                    "genai_judge_model": str(self.judge_model or ""),
                                 }
                             )
                         except Exception:

@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.utils.sensitive_data_utils import mask_sensitive_strings
 
 
 class ToolBase(BaseModel):
@@ -41,7 +43,12 @@ class ToolUpdate(BaseModel):
 
 
 class ToolResponse(ToolBase):
-    """Schema for tool responses"""
+    """Schema for tool responses.
+
+    ``config`` holds credentials as stored (client secrets, passwords, tokens).
+    Read endpoints send members without builder rights ``masked_tool(...)``
+    instead; see ``services/catalog/secret_view``.
+    """
 
     id: int = Field(..., description="Unique identifier for the tool")
     group_id: Optional[str] = Field(
@@ -53,7 +60,18 @@ class ToolResponse(ToolBase):
         ..., description="Timestamp when the tool was last updated"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
+
+
+def masked_config(config: Optional[Mapping[str, object]]) -> Dict[str, object]:
+    """A copy of a tool config with every credential value masked."""
+    masked = mask_sensitive_strings(dict(config or {}))
+    return masked if isinstance(masked, dict) else {}
+
+
+def masked_tool(tool: ToolResponse) -> ToolResponse:
+    """A copy of ``tool`` with the credentials in its config masked."""
+    return tool.model_copy(update={"config": masked_config(tool.config)})
 
 
 class ToolListResponse(BaseModel):

@@ -5,14 +5,14 @@ This module handles dynamic creation of flow methods (starting points, listeners
 """
 
 import asyncio
-import os
-import traceback
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
+from src.config.settings import settings
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
+from src.services.flow_builder.modules.handoff_json import extract_first_json_object
 from src.services.flow_builder.modules.task_context import (
     task_with_context,
     tasks_for_review,
@@ -25,18 +25,13 @@ from .flow_conditions import state_snapshot
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
-# Per-crew kickoff timeout for flow execution. Large Power BI models (hundreds of
-# measures, dozens of fact tables + opt-in LLM DAX translation + reconciliation
-# cycles) can legitimately take a long time. The M→SQL recovery and DAX LLM
-# fallback are bounded-concurrent so they finish far faster than before, but the
-# heaviest reconciliation runs on the most complex models still need headroom —
-# so this defaults to 40 min and is overridable via env for extreme cases.
-CREW_KICKOFF_TIMEOUT_SECONDS = float(
-    os.getenv("KASAL_FLOW_CREW_TIMEOUT_SECONDS", "2400")
-)
+# Per-crew kickoff timeout for flow execution. Large Power BI models (LLM DAX
+# translation + reconciliation cycles) legitimately run long: 40 min by default,
+# KASAL_FLOW_CREW_TIMEOUT_SECONDS in config/settings.py for extreme cases.
+CREW_KICKOFF_TIMEOUT_SECONDS = float(settings.KASAL_FLOW_CREW_TIMEOUT_SECONDS)
 
 
-def extract_final_answer(results) -> str:
+def extract_final_answer(results: Any) -> str:
     """
     Extract only the final answer from flow results, excluding the thinking process.
 
@@ -66,7 +61,7 @@ def extract_final_answer(results) -> str:
         contents = []
         for item in first_result:
             if isinstance(item, dict) and "content" in item:
-                content = item["content"]
+                content: str = item["content"]
                 # Extract only the Final Answer portion if present
                 if "Final Answer:" in content:
                     # Get everything after "Final Answer:"
@@ -107,7 +102,7 @@ def extract_final_answer(results) -> str:
     return content
 
 
-async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
+async def get_model_context_limits(agent: Any, group_context: Any) -> tuple[int, int]:
     """
     Get the context window and max output tokens for the agent's model using ModelConfigService.
 
@@ -606,7 +601,7 @@ class FlowMethodFactory:
         crew_data: Optional[Any] = None,
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create a starting point method that executes multiple tasks as a crew.
 
@@ -628,7 +623,7 @@ class FlowMethodFactory:
         task_list = tasks_for_review(task_list, method_name, callbacks)
 
         @start()
-        async def starting_point_crew_method(self):
+        async def starting_point_crew_method(self: Any) -> Any:
             """Starting point method - executes crew with multiple sequential tasks."""
             # Already answered on an earlier turn? A conversational flow
             # restores its state before every turn, so the crews upstream of the
@@ -1038,17 +1033,8 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if "start_time" in dir() else 0
-                logger.error(
+                logger.exception(
                     f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
-                )
-                # Diagnostic: the full stack of the TimeoutError names its true
-                # source (a run/agent max_execution_time deadline vs a DB
-                # operation hanging on a dropped idle connection) — the one thing
-                # the status logs don't reveal. Needed to fix the long-run timeout
-                # precisely instead of guessing.
-                logger.error(
-                    "Starting-point crew timeout — originating traceback:\n%s",
-                    traceback.format_exc(),
                 )
                 raise TimeoutError(
                     f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS / 60:.0f} minutes"
@@ -1086,7 +1072,7 @@ class FlowMethodFactory:
         crew_data: Optional[Any] = None,
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create a listener method for the flow.
 
@@ -1111,7 +1097,7 @@ class FlowMethodFactory:
         listener_tasks = tasks_for_review(listener_tasks, method_name, callbacks)
 
         @decorator
-        async def listener_method(self, *results):
+        async def listener_method(self: Any, *results: Any) -> Any:
             """Listener method - executes when listening to a specific event."""
             # Already answered on an earlier turn? A conversational flow
             # restores its state before every turn, so the crews upstream of the
@@ -1494,58 +1480,8 @@ class FlowMethodFactory:
                 # not just from the immediately preceding crew B.
                 import json as _json
 
-                def _extract_json(raw: str) -> dict | None:
-                    """Extract the first complete top-level JSON object from a
-                    string that may wrap it in agent narrative ("Here is the
-                    full output: {...}").
-
-                    Balanced-brace scan from the first ``{``, string-literal
-                    aware, instead of a fixed-nesting-depth regex. The prior
-                    regex (``\\{[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}``) only tolerates
-                    ONE level of nested braces, so on a 3+-level-deep tool
-                    payload (config_json's own switch_decompositions ->
-                    {table: [{...}, ...]} is already 3 levels) it silently
-                    matched an INNER sub-object instead of the real top-level
-                    one — confirmed live: on a Pipeline Config Generator
-                    result it extracted {"Fact_OTC": [...]} instead of the
-                    full {"proposed_config": ..., "measures_json": ...,
-                    "mquery_json": ...} payload, so has_ucmv_handoff /
-                    is_bare_pipeline_config both read False below and the
-                    flow handoff silently injected nothing into the next
-                    crew at all — the measures_json/mquery_json/config_json
-                    UCMV received were empty defaults, not the real data.
-                    """
-                    if not raw or not isinstance(raw, str):
-                        return None
-                    start = raw.find("{")
-                    if start == -1:
-                        return None
-                    depth = 0
-                    in_string = False
-                    escape = False
-                    for i in range(start, len(raw)):
-                        ch = raw[i]
-                        if in_string:
-                            if escape:
-                                escape = False
-                            elif ch == "\\":
-                                escape = True
-                            elif ch == '"':
-                                in_string = False
-                            continue
-                        if ch == '"':
-                            in_string = True
-                        elif ch == "{":
-                            depth += 1
-                        elif ch == "}":
-                            depth -= 1
-                            if depth == 0:
-                                candidate = raw[start : i + 1]
-                                try:
-                                    return _json.loads(candidate)
-                                except _json.JSONDecodeError:
-                                    return None
-                    return None
+                # Balanced-brace scan, not a regex (see handoff_json).
+                _extract_json = extract_first_json_object
 
                 # Build a list of all parsed outputs from flow state + current results
                 all_outputs: list[dict] = []
@@ -1578,33 +1514,15 @@ class FlowMethodFactory:
                 try:
                     injected_count = 0
                     for agent in agents:
-                        for _raw_tool in agent.tools or []:
-                            # Under the CrewAI harness, `agent.tools` holds
-                            # `KasalToolAdapter` wrappers (harnesses/crewai/tools.py)
-                            # — the real Kasal tool with `_default_config` sits on
-                            # `.kasal_tool`, not on the adapter itself. Without this
-                            # unwrap, `hasattr(tool, "_default_config")` is always
-                            # False under CrewAI (the default harness), so this
-                            # whole injection loop silently no-ops: UCMV never
-                            # receives the previous crew's config/measures/mquery
-                            # and falls back to its own weaker direct-API
-                            # extraction, which skips fx_OTCKPI resolution and
-                            # measure re-homing.
-                            # Only unwrap when the inner object genuinely carries a
-                            # real dict `_default_config` — a plain MagicMock() tool
-                            # fixture (no `spec=`) auto-fabricates a truthy
-                            # `.kasal_tool` child mock too, and unconditionally
-                            # preferring it would shadow a mock's own directly-set
-                            # `_default_config` in tests that predate the CrewAI
-                            # harness.
-                            _inner = getattr(_raw_tool, "kasal_tool", None)
-                            tool = (
-                                _inner
-                                if isinstance(
-                                    getattr(_inner, "_default_config", None), dict
-                                )
-                                else _raw_tool
-                            )
+                        for tool in agent.tools or []:
+                            # Under the CrewAI harness agent.tools holds KasalToolAdapter
+                            # wrappers; the real tool (with _default_config) is .kasal_tool.
+                            # Unwrap only a real dict config (a bare MagicMock fakes one).
+                            _inner = getattr(tool, "kasal_tool", None)
+                            if isinstance(
+                                getattr(_inner, "_default_config", None), dict
+                            ):
+                                tool = _inner
                             if not hasattr(tool, "_default_config") or not isinstance(
                                 tool._default_config, dict
                             ):
@@ -1851,17 +1769,10 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if "start_time" in dir() else 0
-                logger.error(
+                # With the traceback: it names the timeout's true source (a run/agent
+                # deadline vs a DB call hung on a dropped idle connection).
+                logger.exception(
                     f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
-                )
-                # Diagnostic: the full stack of the TimeoutError names its true
-                # source (a run/agent max_execution_time deadline vs a DB
-                # operation hanging on a dropped idle connection) — the one thing
-                # the status logs don't reveal. Needed to fix the long-run timeout
-                # precisely instead of guessing.
-                logger.error(
-                    "Listener crew timeout — originating traceback:\n%s",
-                    traceback.format_exc(),
                 )
                 raise TimeoutError("Listener crew execution timed out")
             except Exception as e:
@@ -1891,7 +1802,7 @@ class FlowMethodFactory:
         method_condition: Any = None,
         condition_type: str = "NONE",
         checkpoint_output: Any = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create a stub method for a crew that should be skipped during checkpoint resume.
 
@@ -1920,7 +1831,9 @@ class FlowMethodFactory:
                 f"  📦 Checkpoint output provided: {str(checkpoint_output)[:200]}..."
             )
 
-        def get_cached_output(flow_instance, method_nm, crew_nm, prev_output=None):
+        def get_cached_output(
+            flow_instance: Any, method_nm: str, crew_nm: str, prev_output: Any = None
+        ) -> Any:
             """
             Retrieve cached output from persistence layer.
 
@@ -2042,7 +1955,7 @@ class FlowMethodFactory:
         if is_starting_point:
             # Create a starting point stub method that returns checkpoint output
             @start()
-            async def skipped_starting_method(self):
+            async def skipped_starting_method(self: Any) -> Any:
                 logger.info("=" * 80)
                 logger.info(
                     f"⏭️  CHECKPOINT RESUME: Skipping crew '{crew_name}' (sequence: {crew_sequence})"
@@ -2098,7 +2011,9 @@ class FlowMethodFactory:
         else:
             # Create a listener stub method that returns checkpoint output
             @listen(method_condition)
-            async def skipped_listener_method(self, previous_output=None):
+            async def skipped_listener_method(
+                self: Any, previous_output: Any = None
+            ) -> Any:
                 logger.info("=" * 80)
                 logger.info(
                     f"⏭️  CHECKPOINT RESUME: Skipping listener crew '{crew_name}' (sequence: {crew_sequence})"
@@ -2122,7 +2037,6 @@ class FlowMethodFactory:
                     result_output = get_cached_output(
                         self, method_name, crew_name, previous_output
                     )
-
                     if result_output is not None:
                         logger.info(
                             f"  ✅ Using cached/fallback output: {str(result_output)[:200]}..."
@@ -2137,7 +2051,6 @@ class FlowMethodFactory:
                             "crew_name": crew_name,
                             "message": f"Crew '{crew_name}' was skipped during checkpoint resume",
                         }
-
                 # Store in state to propagate to downstream crews
                 if hasattr(self, "state"):
                     self.state[method_name] = result_output
@@ -2146,9 +2059,7 @@ class FlowMethodFactory:
                     logger.info(
                         f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']"
                     )
-
                 _emit_checkpoint_restored(crew_name, result_output)
-
                 logger.info("=" * 80)
                 return result_output
 
@@ -2168,7 +2079,7 @@ class FlowMethodFactory:
         crew_sequence: int,
         callbacks: Optional[Dict[str, Any]] = None,
         group_context: Optional[Any] = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create an HITL gate method that pauses flow for human approval.
 
@@ -2197,7 +2108,7 @@ class FlowMethodFactory:
         """
 
         @listen(previous_method_name)
-        async def hitl_gate_method(self, previous_output=None):
+        async def hitl_gate_method(self: Any, previous_output: Any = None) -> Any:
             """HITL gate method - pauses flow for human approval."""
             # get_isolated_db_session, NOT routed_scoped_session: the gate runs
             # inside kickoff_async's concurrent asyncio.gather fan-out, and
@@ -2288,31 +2199,28 @@ class FlowMethodFactory:
                     logger.info("   Passing through to next step...")
                     logger.info("=" * 80)
 
-                    # Check if the user edited the config in the Config Editor.
-                    # If so, pass the edited version to the next crew instead of
-                    # the original crew output.
+                    # Hand on the edit saved under THIS approval, never one saved
+                    # at another gate (see gate_edits); otherwise the crew output.
                     try:
                         # Runs are ExecutionService's domain.
                         from src.services.execution.service import ExecutionService
+                        from src.services.flow_builder.modules.gate_edits import (
+                            edit_for_gate,
+                        )
 
                         execution = await ExecutionService(session).get_run_by_job_id(
                             job_id
                         )
-                        if execution and execution.checkpoint_data:
-                            edited_config = execution.checkpoint_data.get(
-                                "edited_config"
-                            )
-                            if edited_config:
-                                import json
-
-                                logger.info(
-                                    "   📝 Found edited_config in checkpoint_data — using user edits"
-                                )
-                                return json.dumps(edited_config)
+                        edited = edit_for_gate(
+                            getattr(execution, "checkpoint_data", None),
+                            gate_node_id,
+                            approved_for_gate.id,
+                        )
+                        if edited is not None:
+                            logger.info("   📝 Using the edit saved at this gate")
+                            return edited
                     except Exception as e:
                         logger.warning(f"   Could not check for edited_config: {e}")
-
-                    # No edited config — pass original output
                     return previous_output
 
             # Get previous crew name and output

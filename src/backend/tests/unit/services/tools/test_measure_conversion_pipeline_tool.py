@@ -627,6 +627,18 @@ class TestMeasureConversionPipelineTool:
         assert "Error" in result
         assert "YAML conversion failed" in result
 
+    @patch("src.services.converters.common.transformers.yaml.YAMLKPIParser")
+    def test_run_yaml_to_yaml_is_rejected_cleanly(self, mock_yaml_parser_class, tool):
+        """YAML -> YAML returns a clear error (the parser has no export_to_yaml)."""
+        mock_parser = Mock(spec=["parse_file"])
+        mock_yaml_parser_class.return_value = mock_parser
+        mock_parser.parse_file.return_value = Mock(kpis=[Mock()])
+
+        self._set_default_config(tool, inbound_connector="yaml", outbound_format="yaml")
+        result = tool._run(yaml_content="version: 0.1\nkpis: []")
+
+        assert result.startswith("Error: YAML -> YAML is not supported")
+
     # ========== Format Output Tests ==========
 
     def test_format_output_dax(self, tool):

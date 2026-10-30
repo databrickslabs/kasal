@@ -189,7 +189,11 @@ class TestRecoverSourcesWithLlm:
         # Interleaved raw-M / SQL entries keep their positions after concurrent run.
         entries = [
             {"table_name": "A", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
-            {"table_name": "B", "transpiled_sql": EMBEDDED_SQL, "validation_passed": "Yes"},
+            {
+                "table_name": "B",
+                "transpiled_sql": EMBEDDED_SQL,
+                "validation_passed": "Yes",
+            },
             {"table_name": "C", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
         ]
         fake = json.dumps({"success": True, "source_sql": "SELECT * FROM x.y"})

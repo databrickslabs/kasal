@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { ReactNode, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
@@ -11,7 +12,10 @@ interface ThemeProviderProps {
 // Custom ThemeProvider that uses Zustand for theme state management
 // This helps prevent styling conflicts that can cause the 'insertBefore' Node error
 const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const { currentTheme, initializeTheme } = useThemeStore();
+  const { currentTheme, initializeTheme } = useThemeStore(useShallow(state => ({
+    currentTheme: state.currentTheme,
+    initializeTheme: state.initializeTheme,
+  })));
   
   // Initialize theme on component mount
   useEffect(() => {

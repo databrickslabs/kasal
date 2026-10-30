@@ -27,7 +27,7 @@ class TestDetectLiveConnection:
         assert detect_live_connection(None) is None
         assert detect_live_connection("") is None
         assert detect_live_connection('Sql.Database("srv","db")') is None
-        assert detect_live_connection('let x = Table.FromRows(...) in x') is None
+        assert detect_live_connection("let x = Table.FromRows(...) in x") is None
 
 
 class TestDeriveLiveConnections:
@@ -42,11 +42,17 @@ class TestDeriveLiveConnections:
         }
         out = derive_live_connections(specs, mquery)
         assert out == {
-            "mv_live_sales": {"server": "srv", "database": "Sales Model", "table": "Live_Sales"}
+            "mv_live_sales": {
+                "server": "srv",
+                "database": "Sales Model",
+                "table": "Live_Sales",
+            }
         }
 
     def test_empty_when_no_live_connections(self):
         specs = {"Fact_OTC": SimpleNamespace(view_name="mv_otc")}
-        assert derive_live_connections(specs, {"Fact_OTC": 'Sql.Database("a","b")'}) == {}
+        assert (
+            derive_live_connections(specs, {"Fact_OTC": 'Sql.Database("a","b")'}) == {}
+        )
         assert derive_live_connections(specs, None) == {}
         assert derive_live_connections({}, {}) == {}

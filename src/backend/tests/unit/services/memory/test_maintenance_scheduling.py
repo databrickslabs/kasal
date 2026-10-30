@@ -99,8 +99,12 @@ class TestThrottle:
         assert maybe_run_memory_maintenance(group_a)["deleted"] == 2
         assert maybe_run_memory_maintenance(group_b)["deleted"] == 2
 
-    def test_interval_read_from_environment(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_MAINTENANCE_INTERVAL", "0")
+    def test_interval_is_an_engine_setting(self, tmp_path, monkeypatch):
+        from src.services.settings import engine_settings
+
+        monkeypatch.setitem(
+            engine_settings._snapshot, engine_settings.MEMORY_MAINTENANCE_INTERVAL, "0"
+        )
         memory = _with_duplicates(_memory(tmp_path))
         assert maybe_run_memory_maintenance(memory)["deleted"] == 2
         _with_duplicates(memory, text="another repeated fact")

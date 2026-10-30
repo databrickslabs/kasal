@@ -32,8 +32,8 @@ class DatabricksVolumeCallback(KasalCallback):
         task_key: Optional[str] = None,
         execution_name: Optional[str] = None,
         group_id: Optional[str] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the Databricks Volume callback.
 
@@ -72,7 +72,7 @@ class DatabricksVolumeCallback(KasalCallback):
         self.execution_name = execution_name
 
         # Initialize Databricks client
-        self._client = None
+        self._client: Optional[WorkspaceClient] = None
 
     async def _ensure_auth(self) -> None:
         """Ensure authentication context is initialized."""
@@ -254,7 +254,7 @@ class DatabricksVolumeCallback(KasalCallback):
 
         else:  # Default to text format
             if hasattr(output, "raw"):
-                return output.raw
+                return str(output.raw)
             return str(output)
 
     async def _upload_to_volume(self, file_path: str, content: str) -> str:
@@ -288,7 +288,9 @@ class DatabricksVolumeCallback(KasalCallback):
 
         installation = DatabricksAppInstallation.from_env()
         if installation.output_volume:
-            if self.volume_path.rstrip("/") != installation.output_path(self.group_id):
+            if self.volume_path.rstrip("/") != installation.output_path(
+                self.group_id or ""
+            ):
                 raise ValueError(
                     "Installed output storage must use this team's assigned directory"
                 )
@@ -308,7 +310,7 @@ class DatabricksVolumeCallback(KasalCallback):
             await asyncio.to_thread(
                 client.files.upload,
                 file_path=full_path,
-                content=io.BytesIO(content.encode("utf-8")),
+                contents=io.BytesIO(content.encode("utf-8")),
                 overwrite=True,
             )
             return full_path
@@ -363,7 +365,7 @@ class DatabricksVolumeCallback(KasalCallback):
         await asyncio.to_thread(
             client.files.upload,
             file_path=full_path,
-            content=binary_content,
+            contents=binary_content,
             overwrite=True,
         )
 

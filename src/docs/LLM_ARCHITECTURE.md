@@ -5,6 +5,7 @@ How an agent's model call is assembled and sent: which layer owns what, why the 
 - [The four layers](#the-four-layers)
 - [What each layer owns](#what-each-layer-owns)
 - [The path of one call](#the-path-of-one-call)
+- [Anthropic prompt caching](#anthropic-prompt-caching)
 - [Why the layering is drawn here](#why-the-layering-is-drawn-here)
 - [litellm is not on the LLM path](#litellm-is-not-on-the-llm-path)
 - [Rules for adding behavior](#rules-for-adding-behavior)
@@ -17,23 +18,21 @@ Kasal splits LLM work into four layers. Each one knows only about the layer bene
 | Layer | Location | Knows about |
 |-------|----------|-------------|
 | Facade | `src/backend/src/services/llm/manager.py` | The kasal API other code calls. Stable by contract — `LLMManager.completion` alone has 38+ call sites. |
-| Configuration | `src/backend/src/core/llm/` | The model catalog, tenants, credentials, endpoint URLs, telemetry, embeddings. |
-| Endpoint policy |  `src/backend/src/services/llm/handlers/` | How one serving endpoint misbehaves: retries, fallback, message sanitization, alternate APIs. |
-| Transport | `src/backend/kasal_engine/llm/` | The OpenAI-compatible wire protocol. No database, no tenants, no catalog. |
+| Configuration | `src/backend/src/services/llm/` | The model catalog, tenants, credentials, endpoint URLs, per-endpoint parameter rules, embeddings. A service: it reads the database. |
+| Endpoint policy | `src/backend/src/services/llm/handlers/` | How one serving endpoint misbehaves: retries, fallback, message sanitization, alternate APIs. |
+| Transport | `src/backend/src/core/llm/transport/` | The OpenAI-compatible wire protocol. No database, no tenants, no catalog. |
 
-Only two directories hold LLM code: `src/core/llm/` for everything kasal-specific (handlers included, as a subpackage), and `kasal_engine/llm/` for the transport.
+Beside them, `src/backend/src/core/llm/` holds what hangs off an LLM call without touching the database: usage telemetry, context-limit phrasings, JSON extraction and the subprocess token.
 
-### Why the engine is a separate tree
+### Why the transport sits in `core/`
 
-`kasal_engine` is the vendored package that replaced crewAI. It sits next to `src/` — `src/deploy.py` copies it as a sibling — because **the dependency runs one way**: the engine imports nothing from `src`. No FastAPI, no SQLAlchemy, no tenant context.
+The transport is first-party code in `src/backend/src/core/llm/transport/`, next to the agent runtime that calls it (`services/execution/runtime/`). It once shipped as a separate package; that package no longer exists.
 
-That rule is worth keeping because it is *checkable*: `grep -r "from src\." kasal_engine/` returns nothing, so a violation is visible the moment it appears. Fold the transport into `src/core/llm/` and the rule becomes a convention no one can grep for — and the first `src.services` import sliding into the transport layer goes unnoticed. Silent drift of exactly that kind is what produced the duplication described below.
-
-Note also that `kasal_engine/llm` is not a standalone library: it is one subpackage of the engine, and `kasal_engine/memory/memory.py` refers to `BaseLLM`. Moving only `llm/` would make the engine import from `src` — the inversion.
+What the separate tree bought is kept by the layering instead: **the dependency runs one way**. The transport imports nothing from `services`, `repositories` or `db` — no SQLAlchemy, no tenant context. That is checkable, not a convention: the import-linter contract "`core/` never imports services" (`[tool.importlinter]` in `src/backend/pyproject.toml`, run by `run_tests.py` and in CI) fails the build the moment a `src.services` import slides into the transport. Silent drift of exactly that kind is what produced the duplication described below.
 
 ## What each layer owns
 
-### Transport: `kasal_engine/llm/`
+### Transport: `src/core/llm/transport/`
 
 The engine is where a request becomes HTTP. It is model-agnostic and tenant-agnostic by design.
 
@@ -47,20 +46,27 @@ The engine is where a request becomes HTTP. It is model-agnostic and tenant-agno
 | `instructor.py` | `InternalInstructor`: structured output by prompting, with per-call credentials. |
 | `constants.py` | Context-window sizes and the usage ratio. |
 | `exceptions.py` | `CONTEXT_LIMIT_ERRORS` and the context-length exception. |
+| `budget.py`, `request_deadline.py` | The execution budget for one call (tool rounds, `MAX_TOOL_ROUNDS = 15`, and wall clock), and the deadline carried through nested retries and streamed requests. |
+| `tool_rounds.py` | Executing one round of tool calls with the budget check, shared by the Chat Completions and Responses API loops. |
+| `response_parsing.py` | Pure helpers that pull token counts, tool calls and reasoning items out of a provider response. |
+| `rpm.py` | Requests-per-minute throttling for the `max_rpm` setting on agents and crews. |
+| `anthropic_client.py`, `anthropic_messages.py` | The native Claude Messages API adapter, reusing the same tool loop, budgets and events. |
+| `prompt_cache.py` | Where Anthropic prompt-caching breakpoints go for each endpoint, and stripping them from endpoints that reject them. See [Anthropic prompt caching](#anthropic-prompt-caching). |
 
 Behavior that belongs here is anything true of *every* model on an OpenAI-compatible endpoint: the tool-call loop, budget enforcement, usage counting, event emission.
 
-### Configuration: `src/core/llm/`
+### Configuration: `src/services/llm/`
 
 This layer answers questions the engine deliberately cannot: *which* model, on *whose* credentials, at *which* URL.
 
 | Module | Responsibility |
 |--------|----------------|
+| `params.py` | What gets sent with a request, decided in one place: the per-model `ModelConfig.params` declaration turned into request parameters. |
 | `embeddings.py` | Embeddings — a different protocol entirely: direct HTTP to Databricks, Ollama, Google or OpenAI, with batching, auth resolution and a per-provider circuit breaker. Never touches the engine's LLM. |
-| `usage_telemetry.py` | Forwards per-call token usage to Databricks logfood, by subscribing to the engine's `LLMCallCompletedEvent`. |
-| `context_limits.py` | The single list of error phrasings that mean "context window overflow", extending the engine's own list. |
+| `src/core/llm/usage_telemetry.py` | Forwards per-call token usage to Databricks logfood, by subscribing to the engine's `LLMCallCompletedEvent`. |
+| `src/core/llm/context_limits.py` | The single list of error phrasings that mean "context window overflow", extending the engine's own list. |
 
-### Endpoint policy: `src/core/llm/handlers/`
+### Endpoint policy: `src/services/llm/handlers/`
 
 Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 
@@ -68,10 +74,9 @@ Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 |-------|----------------|
 | `DatabricksRetryLLM` | Retry and backoff (with longer waits for rate limits), OBO token refresh, cross-model fallback, and Databricks message sanitization — empty assistant content, Llama message format, Gemini system-prompt merging and `$ref` resolution. |
 | `DatabricksResponsesLLM` | The native OpenAI Responses API for Databricks-hosted OpenAI endpoints, served under a different base URL than chat completions. Preserves the `phase` field on assistant output items across turns, without which Codex degrades into early text-only responses. |
+| `VLLMFunctionCallingLLM` | Self-hosted vLLM: states `tool_choice="auto"` explicitly when tools are offered, rather than inheriting whatever the endpoint defaults to. Overridable per model with the **Tool choice** field in Configuration → Models (`params.tool_choice`). |
 
-Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it — `databricks_gpt_oss_handler.py` sat in the tree long after the models it existed for were pruned.
-
-| `VLLMFunctionCallingLLM` | Self-hosted vLLM: states `tool_choice="auto"` explicitly when tools are offered, rather than inheriting whatever the endpoint defaults to. Overridable per deployment with `VLLM_TOOL_CHOICE`. |
+Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it: a handler named for the GPT-OSS models sat in the tree long after those models were pruned.
 
 ### A handler may declare tool policy; it must not decide for the model
 
@@ -96,7 +101,7 @@ Five entry points, and they are the whole public surface:
 | `completion()` | A standalone call returning text — intent detection, generation services, guardrails. |
 | `completion_with_usage()` | A call needing Anthropic prompt caching and the `usage` block back. The only direct litellm caller left in kasal. |
 | `configure_kasal_llm()` / `get_llm()` | A configured `LLM` for crew, flow and chat execution. |
-| `get_embedding()` / `get_embeddings()` | Embedding vectors; thin delegates to `src/core/llm/embeddings.py`. |
+| `get_embedding()` / `get_embeddings()` | Embedding vectors; thin delegates to `src/services/llm/embeddings.py`. |
 
 ## The path of one call
 
@@ -108,6 +113,43 @@ Building an LLM for an agent runs down the layers in order:
 4. The right class is chosen: `DatabricksRetryLLM` for Databricks chat models, `DatabricksResponsesLLM` for the Responses API, `VLLMFunctionCallingLLM` for self-hosted vLLM, plain `LLM` otherwise.
 5. The engine sends it: trim the conversation if it approaches the window, clamp the output budget so `prompt + max_tokens` fits, run tool-call rounds, emit `LLMCallStartedEvent` / `LLMCallCompletedEvent`, accumulate usage. If the server still rejects the prompt as too long — the estimate is a chars-per-token guess, and JSON-escaped Cyrillic once measured 1.4 against the assumed 3.4 — the round is retried behind a compaction sized by the server's own count (`ContextCompactionEvent`, strategy `tool_result_stub_after_rejection`); only when nothing is left to stub does `LLMContextLengthExceededError` reach the executor.
 6. `usage_telemetry` sees the completion event and forwards token counts.
+
+## Tracing a standalone generation call
+
+A `completion()` made outside a crew, flow or chat run still emits step 5's events, but nothing writes them down unless a bridge is listening for that call. Generation services that should show up as run activity use the same pipeline as runs, not hand-written trace rows:
+
+1. Open a run first: `generation_run.open_run(...)` creates a RUNNING `executionhistory` row, so the job id exists before the model is called.
+2. Wrap the calls in `otel_tracing.generation_scope.generation_trace(job_id, group_context, lane, step)`. It registers a **scoped** `OTelEventBridge` (it only picks up events whose context carries this `generation_job_id`, so concurrent generations never mix) over a local `TracerProvider` with a `KasalDBSpanExporter`. Each `llm_call` / `llm_response` row carries the prompt, the response, the model, token usage and timing, and is stamped with the caller's group. `generation_step(label)` puts a sub-step (a retry, say) under its own task.
+3. Close the run with the answer as its result: `generation_run.close_run(...)`.
+
+Two callers do this today:
+
+| Caller | Start | Result key | Lane / step |
+|---|---|---|---|
+| Builder turns (Agent Builder, Flow Builder chat) | `POST /builder-generations/{crew,flow}` | `builder_result` | "Agent Builder" / "Create the crew plan" |
+| Skill drafts (`/skill …` or "create a skill …" in chat) | `POST /skills/drafts` | `skill_draft` | "Skills" / "Draft the skill"; a validation retry is "Fix validation errors" |
+
+Both answer `202` with the job id before any LLM work and run the generation in the background. The frontend polls `GET /executions/{job_id}` for the result (`api/execution/runResult.ts`) and puts the job id on the chat's activity step immediately, so expanding the run activity under the prompt shows the LLM request while the model is still working, then its response. `POST /skills/draft` still answers synchronously and is traced the same way; its `job_id` arrives with the draft.
+
+## Anthropic prompt caching
+
+Every tool round resends the system prompt, the tool schemas and the whole conversation so far. Claude caches a prompt prefix only where the request marks it with `cache_control: {"type": "ephemeral"}`, so the transport places those markers itself, in `src/backend/src/core/llm/transport/prompt_cache.py`. `cache_mode()` picks the dialect per endpoint:
+
+| Endpoint | Mode | Where the markers go |
+|---|---|---|
+| Native Messages API (provider `anthropic`) | `anthropic` | On the native request built by `anthropic_messages.message_params`, including `tool_result` blocks. Thinking blocks are never marked, and replayed signed blocks are copied rather than changed |
+| Databricks-hosted Claude over the chat-completions API (provider `databricks`, endpoint name containing `claude`) | `databricks` | On text and image content items; when the conversation ends in tool results, on the preceding assistant message's last `tool_calls` entry, because a `tool` message has no documented field |
+| Everything else, and the Responses API | None | No markers. CrewAI's `cache_breakpoint` hints are stripped, because OpenAI-compatible servers return 400 on the unknown field |
+
+A request carries at most 4 breakpoints, Anthropic's limit, and markers the caller already set count against it. In order, they go on:
+
+1. The stable prefix: the last system block. Tools render before the system prompt, so one marker caches both. With no system prompt, the native path marks the last tool definition instead.
+2. The rolling tail: the end of the conversation as sent. The next round's prompt starts with this one, so its marker becomes a read point.
+3. CrewAI's hints: the `cache_breakpoint` key CrewAI sets on the initial task prompt becomes a marker on that user message.
+
+An endpoint that cannot be identified as Claude gets no markers: a marker on a non-Claude endpoint is a 400, while a missing one only costs money. A prefix shorter than the model's minimum cacheable length (512 to 4,096 tokens) is not an error; the server ignores the marker.
+
+Cache usage is counted on both paths. `response_parsing.py` reads cache reads from `prompt_tokens_details.cached_tokens` or, for Databricks-hosted Claude, Anthropic's top-level `cache_read_input_tokens`, and cache writes from `cache_creation_input_tokens`. `BaseLLM` accumulates them as `cached_prompt_tokens` and `cache_creation_tokens`, and `OTelEventBridge` records both on each `llm_response` span as `kasal.extra.cached_prompt_tokens` and `kasal.extra.cache_creation_tokens`. On the native path, `prompt_tokens` is the whole prompt, including both cache buckets.
 
 ## Why the layering is drawn here
 
@@ -125,7 +167,7 @@ Each layer above therefore owns a concern *completely*. Where two layers appeare
 
 ## litellm is not on the LLM path
 
-litellm remains a dependency, but the engine does not use it. It reaches exactly one function: `LLMManager.completion_with_usage`.
+litellm remains a dependency, but the engine does not use it. On the LLM request path it reaches exactly one function: `LLMManager.completion_with_usage`. Off that path, two other places touch it: the memory storage adapter (`services/memory/storage/adapter.py`) calls `litellm.embedding`, and `DatabricksResponsesLLM` reuses the configured `litellm.cache` object as a plain key/value store for Responses API calls.
 
 Two consequences worth internalizing:
 
@@ -139,9 +181,9 @@ Two consequences worth internalizing:
 
 Where new behavior belongs follows from what it needs to know:
 
-- **True for every OpenAI-compatible model?** The engine, in `completion.py` or `base.py`. Budget enforcement, retries of protocol-level errors, response parsing.
-- **Needs the catalog, a tenant, credentials or a URL?** `src/core/llm/`.
-- **True of one serving endpoint?** A handler subclass in `src/core/llm/handlers/`, named for the endpoint rather than the model.
+- **True for every OpenAI-compatible model?** The transport, in `src/core/llm/transport/` (`completion.py` or `base.py`). Budget enforcement, retries of protocol-level errors, response parsing.
+- **Needs the catalog, a tenant, credentials or a URL?** `src/services/llm/`.
+- **True of one serving endpoint?** A handler subclass in `src/services/llm/handlers/`, named for the endpoint rather than the model.
 - **A new entry point for application code?** `LLMManager`, delegating downward.
 
 Two checks before adding a workaround:

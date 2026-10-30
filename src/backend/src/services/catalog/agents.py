@@ -7,11 +7,6 @@ from src.core.base_service import BaseService
 from src.models.agent import Agent
 from src.repositories.agent_repository import AgentRepository
 from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
-from src.utils.sensitive_data_utils import (
-    decrypt_sensitive_fields,
-    encrypt_sensitive_fields,
-    safe_log_tool_configs,
-)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -49,8 +44,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
     """
     Service for Agent model with business logic.
 
-    Security: This service handles encryption/decryption of sensitive fields
-    in tool_configs to protect credentials stored in the database.
+    Security: ``agents.tool_configs`` is a ``SensitiveJSON`` column, so the
+    credentials in it are encrypted on every write and decrypted on load. This
+    service works with plaintext and must never encrypt or decrypt them itself.
     """
 
     def __init__(
@@ -72,131 +68,83 @@ class AgentService(BaseService[Agent, AgentCreate]):
         self.model_class = model_class
         self.repository = repository_class(session)
 
-    def _decrypt_agent_tool_configs(self, agent: Optional[Agent]) -> Optional[Agent]:
-        """
-        Decrypt sensitive fields in agent's tool_configs after retrieval.
-
-        Args:
-            agent: Agent with potentially encrypted tool_configs
-
-        Returns:
-            Agent with decrypted tool_configs (in-memory only)
-        """
-        if agent and agent.tool_configs:
-            try:
-                agent.tool_configs = decrypt_sensitive_fields(agent.tool_configs)
-            except Exception as e:
-                logger.error(
-                    f"Failed to decrypt tool_configs for agent {agent.id}: {e}"
-                )
-        return agent
-
-    def _encrypt_tool_configs_in_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Encrypt sensitive fields in tool_configs before storage.
-
-        Args:
-            data: Dictionary containing agent data with tool_configs
-
-        Returns:
-            Dictionary with encrypted tool_configs
-        """
-        if "tool_configs" in data and data["tool_configs"]:
-            try:
-                data["tool_configs"] = encrypt_sensitive_fields(data["tool_configs"])
-                logger.debug(safe_log_tool_configs(data["tool_configs"], "Encrypted "))
-            except Exception as e:
-                logger.error(f"Failed to encrypt tool_configs: {e}")
-                raise
-        return data
-
     async def get(self, id: str) -> Optional[Agent]:
         """
-        Get an agent by ID with decrypted tool_configs.
+        Get an agent by ID.
 
         Args:
             id: ID of the agent to get
 
         Returns:
-            Agent if found, else None (with decrypted tool_configs)
+            Agent if found, else None
         """
-        agent = await self.repository.get(id)
-        return self._decrypt_agent_tool_configs(agent)
+        return await self.repository.get(id)
 
     async def get_with_group_check(
-        self, id: str, group_context: GroupContext
+        self, id: str, group_context: Optional[GroupContext]
     ) -> Optional[Agent]:
         """
-        Get an agent by ID with group verification and decrypted tool_configs.
+        Get an agent by ID with group verification.
 
         Args:
             id: ID of the agent to get
             group_context: Group context for verification
 
         Returns:
-            Agent if found and belongs to user's group, else None (with decrypted tool_configs)
+            Agent if found and belongs to user's group, else None
         """
         agent = await self.repository.get(id)
         if agent and group_context and group_context.group_ids:
             # Check if agent belongs to one of the user's groups
             if agent.group_id not in group_context.group_ids:
                 return None  # Return None to trigger 404, not 403 (avoid information leakage)
-        return self._decrypt_agent_tool_configs(agent)
+        return agent
 
     async def create(self, obj_in: AgentCreate) -> Agent:
         """
-        Create a new agent with encrypted tool_configs.
+        Create a new agent.
 
         Args:
             obj_in: Agent data for creation
 
         Returns:
-            Created agent (with decrypted tool_configs for response)
+            Created agent
         """
-        data = obj_in.model_dump()
-        data = self._encrypt_tool_configs_in_data(data)
-        agent = await self.repository.create(data)
-        self._decrypt_agent_tool_configs(agent)
-        return agent
+        return await self.repository.create(obj_in.model_dump())
 
     async def find_by_name(self, name: str) -> Optional[Agent]:
         """
-        Find an agent by name with decrypted tool_configs.
+        Find an agent by name.
 
         Args:
             name: Name to search for
 
         Returns:
-            Agent if found, else None (with decrypted tool_configs)
+            Agent if found, else None
         """
-        agent = await self.repository.find_by_name(name)
-        return self._decrypt_agent_tool_configs(agent)
+        return await self.repository.find_by_name(name)
 
     async def find_all(self) -> List[Agent]:
         """
-        Find all agents with decrypted tool_configs.
+        Find all agents.
 
         Returns:
-            List of all agents (with decrypted tool_configs)
+            List of all agents
         """
-        agents = await self.repository.find_all()
-        for agent in agents:
-            self._decrypt_agent_tool_configs(agent)
-        return agents
+        return await self.repository.find_all()
 
     async def update_with_partial_data(
         self, id: str, obj_in: AgentUpdate
     ) -> Optional[Agent]:
         """
         Update an agent with partial data, only updating fields that are set.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             id: ID of the agent to update
             obj_in: Schema with fields to update
 
         Returns:
-            Updated agent if found, else None (with decrypted tool_configs)
+            Updated agent if found, else None
         """
         # Exclude unset fields (None) from update
         update_data = _keep_explicit_clears(
@@ -206,20 +154,13 @@ class AgentService(BaseService[Agent, AgentCreate]):
             # No fields to update
             return await self.get(id)
 
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
-        agent = await self.repository.update(id, update_data)
-        return self._decrypt_agent_tool_configs(agent)
+        return await self.repository.update(id, update_data)
 
     async def update_with_group_check(
         self, id: str, obj_in: AgentUpdate, group_context: GroupContext
     ) -> Optional[Agent]:
         """
         Update an agent with group verification.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             id: ID of the agent to update
@@ -227,7 +168,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
             group_context: Group context for verification
 
         Returns:
-            Updated agent if found and belongs to user's group, else None (with decrypted tool_configs)
+            Updated agent if found and belongs to user's group, else None
         """
         # First verify the agent belongs to the user's group
         agent = await self.get_with_group_check(id, group_context)
@@ -242,41 +183,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
             # No fields to update
             return agent
 
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
-        agent = await self.repository.update(id, update_data)
-        return self._decrypt_agent_tool_configs(agent)
-
-    async def update_limited_fields(
-        self, id: str, obj_in: AgentLimitedUpdate
-    ) -> Optional[Agent]:
-        """
-        Update only limited fields of an agent.
-        Encrypts sensitive fields in tool_configs before storage.
-
-        Args:
-            id: ID of the agent to update
-            obj_in: Schema with limited fields to update
-
-        Returns:
-            Updated agent if found, else None (with decrypted tool_configs)
-        """
-        # Exclude unset fields (None) from update
-        update_data = obj_in.model_dump(exclude_none=True)
-        if not update_data:
-            # No fields to update
-            return await self.get(id)
-
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
-        agent = await self.repository.update(id, update_data)
-        return self._decrypt_agent_tool_configs(agent)
+        return await self.repository.update(id, update_data)
 
     #: The only fields a prompt optimiser may rewrite. An allowlist rather than an
     #: arbitrary dict: this path exists for GEPA, and a typo'd or hostile key must
@@ -287,7 +194,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
         self,
         id: str,
         fields: Dict[str, str],
-        group_context: GroupContext,
+        group_context: Optional[GroupContext],
     ) -> bool:
         """Rewrite an agent's prompt TEXT, verifying it belongs to the caller's group.
 
@@ -327,7 +234,6 @@ class AgentService(BaseService[Agent, AgentCreate]):
     ) -> Optional[Agent]:
         """
         Update limited fields of an agent with group verification.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             id: ID of the agent to update
@@ -335,7 +241,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
             group_context: Group context for verification
 
         Returns:
-            Updated agent if found and belongs to user's group, else None (with decrypted tool_configs)
+            Updated agent if found and belongs to user's group, else None
         """
         # First verify the agent belongs to the user's group
         agent = await self.get_with_group_check(id, group_context)
@@ -348,16 +254,12 @@ class AgentService(BaseService[Agent, AgentCreate]):
             # No fields to update
             return agent
 
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
-        agent = await self.repository.update(id, update_data)
-        return self._decrypt_agent_tool_configs(agent)
+        return await self.repository.update(id, update_data)
 
     @staticmethod
-    async def _delete_agents_and_tasks(session, agent_ids: List[str]) -> None:
+    async def _delete_agents_and_tasks(
+        session: AsyncSession, agent_ids: List[str]
+    ) -> None:
         """
         Delete the given agents and the tasks assigned to them, on ``session``.
 
@@ -477,43 +379,34 @@ class AgentService(BaseService[Agent, AgentCreate]):
     ) -> Agent:
         """
         Create a new agent with group isolation.
-        Encrypts sensitive fields in tool_configs before storage.
 
         Args:
             obj_in: Agent data for creation
             group_context: Group context from headers
 
         Returns:
-            Created agent with group information (with decrypted tool_configs for response)
+            Created agent with group information
         """
         # Convert schema to dict and add group fields
         agent_data = obj_in.model_dump()
         agent_data["group_id"] = group_context.primary_group_id
         agent_data["created_by_email"] = group_context.group_email
 
-        # Encrypt sensitive fields in tool_configs before storage
-        agent_data = self._encrypt_tool_configs_in_data(agent_data)
-
         # Create agent using repository (pass dict, not object)
-        agent = await self.repository.create(agent_data)
-        self._decrypt_agent_tool_configs(agent)
-        return agent
+        return await self.repository.create(agent_data)
 
     async def find_by_group(self, group_context: GroupContext) -> List[Agent]:
         """
-        Find all agents for a specific group with decrypted tool_configs.
+        Find all agents for a specific group.
 
         Args:
             group_context: Group context from headers
 
         Returns:
-            List of agents for the specified group (with decrypted tool_configs)
+            List of agents for the specified group
         """
         if not group_context.group_ids:
             # If no group context, return empty list for security
             return []
 
-        agents = await self.repository.find_by_group_ids(group_context.group_ids)
-        for agent in agents:
-            self._decrypt_agent_tool_configs(agent)
-        return agents
+        return await self.repository.find_by_group_ids(group_context.group_ids)

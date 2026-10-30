@@ -78,7 +78,6 @@ environment_vars:
   POSTGRES_PASSWORD: <valueFrom lakebase-pat>
   POSTGRES_DB: 'kasal'
   POSTGRES_PORT: '5432'
-  LAKEBASE_INSTANCE_NAME: 'kasal-db'           # <-- must match Step 1
 
 resources:
   - name: lakebase-server
