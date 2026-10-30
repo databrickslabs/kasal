@@ -64,11 +64,16 @@ class TestFold:
         assert "COALESCE" in result
         assert "WHERE" in result
 
-    def test_no_effective_transforms_returns_base(self, folder: MTransformFolder):
-        """Steps list with an unrecognised step_type that produces no transforms."""
+    def test_unrecognised_step_surfaced_as_todo(self, folder: MTransformFolder):
+        """An unrecognised step produces no SQL transform but is NOT silently
+        dropped (S5): the base SQL is preserved and the step is appended as a
+        ``-- TODO:`` note and recorded on ``transform_todos``."""
         sql = "SELECT a FROM t"
         steps = [MStep(step_type="UnknownType", raw_expression="something")]
-        assert folder.fold(sql, steps, []) == sql
+        out = folder.fold(sql, steps, [])
+        assert out.startswith(sql)
+        assert "-- TODO:" in out
+        assert folder.transform_todos and "something" in folder.transform_todos[0]
 
     def test_union_arms_with_transforms(self, folder: MTransformFolder):
         sql = "SELECT a, b FROM t1 UNION SELECT a, b FROM t2"

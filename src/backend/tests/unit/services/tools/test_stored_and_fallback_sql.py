@@ -10,13 +10,8 @@ Apps security scan follow-up (2026-10-28):
   into the sanitized one.
 """
 
-import pytest
-
 from src.services.tools.databricks_dashboard_creator_tool import (
     DatabricksDashboardCreatorTool,
-)
-from src.services.tools.mquery_conversion_pipeline_tool import (
-    MqueryConversionPipelineTool,
 )
 
 
@@ -37,19 +32,3 @@ class TestDashboardDatasetSql:
         assert self._query("main.sales.m`v", None) == (
             "SELECT * FROM `main`.`sales`.`m``v` LIMIT 1000"
         )
-
-
-class TestMqueryCountFallback:
-    def _fallback(self, config, table):
-        return MqueryConversionPipelineTool()._extract_select_body(
-            "DESCRIBE x", config, table
-        )
-
-    def test_it_counts_the_table_the_rows_were_loaded_into(self):
-        cfg = {"target_catalog": "main", "target_schema": "sch"}
-        assert self._fallback(cfg, "My Table") == "SELECT * FROM main.sch.my_table"
-
-    def test_a_hostile_config_prefix_is_refused(self):
-        cfg = {"target_catalog": "main.x UNION SELECT 1", "target_schema": "sch"}
-        with pytest.raises(ValueError):
-            self._fallback(cfg, "t")

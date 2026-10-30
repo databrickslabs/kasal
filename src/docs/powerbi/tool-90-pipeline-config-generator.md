@@ -123,7 +123,6 @@ See the [end-to-end UCMV migration guide](./ucmv-migration-guide.md) for the ful
 
 - [Power BI integration hub](./README.md)
 - [Authentication and service principal setup](./01-authentication-setup.md)
-- [Tool 89 - config generator](./tool-89-config-generator.md)
 - [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
 - [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
 

@@ -22,6 +22,9 @@ And one STANDALONE crew, outside that flow:
      models and re-tries only the measures that failed then, using today's improved
      transpiler. Run manually or on a schedule after shipping transpiler improvements.
      Read-only: it proposes re-transpilation candidates, never modifies metric views.
+ 11. UCMV Drift Monitor              (tool 98) — compares DEPLOYED metric views with
+     the CURRENT Power BI model and proposes a patch that only adds new / updates
+     changed measures on top of the verified YAML. Read-only.
 
 Credential/input placeholders are left empty so the user only needs to fill in
 their workspace_id, client_id, client_secret, catalog, schema, warehouse_id etc.
@@ -30,7 +33,7 @@ All tool logic and agent configurations are ready to run.
 
 import logging
 import uuid
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,12 +44,75 @@ from src.models.crew import Crew
 from src.models.group import Group
 from src.models.group_tool import GroupTool
 from src.models.task import Task
+from src.seeds.bi_specialist_crew_builders import (
+    DEFAULT_EMBEDDER,
+    DEFAULT_TASK_CONFIG,
+    _agent_node,
+    _agent_to_task_edge,
+    _task_node,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_DRIFT_AGENT as UCMV_DRIFT_AGENT,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_DRIFT_AGENT_ID as UCMV_DRIFT_AGENT_ID,
+)
+from src.seeds.bi_specialist_maintenance_crews import UCMV_DRIFT_CREW as UCMV_DRIFT_CREW
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_DRIFT_CREW_ID as UCMV_DRIFT_CREW_ID,
+)
+from src.seeds.bi_specialist_maintenance_crews import UCMV_DRIFT_TASK as UCMV_DRIFT_TASK
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_DRIFT_TASK_ID as UCMV_DRIFT_TASK_ID,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_REEVAL_AGENT as UCMV_REEVAL_AGENT,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_REEVAL_AGENT_ID as UCMV_REEVAL_AGENT_ID,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_REEVAL_CREW as UCMV_REEVAL_CREW,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_REEVAL_CREW_ID as UCMV_REEVAL_CREW_ID,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_REEVAL_TASK as UCMV_REEVAL_TASK,
+)
+from src.seeds.bi_specialist_maintenance_crews import (
+    UCMV_REEVAL_TASK_ID as UCMV_REEVAL_TASK_ID,
+)
+from src.seeds.bi_specialist_output_crews import DASHBOARD_AGENT as DASHBOARD_AGENT
+from src.seeds.bi_specialist_output_crews import (
+    DASHBOARD_AGENT_ID as DASHBOARD_AGENT_ID,
+)
+from src.seeds.bi_specialist_output_crews import DASHBOARD_CREW as DASHBOARD_CREW
+from src.seeds.bi_specialist_output_crews import DASHBOARD_CREW_ID as DASHBOARD_CREW_ID
+from src.seeds.bi_specialist_output_crews import DASHBOARD_TASK as DASHBOARD_TASK
+from src.seeds.bi_specialist_output_crews import DASHBOARD_TASK_ID as DASHBOARD_TASK_ID
+from src.seeds.bi_specialist_output_crews import GENIE_CFG_AGENT as GENIE_CFG_AGENT
+from src.seeds.bi_specialist_output_crews import (
+    GENIE_CFG_AGENT_ID as GENIE_CFG_AGENT_ID,
+)
+from src.seeds.bi_specialist_output_crews import GENIE_CFG_CREW as GENIE_CFG_CREW
+from src.seeds.bi_specialist_output_crews import GENIE_CFG_CREW_ID as GENIE_CFG_CREW_ID
+from src.seeds.bi_specialist_output_crews import GENIE_CFG_TASK as GENIE_CFG_TASK
+from src.seeds.bi_specialist_output_crews import GENIE_CFG_TASK_ID as GENIE_CFG_TASK_ID
+from src.seeds.bi_specialist_output_crews import GENIE_GEN_AGENT as GENIE_GEN_AGENT
+from src.seeds.bi_specialist_output_crews import (
+    GENIE_GEN_AGENT_ID as GENIE_GEN_AGENT_ID,
+)
+from src.seeds.bi_specialist_output_crews import GENIE_GEN_CREW as GENIE_GEN_CREW
+from src.seeds.bi_specialist_output_crews import GENIE_GEN_CREW_ID as GENIE_GEN_CREW_ID
+from src.seeds.bi_specialist_output_crews import GENIE_GEN_TASK as GENIE_GEN_TASK
+from src.seeds.bi_specialist_output_crews import GENIE_GEN_TASK_ID as GENIE_GEN_TASK_ID
 
 # Tools required by the PBI migration pipeline — pre-enabled for bi-specialist.
 # These become GroupTool rows (explicit (group_id, tool_id) eligibility), so a
 # tool missing here is filtered out of the workspace's Tools list and the crew UI.
-# 97 = UCMV Re-evaluation (the standalone recovery crew below).
-BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95, 97]
+# 97 = UCMV Re-evaluation, 98 = UCMV Drift Monitor (the standalone crews below).
+BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95, 97, 98]
 
 logger = logging.getLogger(__name__)
 
@@ -69,96 +135,30 @@ BI_GROUP = {
     "created_by_email": "system@kasal.ai",
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# Neutral, ready-to-edit example of the UC Metric View Generator's optional
+# `domain_context` field: free-text model knowledge fed verbatim into the DAX→SQL
+# translation prompt so the LLM translates with the model's business semantics.
+# This is a TEMPLATE showing the shape — replace each line with your own model's
+# calendar, vocabulary, naming conventions and dimension members.
+EXAMPLE_DOMAIN_CONTEXT = """# Domain context — <your model / report name>
 
+Fiscal calendar: describe it (e.g. 4-4-5). Define how "YTD <year>" is computed
+(e.g. periods 001..latest closed month) and any period-column overrides
+(e.g. latest_month_label → IsCurrentMonth).
 
-def _agent_node(agent_id: str, agent_data: dict, x: int, y: int) -> dict:
-    """Build a ReactFlow agentNode for the crew's visual graph."""
-    return {
-        "id": f"agent-{agent_id}",
-        "type": "agentNode",
-        "position": {"x": x, "y": y},
-        "data": {
-            "label": agent_data["role"],
-            "role": agent_data["role"],
-            "goal": agent_data["goal"],
-            "backstory": agent_data["backstory"],
-            "tools": agent_data.get("tools", []),
-            "tool_configs": agent_data.get("tool_configs"),
-            "agentId": agent_id,
-            "taskId": None,
-            "llm": agent_data.get("llm", "databricks-claude-sonnet-4-5"),
-            "function_calling_llm": None,
-            "max_iter": agent_data.get("max_iter", 25),
-            "max_rpm": agent_data.get("max_rpm", 10),
-            "max_execution_time": agent_data.get("max_execution_time", 300),
-            "verbose": agent_data.get("verbose", True),
-            "allow_delegation": agent_data.get("allow_delegation", False),
-            "cache": agent_data.get("cache", True),
-            "memory": agent_data.get("memory", True),
-            "embedder_config": agent_data.get("embedder_config"),
-            "allow_code_execution": False,
-            "code_execution_mode": "safe",
-            "max_retry_limit": agent_data.get("max_retry_limit", 3),
-            "use_system_prompt": True,
-            "respect_context_window": True,
-            "type": "agent",
-            "inject_date": True,
-        },
-    }
+Vocabulary / acronyms (one per line):
+- <ACRONYM> = <what it means in this model>
+- <ACRONYM> = <what it means in this model>
 
+Measure / naming conventions:
+- Scenario suffixes, e.g. "… PY" = prior year, "… Bud" = budget, "… Act" = actual.
+- Units, e.g. volumes are counts unless suffixed _hl (hectolitres).
+- Business rules, e.g. prefer booked/stored columns over recomputing from components.
 
-def _task_node(task_id: str, agent_id: str, task_data: dict, x: int, y: int) -> dict:
-    """Build a ReactFlow taskNode for the crew's visual graph."""
-    return {
-        "id": f"task-{task_id}",
-        "type": "taskNode",
-        "position": {"x": x, "y": y},
-        "data": {
-            "label": task_data["name"],
-            "tools": task_data.get("tools", []),
-            "tool_configs": task_data.get("tool_configs"),
-            "agentId": None,
-            "taskId": task_id,
-            "llm": None,
-            "type": "task",
-            "description": task_data["description"],
-            "expected_output": task_data["expected_output"],
-            "config": task_data.get("config", {}),
-            "async_execution": task_data.get("async_execution", False),
-            "context": task_data.get("context", []),
-            "human_input": task_data.get("config", {}).get("human_input", False),
-            "markdown": False,
-        },
-    }
-
-
-def _agent_to_task_edge(crew_slug: str, agent_id: str, task_id: str) -> dict:
-    return {
-        "id": f"edge-{crew_slug}-agent-to-task",
-        "source": f"agent-{agent_id}",
-        "target": f"task-{task_id}",
-    }
-
-
-DEFAULT_EMBEDDER = {
-    "provider": "databricks",
-    "config": {"model": "databricks-gte-large-en"},
-}
-
-DEFAULT_TASK_CONFIG = {
-    "cache_response": False,
-    "cache_ttl": 3600,
-    "retry_on_fail": True,
-    "max_retries": 3,
-    "priority": 1,
-    "error_handling": "default",
-    "human_input": False,
-    "markdown": False,
-    "output_json": "true",
-}
+Key dimensions and their members:
+- <dimension>: '<member1>','<member2>', …
+- Regions / entities: '<region1>','<region2>', …
+"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Crew 1 — Pipeline Config Generator
@@ -236,7 +236,9 @@ PIPELINE_CONFIG_TASK = {
 
 PIPELINE_CONFIG_CREW = {
     "id": PIPELINE_CONFIG_CREW_ID,
-    "name": "UCMV — Generate Pipeline Config (API-Direct)",
+    "name": "1 · Extract Power BI Model",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["UCMV — Generate Pipeline Config (API-Direct)"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -329,6 +331,13 @@ UCMV_GEN_TASK = {
             "schema_name": "",
             "use_llm_fallback": True,
             "llm_model": "databricks-claude-sonnet-4-5",
+            # Visual-usage triage: set True to skip measures not shown/filtered in
+            # any visual (directly or via a dependency chain). Needs the report's
+            # visual-usage data; no-op without it. Base measures always kept.
+            "prune_non_visual_measures": False,
+            # Optional free-text model knowledge fed into the DAX→SQL translation.
+            # Ships as a neutral template to edit (or clear) per model.
+            "domain_context": EXAMPLE_DOMAIN_CONTEXT,
             # JSON mode: the flow injects the preceding Pipeline Config crew's
             # output into these fields (config_json ← proposed_config,
             # measures_json/mquery_json ← the handoff arrays it now emits). They
@@ -346,7 +355,9 @@ UCMV_GEN_TASK = {
 
 UCMV_GEN_CREW = {
     "id": UCMV_GEN_CREW_ID,
-    "name": "UC Metric View Generator — JSON Mode",
+    "name": "2 · Convert to Metric Views",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["UC Metric View Generator — JSON Mode"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -358,6 +369,137 @@ UCMV_GEN_CREW = {
         _task_node(UCMV_GEN_TASK_ID, UCMV_GEN_AGENT_ID, UCMV_GEN_TASK, 368, 68),
     ],
     "edges": [_agent_to_task_edge("ucmv-gen", UCMV_GEN_AGENT_ID, UCMV_GEN_TASK_ID)],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Crew 2b — UC Metric View Generator (Reconciled)
+# Same generator, but with the iterative reconciliation loop turned ON: after each
+# generation cycle it deploys the metric view and reconciles it cell-by-cell
+# against the live Power BI model, feeding mismatches back to refine failing
+# measures (up to max_reconciliation_cycles or the target %). Because the
+# generator deploys internally each cycle, this crew does NOT need the separate
+# Metric View Deployer step. The operator must fill warehouse_id + reference_years
+# (+ the Power BI credentials the plain generator already needs).
+# ─────────────────────────────────────────────────────────────────────────────
+UCMV_GEN_RECON_AGENT_ID = "bi-ucmv-gen-recon-agent-001"
+UCMV_GEN_RECON_TASK_ID = "bi-ucmv-gen-recon-task-001"
+UCMV_GEN_RECON_CREW_ID = "bi-ucmv-gen-recon-crew-001"
+
+UCMV_GEN_RECON_AGENT = {
+    "id": UCMV_GEN_RECON_AGENT_ID,
+    "name": "UC Metric View Generator (Reconciled) Agent",
+    "role": "UC Metric View Generator (Reconciled)",
+    "goal": (
+        "Generate UC Metric View YAML definitions for all fact tables and refine "
+        "them against the live Power BI model until they reconcile."
+    ),
+    "backstory": (
+        "You are a Databricks UC Metric View specialist. You translate Power BI DAX "
+        "measures into UCMV YAML with the UC Metric View Generator tool, which — in "
+        "this crew — iteratively deploys and reconciles each metric view against the "
+        "live Power BI model and refines the measures that do not match. "
+        "Call the tool with ZERO arguments — all parameters are pre-configured."
+    ),
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
+    "tool_configs": {},
+    "max_iter": 10,
+    "max_rpm": 10,
+    # The loop deploys + reconciles every cycle, so allow more wall-clock time.
+    "max_execution_time": 1800,
+    "verbose": True,
+    "allow_delegation": False,
+    "cache": True,
+    "memory": False,
+    "embedder_config": DEFAULT_EMBEDDER,
+    "max_retry_limit": 3,
+}
+
+UCMV_GEN_RECON_TASK = {
+    "id": UCMV_GEN_RECON_TASK_ID,
+    "name": "Generate + reconcile UC Metric View definitions",
+    "description": (
+        "Generate UC Metric View YAML definitions for all fact tables AND reconcile "
+        "them against the live Power BI model.\n\n"
+        "⚠️ CRITICAL: Call the UC Metric View Generator tool with ZERO arguments. "
+        "ALL parameters (credentials, catalog, schema, warehouse_id, reference_years, "
+        "reconciliation settings) are ALREADY PRE-CONFIGURED in the tool-task-form.\n\n"
+        "The tool runs the iterative loop internally (generate → deploy → reconcile → "
+        "refine) and deploys each cycle, so NO separate deployer step is needed. "
+        "Return the complete tool output (per-cycle history + final reconciliation)."
+    ),
+    "expected_output": (
+        "A JSON object with the final UCMV YAML per fact table, the per-cycle "
+        "reconciliation history (overall cell-alignment %, measures at 100%), and "
+        "the stop reason."
+    ),
+    "agent_id": UCMV_GEN_RECON_AGENT_ID,
+    "tools": ["86"],
+    "tool_configs": {
+        "UC Metric View Generator": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "admin_client_id": "",
+            "admin_client_secret": "",
+            "catalog": "",
+            "schema_name": "",
+            "use_llm_fallback": True,
+            "llm_model": "databricks-claude-sonnet-4-5",
+            # Iterative reconciliation — the operator fills warehouse_id; without
+            # it the tool degrades to single-pass. reference_years is OPTIONAL
+            # (empty = compare all years).
+            "enable_reconciliation": True,
+            "max_reconciliation_cycles": 5,
+            "reconciliation_target_pct": 100,
+            "warehouse_id": "",
+            "reference_years": "",  # optional, e.g. "[2025, 2026]" (empty = all years)
+            # Visual-usage triage: set True to skip measures not shown/filtered in
+            # any visual (directly or via a dependency chain) — needs the report's
+            # visual-usage data; no-op without it. Base measures always kept.
+            "prune_non_visual_measures": False,
+            # Optional free-text model knowledge fed into the DAX→SQL translation.
+            # Ships as a neutral template to edit (or clear) per model.
+            "domain_context": EXAMPLE_DOMAIN_CONTEXT,
+            # JSON-mode handoff fields (filled by the preceding Pipeline Config crew).
+            "config_json": "{}",
+            "measures_json": "[]",
+            "mquery_json": "[]",
+            "relationships_json": "[]",
+        }
+    },
+    "config": DEFAULT_TASK_CONFIG,
+}
+
+UCMV_GEN_RECON_CREW = {
+    "id": UCMV_GEN_RECON_CREW_ID,
+    "name": "2 · Convert to Metric Views + Verify Numbers",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["UC Metric View Generator — Reconciled (iterative PBI check)"],
+    "process": "sequential",
+    "reasoning": False,
+    "memory": False,
+    "verbose": True,
+    "agent_ids": [UCMV_GEN_RECON_AGENT_ID],
+    "task_ids": [UCMV_GEN_RECON_TASK_ID],
+    "nodes": [
+        _agent_node(UCMV_GEN_RECON_AGENT_ID, UCMV_GEN_RECON_AGENT, 68, 68),
+        _task_node(
+            UCMV_GEN_RECON_TASK_ID,
+            UCMV_GEN_RECON_AGENT_ID,
+            UCMV_GEN_RECON_TASK,
+            368,
+            68,
+        ),
+    ],
+    "edges": [
+        _agent_to_task_edge(
+            "ucmv-gen-recon", UCMV_GEN_RECON_AGENT_ID, UCMV_GEN_RECON_TASK_ID
+        )
+    ],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -423,7 +565,9 @@ UCMV_VAL_TASK = {
 
 UCMV_VAL_CREW = {
     "id": UCMV_VAL_CREW_ID,
-    "name": "UCMV Quality Validator",
+    "name": "3 · Review Metric View Quality",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["UCMV Quality Validator"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -498,7 +642,9 @@ DEPLOYER_TASK = {
 
 DEPLOYER_CREW = {
     "id": DEPLOYER_CREW_ID,
-    "name": "Metric View Deployer",
+    "name": "4 · Deploy Metric Views",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["Metric View Deployer"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -579,7 +725,9 @@ REFERENCES_TASK = {
 
 REFERENCES_CREW = {
     "id": REFERENCES_CREW_ID,
-    "name": "references",
+    "name": "Find Report Fields & Visuals",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["references"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -661,7 +809,9 @@ MAPPER_TASK = {
 
 MAPPER_CREW = {
     "id": MAPPER_CREW_ID,
-    "name": "PBI Visual-UCMV Mapper",
+    "name": "Map Report Visuals to Metric Views",
+    # Older seeded name(s) — renamed in place on existing installs.
+    "previous_names": ["PBI Visual-UCMV Mapper"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -675,373 +825,23 @@ MAPPER_CREW = {
     "edges": [_agent_to_task_edge("mapper", MAPPER_AGENT_ID, MAPPER_TASK_ID)],
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Crew 7 — Databricks Dashboard Creator
-# ─────────────────────────────────────────────────────────────────────────────
-
-DASHBOARD_AGENT_ID = "bi-dashboard-agent-001"
-DASHBOARD_TASK_ID = "bi-dashboard-task-001"
-DASHBOARD_CREW_ID = "bi-dashboard-crew-001"
-
-DASHBOARD_AGENT = {
-    "id": DASHBOARD_AGENT_ID,
-    "name": "Dashboard Creator Agent",
-    "role": "Databricks Dashboard Specialist",
-    "goal": "Create a Databricks AI/BI (Lakeview) dashboard from the PBI visual mappings.",
-    "backstory": (
-        "You create Databricks AI/BI dashboards from the PBI visual-to-UCMV mappings. "
-        "visual_mappings_json is auto-injected from the flow. "
-        "Call the Databricks Dashboard Creator tool with ZERO arguments."
-    ),
-    "llm": "databricks-claude-opus-4-8",
-    "tools": [],
-    "tool_configs": {},
-    "max_iter": 3,
-    "max_rpm": 10,
-    "max_execution_time": 300,
-    "verbose": True,
-    "allow_delegation": False,
-    "cache": True,
-    "memory": False,
-    "embedder_config": DEFAULT_EMBEDDER,
-    "max_retry_limit": 3,
-}
-
-DASHBOARD_TASK = {
-    "id": DASHBOARD_TASK_ID,
-    "name": "Create Databricks AI/BI Dashboard",
-    "description": (
-        "Create a Databricks AI/BI (Lakeview) dashboard from the PBI visual mappings.\n\n"
-        "⚠️ CRITICAL: Call the Databricks Dashboard Creator tool with ZERO arguments. "
-        "visual_mappings_json is auto-injected from flow. "
-        "All other parameters (title, catalog, schema, warehouse_id) are pre-configured.\n\n"
-        "Return the dashboard URL."
-    ),
-    "expected_output": (
-        "A JSON object with dashboard_id, dashboard_url, display_name, status, "
-        "widget_count, page_count, and cicd_download_url."
-    ),
-    "agent_id": DASHBOARD_AGENT_ID,
-    "tools": ["95"],
-    "tool_configs": {
-        "Databricks Dashboard Creator": {
-            "result_as_answer": True,
-            "visual_mappings_json": None,
-            "dashboard_title": "",
-            "catalog": "",
-            "schema_name": "",
-            "warehouse_id": "",
-            "databricks_host": "",
-            "parent_path": "/Workspace/Shared",
-            "publish_dashboard": True,
-        }
-    },
-    "config": DEFAULT_TASK_CONFIG,
-}
-
-DASHBOARD_CREW = {
-    "id": DASHBOARD_CREW_ID,
-    "name": "Databricks Dashboard Creator",
-    "process": "sequential",
-    "reasoning": False,
-    "memory": False,
-    "verbose": True,
-    "agent_ids": [DASHBOARD_AGENT_ID],
-    "task_ids": [DASHBOARD_TASK_ID],
-    "nodes": [
-        _agent_node(DASHBOARD_AGENT_ID, DASHBOARD_AGENT, 68, 68),
-        _task_node(DASHBOARD_TASK_ID, DASHBOARD_AGENT_ID, DASHBOARD_TASK, 368, 68),
-    ],
-    "edges": [_agent_to_task_edge("dashboard", DASHBOARD_AGENT_ID, DASHBOARD_TASK_ID)],
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Crew 8 — UCMV Genie Space Config Generator
-# ─────────────────────────────────────────────────────────────────────────────
-
-GENIE_CFG_AGENT_ID = "bi-genie-cfg-agent-001"
-GENIE_CFG_TASK_ID = "bi-genie-cfg-task-001"
-GENIE_CFG_CREW_ID = "bi-genie-cfg-crew-001"
-
-GENIE_CFG_AGENT = {
-    "id": GENIE_CFG_AGENT_ID,
-    "name": "Genie Config Generator Agent",
-    "role": "Genie Space Configuration Specialist",
-    "goal": "Generate a complete Genie Space configuration from the deployed UC Metric Views.",
-    "backstory": (
-        "You auto-generate Genie Space configuration from deployed UCMV metric views. "
-        "ucmv_output is auto-injected from the flow. "
-        "Call the UCMV Genie Space Config Generator tool with ZERO arguments."
-    ),
-    "llm": "databricks-claude-opus-4-8",
-    "tools": [],
-    "tool_configs": {},
-    "max_iter": 5,
-    "max_rpm": 10,
-    "max_execution_time": 300,
-    "verbose": True,
-    "allow_delegation": False,
-    "cache": True,
-    "memory": False,
-    "embedder_config": DEFAULT_EMBEDDER,
-    "max_retry_limit": 3,
-}
-
-GENIE_CFG_TASK = {
-    "id": GENIE_CFG_TASK_ID,
-    "name": "Generate Genie Space Configuration",
-    "description": (
-        "Generate a complete Genie Space configuration from the deployed UC Metric Views.\n\n"
-        "⚠️ CRITICAL: Call the UCMV Genie Space Config Generator tool with ZERO arguments. "
-        "ucmv_output is auto-injected from the flow. "
-        "All other parameters (space_title, catalog, schema, warehouse_id) are pre-configured.\n\n"
-        "Return the complete Genie Space configuration JSON."
-    ),
-    "expected_output": (
-        "A JSON object with space_title, text_instructions, sample_questions, "
-        "example_sqls_json, and join_specs_json — ready to pass to the Genie Space Generator."
-    ),
-    "agent_id": GENIE_CFG_AGENT_ID,
-    "tools": ["93"],
-    "tool_configs": {
-        "UCMV Genie Space Config Generator": {
-            "result_as_answer": True,
-            "ucmv_output": None,
-            "genie_config_override": None,
-            "space_title": "",
-            "catalog": "",
-            "schema_name": "",
-            "warehouse_id": "",
-            "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4-5",
-        }
-    },
-    "config": DEFAULT_TASK_CONFIG,
-}
-
-GENIE_CFG_CREW = {
-    "id": GENIE_CFG_CREW_ID,
-    "name": "UCMV Genie Space Config Generator",
-    "process": "sequential",
-    "reasoning": False,
-    "memory": False,
-    "verbose": True,
-    "agent_ids": [GENIE_CFG_AGENT_ID],
-    "task_ids": [GENIE_CFG_TASK_ID],
-    "nodes": [
-        _agent_node(GENIE_CFG_AGENT_ID, GENIE_CFG_AGENT, 68, 68),
-        _task_node(GENIE_CFG_TASK_ID, GENIE_CFG_AGENT_ID, GENIE_CFG_TASK, 368, 68),
-    ],
-    "edges": [_agent_to_task_edge("genie-cfg", GENIE_CFG_AGENT_ID, GENIE_CFG_TASK_ID)],
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Crew 9 — Genie Space Generator
-# ─────────────────────────────────────────────────────────────────────────────
-
-GENIE_GEN_AGENT_ID = "bi-genie-gen-agent-001"
-GENIE_GEN_TASK_ID = "bi-genie-gen-task-001"
-GENIE_GEN_CREW_ID = "bi-genie-gen-crew-001"
-
-GENIE_GEN_AGENT = {
-    "id": GENIE_GEN_AGENT_ID,
-    "name": "Genie Space Deployer Agent",
-    "role": "Genie Space Deployer",
-    "goal": "Deploy a Databricks Genie Space from the generated configuration.",
-    "backstory": (
-        "You deploy Databricks Genie Spaces from UC Metric View configurations. "
-        "All parameters are auto-injected or pre-configured. "
-        "Call the Genie Space Generator tool with ZERO arguments."
-    ),
-    "llm": "databricks-claude-opus-4-8",
-    "tools": [],
-    "tool_configs": {},
-    "max_iter": 3,
-    "max_rpm": 10,
-    "max_execution_time": 300,
-    "verbose": True,
-    "allow_delegation": False,
-    "cache": True,
-    "memory": False,
-    "embedder_config": DEFAULT_EMBEDDER,
-    "max_retry_limit": 3,
-}
-
-GENIE_GEN_TASK = {
-    "id": GENIE_GEN_TASK_ID,
-    "name": "Deploy Genie Space",
-    "description": (
-        "Deploy a Databricks Genie Space from the generated configuration.\n\n"
-        "⚠️ CRITICAL: Call the Genie Space Generator tool with ZERO arguments. "
-        "All parameters (ucmv_output, space_title, warehouse_id, catalog, schema, "
-        "instructions, questions, SQL snippets) are pre-configured or auto-injected.\n\n"
-        "Return the space_id and URL."
-    ),
-    "expected_output": (
-        "A JSON object with space_id, url, operation (created/updated), "
-        "table_count, question_count, and cicd_download_url."
-    ),
-    "agent_id": GENIE_GEN_AGENT_ID,
-    "tools": ["92"],
-    "tool_configs": {
-        "Genie Space Generator": {
-            "result_as_answer": True,
-            "ucmv_output": None,
-            "space_title": "",
-            "catalog": "",
-            "schema_name": "",
-            "warehouse_id": "",
-            "databricks_host": "",
-            "additional_tables": "",
-            "text_instructions": "",
-            "join_specs_json": "",
-            "sample_questions": "",
-            "sql_expressions_json": "",
-            "sql_measures_json": "",
-            "sql_filters_json": "",
-            "example_sqls_json": "",
-        }
-    },
-    "config": DEFAULT_TASK_CONFIG,
-}
-
-GENIE_GEN_CREW = {
-    "id": GENIE_GEN_CREW_ID,
-    "name": "Genie Space Generator",
-    "process": "sequential",
-    "reasoning": False,
-    "memory": False,
-    "verbose": True,
-    "agent_ids": [GENIE_GEN_AGENT_ID],
-    "task_ids": [GENIE_GEN_TASK_ID],
-    "nodes": [
-        _agent_node(GENIE_GEN_AGENT_ID, GENIE_GEN_AGENT, 68, 68),
-        _task_node(GENIE_GEN_TASK_ID, GENIE_GEN_AGENT_ID, GENIE_GEN_TASK, 368, 68),
-    ],
-    "edges": [_agent_to_task_edge("genie-gen", GENIE_GEN_AGENT_ID, GENIE_GEN_TASK_ID)],
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Crew 10 — UCMV Re-evaluation (recoverable measures)
-# ─────────────────────────────────────────────────────────────────────────────
-# STANDALONE, not part of the conversion flow: it looks BACKWARDS at models that
-# were already converted and re-tries only the measures that failed back then,
-# using today's (improved) transpiler. Run it manually or on a schedule after
-# shipping transpiler improvements. Read-only — it proposes re-transpilation
-# candidates and never modifies metric views.
-# Docs: src/docs/powerbi/ucmv-reevaluation-recoverable-measures.md
-
-UCMV_REEVAL_AGENT_ID = "bi-ucmv-reeval-agent-001"
-UCMV_REEVAL_TASK_ID = "bi-ucmv-reeval-task-001"
-UCMV_REEVAL_CREW_ID = "bi-ucmv-reeval-crew-001"
-
-UCMV_REEVAL_AGENT = {
-    "id": UCMV_REEVAL_AGENT_ID,
-    "name": "UCMV Re-evaluation Agent",
-    "role": "Metric View Recovery Analyst",
-    "goal": (
-        "Find previously-untranslatable DAX measures that today's improved "
-        "transpiler can now recover, and report them for human review."
-    ),
-    "backstory": (
-        "You track how Kasal's DAX→UC Metric View capability improves over time. "
-        "Models converted months ago still carry measures that failed back then but "
-        "are translatable today. You replay the stored conversion history and report "
-        "which measures are now recoverable. "
-        "Call the UCMV Re-evaluation tool with ZERO arguments — the group scope and "
-        "settings come from the tool config. Report the findings verbatim; do NOT "
-        "invent SQL and do NOT claim anything was applied — the tool only proposes."
-    ),
-    "llm": "databricks-claude-opus-4-8",
-    "tools": [],
-    "tool_configs": {},
-    "max_iter": 5,
-    "max_rpm": 10,
-    "max_execution_time": 600,
-    "verbose": True,
-    "allow_delegation": False,
-    "cache": True,
-    "memory": False,
-    "embedder_config": DEFAULT_EMBEDDER,
-    "max_retry_limit": 3,
-}
-
-UCMV_REEVAL_TASK = {
-    "id": UCMV_REEVAL_TASK_ID,
-    "name": "Find measures the improved transpiler can now recover",
-    "description": (
-        "Scan the stored UCMV conversion history and re-try ONLY the measures that "
-        "previously failed to transpile, using today's transpiler.\n\n"
-        "⚠️ CRITICAL: Call the UCMV Re-evaluation tool with ZERO arguments — the "
-        "group scope and settings are supplied by the tool config.\n\n"
-        "The tool is READ-ONLY. It proposes re-transpilation candidates; it never "
-        "modifies metric views. Return its report as-is, highlighting per dataset "
-        "which measures are now recoverable, the reason each failed before, and the "
-        "new SQL. If nothing is recoverable, say so plainly — that is a valid result "
-        "(either the transpiler has not changed since those runs, or the remaining "
-        "gaps are permanent limitations)."
-    ),
-    "expected_output": (
-        "A JSON report with the capability fingerprint, per-dataset lists of "
-        "newly-recoverable measures (name, previous skip reason, new SQL, impact), "
-        "and a summary of datasets scanned / measures retried / measures recovered."
-    ),
-    "agent_id": UCMV_REEVAL_AGENT_ID,
-    "tools": ["97"],
-    "tool_configs": {
-        "UCMV Re-evaluation": {
-            "result_as_answer": True,
-            # Scope: leave group_id empty to have the runtime group context apply;
-            # set dataset_ids to target specific models.
-            "group_id": None,
-            "dataset_ids": None,
-            # Cost guards. use_llm=False keeps a scheduled sweep free (deterministic
-            # fast-path only); flip it on for a deeper, token-spending pass.
-            "use_llm": False,
-            "include_impossible": False,
-            "max_measures_per_dataset": 200,
-            "max_datasets": 50,
-            # force=True re-tries even when the transpiler has NOT changed since the
-            # stored run. Useful to verify the sweep end-to-end; leave False in
-            # production so the sweep only reports genuine capability gains.
-            "force": False,
-        }
-    },
-    "config": DEFAULT_TASK_CONFIG,
-}
-
-UCMV_REEVAL_CREW = {
-    "id": UCMV_REEVAL_CREW_ID,
-    "name": "UCMV Re-evaluation",
-    "process": "sequential",
-    "planning": False,
-    "reasoning": False,
-    "memory": False,
-    "verbose": True,
-    "agent_ids": [UCMV_REEVAL_AGENT_ID],
-    "task_ids": [UCMV_REEVAL_TASK_ID],
-    "nodes": [
-        _agent_node(UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_AGENT, 68, 68),
-        _task_node(
-            UCMV_REEVAL_TASK_ID, UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK, 368, 68
-        ),
-    ],
-    "edges": [
-        _agent_to_task_edge("ucmv-reeval", UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK_ID)
-    ],
-}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # All crews (ordered for seeding)
 # ─────────────────────────────────────────────────────────────────────────────
 
-ALL_CREWS: List[Dict[str, Dict[str, Any]]] = [
+ALL_CREWS: List[Dict[str, dict]] = [
     {
         "crew": PIPELINE_CONFIG_CREW,
         "agent": PIPELINE_CONFIG_AGENT,
         "task": PIPELINE_CONFIG_TASK,
     },
     {"crew": UCMV_GEN_CREW, "agent": UCMV_GEN_AGENT, "task": UCMV_GEN_TASK},
+    {
+        "crew": UCMV_GEN_RECON_CREW,
+        "agent": UCMV_GEN_RECON_AGENT,
+        "task": UCMV_GEN_RECON_TASK,
+    },
     {"crew": UCMV_VAL_CREW, "agent": UCMV_VAL_AGENT, "task": UCMV_VAL_TASK},
     {"crew": DEPLOYER_CREW, "agent": DEPLOYER_AGENT, "task": DEPLOYER_TASK},
     {"crew": REFERENCES_CREW, "agent": REFERENCES_AGENT, "task": REFERENCES_TASK},
@@ -1051,6 +851,7 @@ ALL_CREWS: List[Dict[str, Dict[str, Any]]] = [
     {"crew": GENIE_GEN_CREW, "agent": GENIE_GEN_AGENT, "task": GENIE_GEN_TASK},
     # Standalone (not part of the conversion flow) — run manually or on a schedule.
     {"crew": UCMV_REEVAL_CREW, "agent": UCMV_REEVAL_AGENT, "task": UCMV_REEVAL_TASK},
+    {"crew": UCMV_DRIFT_CREW, "agent": UCMV_DRIFT_AGENT, "task": UCMV_DRIFT_TASK},
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1061,7 +862,7 @@ ALL_CREWS: List[Dict[str, Dict[str, Any]]] = [
 async def _seed_group(session: AsyncSession) -> None:
     result = await session.execute(select(Group).where(Group.id == BI_GROUP_ID))
     if result.scalars().first():
-        logger.info(f"Group '{BI_GROUP_ID}' already exists — skipping")
+        logger.info("Group '%s' already exists — skipping", BI_GROUP_ID)
         return
     group = Group(
         id=BI_GROUP["id"],
@@ -1072,7 +873,7 @@ async def _seed_group(session: AsyncSession) -> None:
         created_by_email=BI_GROUP["created_by_email"],
     )
     session.add(group)
-    logger.info(f"Created group: {BI_GROUP_ID}")
+    logger.info("Created group: %s", BI_GROUP_ID)
 
 
 async def _seed_agent(session: AsyncSession, data: dict) -> None:
@@ -1131,7 +932,29 @@ async def _seed_task(session: AsyncSession, data: dict) -> None:
 async def _seed_crew(session: AsyncSession, data: dict) -> None:
     crew_id = uuid.uuid5(uuid.NAMESPACE_DNS, data["id"])
     result = await session.execute(select(Crew).where(Crew.id == crew_id))
-    if result.scalars().first():
+    existing = result.scalars().first()
+    seed_nodes = data.get("nodes", [])
+    seed_edges = data.get("edges", [])
+    if existing:
+        # Self-heal. This seeder is otherwise create-only, so a crew that first
+        # landed with EMPTY canvas nodes (an older build before the nodes were
+        # added here, or a save path that dropped them) would open blank on the
+        # Agent Builder canvas forever — re-seeding never backfilled it. Fill the
+        # nodes ONLY when the stored crew has none, so a crew the user has since
+        # edited (and which therefore has nodes) is never clobbered.
+        # Rename a crew still carrying an OLDER seeded name. Matching the exact
+        # old name means a crew the user renamed themselves is left alone.
+        if getattr(existing, "name", None) in data.get("previous_names", []):
+            logger.info("Renamed crew: %r -> %r", existing.name, data["name"])
+            existing.name = data["name"]
+        if not existing.nodes and seed_nodes:
+            existing.nodes = seed_nodes
+            existing.edges = seed_edges
+            if not existing.agent_ids:
+                existing.agent_ids = data.get("agent_ids", [])
+            if not existing.task_ids:
+                existing.task_ids = data.get("task_ids", [])
+            logger.info("Backfilled canvas nodes for existing crew: %s", data["name"])
         return
     crew = Crew(
         id=crew_id,
@@ -1139,15 +962,15 @@ async def _seed_crew(session: AsyncSession, data: dict) -> None:
         group_id=BI_GROUP_ID,
         agent_ids=data.get("agent_ids", []),
         task_ids=data.get("task_ids", []),
-        nodes=data.get("nodes", []),
-        edges=data.get("edges", []),
+        nodes=seed_nodes,
+        edges=seed_edges,
         process=data.get("process", "sequential"),
         reasoning=data.get("reasoning", False),
         memory=data.get("memory", True),
         verbose=data.get("verbose", True),
     )
     session.add(crew)
-    logger.info(f"Created crew: {data['name']}")
+    logger.info("Created crew: %s", data["name"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1192,10 +1015,11 @@ async def seed() -> None:
 
             await session.commit()
             logger.info(
-                f"✅ bi-specialist workspace seeded: "
-                f"{len(ALL_CREWS)} crews + {len(BI_TOOLS)} tools enabled"
+                "✅ bi-specialist workspace seeded: %s crews + %s tools enabled",
+                len(ALL_CREWS),
+                len(BI_TOOLS),
             )
         except Exception as exc:
             await session.rollback()
-            logger.error(f"❌ bi-specialist seeder failed: {exc}")
+            logger.error("❌ bi-specialist seeder failed: %s", exc)
             raise

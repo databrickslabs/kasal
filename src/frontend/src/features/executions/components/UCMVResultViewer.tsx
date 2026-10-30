@@ -19,13 +19,12 @@ import {
   ListItemButton,
   ListItemText,
   Chip,
-  Table,
   TableContainer,
+  Table,
   TableHead,
   TableBody,
   TableRow,
   TableCell,
-  useTheme,
   Paper,
   Divider,
   TextField,
@@ -49,7 +48,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import Button from '@mui/material/Button';
-import { Highlight, themes } from 'prism-react-renderer';
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -64,66 +62,11 @@ export { untranslatableKey };
 export type { UntranslatableItem, ReviewAnnotation, ReviewStatus } from './NonTranspiledPanel';
 import rehypeSanitize from 'rehype-sanitize';
 import { safeImageComponents } from '../../../shared/a2ui/lib/markdown';
+import type { MetricViewDef, UCMVStats, UCMVResult, FallbackExtractRow, UCMVResultViewerProps } from './ucmvResultTypes';
+import { SQLBlock, StatsChips, Section, CopyButton } from './UCMVResultPrimitives';
+import { FieldTable, JoinsTable } from './UCMVFieldTables';
+export type { UCMVResult, FallbackExtractRow } from './ucmvResultTypes';
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
-interface MetricViewDef {
-  version?: string;
-  source?: string;
-  filter?: string;
-  dimensions?: Array<{ name: string; expr?: string; comment?: string }>;
-  measures?: Array<{ name: string; expr?: string; comment?: string; format?: string }>;
-  joins?: Array<{ name: string; source?: string; on?: string; using?: string[] }>;
-}
-
-interface UCMVStats {
-  total_measures_translated?: number;
-  total_untranslatable?: number;
-  total_artifact_measures?: number;
-  coverage_pct?: number;
-  [key: string]: unknown;
-}
-
-export interface UCMVResult {
-  yaml: Record<string, string>;
-  sql: Record<string, string>;
-  stats: Record<string, UCMVStats> | UCMVStats;
-  migration_report?: string;
-  /** Raw source measures with their original DAX expressions (echoed from the generator). */
-  measures_with_dax?: unknown[];
-  /** Raw source M-Query entries (echoed from the generator). */
-  mquery_raw?: unknown[];
-  /** Per-table tabular extract (M-Query source + associated measures/DAX). Always
-   *  present; the primary usable artifact when no views could be generated. */
-  fallback_extract?: FallbackExtractRow[];
-  /** Number of UC metric views actually generated (0 → show the fallback table). */
-  views_generated?: number;
-  /** Flat list of measures that were NOT transpiled (original DAX + reason +
-   *  proposed approach), for the "Not transpiled" review panel. */
-  untranslatable_items?: UntranslatableItem[];
-  /** Persisted reviewer triage annotations, keyed by untranslatableKey(item). */
-  untranslatable_review?: Record<string, ReviewAnnotation>;
-}
-
-export interface FallbackExtractRow {
-  table_name: string;
-  mquery: string;
-  measures: Array<{ measure_name: string; dax_expression: string }>;
-  measure_count: number;
-  has_mquery: boolean;
-}
-
-interface UCMVResultViewerProps {
-  result: UCMVResult;
-  /** Enable editing of individual metric view YAMLs */
-  editable?: boolean;
-  /** Called whenever the user edits YAML. Returns the full updated result. */
-  onResultChange?: (updated: UCMVResult) => void;
-  /** Called when user clicks Save — persists current edits to the database. */
-  onSave?: (updated: UCMVResult) => Promise<void>;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Detection helper (exported for consumers)                          */
@@ -142,200 +85,6 @@ export function isUCMVResult(value: unknown): value is UCMVResult {
     obj.stats !== null
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  SQL Highlight block                                                */
-/* ------------------------------------------------------------------ */
-
-const SQLBlock: React.FC<{ code: string; language?: string }> = ({ code, language = 'sql' }) => {
-  const muiTheme = useTheme();
-  const isDark = muiTheme.palette.mode === 'dark';
-  const prismTheme = isDark ? themes.oneDark : themes.oneLight;
-
-  return (
-    <Highlight theme={prismTheme} code={code.trim()} language={language}>
-      {({ style, tokens, getLineProps, getTokenProps }) => (
-        <pre
-          style={{
-            ...style,
-            margin: 0,
-            padding: 12,
-            overflow: 'auto',
-            maxHeight: 400,
-            fontSize: '0.8rem',
-            fontFamily: 'monospace',
-            lineHeight: 1.5,
-            borderRadius: 4,
-          }}
-        >
-          {tokens.map((line, i) => (
-            <div key={i} {...getLineProps({ line })}>
-              {line.map((token, key) => (
-                <span key={key} {...getTokenProps({ token })} />
-              ))}
-            </div>
-          ))}
-        </pre>
-      )}
-    </Highlight>
-  );
-};
-
-/* ------------------------------------------------------------------ */
-/*  Compact table for dimensions / measures                            */
-/* ------------------------------------------------------------------ */
-
-/** Extract the "referenced by N measures" count the backend appends to a
- *  measure's comment. Returns null when the measure is referenced by nothing
- *  (backend omits the suffix at 0). Lets reviewers see + sort by usage so they
- *  prioritize high-impact measures/gaps. */
-const extractReferencedBy = (comment?: string): number | null => {
-  if (!comment) return null;
-  const m = comment.match(/referenced by (\d+) measures?/i);
-  return m ? parseInt(m[1], 10) : null;
-};
-
-const FieldTable: React.FC<{
-  fields: Array<{ name: string; expr?: string; comment?: string; format?: string }>;
-  showFormat?: boolean;
-}> = ({ fields, showFormat }) => {
-  // Only show the "Used by" column for measures (showFormat) and only when at
-  // least one measure carries a usage count — keeps dimension tables unchanged.
-  const showUsage = !!showFormat && fields.some((f) => extractReferencedBy(f.comment) !== null);
-  // Sort measures by usage desc so the highest-impact ones surface first.
-  const rows = showUsage
-    ? [...fields].sort(
-        (a, b) => (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1),
-      )
-    : fields;
-  return (
-    <Table size="small" sx={{ tableLayout: 'fixed' }}>
-      <TableHead>
-        <TableRow>
-          <TableCell sx={{ fontWeight: 600, width: showUsage ? '24%' : '30%' }}>Name</TableCell>
-          <TableCell sx={{ fontWeight: 600, width: showFormat ? (showUsage ? '34%' : '40%') : '70%' }}>Expression</TableCell>
-          {showFormat && <TableCell sx={{ fontWeight: 600, width: showUsage ? '30%' : '30%' }}>Comment / Format</TableCell>}
-          {showUsage && <TableCell sx={{ fontWeight: 600, width: '12%' }} align="right" title="How many other measures reference this measure">Used by</TableCell>}
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {rows.map((f) => {
-          const usage = extractReferencedBy(f.comment);
-          return (
-            <TableRow key={f.name} hover>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
-                {f.name}
-              </TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
-                {f.expr || '—'}
-              </TableCell>
-              {showFormat && (
-                <TableCell sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>
-                  {f.comment || f.format || '—'}
-                </TableCell>
-              )}
-              {showUsage && (
-                <TableCell sx={{ fontSize: '0.8rem' }} align="right">
-                  {usage != null && usage > 0 ? usage : '—'}
-                </TableCell>
-              )}
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
-  );
-};
-
-/* ------------------------------------------------------------------ */
-/*  Joins table                                                        */
-/* ------------------------------------------------------------------ */
-
-const JoinsTable: React.FC<{
-  joins: Array<{ name: string; source?: string; on?: string; using?: string[] }>;
-}> = ({ joins }) => (
-  <Table size="small">
-    <TableHead>
-      <TableRow>
-        <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
-        <TableCell sx={{ fontWeight: 600 }}>Source</TableCell>
-        <TableCell sx={{ fontWeight: 600 }}>On / Using</TableCell>
-      </TableRow>
-    </TableHead>
-    <TableBody>
-      {joins.map((j) => (
-        <TableRow key={j.name} hover>
-          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.name}</TableCell>
-          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.source || '—'}</TableCell>
-          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-            {j.on || (j.using ? j.using.join(', ') : '—')}
-          </TableCell>
-        </TableRow>
-      ))}
-    </TableBody>
-  </Table>
-);
-
-/* ------------------------------------------------------------------ */
-/*  Stats bar helper                                                   */
-/* ------------------------------------------------------------------ */
-
-const StatsChips: React.FC<{ stats: UCMVStats }> = ({ stats }) => (
-  <Box display="flex" gap={1} flexWrap="wrap">
-    {stats.total_measures_translated != null && (
-      <Chip size="small" label={`${stats.total_measures_translated} translated`} color="success" variant="outlined" />
-    )}
-    {stats.total_untranslatable != null && (
-      <Chip
-        size="small"
-        label={`${stats.total_untranslatable} untranslatable`}
-        color={stats.total_untranslatable > 0 ? 'warning' : 'default'}
-        variant="outlined"
-      />
-    )}
-    {stats.total_artifact_measures != null && (
-      <Chip
-        size="small"
-        label={`${stats.total_artifact_measures} artifacts`}
-        color={stats.total_artifact_measures > 0 ? 'info' : 'default'}
-        variant="outlined"
-      />
-    )}
-    {stats.coverage_pct != null && (
-      <Chip
-        size="small"
-        label={`${Math.round(stats.coverage_pct)}% coverage`}
-        color={stats.coverage_pct >= 100 ? 'success' : stats.coverage_pct >= 80 ? 'warning' : 'error'}
-        variant="filled"
-      />
-    )}
-  </Box>
-);
-
-/* ------------------------------------------------------------------ */
-/*  Section accordion                                                  */
-/* ------------------------------------------------------------------ */
-
-const Section: React.FC<{
-  title: string;
-  icon: React.ReactNode;
-  count?: number;
-  defaultExpanded?: boolean;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, icon, count, defaultExpanded = false, action, children }) => (
-  <Accordion defaultExpanded={defaultExpanded} disableGutters variant="outlined" sx={{ '&:before': { display: 'none' } }}>
-    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Box display="flex" alignItems="center" gap={1} flexGrow={1}>
-        {icon}
-        <Typography variant="subtitle2">{title}</Typography>
-        {count != null && <Chip size="small" label={count} sx={{ height: 20, fontSize: '0.75rem' }} />}
-        {action && <Box sx={{ ml: 'auto', mr: 1 }}>{action}</Box>}
-      </Box>
-    </AccordionSummary>
-    <AccordionDetails sx={{ p: 0, overflow: 'auto' }}>{children}</AccordionDetails>
-  </Accordion>
-);
 
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
@@ -591,8 +340,36 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     URL.revokeObjectURL(url);
   }, []);
 
+  // Download each view's PBI<->UCMV reconciliation mapping draft as its OWN
+  // .mapping_candidates.yml file, staggered like the YAML/SQL downloads.
+  const handleDownloadAllMappings = useCallback(() => {
+    const mapping = result.pbi_ucmv_mapping || {};
+    const entries = Object.entries(mapping).filter(([, v]) => v && v.trim());
+    entries.forEach(([name, yamlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([yamlContent], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}.mapping_candidates.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
+  }, [result.pbi_ucmv_mapping]);
+
   const hasDax = Array.isArray(result.measures_with_dax) && result.measures_with_dax.length > 0;
   const hasMquery = Array.isArray(result.mquery_raw) && result.mquery_raw.length > 0;
+  const hasMapping =
+    !!result.pbi_ucmv_mapping && Object.keys(result.pbi_ucmv_mapping).length > 0;
+
+  // New artifact fields
+  const sourceLayerEntries = useMemo(
+    () => (result.source_layer_ddl ? Object.entries(result.source_layer_ddl) : []),
+    [result.source_layer_ddl],
+  );
+  const hasIngestionTasks =
+    Array.isArray(result.pbi_only_ingestion_tasks) && result.pbi_only_ingestion_tasks.length > 0;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
@@ -649,6 +426,18 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
               </Button>
             </Tooltip>
           )}
+          {hasMapping && (
+            <Tooltip title="Download the deterministic PBI<->UCMV measure mapping draft (one file per view) for the KPI-reconciliation pipeline">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadAllMappings}
+              >
+                Download Mapping
+              </Button>
+            </Tooltip>
+          )}
           {hasMquery && (
             <Tooltip title="Download the original M-Query source as JSON">
               <Button
@@ -663,6 +452,215 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           )}
         </Box>
       </Box>
+
+      {/* Live-connection note: these views are backed by a live connection to a
+          semantic model, so the transpiler can't resolve them — tell the team
+          which model/table to parse. */}
+      {result.live_connections && Object.keys(result.live_connections).length > 0 && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Live connection to a semantic model — parse the upstream model to complete these
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            These view(s) are sourced from a live connection (AnalysisServices.Database), not a
+            warehouse table, so their measures/columns can't be resolved here. Parse the semantic
+            model below to finish the mapping.
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, fontSize: '0.8rem' }}>
+            {Object.entries(result.live_connections).map(([view, lc]) => (
+              <li key={view}>
+                <Box component="span" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{view}</Box>
+                {' → semantic model '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.database}</Box>
+                {' (table '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.table}</Box>
+                {', server '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.server}</Box>
+                {')'}
+              </li>
+            ))}
+          </Box>
+        </Alert>
+      )}
+
+      {/* PBI-only ingestion tasks: tables sourced from non-SQL files that need
+          a snapshot ingestion pipeline before their metric views can run. */}
+      {hasIngestionTasks && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            PBI-only tables need ingestion ({result.pbi_only_ingestion_tasks!.length})
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            These tables are sourced from non-SQL files (Excel, SharePoint, Web, or typed data)
+            and require a snapshot ingestion pipeline before the metric views can read them.
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {result.pbi_only_ingestion_tasks!.map((task) => (
+              <Box key={task.table}>
+                <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap" mb={0.25}>
+                  <Typography variant="caption" fontFamily="monospace" fontWeight={600}>
+                    {task.table}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">→</Typography>
+                  <Chip
+                    size="small"
+                    label={task.kind}
+                    color="warning"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: '0.7rem' }}
+                  />
+                  {task.uc_target && (
+                    <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+                      {task.uc_target}
+                    </Typography>
+                  )}
+                </Box>
+                {task.recommended_approach && (
+                  <Typography variant="caption" sx={{ display: 'block', mb: 0.25 }}>
+                    {task.recommended_approach}
+                  </Typography>
+                )}
+                {task.snapshot_loader_stub && (
+                  <Accordion
+                    defaultExpanded={false}
+                    disableGutters
+                    variant="outlined"
+                    sx={{ mt: 0.5, '&:before': { display: 'none' } }}
+                  >
+                    <AccordionSummary
+                      expandIcon={<ExpandMoreIcon sx={{ fontSize: 14 }} />}
+                      sx={{ minHeight: 28, '& .MuiAccordionSummary-content': { my: 0.5 } }}
+                    >
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <Typography variant="caption">Snapshot loader stub</Typography>
+                        <Box onClick={(e) => e.stopPropagation()}>
+                          <CopyButton content={task.snapshot_loader_stub} />
+                        </Box>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ p: 0 }}>
+                      <SQLBlock code={task.snapshot_loader_stub} language="python" />
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Alert>
+      )}
+
+      {/* Source layer DDL: CREATE VIEW per PBI table — the base views that
+          metric views read from. Each entry shows DDL, an optional copy button,
+          TODO steps (if any manual work remains), and an error chip on failure. */}
+      {sourceLayerEntries.length > 0 && (
+        <Section
+          title={`Source layer (${sourceLayerEntries.length} view${sourceLayerEntries.length !== 1 ? 's' : ''})`}
+          icon={<CodeIcon fontSize="small" color="action" />}
+          defaultExpanded={false}
+        >
+          <Box sx={{ p: 1.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {sourceLayerEntries.map(([tableName, entry]) => (
+              <Box key={tableName}>
+                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                  <Typography
+                    variant="body2"
+                    fontFamily="monospace"
+                    fontWeight={600}
+                    sx={{ flexGrow: 1 }}
+                  >
+                    {tableName}
+                  </Typography>
+                  {entry.error && (
+                    <Chip
+                      size="small"
+                      color="error"
+                      label={entry.error}
+                      variant="outlined"
+                      sx={{ maxWidth: 260, fontSize: '0.7rem', height: 20 }}
+                    />
+                  )}
+                  <CopyButton content={entry.ddl} />
+                </Box>
+                <SQLBlock code={entry.ddl} />
+                {Array.isArray(entry.todo_steps) && entry.todo_steps.length > 0 && (
+                  <Alert severity="warning" sx={{ mt: 0.75 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
+                      TODO steps:
+                    </Typography>
+                    <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                      {entry.todo_steps.map((step, i) => (
+                        <li key={i}>
+                          <Typography variant="caption">{step}</Typography>
+                        </li>
+                      ))}
+                    </Box>
+                  </Alert>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Section>
+      )}
+
+      {/* Reconciliation was requested but did not run — surface the reason loudly
+          so a single-pass is never silent (e.g. reference_years not provided). */}
+      {result.reconciliation_skipped && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <strong>Power BI reconciliation did not run.</strong>{' '}
+          {result.reconciliation_skipped}
+        </Alert>
+      )}
+
+      {/* LLM translation was on but produced nothing — surface WHY (provider /
+          throttle / timeout) instead of a silent empty result. */}
+      {result.llm_translation_warning && (
+        <Alert severity="error" sx={{ mb: 1.5 }}>
+          <strong>LLM translation produced no views.</strong>{' '}
+          {result.llm_translation_warning}
+        </Alert>
+      )}
+
+      {/* Validation status: compact chip row + optional per-view result list. */}
+      {result.pbi_validation && (
+        <Box sx={{ mb: 1.5 }}>
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Validation:
+            </Typography>
+            <Chip
+              size="small"
+              label={result.pbi_validation.status}
+              color={
+                result.pbi_validation.status === 'error'
+                  ? 'error'
+                  : result.pbi_validation.status === 'ran'
+                    ? 'success'
+                    : 'default'
+              }
+              variant="outlined"
+              sx={{ height: 20, fontSize: '0.75rem' }}
+            />
+            {result.pbi_validation.reason && (
+              <Typography variant="caption" color="text.secondary">
+                {result.pbi_validation.reason}
+              </Typography>
+            )}
+          </Box>
+          {result.pbi_validation.views && Object.keys(result.pbi_validation.views).length > 0 && (
+            <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+              {Object.entries(result.pbi_validation.views).map(([view, detail]) => (
+                <li key={view}>
+                  <Typography variant="caption">
+                    <Box component="span" fontFamily="monospace">{view}</Box>
+                    {': '}
+                    {detail}
+                  </Typography>
+                </li>
+              ))}
+            </Box>
+          )}
+        </Box>
+      )}
 
       {/* Migration Report (collapsible) */}
       {result.migration_report && (
@@ -867,6 +865,47 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
               defaultExpanded
             >
               <SQLBlock code={result.sql[selected]} />
+            </Section>
+          )}
+
+          {/* Source M (Power Query) — the FULL raw M the Source SQL was derived
+              from, plus a warning for transformation steps that may not have made
+              it into that SQL (filters, group-by, joins, …). */}
+          {result.source_mquery?.[selected] && (
+            <Section
+              title="Source M (Power Query)"
+              icon={<StorageIcon fontSize="small" color="action" />}
+              defaultExpanded={!result.sql[selected] || !!result.source_transform_todos?.[selected]?.length}
+            >
+              {result.source_transform_todos?.[selected]?.length ? (
+                <Alert severity="warning" variant="outlined" sx={{ mb: 1 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                    These Power Query steps are in the source M but may NOT be reflected in the Source SQL above — review:
+                  </Typography>
+                  <Box component="ul" sx={{ pl: 2, m: 0 }}>
+                    {result.source_transform_todos[selected].map((t) => (
+                      <li key={t}><Typography variant="caption">{t}</Typography></li>
+                    ))}
+                  </Box>
+                </Alert>
+              ) : null}
+              <Box
+                component="pre"
+                sx={{
+                  m: 0,
+                  p: 1,
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  bgcolor: 'action.hover',
+                  borderRadius: 1,
+                  maxHeight: 400,
+                  overflow: 'auto',
+                }}
+              >
+                {result.source_mquery[selected]}
+              </Box>
             </Section>
           )}
 

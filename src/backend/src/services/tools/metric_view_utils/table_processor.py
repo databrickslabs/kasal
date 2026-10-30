@@ -13,10 +13,12 @@ from typing import Any
 
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
 from .dependency_graph import build_dependency_graph
+from .implicit_column_builder import build_implicit_measures
 from .join_detector import _sanitize_alias
 from .m_transform_folder import MTransformFolder
 from .pbi_parameter_resolver import PbiParameterResolver
 from .sql_post_processor import SqlPostProcessor
+from .table_structure import build_table_structure
 from .utils import col_to_readable, run_async, spark_sql_compat, to_snake_case
 
 logger = logging.getLogger(__name__)
@@ -194,160 +196,24 @@ def process_table(
     """
     source_table = table_info.source_table
 
-    # ── Step 1: Auto-generate base measures from MQuery SUM columns ───
-    # Build a DAX-column → source-output-column map so BOTH base and derived
-    # measures reference the column the emitted `source:` SELECT exposes: a
-    # pre-aggregating source (SUM(kbi_value) AS value) outputs its ALIAS (`name`),
-    # not the physical `source_col` (which would fail: column not found).
-    _src_alias_map: dict[str, str] = {}
-    for _c in table_info.aggregate_columns:
-        _sc = _c.get("source_col")
-        _nm = _c.get("name")
-        if _sc and _nm and _sc != _nm:
-            _src_alias_map[_sc] = _nm  # kbi_value -> value (source output col)
-    ctx.translator.set_source_col_map(_src_alias_map)
-
-    base_measures: list[TranslationResult] = []
-    base_names: set[str] = set()
-    for agg_col in table_info.aggregate_columns:
-        name = agg_col["name"]
-        if "expr" in agg_col:
-            expr = agg_col["expr"]
-        else:
-            # Reference the source's OUTPUT column (`name`), which is what the
-            # emitted source SELECT exposes — not the inner `source_col`.
-            expr = f"SUM(source.{name})"
-        base_measures.append(
-            TranslationResult(
-                measure_name=name,
-                original_name=name,
-                sql_expr=expr,
-                is_translatable=True,
-                skip_reason=col_to_readable(name),
-                dax_expression="",
-                confidence="high",
-                category="base",
-            )
-        )
-        base_names.add(name)
-
-    # ── Step 2: Auto-generate dimensions from GROUP BY + calculated columns
-    dimensions: list[dict] = []
-    for col in table_info.group_by_columns:
-        dimensions.append(
-            {
-                "name": col,
-                "expr": f"source.{col}",
-                "comment": col_to_readable(col),
-            }
-        )
-    for calc in table_info.calculated_columns:
-        expr = calc["expr"]
-        for gb_col in table_info.group_by_columns:
-            expr = re.sub(
-                rf"(?<![.\w])\b{re.escape(gb_col)}\b(?!\s*\()",
-                f"source.{gb_col}",
-                expr,
-            )
-        # Normalize DATE() -> MAKE_DATE() for Databricks UC Metric Views
-        expr = re.sub(r"\bDATE\s*\(", "MAKE_DATE(", expr)
-        dimensions.append(
-            {
-                "name": calc["name"],
-                "expr": expr,
-                "comment": f"Calculated: {col_to_readable(calc['name'])}",
-            }
-        )
-
-    # ── Step 3: Auto-detect joins from DAX dimension refs ─────────────
-    joins = ctx.join_detector.detect(
-        table_key, dax_measures, table_info, inner_dim_joins=ctx.inner_dim_joins
+    # ── Steps 1-4: base measures, dimensions, joins (table_structure.py) ──
+    structure = build_table_structure(
+        table_key,
+        table_info,
+        dax_measures,
+        translator=ctx.translator,
+        join_detector=ctx.join_detector,
+        enrichment_joins=ctx.enrichment_joins,
+        inactive_rels=ctx.inactive_rels,
+        mquery_tables=ctx.mquery_tables,
+        inner_dim_joins=ctx.inner_dim_joins,
+        dimension_exclusions=ctx.dimension_exclusions,
     )
-
-    # 3b. Auto-detect fact-to-fact joins for cross-table DIVIDEs
-    fact_joins = ctx.join_detector.detect_fact_joins(
-        table_key, dax_measures, table_info
-    )
-    joins.extend(fact_joins)
-
-    # 3c. Add enrichment joins (domain-specific lookups not in DAX).
-    enrichment_cfg = ctx.enrichment_joins.get(table_key, [])
-    detected_aliases = {j["name"] for j in joins}
-    for ej in enrichment_cfg:
-        if ej["name"] in detected_aliases:
-            continue  # DAX detector already added this join
-        joins.append(
-            {
-                "name": ej["name"],
-                "source": ej["source"],
-                "join_on": ej["join_on"],
-            }
-        )
-        detected_aliases.add(ej["name"])
-        for col in ej.get("dim_columns", []):
-            if isinstance(col, dict):
-                dim_name = col["name"]
-                dim_expr = f"{ej['name']}.{col['expr']}"
-            else:
-                dim_name = col
-                dim_expr = f"{ej['name']}.{col}"
-            dimensions.append(
-                {
-                    "name": dim_name,
-                    "expr": dim_expr,
-                    "comment": f"{col_to_readable(dim_name)} from {ej['name']}",
-                }
-            )
-
-    # 3d. Detect USERELATIONSHIP measures and generate alternate join aliases
-    userel_pattern = re.compile(
-        r"USERELATIONSHIP\s*\(\s*(\w+)\[(\w+)\]\s*,\s*(\w+)\[(\w+)\]\s*\)",
-        re.IGNORECASE,
-    )
-    inactive_rels = ctx.inactive_rels
-    for dm in dax_measures:
-        dax = dm.get("dax_expression", "")
-        for match in userel_pattern.finditer(dax):
-            fact_col = match.group(2)  # e.g. ShipDate
-            dim_table = match.group(3)  # e.g. Calendar
-            dim_col = match.group(4)  # e.g. Date
-            # Find matching inactive relationship
-            for irel in inactive_rels:
-                if (
-                    irel["from_column"].lower() == fact_col.lower()
-                    and irel["to_table"].lower() == dim_table.lower()
-                ):
-                    # Generate alternate join alias
-                    base_alias = dim_table.lower()
-                    alt_alias = f"{base_alias}_{fact_col.lower()}"
-                    # Check if this join already exists
-                    if not any(j["name"] == alt_alias for j in joins):
-                        dim_info = ctx.mquery_tables.get(irel["to_table"])
-                        if dim_info and dim_info.source_table:
-                            joins.append(
-                                {
-                                    "name": alt_alias,
-                                    "source": dim_info.source_table,
-                                    "join_on": f"source.{fact_col.lower()} = {alt_alias}.{dim_col.lower()}",
-                                    "_userelationship": True,
-                                }
-                            )
-
-    # ── Step 4: Add dimension columns from joined tables ──────────────
-    dim_dims = ctx.join_detector.get_dim_dimensions(joins, table_info)
-    dimensions.extend(dim_dims)
-
-    # 4b. Normalize dimension names to lowercase
-    for d in dimensions:
-        if d["name"] != d["name"].lower():
-            old_name = d["name"]
-            d["name"] = old_name.lower()
-            d["expr"] = d["expr"].replace(old_name, old_name.lower())
-
-    # 4c. Remove excluded dimensions (join/filter-only columns, not user-facing)
-    excluded = ctx.dimension_exclusions.get(table_key, set())
-    if excluded:
-        dimensions = [d for d in dimensions if d["name"] not in excluded]
+    base_measures = structure.base_measures
+    base_names = structure.base_names
+    dimensions = structure.dimensions
+    joins = structure.joins
+    fact_joins = structure.fact_joins
 
     # ── Step 5: Translate DAX measures (pass fact_joins for cross-table resolution)
     translated: list[TranslationResult] = []
@@ -716,6 +582,22 @@ def process_table(
                     # Fact-table schema/join context so the LLM uses real column
                     # and alias names instead of guessing.
                     table_context=_table_context,
+                    # Reconciliation feedback from a prior iterative-loop cycle:
+                    # {original_measure_name -> mismatch hint}. Absent on the first
+                    # pass and in non-iterative runs.
+                    feedback=(ctx.llm_config or {}).get(
+                        "refinement_feedback_by_measure"
+                    ),
+                    # Optional customer-supplied domain context (vocabulary,
+                    # business rules, fiscal-calendar quirks). Same for every
+                    # measure on the table, so it rides the per-batch prompt.
+                    domain_context=(ctx.llm_config or {}).get("domain_context", ""),
+                    # Time-intelligence is only translated when reconciliation is
+                    # active to validate it; otherwise the model declines it (no
+                    # unvalidated prior-year/YTD math).
+                    time_intel_enabled=bool(
+                        (ctx.llm_config or {}).get("reconciliation_active")
+                    ),
                 )
             )
             llm_translated = []
@@ -945,8 +827,13 @@ def process_table(
                                 )
                         break
 
-    # ── Step 7: Merge: base + DAX translated + SWITCH decomposed ──────
-    all_measures = base_measures + translated + switch_measures
+    # Step 6d: implicit visual-column measures (see implicit_column_builder.py).
+    implicit_measures = build_implicit_measures(
+        ctx.config.get("implicit_column_measures", {}).get(table_key, []), base_names
+    )
+
+    # ── Step 7: Merge: base + DAX translated + SWITCH decomposed + implicit ──
+    all_measures = base_measures + translated + switch_measures + implicit_measures
 
     # Expand calculation groups if configured (Agent 8)
     calc_expanded = expand_calculation_groups(
@@ -1417,6 +1304,7 @@ def process_table(
     # ── Build comment block ───────────────────────────────────────────
     t_count = len(translated)
     sw_count = len(switch_measures)
+    ic_count = len(implicit_measures)
     u_count = len(untranslatable)
     table_short = table_key.replace("fact_", "").replace("FT_", "").replace("Fact_", "")
     comment_lines = [
@@ -1434,6 +1322,13 @@ def process_table(
             else ""
         ),
         *([] if sw_count == 0 else [f"{sw_count} SWITCH-decomposed measures"]),
+        *(
+            []
+            if ic_count == 0
+            else [
+                f"{ic_count} aggregated-column measures (visual-only, no PBI measure)"
+            ]
+        ),
         f"{u_count} untranslatable DAX measures (documented below)",
     ]
 
@@ -1483,6 +1378,7 @@ def process_table(
         base_measure_count=len(base_measures),
         dax_measure_count=len(translated),
         switch_measure_count=len(switch_measures),
+        implicit_measure_count=len(implicit_measures),
         source_filter=source_filter,
         source_sql=source_sql,
     )

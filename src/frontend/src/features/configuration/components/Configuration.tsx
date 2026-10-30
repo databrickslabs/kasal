@@ -15,6 +15,7 @@ import GeneralSettings from './GeneralSettings';
 import SettingsContent from './SettingsContent';
 import { ErrorBoundary } from '../../../shared/errors/ErrorBoundary';
 import { readSettingsNavigation, clearSettingsNavigation, switchSettingsTeamspace } from '../lib/settingsNavigation';
+import { readSettingsIntent, clearSettingsIntent, OPEN_SETTINGS_EVENT } from '../lib/settingsIntent';
 
 const ModelConfiguration = lazy(() => import('./Models'));
 const APIKeys = lazy(() => import('./APIKeys/APIKeys'));
@@ -86,7 +87,7 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   const isWorkspaceAdmin = isSystemAdmin || userRole === 'admin' || (isPersonalWorkspaceId(groupId, personalGroupId) && isPersonalWorkspaceManager);
   const access = useMemo(() => ({ isSystemAdmin, isWorkspaceAdmin, isEditor: userRole === 'editor' }), [isSystemAdmin, isWorkspaceAdmin, userRole]);
   const [scope, setScope] = useState<SettingsScope>('workspace');
-  const [selected, setSelected] = useState<SettingsSectionId>(() => readSettingsNavigation()?.section || 'overview');
+  const [selected, setSelected] = useState<SettingsSectionId>(() => readSettingsNavigation()?.section || readSettingsIntent()?.section || 'overview');
   const [switchingTeamspace, setSwitchingTeamspace] = useState(false);
   const [switchError, setSwitchError] = useState('');
   const [query, setQuery] = useState('');
@@ -112,7 +113,8 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   const filtered = sections.filter(section => `${label(section)} ${section.title} ${section.description} ${section.group}`.toLocaleLowerCase().includes(normalizedQuery));
   const scopeLabel = scopeOptions.find(option => option.id === scopeValue)?.label;
 
-  useEffect(() => { clearSettingsNavigation(); }, []);
+  // The intent has already chosen the initial section; it is one-shot.
+  useEffect(() => { clearSettingsNavigation(); clearSettingsIntent(); }, []);
   useEffect(() => { if (email) void fetchMyGroups(); }, [email, fetchMyGroups]);
   useEffect(() => { void loadPermissions(); }, [email, groupId, loadPermissions]);
   useEffect(() => { contentRef.current?.scrollTo?.({ top: 0 }); }, [active?.id, activeScope, groupId]);
@@ -125,7 +127,8 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
       if (target) { setScope('workspace'); setSelected(target.id); setQuery(''); }
     };
     window.addEventListener('kasal:navigate-config', handler);
-    return () => window.removeEventListener('kasal:navigate-config', handler);
+    window.addEventListener(OPEN_SETTINGS_EVENT, handler);
+    return () => { window.removeEventListener('kasal:navigate-config', handler); window.removeEventListener(OPEN_SETTINGS_EVENT, handler); };
   }, [access]);
   const changeScope = (value: string) => {
     const option = scopeOptions.find(item => item.id === value);

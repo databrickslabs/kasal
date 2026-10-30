@@ -266,7 +266,6 @@ _UCMV_MODULES = [
     "repositories/execution_history_repository.py",
     "services/tools/metric_view_validator_tool.py",
     "services/tools/uc_metric_view_generator_tool.py",
-    "services/tools/mquery_conversion_pipeline_tool.py",
 ]
 
 

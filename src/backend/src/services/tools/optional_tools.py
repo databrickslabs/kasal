@@ -14,16 +14,12 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .agentbricks_tool import AgentBricksTool as _AgentBricksTool
-    from .config_generator_tool import ConfigGeneratorTool as _ConfigGeneratorTool
     from .databricks_dashboard_creator_tool import (
         DatabricksDashboardCreatorTool as _DatabricksDashboardCreatorTool,
     )
     from .databricks_jobs_tool import DatabricksJobsTool as _DatabricksJobsTool
     from .databricks_knowledge_search_tool import (
         DatabricksKnowledgeSearchTool as _DatabricksKnowledgeSearchTool,
-    )
-    from .dax_to_sql_translator_tool import (
-        DaxToSqlTranslatorTool as _DaxToSqlTranslatorTool,
     )
     from .genie_space_generator_tool import (
         GenieSpaceGeneratorTool as _GenieSpaceGeneratorTool,
@@ -40,12 +36,6 @@ if TYPE_CHECKING:
     from .metric_view_validator_tool import (
         MetricViewValidatorTool as _MetricViewValidatorTool,
     )
-    from .mquery_conversion_pipeline_tool import (
-        MqueryConversionPipelineTool as _MqueryConversionPipelineTool,
-    )
-    from .pbi_measure_allocator_tool import (
-        PbiMeasureAllocatorTool as _PbiMeasureAllocatorTool,
-    )
     from .pbi_visual_ucmv_mapper_tool import (
         PBIVisualUCMVMapperTool as _PBIVisualUCMVMapperTool,
     )
@@ -53,7 +43,6 @@ if TYPE_CHECKING:
     from .pipeline_config_generator_tool import (
         PipelineConfigGeneratorTool as _PipelineConfigGeneratorTool,
     )
-    from .powerbi_analysis_tool import PowerBIAnalysisTool as _PowerBIAnalysisTool
     from .powerbi_connector_tool import PowerBIConnectorTool as _PowerBIConnectorTool
     from .powerbi_dax_executor_tool import (
         PowerBIDaxExecutorTool as _PowerBIDaxExecutorTool,
@@ -64,24 +53,13 @@ if TYPE_CHECKING:
     from .powerbi_hierarchies_tool import (
         PowerBIHierarchiesTool as _PowerBIHierarchiesTool,
     )
-    from .powerbi_metadata_reducer_tool import (
-        PowerBIMetadataReducerTool as _PowerBIMetadataReducerTool,
-    )
-    from .powerbi_relationships_tool import (
-        PowerBIRelationshipsTool as _PowerBIRelationshipsTool,
-    )
     from .powerbi_report_references_tool import (
         PowerBIReportReferencesTool as _PowerBIReportReferencesTool,
-    )
-    from .powerbi_semantic_model_dax_tool import (
-        PowerBISemanticModelDaxTool as _PowerBISemanticModelDaxTool,
-    )
-    from .powerbi_semantic_model_fetcher_tool import (
-        PowerBISemanticModelFetcherTool as _PowerBISemanticModelFetcherTool,
     )
     from .uc_metric_view_generator_tool import (
         UCMetricViewGeneratorTool as _UCMetricViewGeneratorTool,
     )
+    from .ucmv_drift_monitor_tool import UCMVDriftMonitorTool as _UCMVDriftMonitorTool
     from .ucmv_genie_config_generator_tool import (
         UCMVGenieConfigGeneratorTool as _UCMVGenieConfigGeneratorTool,
     )
@@ -129,13 +107,6 @@ except ImportError:
     GmailTool = None
     logging.warning("Could not import GmailTool")
 
-PowerBIAnalysisTool: Optional[type[_PowerBIAnalysisTool]]
-try:
-    from .powerbi_analysis_tool import PowerBIAnalysisTool
-except ImportError:
-    PowerBIAnalysisTool = None
-    logging.warning("Could not import PowerBIAnalysisTool")
-
 # MCPTool - Import from mcp_adapter
 MCPTool: Optional[type[_MCPTool]]
 try:
@@ -154,22 +125,6 @@ except ImportError as e:
     MeasureConversionPipelineTool = None
     PowerBIConnectorTool = None
     logging.warning("Could not import converter tools: %s", e)
-
-# M-Query Conversion Pipeline Tool
-MqueryConversionPipelineTool: Optional[type[_MqueryConversionPipelineTool]]
-try:
-    from .mquery_conversion_pipeline_tool import MqueryConversionPipelineTool
-except ImportError as e:
-    MqueryConversionPipelineTool = None
-    logging.warning("Could not import %s: %s", "MqueryConversionPipelineTool", e)
-
-# Power BI Relationships Tool
-PowerBIRelationshipsTool: Optional[type[_PowerBIRelationshipsTool]]
-try:
-    from .powerbi_relationships_tool import PowerBIRelationshipsTool
-except ImportError as e:
-    PowerBIRelationshipsTool = None
-    logging.warning("Could not import %s: %s", "PowerBIRelationshipsTool", e)
 
 # Power BI Hierarchies Tool
 PowerBIHierarchiesTool: Optional[type[_PowerBIHierarchiesTool]]
@@ -201,30 +156,6 @@ except ImportError as e:
     PowerBIReportReferencesTool = None
     logging.warning("Could not import %s: %s", "PowerBIReportReferencesTool", e)
 
-# Power BI Semantic Model Fetcher Tool
-PowerBISemanticModelFetcherTool: Optional[type[_PowerBISemanticModelFetcherTool]]
-try:
-    from .powerbi_semantic_model_fetcher_tool import PowerBISemanticModelFetcherTool
-except ImportError as e:
-    PowerBISemanticModelFetcherTool = None
-    logging.warning("Could not import %s: %s", "PowerBISemanticModelFetcherTool", e)
-
-# Power BI Semantic Model DAX Generator Tool
-PowerBISemanticModelDaxTool: Optional[type[_PowerBISemanticModelDaxTool]]
-try:
-    from .powerbi_semantic_model_dax_tool import PowerBISemanticModelDaxTool
-except ImportError as e:
-    PowerBISemanticModelDaxTool = None
-    logging.warning("Could not import %s: %s", "PowerBISemanticModelDaxTool", e)
-
-# Power BI Metadata Reducer Tool
-PowerBIMetadataReducerTool: Optional[type[_PowerBIMetadataReducerTool]]
-try:
-    from .powerbi_metadata_reducer_tool import PowerBIMetadataReducerTool
-except ImportError as e:
-    PowerBIMetadataReducerTool = None
-    logging.warning("Could not import %s: %s", "PowerBIMetadataReducerTool", e)
-
 # Power BI DAX Executor Tool
 PowerBIDaxExecutorTool: Optional[type[_PowerBIDaxExecutorTool]]
 try:
@@ -233,27 +164,12 @@ except Exception as e:  # noqa: BLE001 - any failure just drops this one tool
     PowerBIDaxExecutorTool = None
     logging.warning("Could not import %s: %s", "PowerBIDaxExecutorTool", e)
 
-# UC Metric View Tools
-DaxToSqlTranslatorTool: Optional[type[_DaxToSqlTranslatorTool]]
-try:
-    from .dax_to_sql_translator_tool import DaxToSqlTranslatorTool
-except ImportError as e:
-    DaxToSqlTranslatorTool = None
-    logging.warning("Could not import %s: %s", "DaxToSqlTranslatorTool", e)
-
 UCMetricViewGeneratorTool: Optional[type[_UCMetricViewGeneratorTool]]
 try:
     from .uc_metric_view_generator_tool import UCMetricViewGeneratorTool
 except ImportError as e:
     UCMetricViewGeneratorTool = None
     logging.warning("Could not import %s: %s", "UCMetricViewGeneratorTool", e)
-
-PbiMeasureAllocatorTool: Optional[type[_PbiMeasureAllocatorTool]]
-try:
-    from .pbi_measure_allocator_tool import PbiMeasureAllocatorTool
-except ImportError as e:
-    PbiMeasureAllocatorTool = None
-    logging.warning("Could not import %s: %s", "PbiMeasureAllocatorTool", e)
 
 MetricViewDeployerTool: Optional[type[_MetricViewDeployerTool]]
 try:
@@ -268,14 +184,6 @@ try:
 except ImportError as e:
     MetricViewValidatorTool = None
     logging.warning("Could not import %s: %s", "MetricViewValidatorTool", e)
-
-# Config Generator Tool
-ConfigGeneratorTool: Optional[type[_ConfigGeneratorTool]]
-try:
-    from .config_generator_tool import ConfigGeneratorTool
-except ImportError as e:
-    ConfigGeneratorTool = None
-    logging.warning("Could not import %s: %s", "ConfigGeneratorTool", e)
 
 # Pipeline Config Generator Tool (API-direct, no LLM)
 PipelineConfigGeneratorTool: Optional[type[_PipelineConfigGeneratorTool]]
@@ -316,3 +224,11 @@ try:
 except ImportError as e:
     DatabricksDashboardCreatorTool = None
     logging.warning("Could not import %s: %s", "DatabricksDashboardCreatorTool", e)
+
+# UCMV Drift Monitor Tool (keeps deployed metric views in sync with Power BI)
+UCMVDriftMonitorTool: Optional[type[_UCMVDriftMonitorTool]]
+try:
+    from .ucmv_drift_monitor_tool import UCMVDriftMonitorTool
+except ImportError as e:
+    UCMVDriftMonitorTool = None
+    logging.warning("Could not import %s: %s", "UCMVDriftMonitorTool", e)

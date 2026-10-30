@@ -7,7 +7,7 @@ gets them. So the only proof that a Power BI tool still authenticates is a run
 in a spawned interpreter (services/execution/CLAUDE.md), the same shape as
 test_flow_failure_status.py:
 
-- the test writes a crew whose task uses the Power BI Relationships tool with a
+- the test writes a crew whose task uses the Power BI DAX Executor with a
   service-principal secret, through the ORM, so the row holds ciphertext;
 - a fresh interpreter runs the real child entry, the Flow Builder's
   ``run_flow_in_process`` or the Agent Builder's ``run_crew_in_process``, on the
@@ -51,7 +51,7 @@ from src.utils.user_context import GroupContext
 BACKEND = pathlib.Path(__file__).resolve().parents[4]
 WS = "ws-pbi"
 SECRET = "sp-secret-value-1234567890"
-TOOL = "Power BI Relationships Tool"
+TOOL = "Power BI DAX Executor"
 CREW_ID = uuid.UUID("7d4f2a9e-1c3b-4e5f-8a6b-0c1d2e3f4a5b")
 PBI = {
     TOOL: {
@@ -61,6 +61,7 @@ PBI = {
         "client_id": "client-1",
         "client_secret": SECRET,
         "auth_method": "service_principal",
+        "dax_query": 'EVALUATE ROW("ok", 1)',
     }
 }
 
@@ -103,7 +104,7 @@ class FakeLLM:
     def call(self, messages, tools=None, available_functions=None):
         seen["llm_calls"] += 1
         for name, run_tool in (available_functions or {}).items():
-            if "relationships" in name.lower():
+            if "dax" in name.lower():
                 seen["tool_outputs"].append(str(run_tool())[:300])
         return "done"
 
@@ -199,7 +200,7 @@ def _seed(path, job_ids):
                     id="a1",
                     name="analyst",
                     role="Analyst",
-                    goal="Extract relationships",
+                    goal="Query the model",
                     backstory="b",
                     llm="fake-model",
                     tools=[],
@@ -209,7 +210,7 @@ def _seed(path, job_ids):
                 Task(
                     id="t1",
                     name="extract",
-                    description="Extract the model's relationships",
+                    description="Run a DAX query against the model",
                     expected_output="A list",
                     agent_id="a1",
                     tools=[str(tool.id)],

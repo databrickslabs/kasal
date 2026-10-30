@@ -466,7 +466,7 @@ async def get_context_config_dict(
 ) -> PowerBIContextConfigDict:
     """
     Get context configuration in dictionary format (for tool integration).
-    Returns mappings and synonyms in the format expected by powerbi_analysis_tool.
+    Returns mappings and synonyms as a Power BI context-config dictionary.
 
     Args:
         semantic_model_id: Power BI semantic model ID

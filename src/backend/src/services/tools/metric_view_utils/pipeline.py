@@ -8,6 +8,8 @@ for use as a Kasal tool.
 Heavy lifting is delegated to:
   - table_processor.py  (per-table translation pipeline)
   - artifact_cascade.py (cross-table reclassification, grouping, counting)
+  - switch_measure_builder.py, dax_var_chain.py, scan_columns.py (helpers)
+  - pipeline_results.py (serialized results + metadata lint)
 """
 
 from __future__ import annotations
@@ -24,15 +26,17 @@ from .artifact_cascade import (
     group_by_table,
 )
 from .data_classes import MetricViewSpec, ScanTableInfo, TableInfo, TranslationResult
-from .dax_condition_sql import _sql_in_list
 from .dax_translator import DaxTranslator
-from .join_detector import JoinDetector, _sanitize_alias
+from .dax_var_chain import extract_divide_args, resolve_var_chain
+from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
 from .metadata_generator import MetadataGenerator
 from .pbi_parameter_resolver import PbiParameterResolver
-from .report_emitter import build_proposal, emit_migration_report
+from .pipeline_results import build_results
+from .scan_columns import extract_columns_from_scan, extract_source_table_from_scan
 from .sql_emitter import emit_deploy_sql
 from .sql_post_processor import SqlPostProcessor
+from .switch_measure_builder import build_switch_measure
 from .table_processor import (
     _ARTIFACT_SKIP_KEYWORDS,
     TableProcessorContext,
@@ -42,6 +46,29 @@ from .utils import to_snake_case
 from .yaml_emitter import emit_yaml
 
 logger = logging.getLogger(__name__)
+
+
+def _skip_stat(tinfo: TableInfo) -> dict:
+    from .mquery_parser import classify_mquery_source
+
+    """Build a skip stat that classifies WHY a table produced no view and
+    carries the original M-query so it can be emitted as a note (mirrors
+    how untranslatable measures are surfaced)."""
+    raw = getattr(tinfo, "raw_transpiled_sql", "") or ""
+    category, reason = classify_mquery_source(raw)
+    return {
+        "total": 0,
+        "translated": 0,
+        "untranslatable": 0,
+        "cross_table": 0,
+        "base": 0,
+        "dax": 0,
+        "skipped": True,
+        "skip_reason": reason,
+        "skip_category": category,
+        # original M-query, capped, for the "not emitted" note in the report
+        "original_mquery": raw[:2000],
+    }
 
 
 class MetricViewPipeline:
@@ -172,6 +199,7 @@ class MetricViewPipeline:
         self.cross_table_measures: list[TranslationResult] = []
         self._filter_warnings: list[str] = []
         self.all_specs: dict[str, MetricViewSpec] = {}
+        self._allocation_report: dict | None = None
 
         # Pipeline helper instances
         self.metadata_gen = MetadataGenerator(
@@ -194,42 +222,75 @@ class MetricViewPipeline:
             parameter_defaults=self.config.get("parameter_defaults"),
         )
 
-    # ── Calculation group expansion (Agent 8) — delegates to table_processor
-    # ── run() — full pipeline ─────────────────────────────────────────────
-
     def run(self) -> dict[str, MetricViewSpec]:
         """Execute the full pipeline and return specs per fact table.
 
         Returns:
             Dict mapping fact_table_key -> MetricViewSpec
         """
+        self._allocate_by_columns()
         measure_groups = self._group_by_table()
 
         # Phase 1: Process all tables and collect specs
         self.all_specs = {}
+        self._process_fact_tables(measure_groups)
+        self._promote_measure_driven_facts(measure_groups)
+        self._process_scan_only_tables(measure_groups)
 
-        from .mquery_parser import classify_mquery_source
+        # Phase 2: Cross-table artifact cascade
+        self._cross_table_artifact_cascade(self.all_specs)
+        self._reclassify_secondary_allocations()
+        self._resolve_generated_table_names()
 
-        def _skip_stat(tinfo: TableInfo) -> dict:
-            """Build a skip stat that classifies WHY a table produced no view and
-            carries the original M-query so it can be emitted as a note (mirrors
-            how untranslatable measures are surfaced)."""
-            raw = getattr(tinfo, "raw_transpiled_sql", "") or ""
-            category, reason = classify_mquery_source(raw)
-            return {
-                "total": 0,
-                "translated": 0,
-                "untranslatable": 0,
-                "cross_table": 0,
-                "base": 0,
-                "dax": 0,
-                "skipped": True,
-                "skip_reason": reason,
-                "skip_category": category,
-                # original M-query, capped, for the "not emitted" note in the report
-                "original_mquery": raw[:2000],
-            }
+        # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
+        for spec in self.all_specs.values():
+            comment_override = self._comment_overrides.get(spec.fact_table_key)
+            if comment_override:
+                spec.comment = comment_override
+            else:
+                MetricViewPipeline._rebuild_comment(spec)
+        self._collect_stats()
 
+        # Handle unassigned measures
+        unassigned = measure_groups.get("__unassigned__", [])
+        if unassigned:
+            self._collect_unassigned(unassigned)
+
+        self._plan_cross_table_specs()
+        return self.all_specs
+
+    # ── Run phases (each step of run(), in execution order) ───────────
+
+    def _allocate_by_columns(self) -> None:
+        """Phase 0: home each measure on the fact whose columns its DAX references."""
+        # ── Phase 0: column-based allocation (KASAL_FIXES M6/M7/M10) ──────
+        # Home each measure on the fact whose COLUMNS its DAX references, before
+        # grouping — so the existing routing places rescued/re-homed measures on
+        # the right fact and keeps broken/cross-fact ones out of every fact.
+        # Conservative: a correctly-homed measure is left untouched. Default on;
+        # set allocate_by_columns=False for the exact prior behaviour.
+        if self.config.get("allocate_by_columns", True):
+            from .measure_allocator import reallocate_by_columns
+
+            self._allocation_report = reallocate_by_columns(
+                self.mapping, self.mquery_tables, config=self.config
+            )
+            _r = self._allocation_report
+            if any(_r.get(k) for k in ("rescued", "rehomed", "broken", "cross_fact")):
+                self._limitations["measure_allocation"] = _r
+                logger.info(
+                    "[MetricViewPipeline] column-based allocation: "
+                    "%d rescued, %d re-homed, %d broken, %d cross-fact",
+                    len(_r.get("rescued", [])),
+                    len(_r.get("rehomed", [])),
+                    len(_r.get("broken", [])),
+                    len(_r.get("cross_fact", [])),
+                )
+        else:
+            self._allocation_report = None
+
+    def _process_fact_tables(self, measure_groups: dict[str, list[dict]]) -> None:
+        """Phase 1: specs for SQL fact tables and mapping-only tables."""
         for table_key, table_info in self.mquery_tables.items():
             if not table_info.is_fact:
                 # Non-fact / raw-M tables: record a classified skip (not a silent
@@ -263,6 +324,10 @@ class MetricViewPipeline:
             spec = self._process_table(table_key, stub_info, dax_measures)
             self.all_specs[table_key] = spec
 
+    def _promote_measure_driven_facts(
+        self, measure_groups: dict[str, list[dict]]
+    ) -> None:
+        """Phase 1b: promote plain-source tables that carry allocated measures."""
         # Phase 1b: Measure-driven facts ──────────────────────────────────────
         # A table can parse WITH a source_table yet NOT be detected as a fact
         # because its M-Query resolved to a plain table read (no aggregate SQL /
@@ -301,6 +366,8 @@ class MetricViewPipeline:
                     promoted,
                 )
 
+    def _process_scan_only_tables(self, measure_groups: dict[str, list[dict]]) -> None:
+        """Specs for PBI scan tables that have measures but no MQuery entry."""
         # Handle scan-data-only tables (in PBI scan + have DAX measures, but no MQuery/mapping entry)
         if self.scan_data:
             for table_key, scan_info in self.scan_data.items():
@@ -325,9 +392,8 @@ class MetricViewPipeline:
                 spec = self._process_table(table_key, stub_info, dax_measures)
                 self.all_specs[table_key] = spec
 
-        # Phase 2: Cross-table artifact cascade
-        self._cross_table_artifact_cascade(self.all_specs)
-
+    def _reclassify_secondary_allocations(self) -> None:
+        """Phase 2b: reclassify secondary allocations covered on the primary table."""
         # Phase 2b: Reclassify secondary allocations that are covered on primary table
         global_covered: set[str] = set()
         for spec in self.all_specs.values():
@@ -362,6 +428,8 @@ class MetricViewPipeline:
                             "Covered on primary table (secondary allocation)"
                         )
 
+    def _resolve_generated_table_names(self) -> None:
+        """Phase 2b-fix: resolve physical table/column names from the Power Query M."""
         # Phase 2b-fix: resolve physical table/column names from the Power Query M
         # (KASAL_FIXES Gaps 1-3). Fail-open — unresolved identifiers are left as-is.
         if self._mquery_expressions:
@@ -393,14 +461,8 @@ class MetricViewPipeline:
                         ", ".join(sorted(_gen_sql)),
                     )
 
-        # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
-        for spec in self.all_specs.values():
-            comment_override = self._comment_overrides.get(spec.fact_table_key)
-            if comment_override:
-                spec.comment = comment_override
-            else:
-                MetricViewPipeline._rebuild_comment(spec)
-
+    def _collect_stats(self) -> None:
+        """Phase 3: emit each spec once to collect its per-table statistics."""
         # Phase 3: Collect stats (no file I/O in Kasal — emit is done by caller)
         for table_key, spec in self.all_specs.items():
             m_meta = self._measure_metadata.get(table_key, {})
@@ -426,6 +488,7 @@ class MetricViewPipeline:
                     "base": 0,
                     "dax": 0,
                     "switch": 0,
+                    "implicit_column": 0,
                     "manual_override": 0,
                     "skipped": True,
                     "skip_reason": "All measures dropped by validation (no deployable measures)",
@@ -443,6 +506,7 @@ class MetricViewPipeline:
                 "base": spec.base_measure_count,
                 "dax": spec.dax_measure_count,
                 "switch": spec.switch_measure_count,
+                "implicit_column": spec.implicit_measure_count,
                 "manual_override": sum(
                     1
                     for m in spec.measures
@@ -451,12 +515,27 @@ class MetricViewPipeline:
                 "skipped": False,
             }
 
-        # Handle unassigned measures
-        unassigned = measure_groups.get("__unassigned__", [])
-        if unassigned:
-            self._collect_unassigned(unassigned)
+    def _plan_cross_table_specs(self) -> None:
+        """Cross-fact measures: same-grain UNION combined sources (reconciliation-gated)."""
+        # Cross-fact measures (span 2 facts): build same-grain UNION combined
+        # sources and translate them via the normal path — but ONLY when
+        # reconciliation is active to validate the numbers (see
+        # cross_table_source_planner). Off → leave them collected, as before.
+        if self.config.get("reconciliation_active"):
+            try:
+                from .cross_table_source_planner import plan_cross_table_sources
 
-        return self.all_specs
+                _xspecs, _xlims = plan_cross_table_sources(self)
+                for _k, _spec in _xspecs.items():
+                    self.all_specs[_k] = _spec
+                if _xlims:
+                    self._limitations.setdefault("cross_table_deferred", []).extend(
+                        _xlims
+                    )
+            except Exception as e:  # noqa: BLE001 — never break generation
+                logger.warning(
+                    "[MetricViewPipeline] cross-table planning skipped: %s", e
+                )
 
     # ── _process_table() — delegates to table_processor module ────────
 
@@ -611,6 +690,11 @@ class MetricViewPipeline:
         ]
         if spec.switch_measure_count:
             lines.append(f"{spec.switch_measure_count} SWITCH-decomposed measures")
+        if spec.implicit_measure_count:
+            lines.append(
+                f"{spec.implicit_measure_count} aggregated-column measures "
+                "(used in visuals, no named PBI measure)"
+            )
         lines.append(
             f"{len(spec.untranslatable)} untranslatable DAX measures (documented below)"
         )
@@ -621,6 +705,8 @@ class MetricViewPipeline:
                 lines.append(f"  {r.original_name} — {r.skip_reason}")
         spec.comment = "\n".join(lines)
 
+    # ── Scan-data helpers (scan_columns.py) ───────────────────────────
+
     @staticmethod
     def _extract_columns_from_scan(
         scan_info: ScanTableInfo,
@@ -629,41 +715,12 @@ class MetricViewPipeline:
 
         Returns: (aggregate_columns, group_by_columns)
         """
-        sql = scan_info.native_sql
-        first_arm = re.split(r"\bunion\b", sql, maxsplit=1, flags=re.IGNORECASE)[0]
-        m = re.match(
-            r"\s*SELECT\s+(.*?)\s+FROM\s+", first_arm, re.IGNORECASE | re.DOTALL
-        )
-        if not m:
-            return [], []
-        select_body = m.group(1)
-        agg_cols = []
-        grp_cols = []
-        for part in MTransformFolder._split_select_columns(select_body):
-            part = part.strip()
-            if not part:
-                continue
-            as_match = re.search(r"\bAS\s+(\w+)\s*$", part, re.IGNORECASE)
-            alias = as_match.group(1) if as_match else part.split(".")[-1].strip()
-            alias = re.sub(r"\W+$", "", alias)
-            if re.match(r"^\s*(SUM|AVG|COUNT|MIN|MAX)\s*\(", part, re.IGNORECASE):
-                source_col = alias
-                inner_match = re.match(r"^\s*\w+\s*\(([^()]+)\)\s*", part)
-                if inner_match:
-                    inner = inner_match.group(1).strip()
-                    source_col = inner.split(".")[-1].strip()
-                agg_cols.append({"name": alias, "source_col": source_col})
-            elif re.match(r"^[a-zA-Z_]\w*$", alias):
-                grp_cols.append(alias)
-        return agg_cols, grp_cols
+        return extract_columns_from_scan(scan_info)
 
     @staticmethod
     def _extract_source_table_from_scan(scan_info: ScanTableInfo) -> str:
         """Extract source table name from scan data SQL's FROM clause."""
-        sql = scan_info.native_sql
-        first_arm = re.split(r"\bunion\b", sql, maxsplit=1, flags=re.IGNORECASE)[0]
-        m = re.search(r"\bFROM\s+([\w.]+)", first_arm, re.IGNORECASE)
-        return m.group(1) if m else ""
+        return extract_source_table_from_scan(scan_info)
 
     @staticmethod
     def _clean_unresolved_vars(expr: str | None) -> str | None:
@@ -697,6 +754,8 @@ class MetricViewPipeline:
                 )
         return warnings
 
+    # ── SWITCH and DAX-VAR helpers (switch_measure_builder.py, dax_var_chain.py)
+
     def _build_switch_measure(
         self,
         defn: dict,
@@ -705,278 +764,25 @@ class MetricViewPipeline:
         filter_sets: dict | None = None,
     ) -> TranslationResult:
         """Build a TranslationResult from a SWITCH decomposition definition."""
-        join_alias = join_alias or self.config.get("switch_join_alias", "")
-        join_col = join_col or self.config.get("switch_join_col", "")
-        _fs = filter_sets or {}
-        if _fs:  # config identifiers reach the deployed SQL unquoted
-            join_alias, join_col = _sanitize_alias(join_alias), _sanitize_alias(
-                join_col
-            )
-
-        # Filter-set values are model/warehouse data deployed as metric-view
-        # SQL: escaped literals, never raw '{v}'.
-        def _filter_clause(fs_key: str) -> str:
-            quoted = _sql_in_list(_fs[fs_key])
-            return f"FILTER (WHERE {join_alias}.{join_col} IN ({quoted}))"  # identifiers validated, values escaped — nosemgrep: tmp.databricks.sql-injection.fstring-where
-
-        # Support raw_expr for pre-built SQL expressions
-        if "raw_expr" in defn:
-            return TranslationResult(
-                measure_name=defn["name"],
-                original_name=defn["name"],
-                sql_expr=defn["raw_expr"],
-                is_translatable=True,
-                skip_reason=defn.get("comment", "SWITCH decomposition"),
-                dax_expression="SWITCH decomposition",
-                confidence="high",
-                category="switch_decomposition",
-                window_spec=defn.get("window"),
-            )
-
-        num = defn["num"]
-        den = defn["den"]
-        num_fs = defn["num_fs"]
-        den_fs = defn["den_fs"]
-
-        if num_fs is None:
-            # Complex expression -- already has filter placeholders
-            for fs_key, fs_vals in _fs.items():
-                quoted = _sql_in_list(fs_vals)
-                placeholder = "{" + fs_key.lower() + "}"
-                fc = f"(WHERE {join_alias}.{join_col} IN ({quoted}))"  # identifiers validated, values escaped — nosemgrep: tmp.databricks.sql-injection.fstring-where
-                num = num.replace(placeholder, fc)
-            num_expr = num
-        else:
-            num_expr = f"SUM(source.{num}) {_filter_clause(num_fs)}"
-
-        if den_fs is None:
-            den_expr = den
-        else:
-            den_expr = f"SUM(source.{den}) {_filter_clause(den_fs)}"
-
-        num_wrapped = (
-            f"({num_expr})" if "+" in num_expr or "-" in num_expr else num_expr
-        )
-        sql_expr = f"{num_wrapped} / NULLIF({den_expr}, 0)"
-
-        return TranslationResult(
-            measure_name=defn["name"],
-            original_name=defn["name"],
-            sql_expr=sql_expr,
-            is_translatable=True,
-            skip_reason=defn.get("comment", "SWITCH decomposition"),
-            dax_expression="SWITCH decomposition",
-            confidence="high",
-            category="switch_decomposition",
+        return build_switch_measure(
+            defn, self.config, join_alias, join_col, filter_sets
         )
 
     @staticmethod
     def _resolve_var_chain(dax: str) -> str:
-        """Resolve chained VAR assignments up to 5 levels deep.
-
-        For example:
-            var a = SUM(t[x])
-            var b = a + 1
-            return b
-        becomes:
-            var b = SUM(t[x]) + 1
-            return b
-
-        Only resolves simple scalar assignments (not CALCULATE/SUMX blocks).
-        """
-        # Normalize single-line multi-var
-        dax = re.sub(r"\s+(?=\bvar\s)", "\n", dax, flags=re.IGNORECASE)
-        dax = re.sub(r"\s+(?=\breturn\s)", "\n", dax, flags=re.IGNORECASE)
-        var_map: dict[str, str] = {}
-        lines = dax.split("\n")
-        for line in lines:
-            m = re.match(r"\s*var\s+(\w+)\s*=\s*(.+)", line.strip(), re.IGNORECASE)
-            if m:
-                var_name = m.group(1)
-                var_expr = m.group(2).strip()
-                if var_expr.count("(") != var_expr.count(")"):
-                    continue
-                if re.search(
-                    r"\b(CALCULATE|SUMX|FILTER|COUNTX|AVERAGEX)\s*\(",
-                    var_expr,
-                    re.IGNORECASE,
-                ):
-                    continue
-                for prev_var in sorted(var_map.keys(), key=len, reverse=True):
-                    var_expr = re.sub(
-                        rf"\b{re.escape(prev_var)}\b", var_map[prev_var], var_expr
-                    )
-                var_map[var_name] = var_expr
-        if not var_map:
-            return dax
-        result_lines = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped.lower().startswith("return "):
-                ret_expr = stripped[7:].strip()
-                for var_name in sorted(var_map.keys(), key=len, reverse=True):
-                    ret_expr = re.sub(
-                        rf"\b{re.escape(var_name)}\b", var_map[var_name], ret_expr
-                    )
-                result_lines.append(f"return {ret_expr}")
-            else:
-                result_lines.append(line)
-        return "\n".join(result_lines)
+        """Resolve chained VAR assignments up to 5 levels deep (dax_var_chain.py)."""
+        return resolve_var_chain(dax)
 
     @staticmethod
     def _extract_divide_args_static(raw: str) -> tuple[int, int, str, str] | None:
         """Return (start, end, numerator, denominator) of the first DIVIDE(...) in *raw*."""
-        m = re.search(r"DIVIDE\s*\(", raw, re.IGNORECASE)
-        if not m:
-            return None
-        div_start = m.start()
-        inner_start = m.end()
-        depth = 1
-        pos = inner_start
-        comma_positions: list[int] = []
-        while pos < len(raw) and depth > 0:
-            ch = raw[pos]
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0:
-                    break
-            elif ch == "," and depth == 1:
-                comma_positions.append(pos)
-            pos += 1
-        if len(comma_positions) >= 1:
-            num = raw[inner_start : comma_positions[0]]
-            if len(comma_positions) >= 2:
-                den = raw[comma_positions[0] + 1 : comma_positions[1]]
-            else:
-                den = raw[comma_positions[0] + 1 : pos]
-            div_end = pos + 1  # past the closing paren
-            return div_start, div_end, num.strip(), den.strip()
-        return None
+        return extract_divide_args(raw)
 
     # ── Serialization ─────────────────────────────────────────────────────
 
     def get_results(self) -> dict:
         """Return pipeline results as a serializable dict."""
-        from .recovery_recommender import draft_source_view as _draft_source_view
-        from .recovery_recommender import recommend as _recovery_recipe
-
-        # Tables reachable only via a skipped many:many/bidirectional relationship
-        # — used to recommend an EXISTS-precompute recovery (Gap 4) instead of a
-        # generic decline.
-        _m2n_tables: set[str] = set()
-        for _r in self._limitations.get("m2n_relationships", []) or []:
-            _m2n_tables.add(_r.get("from_table", ""))
-            _m2n_tables.add(_r.get("to_table", ""))
-        _m2n_tables.discard("")
-        results: dict[str, Any] = {
-            "specs": {},
-            "stats": self.stats,
-            "cross_table_count": len(self.cross_table_measures),
-            "filter_warnings": self._filter_warnings,
-        }
-        for table_key, spec in self.all_specs.items():
-            results["specs"][table_key] = {
-                "fact_table_key": spec.fact_table_key,
-                "source_table": spec.source_table,
-                "view_name": spec.view_name,
-                "measures_count": len(spec.measures),
-                "untranslatable_count": len(spec.untranslatable),
-                "base_measure_count": spec.base_measure_count,
-                "dax_measure_count": spec.dax_measure_count,
-                "switch_measure_count": spec.switch_measure_count,
-                "joins_count": len(spec.joins),
-                "dimensions_count": len(spec.dimensions),
-                "measures": [
-                    {
-                        "name": m.measure_name,
-                        "original_name": m.original_name,
-                        "sql_expr": m.sql_expr,
-                        # dax_expression is the ORIGINAL DAX — the validator needs
-                        # it to compare against the translated SQL (filter/agg check).
-                        "dax_expression": m.dax_expression,
-                        "confidence": m.confidence,
-                        "category": m.category,
-                    }
-                    for m in spec.measures
-                ],
-                "untranslatable": [
-                    {
-                        "name": m.original_name,
-                        "original_name": m.original_name,
-                        "skip_reason": m.skip_reason,
-                        "category": m.category,
-                        # Rich fields for the validation-UI "Not transpiled" review
-                        # panel: the full original DAX, the LLM translation-class
-                        # label, and how many other measures depend on this one (so
-                        # reviewers can triage high-impact gaps first).
-                        "dax_expression": m.dax_expression,
-                        "dax_class": m.dax_class,
-                        "referenced_by": getattr(m, "referenced_by", 0),
-                        "explanation": getattr(m, "explanation", None),
-                        # Prefer the LLM's own recipe; else a concrete Gap 4/5 recovery
-                        # recipe (EXISTS precompute / separate-grain view) when the DAX
-                        # shape matches; else the class-based default.
-                        "proposal": build_proposal(
-                            m.dax_class,
-                            getattr(m, "explanation", None)
-                            or _recovery_recipe(
-                                m.dax_expression,
-                                fact_table=spec.fact_table_key,
-                                m2n_tables=_m2n_tables,
-                                join_tables={
-                                    n
-                                    for j in (spec.joins or [])
-                                    if (n := j.get("name"))
-                                },
-                            ),
-                            m.skip_reason,
-                        ),
-                        # Best-effort, UNVERIFIED source-view SQL scaffold for cross-fact /
-                        # multi-stage measures — a proposal starting point, never an emitted
-                        # measure. Clearly labeled DRAFT; complete + verify against PBI.
-                        "source_view_sql_draft": _draft_source_view(
-                            m.dax_expression,
-                            measure_name=m.measure_name,
-                            fact_table=spec.fact_table_key,
-                        ),
-                    }
-                    for m in spec.untranslatable
-                ],
-            }
-        total_measures = sum(
-            s.get("total", 0) for k, s in self.stats.items() if k != "__unassigned__"
-        )
-        total_translated = sum(
-            s.get("translated", 0)
-            for k, s in self.stats.items()
-            if k != "__unassigned__"
-        )
-        total_artifacts = sum(
-            s.get("artifacts", 0)
-            for k, s in self.stats.items()
-            if k != "__unassigned__"
-        )
-        business_scope = total_measures - total_artifacts
-        results["business_coverage"] = {
-            "total_measures": total_measures,
-            "translated": total_translated,
-            "artifacts_excluded": total_artifacts,
-            "business_scope": business_scope,
-            "overall_pct": (
-                total_translated * 100 // total_measures if total_measures else 0
-            ),
-            "business_pct": (
-                total_translated * 100 // business_scope if business_scope > 0 else 0
-            ),
-        }
-        self._record_source_gaps()
-        results["limitations"] = self._limitations
-        results["migration_report"] = emit_migration_report(
-            self.all_specs, self.stats, self.config, limitations=self._limitations
-        )
-        return results
+        return build_results(self)
 
     def _record_source_gaps(self) -> None:
         """Gaps the YAML does not show, for ``limitations`` and the report:
@@ -1014,13 +820,54 @@ class MetricViewPipeline:
             if "source" in j:
                 j["source"] = _sub(j["source"])
 
+    def _infer_source_catalog(self) -> "str | None":
+        """The model's dominant SOURCE catalog, inferred from specs whose source
+        is already a 3-level ``catalog.schema.table``.
+
+        Used to qualify a source resolved from a ``Value.NativeQuery`` native-SQL
+        ``FROM`` clause, which uses an implicit-catalog ``schema.table`` (e.g.
+        ``acme_datamart_mtc.fm016_...``) and would otherwise emit a 2-part source
+        that cannot be deployed. Placeholder ``main.default.*`` / ``TODO.*``
+        sources are not real source catalogs and are ignored. Returns ``None``
+        when there is no evidence — we never guess a catalog out of thin air."""
+        from collections import Counter
+
+        cats: Counter = Counter()
+        for s in self.all_specs.values():
+            st = getattr(s, "source_table", "") or ""
+            low = st.lower()
+            if st.count(".") == 2 and not (
+                low.startswith("todo") or low.startswith("main.default.")
+            ):
+                cats[st.split(".", 1)[0]] += 1
+        return cats.most_common(1)[0][0] if cats else None
+
+    @staticmethod
+    def _qualify_source_catalog(
+        spec: MetricViewSpec, default_src_catalog: "str | None"
+    ) -> None:
+        """Prepend the inferred source catalog to a 2-part (``schema.table``)
+        source so it becomes a 3-level ``catalog.schema.table``. Idempotent;
+        a no-op without an inferred catalog, or on sources that are already
+        3-level, bare, placeholders, or unresolved ``{token}`` templates."""
+        if not default_src_catalog:
+            return
+        st = getattr(spec, "source_table", None)
+        if not isinstance(st, str) or not st:
+            return
+        low = st.lower()
+        if st.count(".") == 1 and not (low.startswith("todo") or st.startswith("{")):
+            spec.source_table = f"{default_src_catalog}.{st}"
+
     def emit_all_yaml(
         self, catalog: str = "main", schema: str = "default"
     ) -> dict[str, str]:
         """Emit YAML for all specs. Returns dict[table_key -> yaml_string]."""
         result = {}
+        default_src_catalog = self._infer_source_catalog()
         for table_key, spec in self.all_specs.items():
             self._resolve_placeholders_in_spec(spec, catalog, schema)
+            self._qualify_source_catalog(spec, default_src_catalog)
             dim_meta = self._dimension_metadata.get(table_key, {})
             meas_meta = self._measure_metadata.get(table_key, {})
             dim_order = self.metadata_gen.get_dimension_order(table_key)
@@ -1044,7 +891,9 @@ class MetricViewPipeline:
     ) -> dict[str, str]:
         """Emit deploy SQL for all specs. Returns dict[table_key -> sql_string]."""
         result = {}
+        default_src_catalog = self._infer_source_catalog()
         for table_key, spec in self.all_specs.items():
             self._resolve_placeholders_in_spec(spec, catalog, schema)
+            self._qualify_source_catalog(spec, default_src_catalog)
             result[table_key] = emit_deploy_sql(spec, catalog=catalog, schema=schema)
         return result

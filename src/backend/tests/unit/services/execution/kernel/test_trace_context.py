@@ -4,7 +4,13 @@ memory + tools with job_id/group attribution."""
 
 from unittest.mock import MagicMock
 
-from src.services.execution.kernel.trace_context import attach_execution_trace_context
+import src.services.execution.kernel.trace_context as tc_mod
+from src.services.execution.kernel.trace_context import (
+    attach_execution_trace_context,
+    get_current_execution_id,
+    resolve_tool_execution_id,
+    set_current_execution_id,
+)
 
 
 class TestAttachExecutionTraceContext:
@@ -45,3 +51,46 @@ class TestAttachExecutionTraceContext:
     def test_never_raises_on_inner_failure(self):
         # Even a totally broken crew/service must not raise — best-effort.
         attach_execution_trace_context("not-a-crew", {}, group_id="grp", job_id="job-1")
+
+    def test_attach_records_process_execution_id_from_job_id(self):
+        # Flow path: attaching with a job_id records it process-wide so a tool
+        # whose own trace_context was not attached can still recover it.
+        tc_mod._CURRENT_EXECUTION_ID = None
+        crew = MagicMock()
+        crew.agents = []
+        crew.tasks = []
+        attach_execution_trace_context(crew, {}, group_id="grp", job_id="job-abc")
+        assert get_current_execution_id() == "job-abc"
+
+
+class TestResolveToolExecutionId:
+    def setup_method(self):
+        tc_mod._CURRENT_EXECUTION_ID = None
+
+    def teardown_method(self):
+        tc_mod._CURRENT_EXECUTION_ID = None
+
+    def test_prefers_tool_trace_context(self):
+        set_current_execution_id("proc-global")
+        tool = MagicMock()
+        tool.trace_context = {"job_id": "from-tc"}
+        assert resolve_tool_execution_id(tool) == "from-tc"
+
+    def test_falls_back_to_process_global_when_trace_context_empty(self):
+        # This is the OTC handoff bug: ToolFactory rebuilt the instance, so its
+        # trace_context is empty — the process-scoped id must still resolve.
+        set_current_execution_id("proc-global")
+        tool = MagicMock()
+        tool.trace_context = None
+        assert resolve_tool_execution_id(tool) == "proc-global"
+
+    def test_none_when_neither_available(self):
+        tool = MagicMock()
+        tool.trace_context = {}
+        assert resolve_tool_execution_id(tool) is None
+
+    def test_set_current_execution_id_ignores_falsy(self):
+        set_current_execution_id("keep")
+        set_current_execution_id(None)
+        set_current_execution_id("")
+        assert get_current_execution_id() == "keep"

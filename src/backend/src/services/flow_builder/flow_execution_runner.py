@@ -30,6 +30,12 @@ CICD_ARTIFACT_QUERY = (
 )
 
 
+#: Statuses the child already persisted that a missing IPC result must not
+#: overwrite with FAILED: a stop, an approval pause, or COMPLETED (a large result
+#: can be lost in the queue after the child saved its success).
+_PRESERVED_STATUSES = ("STOPPED", "STOPPING", "WAITING_FOR_APPROVAL", "COMPLETED")
+
+
 async def update_execution_status_with_retry(
     execution_id: str,
     status: str,
@@ -301,13 +307,11 @@ async def run_flow_in_process(
                 if execution_record and hasattr(execution_record, "status")
                 else None
             )
-            if current_status and current_status.upper() in [
-                "STOPPED",
-                "STOPPING",
-                "WAITING_FOR_APPROVAL",
-            ]:
+            if current_status and current_status.upper() in _PRESERVED_STATUSES:
                 logger.info(
-                    f"Flow execution {execution_id} has status {current_status} - preserving it"
+                    "Flow execution %s has status %s - preserving it",
+                    execution_id,
+                    current_status,
                 )
                 final_status = None  # Don't update status
                 final_message = None

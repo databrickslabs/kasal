@@ -82,27 +82,9 @@ tools_data = [
         "database",
     ),
     (
-        72,
-        "Power BI Comprehensive Analysis Tool",
-        "Answer ad-hoc business questions by converting natural language queries into DAX queries with intelligent self-correction (up to 5 retries). This tool extracts Power BI model context (measures, tables, relationships), uses LLM to generate DAX from user questions, executes queries via Power BI Execute Queries API, and identifies which reports use the queried measures. Features measure hallucination detection to prevent incorrect data and enhanced logging for debugging. Perfect for data exploration, self-service BI, validating measure logic, and learning DAX through LLM-generated examples. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token. Supports both LLM-powered intelligent DAX generation and keyword-based fallback for simple queries.",
-        "database",
-    ),
-    (
         73,
         "Measure Conversion Pipeline",
         "Universal measure conversion pipeline for converting business metrics between different BI platforms and formats. Supports multiple inbound connectors (Power BI, YAML) and outbound formats (DAX, SQL, UC Metrics, YAML). Perfect for migrating Power BI measures to Databricks SQL, generating UC Metrics from YAML definitions, or converting between different BI platforms. Configure the source format (FROM) and target format (TO) along with authentication credentials in the task configuration. Supports both static configuration (values entered in UI) and dynamic mode (values provided at runtime via execution inputs).",
-        "transform",
-    ),
-    (
-        74,
-        "M-Query Conversion Pipeline",
-        "Extracts M-Query (Power Query) expressions from Power BI semantic models using the Admin API and converts them to Databricks SQL. This tool scans Power BI workspaces to extract table definitions including Value.NativeQuery (embedded SQL), DatabricksMultiCloud.Catalogs connections, Sql.Database connections, and various Table.* transformations. It generates CREATE VIEW statements for Unity Catalog. Supports both rule-based conversion for simple expressions and LLM-powered conversion for complex M-Query transformations. Perfect for migrating Power BI data models to Databricks, extracting SQL logic for documentation, or analyzing M-Query patterns for migration planning. Requires Service Principal with Power BI Admin API permissions.",
-        "transform",
-    ),
-    (
-        75,
-        "Power BI Relationships Tool",
-        "Extracts relationships from Power BI semantic models using the Execute Queries API with INFO.VIEW.RELATIONSHIPS() DAX function. Generates Unity Catalog Foreign Key constraint statements (NOT ENFORCED). IMPORTANT: Requires a Service Principal that is a WORKSPACE MEMBER with dataset read permissions - this is different from the Admin API which requires admin-level permissions. Perfect for migrating Power BI relationships to Unity Catalog as informational FKs, documenting data model relationships, or generating DDL for Databricks tables.",
         "transform",
     ),
     (
@@ -124,34 +106,10 @@ tools_data = [
         "transform",
     ),
     (
-        79,
-        "Power BI Semantic Model Fetcher",
-        "Extracts and caches semantic model metadata (measures, tables, relationships, columns, sample data, default filters) from Power BI. Uses 3-tier fallback: Fabric TMDL API, Admin Scanner API, or DAX-based extraction. Output is JSON that can be fed directly into the 'Power BI Semantic Model DAX Generator' tool for multi-step workflows. Caches metadata for same-day reuse. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token.",
-        "database",
-    ),
-    (
-        80,
-        "Power BI Semantic Model DAX Generator",
-        "Generates and executes DAX queries from natural language questions using LLM with self-correction retry loop (up to N retries). Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, or reads from cache as fallback. Features business term mappings, field synonyms, active filter auto-application, and optional visual reference lookup. Requires Service Principal or user OAuth token for DAX execution, plus Databricks LLM endpoint for DAX generation.",
-        "database",
-    ),
-    (
-        81,
-        "Power BI Metadata Reducer",
-        "Intelligently reduces semantic model metadata to only what's relevant for a specific question. Uses fuzzy matching, LLM-powered table/measure selection, and measure dependency resolution to filter the full model context from the Fetcher tool. Produces a focused, reduced JSON that dramatically improves DAX generation accuracy. Place between Fetcher and DAX Generator tools in multi-step workflows. Pass the Fetcher output as 'model_context_json' and the user's business question as 'user_question'.",
-        "database",
-    ),
-    (
         82,
         "Power BI DAX Executor",
         "Executes a pre-configured DAX query directly against a Power BI semantic model via the Execute Queries API. Accepts workspace ID, dataset ID, authentication credentials, and a DAX EVALUATE statement. Returns results as a formatted markdown table or JSON. No LLM required — use when you already have a working DAX query and want to run it against Power BI.",
         "database",
-    ),
-    (
-        85,
-        "DAX to SQL Translator",
-        "Translate Power BI DAX measure expressions to Databricks Spark SQL using pattern-based rules. Supports 14+ DAX patterns including SUM, SUMX+FILTER, CALCULATE, DIVIDE, COUNTX, AVERAGEX, SAMEPERIODLASTYEAR, and SELECTEDVALUE+SWITCH detection. Input: JSON array of measures with dax_expression fields. Output: JSON array with sql_expr, confidence, and skip_reason per measure. Can be used standalone or as part of the UC Metric View Generator pipeline.",
-        "transform",
     ),
     (
         86,
@@ -160,21 +118,9 @@ tools_data = [
         "transform",
     ),
     (
-        87,
-        "PBI Measure Allocator",
-        "Groups Power BI measures into fact tables with confidence scores based on DAX table column references (Table[Column] patterns). Analyzes DAX expressions to determine which table each measure belongs to. Input: raw measures JSON (from Power BI Connector/Fetcher) + mquery_transpilation JSON (from tool 74). Output: JSON mapping of measure → fact table allocation with confidence (high/medium/low/none). Use before the UC Metric View Generator when measures don't have proposed_allocation fields.",
-        "transform",
-    ),
-    (
         88,
         "Metric View Deployer",
         "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.",
-        "transform",
-    ),
-    (
-        89,
-        "Config Generator",
-        "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.",
         "transform",
     ),
     (
@@ -227,6 +173,12 @@ tools_data = [
         97,
         "UCMV Re-evaluation",
         "Finds previously-untranslatable DAX measures that TODAY's improved transpiler can now recover. Replays stored conversion history (no PowerBI API call): for each dataset it compares the capability fingerprint of the original run against the current one, and re-tries ONLY the measures that failed back then. Reports which are now recoverable with their new SQL, the reason they failed before, and how many other measures depend on them. Read-only — proposes re-transpilation candidates, never modifies metric views. Deterministic by default (no LLM tokens); set use_llm=true to also try the LLM-first path. Skips permanent-limitation categories (display artifacts, slicer scalars, prior-year) and measures a reviewer already dismissed. Schedule it or trigger manually after shipping transpiler improvements.",
+        "database",
+    ),
+    (
+        98,
+        "UCMV Drift Monitor",
+        "Keeps deployed Unity Catalog metric views in sync with the Power BI semantic model they were generated from. Reads each monitored view's DEPLOYED YAML as the verified baseline, extracts today's measures from Power BI (same APIs and credentials as the Pipeline Config Generator; visuals are not compared), and classifies every measure: unchanged, changed in PBI, new in PBI, removed from PBI, or unassigned. New and changed measures are translated DAX→SQL (LLM fallback) and appended to the baseline YAML without touching anything else — a structural check rejects any patch that alters the verified view. Change detection is exact for views generated with DAX fingerprints; older views get an optional batched LLM comparison. Read-only: produces a proposal for the Metric View Deployer, never deploys.",
         "database",
     ),
 ]
@@ -301,17 +253,6 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "result_as_answer": False,
             "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "your-workspace.cloud.databricks.com")
         },  # DatabricksJobsTool
-        "72": {
-            "result_as_answer": False,
-            "databricks_job_id": None,  # Required: Databricks job ID for Power BI analysis
-            "tenant_id": "",  # Azure AD Tenant ID (required)
-            "client_id": "",  # Azure AD Application/Client ID (required)
-            "workspace_id": "",  # Default Power BI Workspace ID (optional, can be overridden per task)
-            "semantic_model_id": "",  # Default Power BI Semantic Model ID (optional, can be overridden per task)
-            "auth_method": None,  # Authentication method: "service_principal" or "service_account" (None = use UI selection)
-            "username": "",  # Service Account username/UPN (for service_account auth)
-            "password": "",  # Service Account password (for service_account auth)
-        },  # PowerBIAnalysisTool
         "73": {
             "result_as_answer": True,
             "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs)
@@ -345,64 +286,6 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             # DAX outbound configuration
             "dax_process_structures": True,
         },  # Measure Conversion Pipeline
-        "74": {
-            "result_as_answer": True,
-            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs)
-            # Power BI Admin API configuration
-            "workspace_id": "",
-            "dataset_id": "",
-            # Service Principal Authentication
-            "tenant_id": "",
-            "client_id": "",
-            "client_secret": "",
-            # Service Account Authentication
-            "username": "",
-            "password": "",
-            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
-            # User OAuth Authentication
-            "access_token": "",
-            # LLM Configuration (optional)
-            "llm_workspace_url": "",
-            "llm_token": "",
-            "llm_model": "databricks-claude-sonnet-4-5",
-            "use_llm": True,
-            # Scan Options
-            "include_lineage": True,
-            "include_datasource_details": True,
-            "include_dataset_schema": True,
-            "include_dataset_expressions": True,
-            "include_hidden_tables": False,
-            "skip_static_tables": True,
-            # Output Options
-            "include_summary": True,
-            # DBSQL Validation (optional — enables classify-first + DAX vs SQL comparison)
-            "databricks_sql_endpoint": "",  # e.g. https://workspace.cloud.databricks.com/api/2.0/mcp/sql
-            "databricks_pat": "",
-            "max_iterations": 10,
-        },  # M-Query Conversion Pipeline
-        "75": {
-            "result_as_answer": True,
-            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
-            # Power BI Configuration (supports {placeholder} syntax in dynamic mode)
-            "workspace_id": "",
-            "dataset_id": "",
-            # Service Principal Authentication
-            "tenant_id": "",
-            "client_id": "",
-            "client_secret": "",
-            # Service Account Authentication
-            "username": "",
-            "password": "",
-            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
-            # User OAuth Authentication
-            "access_token": "",
-            # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
-            "target_catalog": "main",
-            "target_schema": "default",
-            # Output Options
-            "include_inactive": False,
-            "skip_system_tables": True,
-        },  # Power BI Relationships Tool
         "76": {
             "result_as_answer": True,
             "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
@@ -466,53 +349,6 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "include_visual_details": True,
             "group_by": "page",  # Group results by: "page", "measure", or "table"
         },  # Power BI Report References Tool
-        "79": {
-            "result_as_answer": False,
-            "tenant_id": "",
-            "client_id": "",
-            "client_secret": "",
-            "workspace_id": "",
-            "semantic_model_id": "",  # Alias for dataset_id
-            "auth_method": None,
-            "username": "",
-            "password": "",
-            "output_format": "json",
-            "cache_ttl_days": 1,  # Days to cache model metadata (1=daily, 7=weekly)
-        },  # Power BI Semantic Model Fetcher
-        "80": {
-            "result_as_answer": False,
-            "workspace_id": "",
-            "semantic_model_id": "",  # Alias for dataset_id
-            "auth_method": None,
-            "tenant_id": "",
-            "client_id": "",
-            "client_secret": "",
-            "username": "",
-            "password": "",
-            "llm_model": "databricks-claude-sonnet-4-5",
-            "max_dax_retries": 5,
-            "user_question": "",
-            "context_knowledge": "",
-            "reference_dax": "",
-            # Context enrichment fields (dynamic context passed via crew inputs or UI config)
-            "active_filters": {},
-            "business_mappings": {},
-            "field_synonyms": {},
-            "visible_tables": [],
-            "conversation_history": [],
-        },  # Power BI Semantic Model DAX Generator
-        "81": {
-            "result_as_answer": True,
-            "strategy": "combined",
-            "synonym_threshold": 70,
-            "synonym_boost_min": 60.0,
-            "max_tables": 15,
-            "max_measures": 30,
-            "enable_value_normalization": True,
-            "dataset_id": "",
-            "workspace_id": "",
-            "llm_model": "databricks-claude-sonnet-4-5",
-        },  # Power BI Metadata Reducer
         "82": {
             "result_as_answer": True,
             "workspace_id": "",
@@ -528,10 +364,6 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "output_format": "markdown",
             "max_rows": 1000,
         },  # Power BI DAX Executor
-        "85": {
-            "result_as_answer": True,
-            "config_json": "{}",
-        },  # DAX to SQL Translator
         "86": {
             "result_as_answer": True,
             "catalog": "main",
@@ -555,10 +387,6 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "access_token": "",
             "pbi_api_base_url": "",
         },  # UC Metric View Generator
-        "87": {
-            "result_as_answer": True,
-            "config_json": "{}",
-        },  # PBI Measure Allocator
         "88": {
             "result_as_answer": True,
             "ucmv_output": None,
@@ -569,17 +397,6 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "warehouse_id": "",
             "catalog_remap": None,
         },  # Metric View Deployer
-        "89": {
-            "result_as_answer": True,
-            "workspace_id": None,
-            "dataset_id": None,
-            "measures_json": None,
-            "mquery_json": None,
-            "relationships_json": None,
-            "scan_data_json": None,
-            "catalog": None,
-            "schema_name": None,
-        },  # Config Generator
         "90": {
             "result_as_answer": True,
             "workspace_id": "",
@@ -647,6 +464,23 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "parent_path": "/Workspace/Shared",
             "publish_dashboard": True,
         },  # Databricks Dashboard Creator
+        "98": {
+            "result_as_answer": True,
+            "ucmv_names": "",
+            "warehouse_id": "",
+            "databricks_host": "",
+            "workspace_id": "",
+            "dataset_id": "",
+            "report_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "admin_client_id": "",
+            "admin_client_secret": "",
+            "llm_compare_legacy": True,
+            "apply_suspected_changes": False,
+            "llm_model": "databricks-claude-sonnet-4-5",
+        },  # UCMV Drift Monitor
     }
 
 

@@ -90,17 +90,6 @@ class TestVisualMappingsBaseline:
                 ), f"{m['visual_id']}: SQL must use MEASURE() syntax"
 
 
-class TestReducedModelContextBaseline:
-    def test_reduction_ran_and_cached(self):
-        data = _load("reduced_model_context.json")
-        assert data["status"] == "success"
-        assert data["cache_saved"] is True, (
-            "cache_saved=False would mean the Reducer→DAX cache handoff is broken "
-            "(group-id resolution regression)"
-        )
-        assert data["reduction_summary"]
-
-
 class TestSanitization:
     @pytest.mark.parametrize(
         "name",
@@ -108,7 +97,6 @@ class TestSanitization:
             "ucmv_output.json",
             "genie_space_config.json",
             "visual_mappings.json",
-            "reduced_model_context.json",
         ],
     )
     def test_no_real_endpoints_or_tokens(self, name):

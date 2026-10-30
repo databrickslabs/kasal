@@ -85,7 +85,6 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 - [Power BI integration hub](./README.md)
 - [Authentication and service principal setup](./01-authentication-setup.md)
-- [Tool 72 - comprehensive analysis](./tool-72-comprehensive-analysis.md)
 - [Tool 76 - hierarchies tool](./tool-76-hierarchies.md)
 - [Tool 77 - field parameters and calculation groups](./tool-77-field-parameters.md)
 

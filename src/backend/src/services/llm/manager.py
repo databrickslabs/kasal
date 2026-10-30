@@ -808,8 +808,9 @@ class LLMManager:
 
         # Read the resolved transport params off the configured LLM so we reuse
         # the exact auth/base/model resolution (OBO/PAT/SPN) without forking it.
+        _resolved_model = getattr(llm, "model", None) or model
         call_kwargs: Dict[str, Any] = {
-            "model": getattr(llm, "model", None) or model,
+            "model": _resolved_model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -817,6 +818,27 @@ class LLMManager:
             val = getattr(llm, attr, None)
             if val:
                 call_kwargs[attr] = val
+        # litellm routes on a "<provider>/" model prefix. If the configured LLM
+        # came back unprefixed, litellm raises "LLM Provider NOT provided" and every
+        # DAX/M->SQL fallback in a crew subprocess fails, so pin the provider (this
+        # cached path serves Databricks models only) and log why it was needed.
+        if _resolved_model and "/" not in str(_resolved_model):
+            _recovered_provider = str(
+                getattr(llm, "custom_llm_provider", None)
+                or getattr(llm, "provider", None)
+                or "databricks"
+            )
+            call_kwargs["custom_llm_provider"] = _recovered_provider
+            logger.warning(
+                "[LLM] completion_with_usage: model '%s' arrived WITHOUT a provider "
+                "prefix (llm=%s, requested=%s) — pinned custom_llm_provider=%s so "
+                "litellm can route. Root-cause configure_kasal_llm's provider "
+                "resolution for this model if this repeats.",
+                _resolved_model,
+                type(llm).__name__,
+                model,
+                _recovered_provider,
+            )
         # litellm falls back to the provider's *_API_KEY in os.environ when no
         # key is passed; that env is shared by every workspace, so never let it.
         call_kwargs.setdefault("api_key", NO_API_KEY)

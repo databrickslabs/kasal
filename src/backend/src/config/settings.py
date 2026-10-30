@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "kasal"
     POSTGRES_PORT: str = "5432"
 
+    # Per-crew kickoff timeout inside a flow run (seconds). Large Power BI models
+    # with LLM DAX translation + reconciliation cycles legitimately run long.
+    KASAL_FLOW_CREW_TIMEOUT_SECONDS: float = 2400.0
+
     # Database file path for SQLite.
     #
     # The default is ABSOLUTE on purpose. It used to be "./app.db", which

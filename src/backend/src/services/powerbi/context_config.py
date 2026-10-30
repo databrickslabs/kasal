@@ -371,7 +371,7 @@ class PowerBIContextConfigService:
             semantic_model_id: Power BI semantic model ID
 
         Returns:
-            Dictionary format compatible with powerbi_analysis_tool
+            Power BI context-config dictionary (mappings + synonyms)
         """
         try:
             mappings_dict = await self.business_mapping_repo.get_as_dict(

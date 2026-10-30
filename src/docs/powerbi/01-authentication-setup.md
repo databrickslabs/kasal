@@ -231,7 +231,6 @@ Never hardcode secrets in crew task descriptions. Use one of:
 - [Power BI integration hub](./README.md)
 - [Simple migration story](./02-simple-migration-story.md)
 - [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
-- [Tool 74 - M-Query conversion pipeline](./tool-74-mquery-conversion.md)
 - [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
 
 Back to the [Power BI integration hub](./README.md).

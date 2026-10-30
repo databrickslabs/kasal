@@ -29,12 +29,25 @@ logger = LoggerManager.get_instance().flow
 
 
 @asynccontextmanager
-async def _smart_db_session() -> AsyncIterator[AsyncSession]:
+async def _smart_db_session(
+    soft_complete_on_closed: bool = False,
+) -> AsyncIterator[AsyncSession]:
     """Wrap get_smart_db_session as an async context manager for 'async with' usage.
 
     get_smart_db_session is an async generator (for FastAPI DI). This wrapper
     lets flow_runner_service use it with 'async with' while preserving proper
     commit-on-success / rollback-on-error semantics.
+
+    ``soft_complete_on_closed``: for a session HELD across a long, DB-idle run
+    (the flow kickoff), the Lakebase server can close the connection mid-run —
+    and with ``pool_pre_ping=False`` (required for the do_connect token pattern)
+    the commit-on-exit then raises ``cannot call Transaction.commit(): the
+    underlying connection is closed``. The transaction is already lost with the
+    connection, so re-raising would mark a SUCCESSFUL run FAILED even though its
+    result/terminal-status were persisted on fresh post-execution sessions. When
+    set, that SPECIFIC closed-connection commit error is swallowed (and the dead
+    factory disposed so the next acquisition reconnects); every other error still
+    propagates unchanged.
     """
     gen: Any = get_smart_db_session().__aiter__()  # an async generator
     session = await gen.__anext__()
@@ -48,6 +61,27 @@ async def _smart_db_session() -> AsyncIterator[AsyncSession]:
             await gen.__anext__()
         except StopAsyncIteration:
             pass
+        except Exception as e:
+            from src.db.lakebase_session import _is_disposed_connection_error
+
+            if not (soft_complete_on_closed and _is_disposed_connection_error(e)):
+                await gen.aclose()
+                raise
+            logger.warning(
+                "Held flow session's connection was closed by the server during the "
+                "long run; result/status are persisted on fresh sessions, so treating "
+                "the run as complete and disposing the dead Lakebase factory."
+            )
+            try:
+                from src.db.lakebase_session import dispose_current_lakebase_factory
+
+                await dispose_current_lakebase_factory()
+            except Exception as disp_err:  # noqa: BLE001 — best-effort cleanup
+                logger.debug("Lakebase factory dispose skipped: %s", disp_err)
+            try:
+                await gen.aclose()
+            except Exception:  # noqa: BLE001 — teardown of a dead connection
+                logger.debug("Closing the dead session generator failed", exc_info=True)
 
 
 class FlowRunnerService:
@@ -126,10 +160,13 @@ class FlowRunnerService:
 
         Routes through get_smart_db_session (Lakebase when enabled, local DB otherwise).
         After long-running operations (like CrewAI kickoff), sessions can lose their
-        greenlet context, causing MissingGreenlet errors during cleanup.
-        This context manager suppresses those cleanup errors.
+        greenlet context, causing MissingGreenlet errors during cleanup. The
+        connection can also be closed server-side during the long DB-idle run, so
+        this uses ``soft_complete_on_closed`` — a successful kickoff whose held
+        session can no longer commit (the result/status are written on fresh
+        post-execution sessions) completes rather than being reported as failed.
         """
-        async with _smart_db_session() as session:
+        async with _smart_db_session(soft_complete_on_closed=True) as session:
             yield session
 
     async def run_flow(

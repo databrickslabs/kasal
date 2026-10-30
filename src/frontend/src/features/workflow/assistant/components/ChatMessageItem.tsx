@@ -245,7 +245,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
                 {renderAnswer(answerText)}
               </Box>
             )}
-            <UiSurfaceResult surface={surface} messageId={message.id} onRestyle={restyle} />
+            <UiSurfaceResult surface={surface} messageId={message.id} jobId={message.jobId} onRestyle={restyle} />
           </Box>
         );
       }

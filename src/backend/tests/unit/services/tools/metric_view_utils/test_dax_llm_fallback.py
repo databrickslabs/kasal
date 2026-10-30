@@ -8,6 +8,7 @@ import pytest
 
 from src.services.tools.metric_view_utils.data_classes import TranslationResult
 from src.services.tools.metric_view_utils.dax_llm_fallback import (
+    _build_batch_user_prompt,
     _build_user_prompt,
     _content_hash,
     _parse_response,
@@ -15,6 +16,45 @@ from src.services.tools.metric_view_utils.dax_llm_fallback import (
     translate_batch_with_llm,
     translate_with_llm,
 )
+
+
+def _tr(original_name, dax, measure_name):
+    return TranslationResult(
+        measure_name=measure_name,
+        original_name=original_name,
+        sql_expr=None,
+        is_translatable=False,
+        confidence="low",
+        skip_reason="",
+        dax_expression=dax,
+        category="unassigned",
+    )
+
+
+class TestBatchPromptFeedback:
+    def test_feedback_injected_for_matching_measure(self):
+        measures = [_tr("Total Sales", "SUM(Sales[Amount])", "total_sales")]
+        prompt = _build_batch_user_prompt(
+            measures,
+            {"base_a"},
+            feedback={
+                "total_sales": "only 40.0% matched Power BI; [AT/2025007] UCMV=5 vs PBI=9"
+            },
+        )
+        assert "PREVIOUS ATTEMPT MISMATCHED POWER BI" in prompt
+        assert "40.0%" in prompt
+
+    def test_feedback_matches_by_original_name_too(self):
+        measures = [_tr("Total Sales", "SUM(Sales[Amount])", "total_sales")]
+        prompt = _build_batch_user_prompt(
+            measures, {"base_a"}, feedback={"Total Sales": "was wrong"}
+        )
+        assert "FIX IT: was wrong" in prompt
+
+    def test_no_feedback_no_note(self):
+        measures = [_tr("Total Sales", "SUM(Sales[Amount])", "total_sales")]
+        prompt = _build_batch_user_prompt(measures, {"base_a"})
+        assert "PREVIOUS ATTEMPT" not in prompt
 
 
 class TestHelpers:
@@ -584,3 +624,89 @@ class TestTableContext:
         asyncio.run(go())
         # different table context → two distinct cache keys → two LLM calls
         assert calls["n"] == 2
+
+
+class TestDomainContextInjection:
+    """Customer-supplied free-text domain context is appended to the translation
+    prompt (both single and batch) and omitted cleanly when absent."""
+
+    def test_single_prompt_includes_domain_context(self):
+        prompt = _build_user_prompt(
+            "Sales",
+            "SUM(x)",
+            {"a"},
+            {},
+            table_context="tc",
+            domain_context="CTS = cost to supply; fiscal calendar is 4-4-5",
+        )
+        assert "Domain context" in prompt
+        assert "CTS = cost to supply" in prompt
+
+    def test_batch_prompt_includes_domain_context(self):
+        m = _tr("Sales", "SUM(x)", "sales")
+        prompt = _build_batch_user_prompt(
+            [m], {"a"}, table_context="tc", domain_context="POH = production overhead"
+        )
+        assert "Domain context" in prompt
+        assert "POH = production overhead" in prompt
+
+    def test_no_domain_context_omits_the_block(self):
+        m = _tr("Sales", "SUM(x)", "sales")
+        assert "Domain context" not in _build_batch_user_prompt(
+            [m], {"a"}, table_context="tc"
+        )
+        assert "Domain context" not in _build_user_prompt("Sales", "SUM(x)", {"a"}, {})
+
+
+class TestTimeIntelligenceRule:
+    """Time-intelligence is translatable via window functions, but WHETHER to do
+    it this run is gated on reconciliation (the validator) via a per-run directive."""
+
+    def test_sql_rules_describe_the_window_form(self):
+        from src.services.tools.metric_view_utils.dax_llm_fallback import _SQL_RULES
+
+        assert "TIME-INTELLIGENCE" in _SQL_RULES
+        assert "SAMEPERIODLASTYEAR" in _SQL_RULES
+        assert "LAG(" in _SQL_RULES
+        # the rule now defers the WHETHER to the per-run directive
+        assert "directive" in _SQL_RULES
+
+    def test_rule_reaches_the_system_prompt(self):
+        from src.services.tools.metric_view_utils import dax_llm_fallback as m
+
+        assert "TIME-INTELLIGENCE" in m._OUTPUT_CONTRACT
+
+    def test_directive_enabled_tells_model_to_translate(self):
+        from src.services.tools.metric_view_utils.dax_llm_fallback import (
+            _time_intel_directive,
+        )
+
+        d = _time_intel_directive(True)
+        assert "ENABLED" in d
+        assert "do NOT decline" in d
+        assert "SAMEPERIODLASTYEAR" in d
+
+    def test_directive_disabled_tells_model_to_decline(self):
+        from src.services.tools.metric_view_utils.dax_llm_fallback import (
+            _time_intel_directive,
+        )
+
+        d = _time_intel_directive(False)
+        assert "NOT validated" in d
+        assert "DECLINE" in d
+        assert "architecture_change" in d
+
+    def test_batch_prompt_gates_on_the_flag(self):
+        m = _tr(
+            "PY Sales",
+            "CALCULATE([Sales], SAMEPERIODLASTYEAR('Cal'[Date]))",
+            "py_sales",
+        )
+        on = _build_batch_user_prompt(
+            [m], {"sales"}, table_context="t", time_intel_enabled=True
+        )
+        off = _build_batch_user_prompt(
+            [m], {"sales"}, table_context="t", time_intel_enabled=False
+        )
+        assert "ENABLED this run" in on and "do NOT decline" in on
+        assert "NOT validated this run" in off and "DECLINE" in off

@@ -493,6 +493,31 @@ describe('flowExecutionStore', () => {
       expect(state.crewNodeStates.get('Crew A')?.failed_at).toBeDefined();
     });
 
+    it('should mark running/pending crews as warning (not failed) on a late timeout', () => {
+      const crewNodeStates = new Map();
+      crewNodeStates.set('Crew A', { status: 'running' as const, started_at: '2024-01-01T00:00:00Z' });
+      crewNodeStates.set('Crew B', { status: 'pending' as const });
+      crewNodeStates.set('Crew C', { status: 'completed' as const, completed_at: '2024-01-01T00:02:00Z' });
+
+      useFlowExecutionStore.setState({
+        currentJobId: 'job-456',
+        isExecuting: true,
+        crewNodeStates,
+      });
+
+      window.dispatchEvent(new CustomEvent('jobFailed', {
+        detail: { jobId: 'job-456', error: 'Listener crew execution timed out' },
+      }));
+
+      const state = useFlowExecutionStore.getState();
+      // The run only timed out while finalizing — show orange 'warning', not red 'failed'.
+      expect(state.crewNodeStates.get('Crew A')?.status).toBe('warning');
+      expect(state.crewNodeStates.get('Crew A')?.completed_at).toBeDefined();
+      expect(state.crewNodeStates.get('Crew B')?.status).toBe('warning');
+      expect(state.crewNodeStates.get('Crew C')?.status).toBe('completed');
+      expect(state.flowStatus).toBe('warning');
+    });
+
     it('should not modify state for a different jobId', () => {
       const crewNodeStates = new Map();
       crewNodeStates.set('Crew A', { status: 'running' as const });

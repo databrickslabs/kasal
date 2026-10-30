@@ -2,16 +2,18 @@ import type { TaskStatus, TaskState } from '../types/execution/task';
 import { create } from 'zustand';
 import { apiClient } from '../shared/api/client';
 import { extractTaskId, extractTaskName, mapEventToStatus } from '../utils/taskIdUtils';
+import { isLateTimeoutError } from '../utils/lateTimeout';
 
 /**
  * Valid state transitions for task lifecycle.
  * Prevents impossible states like going from 'completed' back to 'running'.
  */
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  planning: ['running', 'failed'],
-  running: ['completed', 'failed'],
+  planning: ['running', 'failed', 'warning'],
+  running: ['completed', 'failed', 'warning'],
   completed: [],          // terminal state
   failed: ['running'],    // allow retry
+  warning: ['running'],   // allow retry (late-timeout, outputs saved)
 };
 
 /**
@@ -24,6 +26,7 @@ const STATUS_PRECEDENCE: Record<TaskStatus, number> = {
   running: 1,
   completed: 2,
   failed: 2,  // same precedence as completed (both terminal)
+  warning: 2, // terminal (late-timeout; outputs saved)
 };
 
 interface TaskExecutionState {
@@ -55,6 +58,7 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
           task_name: metadata?.task_name ?? '',
           ...(newStatus === 'running' && { started_at: metadata?.started_at ?? new Date().toISOString() }),
           ...(newStatus === 'completed' && { completed_at: metadata?.completed_at ?? new Date().toISOString() }),
+          ...(newStatus === 'warning' && { completed_at: metadata?.completed_at ?? new Date().toISOString() }),
           ...(newStatus === 'failed' && { failed_at: metadata?.failed_at ?? new Date().toISOString() }),
         });
         return { taskStates: newStates };
@@ -85,6 +89,7 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
         ...(current.started_at && { started_at: current.started_at }),
         ...(newStatus === 'running' && !current.started_at && { started_at: metadata?.started_at ?? new Date().toISOString() }),
         ...(newStatus === 'completed' && { completed_at: metadata?.completed_at ?? new Date().toISOString() }),
+        ...(newStatus === 'warning' && { completed_at: metadata?.completed_at ?? new Date().toISOString() }),
         ...(newStatus === 'failed' && { failed_at: metadata?.failed_at ?? new Date().toISOString() }),
       });
       return { taskStates: newStates };
@@ -105,6 +110,7 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
               ...state,
               status: toStatus,
               ...(toStatus === 'completed' && { completed_at: metadata?.completed_at ?? new Date().toISOString() }),
+              ...(toStatus === 'warning' && { completed_at: metadata?.completed_at ?? new Date().toISOString() }),
               ...(toStatus === 'failed' && { failed_at: metadata?.failed_at ?? new Date().toISOString() }),
             });
             changed = true;
@@ -210,11 +216,16 @@ if (typeof window !== 'undefined') {
     );
   }) as EventListener);
 
-  window.addEventListener('jobFailed', (() => {
+  window.addEventListener('jobFailed', ((event: CustomEvent) => {
+    // A run that merely TIMED OUT while finalizing produced its outputs — show the
+    // nodes as an orange 'warning', not a red 'failed'. See src/utils/lateTimeout.ts.
+    const lateTimeout = isLateTimeoutError(event.detail?.error);
     useTaskExecutionStore.getState().transitionAll(
       ['running', 'planning'],
-      'failed',
-      { failed_at: new Date().toISOString() }
+      lateTimeout ? 'warning' : 'failed',
+      lateTimeout
+        ? { completed_at: new Date().toISOString() }
+        : { failed_at: new Date().toISOString() }
     );
   }) as EventListener);
 

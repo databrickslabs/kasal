@@ -6,13 +6,71 @@ import re
 
 from .data_classes import MStep
 from .dax_condition_sql import _sql_str_literal
+from .m_sql_formatter import (
+    _compact_where,
+    _reformat_arm,
+    _reorder_re_branches,
+    _split_select_columns,
+    _split_top_level_or,
+    reformat_source_sql,
+)
+from .mquery_parser import strip_m_comments
+
+# M transform steps that carry a deterministic column expression / filter.
+_COLUMN_TRANSFORM_STEPS = frozenset(
+    {
+        "ReplaceValue",
+        "ReplaceValueAccumulate",
+        "DuplicateColumn",
+        "SplitColumn",
+        "TransformColumnTypes",
+        "TransformColumns",
+        "AddColumn",
+    }
+)
+# Steps recognized structurally but NOT deterministically translatable to SQL.
+# Table.Combine appends hard-coded records (needs VALUES the tool can't infer);
+# Table.Group / Table.Distinct-on-a-key-subset change grain (a first-row pick is
+# non-deterministic); joins need a partner table. Emitted as `-- TODO:` so the
+# reviewer sees the step instead of it vanishing.
+_UNTRANSLATABLE_STEPS = frozenset(
+    {
+        "Combine",
+        "Group",
+        "Pivot",
+        "Unpivot",
+        "Join",
+        "NestedJoin",
+        "AddIndexColumn",
+        "FillDown",
+        "FillUp",
+        "Sort",
+        "Buffer",
+    }
+)
+
+
+def _todo_note(step: MStep) -> str:
+    """Render an M step that could not be translated as a one-line SQL comment."""
+    compact = " ".join(step.raw_expression.split())
+    if len(compact) > 240:
+        compact = compact[:237] + "..."
+    return f"-- TODO: M step not translatable to SQL, apply manually: {compact}"
 
 
 class MTransformFolder:
     """Fold Power BI M transform steps into the base SQL query."""
 
     def fold(self, base_sql: str, m_steps: list[MStep], pbi_columns: list) -> str:
-        """Apply M transform steps to the base SQL."""
+        """Apply M transform steps to the base SQL.
+
+        Deterministically translatable steps (``Table.SelectRows`` filters,
+        ``Table.ReplaceValue`` / ``List.Accumulate`` code remaps, type casts) fold
+        into the SQL. Any recognized-but-untranslatable step (appended rows,
+        group-by, keyed dedup, cross-table filters) is NEVER dropped — it is
+        recorded on ``self.transform_todos`` and appended to the returned SQL as a
+        ``-- TODO:`` comment so it surfaces in the emitted source (S5)."""
+        self.transform_todos: list[str] = []
         if not m_steps:
             return base_sql
 
@@ -20,40 +78,51 @@ class MTransformFolder:
         column_transforms = []
         remove_columns = []
         rename_map = {}
+        distinct_all = False
 
         i = 0
         while i < len(m_steps):
             step = m_steps[i]
-            if step.step_type == "SelectRows":
+            st = step.step_type
+            if st == "SelectRows":
                 select_rows.append(step)
-            elif step.step_type == "ReplaceValue":
+            elif st in _COLUMN_TRANSFORM_STEPS:
                 column_transforms.append(step)
-            elif step.step_type == "DuplicateColumn":
-                column_transforms.append(step)
-            elif step.step_type == "SplitColumn":
-                column_transforms.append(step)
-            elif step.step_type == "RemoveColumns":
+            elif st == "RemoveColumns":
                 remove_columns.append(step)
-            elif step.step_type == "RenameColumns":
+            elif st == "RenameColumns":
                 renames = re.findall(r'\{"([^"]+)",\s*"([^"]+)"\}', step.raw_expression)
                 for old_name, new_name in renames:
                     rename_map[old_name] = new_name
-            elif step.step_type == "TransformColumnTypes":
-                column_transforms.append(step)
-            elif step.step_type == "TransformColumns":
-                column_transforms.append(step)
-            elif step.step_type == "AddColumn":
-                column_transforms.append(step)
+            elif st == "Distinct":
+                # Full-row Table.Distinct(t) → SELECT DISTINCT; a keyed
+                # Table.Distinct(t, {"col"}) keeps the first row per key (a
+                # non-deterministic pick) → not translatable, emit a TODO.
+                if re.search(r"Table\.Distinct\s*\([^,]+,", step.raw_expression):
+                    self.transform_todos.append(_todo_note(step))
+                else:
+                    distinct_all = True
+            elif st in _UNTRANSLATABLE_STEPS:
+                self.transform_todos.append(_todo_note(step))
+            elif st == "SelectColumns":
+                # A projection — harmless to omit from the emitted source (the
+                # metric view selects the columns it needs), but surface it so the
+                # reviewer knows the PBI table was narrowed.
+                self.transform_todos.append(_todo_note(step))
+            elif st:
+                # Unknown Table.* op — never silently drop it.
+                self.transform_todos.append(_todo_note(step))
             i += 1
-
-        if not select_rows and not column_transforms and not remove_columns:
-            return base_sql
 
         where_conditions = []
         for step in select_rows:
             cond = self._parse_select_rows(step)
             if cond:
                 where_conditions.append(cond)
+            else:
+                # A filter we could not lower to SQL (e.g. a List.Contains against
+                # a buffer of another table's rows) — keep it as a TODO.
+                self.transform_todos.append(_todo_note(step))
 
         col_exprs = self._build_column_transforms(
             column_transforms, rename_map, remove_columns
@@ -72,7 +141,142 @@ class MTransformFolder:
         elif where_conditions:
             base_sql = self._apply_where_only(base_sql, where_conditions)
 
+        if distinct_all:
+            base_sql = re.sub(
+                r"^(\s*)SELECT\b",
+                r"\1SELECT DISTINCT",
+                base_sql,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+
+        if self.transform_todos:
+            base_sql = base_sql + "\n" + "\n".join(self.transform_todos)
+
         return base_sql
+
+    def fold_from_mquery(
+        self, base_sql: str, mquery: str, pbi_columns: list | None = None
+    ) -> str:
+        """Fold the transform steps of a raw Power Query M ``let`` block into SQL.
+
+        The scan-data path already yields ``MStep`` objects; the config-generation
+        path only has the raw M text (``table_mquery_expressions``). This parses the
+        steps that follow the source out of the M and runs :meth:`fold`, so both
+        paths carry the M transforms (S5) rather than only the source table.
+        After it returns, ``self.transform_todos`` lists any untranslatable steps.
+        """
+        steps = self.parse_let_steps(mquery)
+        return self.fold(base_sql, steps, pbi_columns or [])
+
+    @staticmethod
+    def parse_let_steps(mquery: str) -> list[MStep]:
+        """Extract the transform steps from a Power Query M ``let ... in`` block.
+
+        Comments are stripped first (a disabled ``// FilterExclude… = Table.SelectRows``
+        line must not become a live filter). The source assignment and pure
+        navigation/buffer/row-limit plumbing are skipped; each remaining
+        ``Name = Table.<Op>(…)`` (or ``List.Accumulate`` remap) becomes an ``MStep``
+        in author order. Returns ``[]`` when there is no ``let`` block."""
+        if not mquery or not isinstance(mquery, str):
+            return []
+        m = strip_m_comments(mquery)
+        lm = re.search(r"\blet\b", m)
+        if not lm:
+            return []
+        body = MTransformFolder._strip_trailing_in(m[lm.end() :])
+        steps: list[MStep] = []
+        for part in MTransformFolder._split_top_level_commas(body):
+            expr = part.strip()
+            if not expr or "=" not in expr:
+                continue
+            rhs = expr.split("=", 1)[1].strip()
+            step_type = MTransformFolder._classify_m_step(rhs)
+            if step_type:
+                steps.append(MStep(step_type=step_type, raw_expression=expr))
+        return steps
+
+    @staticmethod
+    def _classify_m_step(rhs: str) -> str | None:
+        """Map the right-hand side of an M assignment to an ``MStep`` type, or None
+        to skip it (source / navigation / buffer / row-limit / result plumbing)."""
+        # List.Accumulate that folds repeated Table.ReplaceValue over code pairs.
+        if re.match(r"List\.Accumulate\b", rhs) and "Table.ReplaceValue" in rhs:
+            return "ReplaceValueAccumulate"
+        tm = re.match(r"Table\.(\w+)\s*\(", rhs)
+        if tm:
+            op = tm.group(1)
+            if op in ("FirstN", "LastN", "Skip", "Range"):
+                return None  # RowLimit plumbing, not a transform
+            return op
+        return None  # Source, navigation records, List.Buffer, `if RowLimit`, etc.
+
+    @staticmethod
+    def _strip_trailing_in(body: str) -> str:
+        """Drop the final top-level ``in <result>`` clause from a ``let`` body."""
+        depth = 0
+        i = 0
+        n = len(body)
+        last_in = -1
+        while i < n:
+            c = body[i]
+            if c == '"':
+                i += 1
+                while i < n and body[i] != '"':
+                    i += 1
+                i += 1
+                continue
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif (
+                depth == 0
+                and body[i : i + 2] == "in"
+                and (i == 0 or not body[i - 1].isalnum())
+                and (i + 2 >= n or not body[i + 2].isalnum())
+            ):
+                last_in = i
+            i += 1
+        return body[:last_in] if last_in >= 0 else body
+
+    @staticmethod
+    def _split_top_level_commas(body: str) -> list[str]:
+        """Split an M expression list on top-level commas (bracket + string aware)."""
+        parts: list[str] = []
+        buf: list[str] = []
+        depth = 0
+        i = 0
+        n = len(body)
+        while i < n:
+            c = body[i]
+            if c == '"':
+                j = i + 1
+                while j < n:
+                    if body[j] == '"':
+                        if j + 1 < n and body[j + 1] == '"':
+                            j += 2
+                            continue
+                        j += 1
+                        break
+                    j += 1
+                buf.append(body[i:j])
+                i = j
+                continue
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            if c == "," and depth == 0:
+                parts.append("".join(buf))
+                buf = []
+                i += 1
+                continue
+            buf.append(c)
+            i += 1
+        if buf:
+            parts.append("".join(buf))
+        return parts
 
     @staticmethod
     def _split_union(sql: str) -> list[str]:
@@ -169,222 +373,27 @@ class MTransformFolder:
     @staticmethod
     def reformat_source_sql(sql: str) -> str:
         """Reformat the full source SQL for clean, compact output."""
-        arms = re.split(
-            r"\s*\bUNION\s+ALL\b\s*|\s*\bUNION\b\s*", sql, flags=re.IGNORECASE
-        )
-        formatted = [MTransformFolder._reformat_arm(a.strip()) for a in arms]
-        if len(formatted) <= 1:
-            return formatted[0] if formatted else sql
-        parts = []
-        for i, arm in enumerate(formatted):
-            arm = re.sub(r"\n\s*GROUP\s+BY\s+ALL\s*$", "", arm)
-            if i == 0:
-                parts.append(arm)
-            else:
-                arm_body = re.sub(r"^SELECT\n", "", arm, flags=re.IGNORECASE)
-                parts.append(arm_body)
-        return "\nGROUP BY ALL UNION ALL SELECT\n".join(parts) + "\nGROUP BY ALL"
+        return reformat_source_sql(sql)
 
     @staticmethod
     def _reformat_arm(arm_sql: str) -> str:
         """Reformat a single SELECT…FROM…WHERE…GROUP BY arm."""
-        arm_sql = arm_sql.strip()
-        select_m = re.match(
-            r"SELECT\s+(.*?)\s+FROM\s+", arm_sql, re.DOTALL | re.IGNORECASE
-        )
-        if not select_m:
-            return arm_sql
-        cols_text = select_m.group(1)
-        rest = arm_sql[select_m.end() :]
-
-        table_m = re.match(r"(\S+)(.*)", rest, re.DOTALL)
-        if not table_m:
-            return arm_sql
-        table_name = table_m.group(1)
-        after_table = table_m.group(2).strip()
-        has_group_by = bool(
-            re.search(r"\bGROUP\s+BY\s+ALL\b", after_table, re.IGNORECASE)
-        )
-        no_gb = re.sub(
-            r"\s*GROUP\s+BY\s+ALL\s*$", "", after_table, flags=re.IGNORECASE
-        ).strip()
-        where_text = ""
-        if re.match(r"WHERE\b", no_gb, re.IGNORECASE):
-            where_text = no_gb[5:].strip()
-
-        cols = MTransformFolder._split_select_columns(cols_text)
-        normalized: list[str] = []
-        for c in cols:
-            c = c.strip()
-            if not c:
-                continue
-            if "CASE" in c.upper() and "END" in c.upper() and "\n" in c:
-                case_lines = c.split("\n")
-                fmt_lines: list[str] = []
-                for cl in case_lines:
-                    cl = cl.strip()
-                    if not cl:
-                        continue
-                    if cl.upper().startswith(("WHEN ", "ELSE ")):
-                        fmt_lines.append(f"  {cl}")
-                    else:
-                        fmt_lines.append(cl)
-                normalized.append("\n".join(fmt_lines))
-            else:
-                normalized.append(" ".join(c.split()))
-        cols = normalized
-        col_lines: list[str] = []
-        buf: list[str] = []
-        for col in cols:
-            is_simple = (
-                "\n" not in col
-                and "(" not in col
-                and "CASE" not in col.upper()
-                and "'" not in col
-                and len(col) < 30
-            )
-            if is_simple:
-                buf.append(col)
-            else:
-                if buf:
-                    col_lines.append(", ".join(buf))
-                    buf = []
-                col_lines.append(col)
-        if buf:
-            col_lines.append(", ".join(buf))
-
-        where_fmt = ""
-        if where_text:
-            where_text = MTransformFolder._reorder_re_branches(where_text)
-            where_fmt = MTransformFolder._compact_where(where_text)
-
-        result = "SELECT\n"
-        formatted_cols: list[str] = []
-        for line in col_lines:
-            if "\n" in line:
-                sub_lines = line.split("\n")
-                formatted_cols.append("\n".join(f"  {sl}" for sl in sub_lines))
-            else:
-                formatted_cols.append(f"  {line}")
-        result += ",\n".join(formatted_cols)
-        if where_fmt:
-            first_line, *rest_lines = where_fmt.split("\n")
-            result += f"\nFROM {table_name} WHERE {first_line}"  # re-lays out SQL it was given; deployed only via the metric-view deployer's SQL check — nosemgrep: tmp.databricks.sql-injection.fstring-where
-            for rl in rest_lines:
-                result += f"\n  {rl}"
-        else:
-            result += f"\nFROM {table_name}"
-        if has_group_by:
-            result += "\nGROUP BY ALL"
-        return result
+        return _reformat_arm(arm_sql)
 
     @staticmethod
     def _compact_where(where_text: str) -> str:
         """Compact WHERE clause into clean lines split at top-level AND."""
-        where_text = " ".join(where_text.split())
-        parts: list[str] = []
-        depth = 0
-        buf: list[str] = []
-        i = 0
-        while i < len(where_text):
-            c = where_text[i]
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-            if depth == 0 and where_text[i : i + 5].upper() == " AND " and buf:
-                parts.append("".join(buf).strip())
-                buf = []
-                i += 5
-                continue
-            buf.append(c)
-            i += 1
-        if buf:
-            parts.append("".join(buf).strip())
-
-        if len(parts) <= 1:
-            return where_text
-
-        out_lines = [parts[0]]
-        for p in parts[1:]:
-            if p.startswith("(") and p.endswith(")") and " OR " in p:
-                inner = p[1:-1].strip()
-                or_parts = MTransformFolder._split_top_level_or(inner)
-                if len(or_parts) > 1:
-                    inline = f"AND {p}"
-                    if len(inline) <= 120:
-                        out_lines.append(inline)
-                        continue
-                    out_lines.append("AND (")
-                    for j, op in enumerate(or_parts):
-                        prefix = "  OR " if j > 0 else "  "
-                        out_lines.append(f"{prefix}{op.strip()}")
-                    out_lines.append(")")
-                    continue
-            out_lines.append(f"AND {p}")
-        return "\n".join(out_lines)
+        return _compact_where(where_text)
 
     @staticmethod
     def _split_top_level_or(text: str) -> list[str]:
         """Split text at top-level OR (paren-aware)."""
-        parts: list[str] = []
-        depth = 0
-        buf: list[str] = []
-        i = 0
-        while i < len(text):
-            c = text[i]
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-            if depth == 0 and text[i : i + 4].upper() == " OR " and buf:
-                parts.append("".join(buf).strip())
-                buf = []
-                i += 4
-                continue
-            buf.append(c)
-            i += 1
-        if buf:
-            parts.append("".join(buf).strip())
-        return parts
+        return _split_top_level_or(text)
 
     @staticmethod
     def _reorder_re_branches(where_text: str) -> str:
         """Reorder month-range OR branches descending (R100→R070→R040)."""
-        i = 0
-        while i < len(where_text):
-            if where_text[i] == "(":
-                depth = 1
-                j = i + 1
-                while j < len(where_text) and depth > 0:
-                    if where_text[j] == "(":
-                        depth += 1
-                    elif where_text[j] == ")":
-                        depth -= 1
-                    j += 1
-                inner = where_text[i + 1 : j - 1]
-                or_parts = MTransformFolder._split_top_level_or(inner.strip())
-                if len(or_parts) >= 2 and all(
-                    re.search(r"MONTH\(CURRENT_DATE\(\)\)", p, re.IGNORECASE)
-                    for p in or_parts
-                ):
-                    first_num = re.search(r">=\s*(\d+)", or_parts[0])
-                    last_num = re.search(r">=\s*(\d+)", or_parts[-1])
-                    if (
-                        first_num
-                        and last_num
-                        and int(first_num.group(1)) < int(last_num.group(1))
-                    ):
-                        or_parts = list(reversed(or_parts))
-                        new_inner = " OR ".join(p.strip() for p in or_parts)
-                        where_text = (
-                            where_text[: i + 1] + new_inner + where_text[j - 1 :]
-                        )
-                        return where_text
-                i = j
-            else:
-                i += 1
-        return where_text
+        return _reorder_re_branches(where_text)
 
     def _inline_transforms_into_arm(self, arm_sql: str, col_exprs: dict) -> str:
         """Modify a single SELECT arm's column list to apply transforms inline."""
@@ -443,22 +452,7 @@ class MTransformFolder:
     @staticmethod
     def _split_select_columns(select_body: str) -> list[str]:
         """Split SELECT column list on commas, respecting parentheses."""
-        cols = []
-        current: list[str] = []
-        depth = 0
-        for char in select_body:
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-            elif char == "," and depth == 0:
-                cols.append("".join(current))
-                current = []
-                continue
-            current.append(char)
-        if current:
-            cols.append("".join(current))
-        return cols
+        return _split_select_columns(select_body)
 
     @staticmethod
     def _get_column_name(col_str: str) -> str | None:
@@ -474,12 +468,22 @@ class MTransformFolder:
         return None
 
     def _parse_select_rows(self, step: MStep) -> str:
-        """Parse Table.SelectRows filter condition to SQL."""
+        """Parse a ``Table.SelectRows`` filter condition to a SQL predicate.
+
+        Returns '' when the ``each`` predicate is not a plain column comparison —
+        notably a ``List.Contains(buffer, [col])`` against a buffered list of
+        another table's values, which has no deterministic SQL form (the caller
+        then surfaces it as a TODO rather than emitting invalid SQL)."""
         expr = step.raw_expression
         each_match = re.search(r"each\s+(.+?)\s*\)\s*$", expr, re.DOTALL)
         if not each_match:
             return ""
         condition = each_match.group(1).strip()
+        # M list/table/record calls in a filter (e.g. List.Contains against a
+        # buffered column of another table) don't lower to a column predicate —
+        # bail so the step becomes a TODO instead of malformed SQL.
+        if re.search(r"\b(?:List|Table|Record)\.\w+", condition):
+            return ""
         condition = re.sub(r"\[([^\]]+)\]", r"\1", condition)
         condition = condition.replace('"', "'")
         return condition
@@ -516,7 +520,38 @@ class MTransformFolder:
                             col_exprs[col] = f"COALESCE({col}, '{new_val}')"
                     elif replacer_type == "ReplaceText":
                         old_str = old_val.strip('"')
-                        col_exprs[col] = f"REPLACE({col}, '{old_str}', '{new_val}')"
+                        # Nest onto any prior expression for this column so chained
+                        # replaces compose (Baltics→Estonia THEN Rep.of Ireland→
+                        # Ireland) instead of the later one clobbering the earlier.
+                        base = (
+                            col_exprs[col]
+                            if col in col_exprs and col_exprs[col] is not None
+                            else col
+                        )
+                        col_exprs[col] = f"REPLACE({base}, '{old_str}', '{new_val}')"
+
+            elif step.step_type == "ReplaceValueAccumulate":
+                # List.Accumulate({{"ROI","IE"},{"CR","HR"},…}, state,
+                #   (s,c)=>Table.ReplaceValue(s, c{0}, c{1}, Replacer.ReplaceText, {"col"}))
+                # = fold each code pair into a nested REPLACE() on the target column
+                # (the classic "these codes differ between this table and the fact"
+                # remap). Deterministic; PBI applies the pairs left-to-right.
+                colm = re.search(
+                    r'Replacer\.\w+\s*,\s*\{"([^"]+)"\}', step.raw_expression
+                )
+                pairs = re.findall(
+                    r'\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}', step.raw_expression
+                )
+                if colm and pairs:
+                    col = colm.group(1)
+                    expr = (
+                        col_exprs[col]
+                        if col in col_exprs and col_exprs[col] is not None
+                        else col
+                    )
+                    for old_code, new_code in pairs:
+                        expr = f"REPLACE({expr}, '{old_code}', '{new_code}')"
+                    col_exprs[col] = expr
 
             elif step.step_type == "DuplicateColumn":
                 m = re.search(

@@ -5,11 +5,13 @@ import logging
 import re as _re
 import time
 import urllib.parse
-from typing import TYPE_CHECKING, Any, Optional, Type
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
 
 if TYPE_CHECKING:
     from src.utils.databricks_auth import AuthContext
@@ -64,7 +66,7 @@ class MetricViewDeployerTool(BaseTool):
         ".databricksapps.com",
     )
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, **kwargs: object) -> None:
         config_keys = (
             "ucmv_output",
             "yaml_specs_json",
@@ -152,7 +154,9 @@ class MetricViewDeployerTool(BaseTool):
             polls += 1
 
         if state == "SUCCEEDED":
-            return {"success": True, "state": state}
+            # Carry the raw payload so callers that need the result set (e.g. the
+            # post-deploy DESCRIBE guard rail) can read result.data_array.
+            return {"success": True, "state": state, "data": data}
 
         err = data.get("status", {}).get("error", {})
         return {
@@ -161,54 +165,240 @@ class MetricViewDeployerTool(BaseTool):
             "error": err.get("message", f"State: {state}"),
         }
 
-    def _run(self, **kwargs: Any) -> str:
-        def _get(key: str) -> Any:
+    # ── Post-deploy schema guard rail ────────────────────────────────────────
+    # The migration playbook warns that a truncated YAML deploys with no error as
+    # a metric view exposing NO measures. After each deploy we DESCRIBE the view
+    # and confirm the measures/dimensions declared in the YAML actually landed.
+
+    @staticmethod
+    def _declared_names_from_yaml(yaml_content: str) -> tuple:
+        """Return (measure_names, dimension_names) declared in a metric-view YAML,
+        lower-cased for case-insensitive comparison with DESCRIBE output.
+
+        Returns empty sets on unparseable YAML — the caller then skips the check
+        rather than raising."""
+        import yaml as _yaml
+
+        try:
+            spec = _yaml.safe_load(yaml_content)
+        except Exception:  # noqa: BLE001 — bad YAML → skip check, never break deploy
+            return set(), set()
+        if not isinstance(spec, dict):
+            return set(), set()
+
+        def _names(items: object) -> set[str]:
+            out: set[str] = set()
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict):
+                        nm = it.get("name")
+                        if isinstance(nm, str) and nm.strip():
+                            out.add(nm.strip().lower())
+            return out
+
+        return _names(spec.get("measures")), _names(spec.get("dimensions"))
+
+    @staticmethod
+    def _parse_describe_json_columns(data: dict) -> Optional[tuple]:
+        """Parse a ``DESCRIBE TABLE EXTENDED <view> AS JSON`` result into
+        (deployed_measure_names, deployed_dimension_names), lower-cased.
+
+        The SQL Statement API returns the JSON document as a single string cell in
+        result.data_array; metric-view measure columns carry ``"is_measure": true``.
+        Returns None if the shape is not what we expect (caller skips the check)."""
+        try:
+            rows = (data or {}).get("result", {}).get("data_array") or []
+            if not rows or not rows[0] or not rows[0][0]:
+                return None
+            doc = json.loads(rows[0][0])
+        except Exception:  # noqa: BLE001 — malformed DESCRIBE output → skip check
+            return None
+        cols = doc.get("columns")
+        if not isinstance(cols, list):
+            return None
+        measures: set = set()
+        dims: set = set()
+        for c in cols:
+            if not isinstance(c, dict):
+                continue
+            nm = c.get("name")
+            if not isinstance(nm, str) or not nm.strip():
+                continue
+            (measures if c.get("is_measure") else dims).add(nm.strip().lower())
+        return measures, dims
+
+    @staticmethod
+    def _compare_schema(
+        declared_measures: set,
+        declared_dimensions: set,
+        deployed_measures: set,
+        deployed_dimensions: set,
+    ) -> dict:
+        """Compare declared (YAML) vs deployed (DESCRIBE) names. Flags the
+        truncation failure: declared measures exist but NONE landed in the view."""
+        missing_measures = sorted(declared_measures - deployed_measures)
+        missing_dimensions = sorted(declared_dimensions - deployed_dimensions)
+        truncated = bool(declared_measures) and not (
+            declared_measures & deployed_measures
+        )
+        result: dict = {
+            "schema_verified": not missing_measures and not missing_dimensions,
+            "declared_measures": len(declared_measures),
+            "deployed_measures": len(deployed_measures),
+            "declared_dimensions": len(declared_dimensions),
+            "deployed_dimensions": len(deployed_dimensions),
+        }
+        if missing_measures:
+            result["missing_measures"] = missing_measures
+        if missing_dimensions:
+            result["missing_dimensions"] = missing_dimensions
+        if truncated:
+            result["truncated"] = True
+        return result
+
+    def _verify_deployed_schema(
+        self,
+        yaml_content: str,
+        view_name: str,
+        workspace_url: str,
+        warehouse_id: str,
+        headers: dict,
+    ) -> Optional[dict]:
+        """DESCRIBE the just-created metric view and confirm its declared
+        measures/dimensions landed. Returns a schema-check dict, or None if the
+        check could not run. Never raises — a failed check must not fail an
+        otherwise-successful deploy."""
+        declared_m, declared_d = self._declared_names_from_yaml(yaml_content)
+        if not declared_m and not declared_d:
+            return None  # nothing to verify (or unparseable YAML)
+        describe = self._execute_sql_sync(
+            f"DESCRIBE TABLE EXTENDED {view_name} AS JSON",
+            workspace_url,
+            warehouse_id,
+            headers,
+        )
+        if not describe.get("success"):
+            return {
+                "schema_verified": None,
+                "note": "DESCRIBE failed; schema not verified",
+            }
+        parsed = self._parse_describe_json_columns(describe.get("data", {}))
+        if parsed is None:
+            return {
+                "schema_verified": None,
+                "note": "DESCRIBE output not parseable; schema not verified",
+            }
+        deployed_m, deployed_d = parsed
+        return self._compare_schema(declared_m, declared_d, deployed_m, deployed_d)
+
+    @staticmethod
+    def _resolve_yaml_specs(
+        yaml_raw: object, ucmv_raw: object
+    ) -> tuple[dict[str, object], Optional[str]]:
+        """Pick the YAML specs to deploy: a manual ``yaml_specs_json`` upload wins
+        over the flow-injected ``ucmv_output``. Returns ``(specs, error)``."""
+        yaml_specs: dict[str, object] = {}
+        # 1. Manual upload takes priority (explicit override)
+        if yaml_raw and yaml_raw != "{}":
+            try:
+                parsed = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
+                if isinstance(parsed, dict) and parsed:
+                    yaml_specs = dict(parsed)
+                    logger.info(
+                        "[MVDeployer] Using manual yaml_specs_json: %s views",
+                        len(yaml_specs),
+                    )
+            except json.JSONDecodeError as e:
+                return {}, f"Invalid JSON in yaml_specs_json: {e}"
+
+        # 2. Fall back to flow-injected ucmv_output
+        if not yaml_specs and ucmv_raw:
+            try:
+                ucmv = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+            except json.JSONDecodeError as e:
+                logger.warning("[MVDeployer] Could not parse ucmv_output: %s", e)
+            else:
+                if isinstance(ucmv, Mapping):
+                    yaml_dict = as_map(ucmv).get("yaml")
+                    if isinstance(yaml_dict, dict):
+                        yaml_specs = dict(yaml_dict)
+                    logger.info(
+                        "[MVDeployer] Using flow ucmv_output: %s views",
+                        len(yaml_specs),
+                    )
+                else:
+                    logger.warning(
+                        "[MVDeployer] Could not parse ucmv_output: not a JSON object"
+                    )
+        return yaml_specs, None
+
+    @staticmethod
+    def _apply_catalog_remap(
+        yaml_specs: dict[str, object], remap_raw: object
+    ) -> dict[str, object]:
+        """Replace source catalog names in every YAML spec (best-effort: a failure
+        logs a warning and leaves the specs untouched)."""
+        if not remap_raw:
+            return yaml_specs
+        try:
+            remap = json.loads(remap_raw) if isinstance(remap_raw, str) else remap_raw
+            if isinstance(remap, dict):
+                # SEC #7: validate both sides are plain (optionally dotted)
+                # identifiers before a blind substring replace into the YAML —
+                # config/agent-supplied new_cat must not inject arbitrary text.
+                _ident = _re.compile(r"^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$")
+                safe_remap = {
+                    old: new
+                    for old, new in remap.items()
+                    if isinstance(old, str)
+                    and isinstance(new, str)
+                    and _ident.match(old)
+                    and _ident.match(new)
+                }
+                dropped = set(remap) - set(safe_remap)
+                if dropped:
+                    logger.warning(
+                        "[MVDeployer] Ignoring catalog_remap entries with "
+                        "non-identifier values: %s",
+                        sorted(dropped),
+                    )
+                remapped: dict[str, object] = {}
+                for k, v in yaml_specs.items():
+                    text = v
+                    for old_cat, new_cat in safe_remap.items():
+                        if not isinstance(text, str):
+                            raise TypeError(f"YAML spec {k!r} is not text")
+                        text = text.replace(old_cat, new_cat)
+                    remapped[k] = text
+                logger.info("[MVDeployer] Applied catalog remap: %s", safe_remap)
+                return remapped
+        except Exception as e:
+            logger.warning(
+                "[MVDeployer] Could not apply catalog_remap: %s", e, exc_info=True
+            )
+        return yaml_specs
+
+    def _run(self, **kwargs: object) -> str:
+        def _get(key: str) -> object:
             val = kwargs.get(key)
             if val is not None:
                 return val
             return self._default_config.get(key)
 
-        catalog = _get("catalog") or "main"
-        schema = _get("schema_name") or "default"
+        catalog = str(_get("catalog") or "main")
+        schema = str(_get("schema_name") or "default")
         dry_run = _get("dry_run")
         if dry_run is None:
             dry_run = False
-        host_override = _get("databricks_host") or None
-        warehouse_id = _get("warehouse_id") or ""
+        host_override = opt_str(_get("databricks_host")) or None
+        warehouse_id = str(_get("warehouse_id") or "")
 
         # ── Parse yaml specs — manual upload wins over flow injection ────────
-        yaml_specs: dict = {}
-
-        # 1. Manual upload takes priority (explicit override)
-        yaml_raw = _get("yaml_specs_json") or "{}"
-        if yaml_raw and yaml_raw != "{}":
-            try:
-                parsed = json.loads(yaml_raw) if isinstance(yaml_raw, str) else yaml_raw
-                if isinstance(parsed, dict) and parsed:
-                    yaml_specs = parsed
-                    logger.info(
-                        f"[MVDeployer] Using manual yaml_specs_json: {len(yaml_specs)} views"
-                    )
-            except json.JSONDecodeError as e:
-                return json.dumps({"error": f"Invalid JSON in yaml_specs_json: {e}"})
-
-        # 2. Fall back to flow-injected ucmv_output
-        if not yaml_specs:
-            ucmv_raw = _get("ucmv_output")
-            if ucmv_raw:
-                try:
-                    ucmv = (
-                        json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
-                    )
-                    yaml_dict = ucmv.get("yaml", {})
-                    if isinstance(yaml_dict, dict):
-                        yaml_specs = yaml_dict
-                    logger.info(
-                        f"[MVDeployer] Using flow ucmv_output: {len(yaml_specs)} views"
-                    )
-                except (json.JSONDecodeError, AttributeError) as e:
-                    logger.warning(f"[MVDeployer] Could not parse ucmv_output: {e}")
-
+        yaml_specs, spec_error = self._resolve_yaml_specs(
+            _get("yaml_specs_json") or "{}", _get("ucmv_output")
+        )
+        if spec_error:
+            return json.dumps({"error": spec_error})
         if not yaml_specs:
             return json.dumps(
                 {
@@ -217,46 +407,14 @@ class MetricViewDeployerTool(BaseTool):
             )
 
         # ── Apply catalog remapping to every YAML spec ────────────────────────
-        remap_raw = _get("catalog_remap")
-        if remap_raw:
-            try:
-                remap = (
-                    json.loads(remap_raw) if isinstance(remap_raw, str) else remap_raw
-                )
-                if isinstance(remap, dict):
-                    # SEC #7: validate both sides are plain (optionally dotted)
-                    # identifiers before a blind substring replace into the YAML —
-                    # config/agent-supplied new_cat must not inject arbitrary text.
-                    _ident = _re.compile(r"^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$")
-                    safe_remap = {
-                        old: new
-                        for old, new in remap.items()
-                        if isinstance(old, str)
-                        and isinstance(new, str)
-                        and _ident.match(old)
-                        and _ident.match(new)
-                    }
-                    dropped = set(remap) - set(safe_remap)
-                    if dropped:
-                        logger.warning(
-                            f"[MVDeployer] Ignoring catalog_remap entries with "
-                            f"non-identifier values: {sorted(dropped)}"
-                        )
-                    remapped = {}
-                    for k, v in yaml_specs.items():
-                        for old_cat, new_cat in safe_remap.items():
-                            v = v.replace(old_cat, new_cat)
-                        remapped[k] = v
-                    yaml_specs = remapped
-                    logger.info(f"[MVDeployer] Applied catalog remap: {safe_remap}")
-            except Exception as e:
-                logger.warning(f"[MVDeployer] Could not apply catalog_remap: {e}")
+        yaml_specs = self._apply_catalog_remap(yaml_specs, _get("catalog_remap"))
 
-        results = {}
+        results: dict[str, dict[str, object]] = {}
         schema_ensured = False  # create schema once before first deployment
 
         for table_key in sorted(yaml_specs.keys()):
-            yaml_content = yaml_specs.get(table_key, "")
+            raw_yaml = yaml_specs.get(table_key)
+            yaml_content = raw_yaml if isinstance(raw_yaml, str) else ""
 
             if dry_run:
                 safe_key = _re.sub(r"[^a-zA-Z0-9_]", "_", table_key.lower())
@@ -292,6 +450,9 @@ class MetricViewDeployerTool(BaseTool):
                 view_name = f"{safe_cat}.{safe_sch}.{safe_key}"
                 ddl = self._yaml_to_ddl(yaml_content, view_name)
             except Exception as e:
+                logger.warning(
+                    "[MVDeployer] DDL generation failed: %s", e, exc_info=True
+                )
                 results[table_key] = {
                     "status": "error",
                     "message": f"DDL generation failed: {e}",
@@ -313,6 +474,9 @@ class MetricViewDeployerTool(BaseTool):
                 headers.update(get_user_agent_header(KasalProduct.POWERBI))
                 workspace_url = (auth.workspace_url or "").rstrip("/")
             except Exception as e:
+                logger.warning(
+                    "[MVDeployer] Authentication error: %s", e, exc_info=True
+                )
                 results[table_key] = {
                     "status": "error",
                     "message": f"Authentication error: {e}",
@@ -331,7 +495,8 @@ class MetricViewDeployerTool(BaseTool):
                 from src.utils.url_security import is_trusted_databricks_host
 
                 _host_ok = is_trusted_databricks_host(workspace_url)
-            except Exception:  # noqa: BLE001 — no helper → do not trust
+            except Exception:
+                logger.warning("[MVDeployer] Host check unavailable", exc_info=True)
                 _host_ok = False
             if not _host_ok:
                 parsed_host = urllib.parse.urlparse(workspace_url)
@@ -353,11 +518,12 @@ class MetricViewDeployerTool(BaseTool):
                 )
                 if not schema_result["success"]:
                     logger.warning(
-                        f"[MVDeployer] Could not ensure schema: {schema_result.get('error')}"
+                        "[MVDeployer] Could not ensure schema: %s",
+                        schema_result.get("error"),
                     )
                 else:
                     logger.info(
-                        f"[MVDeployer] Schema {safe_cat_s}.{safe_sch_s} ensured"
+                        "[MVDeployer] Schema %s.%s ensured", safe_cat_s, safe_sch_s
                     )
                 schema_ensured = True
 
@@ -379,7 +545,36 @@ class MetricViewDeployerTool(BaseTool):
                     ddl, workspace_url, warehouse_id, headers
                 )
                 if result["success"]:
-                    results[table_key] = {"status": "deployed", "view_name": view_name}
+                    entry: dict[str, object] = {
+                        "status": "deployed",
+                        "view_name": view_name,
+                    }
+                    try:
+                        schema_check = self._verify_deployed_schema(
+                            yaml_content,
+                            view_name,
+                            workspace_url,
+                            warehouse_id,
+                            headers,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[MVDeployer] schema check error: %s", e, exc_info=True
+                        )
+                        schema_check = {
+                            "schema_verified": None,
+                            "note": f"schema check error: {e}",
+                        }
+                    if schema_check is not None:
+                        entry["schema_check"] = schema_check
+                        if schema_check.get("truncated"):
+                            entry["status"] = "deployed_incomplete"
+                            entry["message"] = (
+                                f"Metric view deployed but exposes 0 of "
+                                f"{schema_check['declared_measures']} declared measures "
+                                f"— YAML likely truncated"
+                            )
+                    results[table_key] = entry
                 else:
                     results[table_key] = {
                         "status": "error",
@@ -388,6 +583,7 @@ class MetricViewDeployerTool(BaseTool):
                         "http_status": result.get("http_status"),
                     }
             except Exception as e:
+                logger.warning("[MVDeployer] deploy failed: %s", e, exc_info=True)
                 results[table_key] = {"status": "error", "message": str(e)}
 
         return json.dumps(
@@ -400,6 +596,11 @@ class MetricViewDeployerTool(BaseTool):
                     ),
                     "deployed": sum(
                         1 for r in results.values() if r.get("status") == "deployed"
+                    ),
+                    "deployed_incomplete": sum(
+                        1
+                        for r in results.values()
+                        if r.get("status") == "deployed_incomplete"
                     ),
                     "errors": sum(
                         1 for r in results.values() if r.get("status") == "error"
