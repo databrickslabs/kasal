@@ -67,7 +67,24 @@ def build_source_layer_outputs(
         # creds are present) — otherwise run_pbi_validation reports "skipped"
         # and makes no network calls.
         evaluate_fn = None
-        if validate_against_pbi:
+        # The request carries the run's Power BI token, so the target must pass
+        # the same allowlist (https + Power BI host, UUID ids) as extraction.
+        from src.services.tools.uc_metric_view_generator_utils.pbi_api_extraction import (
+            validate_pbi_inputs,
+        )
+
+        pbi_ok, pbi_reason = (
+            validate_pbi_inputs(
+                str(workspace_id or ""),
+                str(dataset_id or ""),
+                str(pbi_api_base_url or ""),
+            )
+            if validate_against_pbi
+            else (False, "")
+        )
+        if validate_against_pbi and not pbi_ok:
+            logger.warning("[UCMVGenerator] PBI validation skipped: %s", pbi_reason)
+        if pbi_ok:
             from src.services.tools.metric_view_utils.source_artifacts import (
                 build_pbi_evaluate_fn,
             )

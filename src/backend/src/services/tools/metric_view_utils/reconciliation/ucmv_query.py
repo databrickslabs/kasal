@@ -19,7 +19,7 @@ from .mapping import Measure, UCMVMapping
 def _quote_ident(name: str) -> str:
     """Backtick-quote a UCMV-side identifier. Harmless when unneeded; required
     for measure/dimension names containing spaces (e.g. "Company Code")."""
-    return f"`{name}`"
+    return "`{}`".format(str(name).replace("`", "``"))
 
 
 def _quote_sql_string(value: object) -> str:
@@ -51,7 +51,8 @@ def build_ucmv_query(
                 "No dimension values remain inside this measure's applicability."
             )
 
-    select_cols = [f"{_quote_ident(dim.ucmv_column)} AS {dimension_name}"]
+    dim_alias = _quote_ident(dimension_name)
+    select_cols = [f"{_quote_ident(dim.ucmv_column)} AS {dim_alias}"]
     group_cols = [_quote_ident(dim.ucmv_column)]
 
     if td.ucmv_mode == "column":
@@ -93,12 +94,9 @@ def build_ucmv_query(
     where_sql = "\n      AND ".join(where_clauses)
     group_sql = ", ".join(group_cols)
 
-    # Split "catalog.schema.table" -> `catalog`.schema.table (only the catalog
-    # is backtick-wrapped, matching the reference's addressing).
-    parts = binding.ucmv_table.split(".")
-    from_target = f"`{parts[0]}`" + (
-        "." + ".".join(parts[1:]) if len(parts) > 1 else ""
-    )
+    # "catalog.schema.table" -> `catalog`.`schema`.`table`: every part quoted
+    # (and escaped), since the table comes from a mapping, not from Kasal.
+    from_target = ".".join(_quote_ident(p) for p in binding.ucmv_table.split("."))
 
     where_line = f"\n    WHERE {where_sql}" if where_clauses else ""
     return f"""
@@ -106,5 +104,5 @@ def build_ucmv_query(
         {select_sql}
     FROM {from_target}{where_line}
     GROUP BY {group_sql}
-    ORDER BY {dimension_name}, period
+    ORDER BY {dim_alias}, period
 """.strip()

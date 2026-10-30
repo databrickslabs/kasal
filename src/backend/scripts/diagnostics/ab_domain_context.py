@@ -7,7 +7,7 @@ Measures the impact of domain_context on translation quality by:
 3. Printing a side-by-side comparison
 
 Usage:
-    python scripts/ab_domain_context.py \\
+    python -m scripts.diagnostics.ab_domain_context \\
         --measures-json /path/to/measures.json \\
         --mquery-json /path/to/mquery.json \\
         --domain-context /path/to/context.md \\
@@ -16,7 +16,7 @@ Usage:
         [--model databricks-claude-sonnet-4-5]
 
 Or with a bundle:
-    python scripts/ab_domain_context.py \\
+    python -m scripts.diagnostics.ab_domain_context \\
         --bundle /path/to/bundle.json \\
         --domain-context /path/to/context.md
 """

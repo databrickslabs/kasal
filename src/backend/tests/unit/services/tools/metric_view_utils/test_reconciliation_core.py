@@ -121,14 +121,24 @@ def test_load_mapping_from_yaml_text():
 def test_build_ucmv_query_exact():
     m = _mapping()
     sql = r.build_ucmv_query(m, "country", ["AT", "NG"], [2025, 2026])
-    assert "`country_group` AS country" in sql
+    assert "`country_group` AS `country`" in sql
     assert "`fiscper` AS period" in sql
     assert "MEASURE(`sweetener_yield_bp`) AS `sweetener_yield_bp`" in sql
     assert "WHERE `fiscal_year` IN ('2025', '2026')" in sql
     assert "AND `country_group` IN ('AT', 'NG')" in sql
     assert sql.startswith("SELECT")
-    assert "FROM `cat`.sch.fact_sc" in sql
+    assert "FROM `cat`.`sch`.`fact_sc`" in sql
     assert "GROUP BY `country_group`, `fiscper`" in sql
+
+
+def test_build_ucmv_query_escapes_backticks_in_identifiers():
+    # Mapping values reach the SQL: a backtick must not close the quoted name.
+    data = dict(BASE_MAPPING)
+    data["ucmv_table"] = "cat.sch.t` UNION SELECT secret FROM x --"
+    m = r.load_mapping_dict(data)
+    sql = r.build_ucmv_query(m, "country", [], [2025])
+    assert "FROM `cat`.`sch`.`t`` UNION SELECT secret FROM x --`" in sql
+    assert "` UNION SELECT" not in sql.replace("``", "")
 
 
 def test_build_ucmv_query_reconstruct_mode():

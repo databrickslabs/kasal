@@ -18,6 +18,7 @@ Python import path without script-specific `sys.path` changes.
 | `scripts.maintenance.list_unreviewed_powerbi_templates` | List Power BI converter templates (visible to every tenant) created by users who are not system admins | Read-only; supports `--json` |
 | `scripts.maintenance.clear_bi_specialist_memory` | Clear a workspace's default local memory store | Deletes local memory; supports `--dry-run` |
 | `scripts.diagnostics.diagnose_prompt_registry` | Diagnose Unity Catalog prompt-registry access | Creates a probe prompt and attempts to delete it |
+| `scripts.diagnostics.ab_domain_context` | A/B-compare UC Metric View Generator output with and without a domain context | Runs the generator twice (LLM calls); prints metrics and saves outputs to `/tmp/ab_domain_context_results` |
 
 For example, inspect the proposed Power BI table DDL without executing it:
 

@@ -474,7 +474,7 @@ class CrewService:
         # Duplicate agents first — tasks point at the cloned agent IDs.
         agent_id_map: Dict[str, str] = {}
         for aid in source.agent_ids or []:
-            src_agent = await agent_svc.get(str(aid))
+            src_agent = await agent_svc.get_with_group_check(str(aid), group_context)
             if src_agent is None:
                 continue
             new_agent = await agent_svc.create_with_group(
@@ -486,7 +486,7 @@ class CrewService:
         task_id_map: Dict[str, str] = {}
         cloned_tasks: List[tuple] = []
         for tid in source.task_ids or []:
-            src_task = await task_svc.get(str(tid))
+            src_task = await task_svc.get_with_group_check(str(tid), group_context)
             if src_task is None:
                 continue
             new_task = await task_svc.create_with_group(

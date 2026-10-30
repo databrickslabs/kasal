@@ -1,13 +1,8 @@
 """Unit tests for A/B domain_context test harness metrics logic."""
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
-
-# Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 
 class TestExtractMetrics:
@@ -15,8 +10,7 @@ class TestExtractMetrics:
 
     def test_extract_metrics_from_valid_output(self):
         """Test extracting metrics from a valid UCMV output."""
-        # Import here to avoid import errors in other tests
-        from ab_domain_context import extract_metrics
+        from scripts.diagnostics.ab_domain_context import extract_metrics
 
         output = {
             "stats": {
@@ -41,7 +35,7 @@ class TestExtractMetrics:
 
     def test_extract_metrics_empty_output(self):
         """Test extracting metrics from empty output."""
-        from ab_domain_context import extract_metrics
+        from scripts.diagnostics.ab_domain_context import extract_metrics
 
         output = {"stats": {}, "specs": {}}
 
@@ -54,7 +48,7 @@ class TestExtractMetrics:
 
     def test_extract_metrics_with_error(self):
         """Test extracting metrics when output contains error."""
-        from ab_domain_context import extract_metrics
+        from scripts.diagnostics.ab_domain_context import extract_metrics
 
         output = {"error": "Tool execution failed"}
 
@@ -65,7 +59,7 @@ class TestExtractMetrics:
 
     def test_extract_metrics_missing_stats(self):
         """Test extracting metrics when stats key is missing."""
-        from ab_domain_context import extract_metrics
+        from scripts.diagnostics.ab_domain_context import extract_metrics
 
         output = {"specs": {"fact_sales": {}}}
 
@@ -81,7 +75,7 @@ class TestComputeDiffMetrics:
 
     def test_compute_diff_newly_translated(self):
         """Test computing diff when domain_context enables new translations."""
-        from ab_domain_context import compute_diff_metrics
+        from scripts.diagnostics.ab_domain_context import compute_diff_metrics
 
         output_a = {
             "specs": {
@@ -130,7 +124,7 @@ class TestComputeDiffMetrics:
 
     def test_compute_diff_confidence_improved(self):
         """Test computing diff when confidence improves with SQL change."""
-        from ab_domain_context import compute_diff_metrics
+        from scripts.diagnostics.ab_domain_context import compute_diff_metrics
 
         output_a = {
             "specs": {
@@ -169,7 +163,7 @@ class TestComputeDiffMetrics:
 
     def test_compute_diff_no_change(self):
         """Test computing diff when nothing changes."""
-        from ab_domain_context import compute_diff_metrics
+        from scripts.diagnostics.ab_domain_context import compute_diff_metrics
 
         output_a = {
             "specs": {
@@ -207,7 +201,7 @@ class TestComputeDiffMetrics:
 
     def test_compute_diff_multiple_measures(self):
         """Test computing diff with multiple measures."""
-        from ab_domain_context import compute_diff_metrics
+        from scripts.diagnostics.ab_domain_context import compute_diff_metrics
 
         output_a = {
             "specs": {
@@ -254,7 +248,7 @@ class TestComputeDiffMetrics:
 
     def test_compute_diff_with_empty_specs(self):
         """Test computing diff with empty specs."""
-        from ab_domain_context import compute_diff_metrics
+        from scripts.diagnostics.ab_domain_context import compute_diff_metrics
 
         output_a = {"specs": {}}
         output_b = {"specs": {}}
@@ -270,7 +264,7 @@ class TestFormatComparisonTable:
 
     def test_format_comparison_table_basic(self):
         """Test formatting a basic comparison table."""
-        from ab_domain_context import format_comparison_table
+        from scripts.diagnostics.ab_domain_context import format_comparison_table
 
         metrics_a = {
             "total_measures": 10,
@@ -309,7 +303,7 @@ class TestFormatComparisonTable:
 
     def test_format_comparison_table_error_run_a(self):
         """Test formatting when Run A has error."""
-        from ab_domain_context import format_comparison_table
+        from scripts.diagnostics.ab_domain_context import format_comparison_table
 
         metrics_a = {
             "total_measures": 0,
@@ -338,7 +332,7 @@ class TestFormatComparisonTable:
 
     def test_format_comparison_table_no_improvement(self):
         """Test formatting when there's no improvement."""
-        from ab_domain_context import format_comparison_table
+        from scripts.diagnostics.ab_domain_context import format_comparison_table
 
         metrics_a = {
             "total_measures": 10,
@@ -375,7 +369,7 @@ class TestLoadFunctions:
 
     def test_load_file_success(self, tmp_path):
         """Test loading a file successfully."""
-        from ab_domain_context import load_file
+        from scripts.diagnostics.ab_domain_context import load_file
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
@@ -386,14 +380,14 @@ class TestLoadFunctions:
 
     def test_load_file_not_found(self):
         """Test loading a non-existent file."""
-        from ab_domain_context import load_file
+        from scripts.diagnostics.ab_domain_context import load_file
 
         with pytest.raises(FileNotFoundError):
             load_file("/nonexistent/path/file.txt")
 
     def test_load_json_file_success(self, tmp_path):
         """Test loading a JSON file successfully."""
-        from ab_domain_context import load_json_file
+        from scripts.diagnostics.ab_domain_context import load_json_file
 
         test_file = tmp_path / "test.json"
         test_file.write_text(json.dumps({"key": "value"}))
@@ -404,7 +398,7 @@ class TestLoadFunctions:
 
     def test_load_json_file_invalid(self, tmp_path):
         """Test loading invalid JSON."""
-        from ab_domain_context import load_json_file
+        from scripts.diagnostics.ab_domain_context import load_json_file
 
         test_file = tmp_path / "test.json"
         test_file.write_text("not valid json{")

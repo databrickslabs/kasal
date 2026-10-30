@@ -40,6 +40,8 @@ def validate_pbi_inputs(
     if not UUID_PATTERN.match(dataset_id):
         return False, f"Invalid dataset_id format: {dataset_id}"
     parsed = urllib.parse.urlparse(pbi_api_base_url or "https://api.powerbi.com")
+    if parsed.scheme != "https":
+        return False, f"PBI API URL must use https: {pbi_api_base_url}"
     if parsed.hostname not in ALLOWED_PBI_DOMAINS:
         return False, f"Untrusted PBI API domain: {parsed.hostname}"
     return True, ""

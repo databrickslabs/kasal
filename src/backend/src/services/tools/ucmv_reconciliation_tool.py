@@ -294,12 +294,11 @@ class UCMVReconciliationTool(BaseTool):
             auth: Optional[AuthContext] = executor.submit(_run_in_thread).result(
                 timeout=30
             )
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        # The override may only name the credential's OWN workspace: the SQL
+        # request carries that credential's bearer token.
+        from src.services.tools.databricks_tool_utils.auth import apply_host_override
+
+        return apply_host_override(auth, host_override)
 
     def _build_sql_executor(
         self, warehouse_id: str, host_override: Optional[str]
