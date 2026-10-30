@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Optional
 
+from ..dax_condition_sql import _sql_str_literal
 from ..raw_fields import DimensionValue
 from .mapping import Measure, UCMVMapping
 
@@ -23,7 +24,14 @@ def _quote_ident(name: str) -> str:
 
 
 def _quote_sql_string(value: object) -> str:
-    return "'{}'".format(str(value).replace("'", "''"))
+    """A Databricks SQL string literal for a filter value.
+
+    The values come from Power BI data or a mapping, so they are escaped the way
+    every other generated literal is (backslashes first, then quotes; see
+    ``_sql_str_literal``) — doubling quotes alone lets a value ending in ``\``
+    turn its closing quote into ``\'`` and free the next value.
+    """
+    return _sql_str_literal(value)
 
 
 def build_ucmv_query(

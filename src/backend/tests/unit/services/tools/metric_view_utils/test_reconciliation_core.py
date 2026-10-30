@@ -141,6 +141,21 @@ def test_build_ucmv_query_escapes_backticks_in_identifiers():
     assert "` UNION SELECT" not in sql.replace("``", "")
 
 
+def test_build_ucmv_query_values_cannot_leave_their_literals():
+    # A value ending in a backslash must not turn its closing quote into \'.
+    from tests.unit.services.tools.metric_view_utils.test_sql_literal_security import (
+        _outside_literals,
+    )
+
+    m = _mapping()
+    sql = r.build_ucmv_query(m, "country", ["a\\", ") OR 1=1 --"], ["2025\\"])
+    outside = _outside_literals(sql)
+    # Only the IN-list skeletons are SQL; every value stayed inside its quotes.
+    assert "WHERE `fiscal_year` IN ()" in outside
+    assert "AND `country_group` IN (, )" in outside
+    assert "OR 1=1" not in outside
+
+
 def test_build_ucmv_query_reconstruct_mode():
     data = dict(BASE_MAPPING)
     data["time_dimension"] = {
