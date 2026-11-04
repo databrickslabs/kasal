@@ -866,6 +866,14 @@ class PipelineConfigGeneratorTool(BaseTool):
 
         if run.calculated_columns:  # S6
             config["calculated_columns"] = run.calculated_columns
+        if run.measure_metadata:  # display format from the PBI formatString
+            from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                pbi_format_strings_from_harvest,
+            )
+
+            config["measure_format_strings"] = pbi_format_strings_from_harvest(
+                run.measure_metadata
+            )
         if run.fiscal_calendars:  # S9
             time_dimension = config.setdefault("time_dimension", {})
             if (
@@ -935,6 +943,10 @@ class PipelineConfigGeneratorTool(BaseTool):
             "reconciliation_mapping_scaffolds": rec_scaffolds,
             # {original_measure_name: [{page, visual_type, role}, ...]}
             "visual_usage_index": run.visual_usage_index,
+            # Reachability closure → draft scope table (keep/snapshot/fold/genie/drop/n/a).
+            "report_scope": self._report_scope(run),
+            # Hashed semantic objects: the UCMV Drift Monitor diffs two of these.
+            "semantic_snapshot": self._semantic_snapshot(run),
             # {table: [raw columns drawn in a visual with no named measure behind them]}
             "implicit_column_measures": implicit_column_measures,
             "summary": {
@@ -1001,6 +1013,56 @@ class PipelineConfigGeneratorTool(BaseTool):
                 e,
                 exc_info=True,
             )
+
+    @staticmethod
+    def _report_scope(run: _ConfigGenRun) -> dict:
+        """What a viewer can reach and what it needs (``services/powerbi/scope``).
+
+        Built from the TMDL and PBIR parts this run already fetched; empty when
+        either is missing (no report → every measure would read as unreached).
+        """
+        if not run.tmdl_parts or not run.report_def:
+            return {}
+        try:
+            from src.services.powerbi.scope import (
+                build_report_scope,
+                relationships_from_rows,
+            )
+
+            rels = (
+                relationships_from_rows(run.relationships)
+                if run.relationships
+                else None
+            )
+            scope = build_report_scope(
+                run.tmdl_parts, run.report_def, relationships=rels
+            )
+            if scope:
+                logger.info(
+                    "[PipelineConfigGen]   → report scope: %s", scope["summary"]
+                )
+            return scope
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(
+                "[PipelineConfigGen] Report scope failed: %s", e, exc_info=True
+            )
+            return {}
+
+    @staticmethod
+    def _semantic_snapshot(run: _ConfigGenRun) -> dict:
+        """Every semantic object of the model (+ report), hashed: the UCMV Drift
+        Monitor compares two of these to find what changed in Power BI."""
+        if not run.tmdl_parts:
+            return {}
+        try:
+            from src.services.powerbi.scope import relationships_from_rows
+            from src.services.powerbi.scope.semantic_sync import build_snapshot
+
+            rels = relationships_from_rows(run.relationships) if run.relationships else None
+            return build_snapshot(run.tmdl_parts, run.report_def, relationships=rels)
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.warning("[PipelineConfigGen] Semantic snapshot failed: %s", e, exc_info=True)
+            return {}
 
     def _implicit_column_measures(
         self, run: _ConfigGenRun, config: dict, ucmv_measures: list[dict]

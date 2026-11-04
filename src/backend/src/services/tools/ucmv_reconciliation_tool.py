@@ -88,6 +88,10 @@ _CONFIG_KEYS = (
     # Optional refresh boundaries for classification
     "pbi_refresh_period",
     "mv_refresh_period",
+    # Privacy / scale options. Operator-set (constructor), never LLM-set.
+    "statistics_only",
+    "scale_check",
+    "scale_threshold",
 )
 
 
@@ -435,6 +439,8 @@ class UCMVReconciliationTool(BaseTool):
             )
 
         # UCMV side
+        scale = self._scale_check(kwargs, mapping, dimension_name, sql_executor)
+
         ucmv_sql = recon.build_ucmv_query(
             mapping, dimension_name, dimension_values, reference_years
         )
@@ -458,9 +464,37 @@ class UCMVReconciliationTool(BaseTool):
             context_periods=context_periods,
         )
 
-        return self._compare_and_summarize(
+        result = self._compare_and_summarize(
             view_name, mapping, dimension_name, reference_years, ucmv_df, pbi_df, kwargs
         )
+        if scale is not None:
+            result["scale_check"] = scale
+        return result
+
+    def _scale_check(
+        self,
+        kwargs: Mapping[str, object],
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        sql_executor: recon.UcmvExecutor,
+    ) -> Optional[dict[str, object]]:
+        """Counts-only percentage scale check on the UC side (``scale_check``).
+
+        Returns ``None`` when the option is off. Otherwise one verdict per
+        measure (``fraction`` / ``0-100`` / ``no_data``) with its group counts.
+        """
+        if not self._cfg(kwargs, "scale_check"):
+            return None
+        threshold_raw = self._cfg(kwargs, "scale_threshold")
+        threshold = (
+            float(threshold_raw)
+            if isinstance(threshold_raw, (int, float, str))
+            else recon.DEFAULT_SCALE_THRESHOLD
+        )
+        verdicts = recon.run_scale_check(
+            sql_executor, mapping, dimension_name, threshold
+        )
+        return {"threshold": threshold, "measures": verdicts}
 
     def _compare_and_summarize(
         self,
@@ -474,6 +508,10 @@ class UCMVReconciliationTool(BaseTool):
     ) -> dict[str, object]:
         wide = recon.compare(ucmv_df, pbi_df, mapping, dimension_name, reference_years)
         long_df = recon.to_long_format(wide, mapping, dimension_name)
+        if self._cfg(kwargs, "statistics_only"):
+            # Values never reach the output on this path: the report is built
+            # from the value-free statistics only (see reconciliation/statistics).
+            return self._statistics_view(mapping, dimension_name, long_df, kwargs)
         summary = recon.summarize(long_df)
 
         pbi_refresh = self._cfg(kwargs, "pbi_refresh_period")
@@ -535,6 +573,60 @@ class UCMVReconciliationTool(BaseTool):
                 "cells_aligned": aligned_cells,
                 "overall_cell_pct": (
                     round(100 * aligned_cells / total_cells, 2) if total_cells else 0.0
+                ),
+            },
+        }
+
+    def _statistics_view(
+        self,
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        long_df: pd.DataFrame,
+        kwargs: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Statistics-only view (``statistics_only``): counts, shares and the
+        largest RELATIVE difference per measure, no values and no absolute deltas."""
+        pbi_refresh = opt_str(self._cfg(kwargs, "pbi_refresh_period"))
+        mv_refresh = opt_str(self._cfg(kwargs, "mv_refresh_period"))
+        measures_out: dict[str, dict[str, object]] = {}
+        measures_at_100 = 0
+        for name, stats in recon.statistics_by_measure(long_df).items():
+            measure = mapping.measure(name)
+            classification = recon.classify(
+                recon.MismatchStats(
+                    pct_aligned=stats["pct_aligned"],
+                    n_periods=stats["n_periods"],
+                    periods_failing=stats["periods_failing"],
+                    n_dims=stats["n_dims"],
+                    dims_failing=stats["dims_failing"],
+                    failing_periods=stats["failing_periods"],
+                    value_format=measure.value_format,
+                ),
+                pbi_refresh_period=pbi_refresh,
+                mv_refresh_period=mv_refresh,
+            )
+            if stats["pct_aligned"] >= 100:
+                measures_at_100 += 1
+            # failing_periods is the classifier's input; the report lists periods once.
+            entry: dict[str, object] = {
+                key: value for key, value in stats.items() if key != "failing_periods"
+            }
+            entry["classification"] = classification
+            measures_out[name] = entry
+
+        cells_total = int(long_df.shape[0])
+        cells_aligned = int(long_df["within_tolerance"].astype(bool).sum())
+        return {
+            "dimension": dimension_name,
+            "statistics_only": True,
+            "measures": measures_out,
+            "summary": {
+                "measures_at_100": measures_at_100,
+                "total_measures": len(measures_out),
+                "cells_total": cells_total,
+                "cells_aligned": cells_aligned,
+                "overall_cell_pct": (
+                    round(100 * cells_aligned / cells_total, 2) if cells_total else 0.0
                 ),
             },
         }

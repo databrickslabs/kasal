@@ -187,6 +187,28 @@ def _clean_filter_prefixes(
     return re.sub(r"FILTER\s*\(WHERE\s+(.*?)\)", _strip_in_filter, expr)
 
 
+def _render_dimensions(lines: list[str], dimensions: list[dict]) -> None:
+    """Append the ``dimensions:`` block (nothing when there are none)."""
+    if not dimensions:
+        return
+    lines.append("")
+    lines.append("# \u2500\u2500\u2500 Dimensions " + "\u2500" * 63)
+    lines.append("")
+    lines.append("dimensions:")
+    for d in dimensions:
+        lines.append(f'  - name: {d["name"]}')
+        expr = d["expr"]
+        lines.append(f"    expr: {_yaml_scalar(expr, indent=4)}")
+        if d.get("comment"):
+            lines.append(f'    comment: {_yaml_val(d["comment"])}')
+        if d.get("display_name"):
+            lines.append(f'    display_name: {_yaml_val(d["display_name"])}')
+        if d.get("synonyms"):
+            lines.append("    synonyms:")
+            for syn in d["synonyms"]:
+                lines.append(f"      - {_yaml_val(syn)}")
+
+
 def emit_yaml(
     spec: MetricViewSpec,
     measure_metadata: dict | None = None,
@@ -197,6 +219,7 @@ def emit_yaml(
     fact_join_map: dict | None = None,
     percentage_multiplier_patterns: list[str] | None = None,
     budget_suffix: str | None = None,
+    pbi_format_strings: dict[str, str] | None = None,
 ) -> str:
     """Emit UC Metric View YAML from a MetricViewSpec."""
     spec = copy.deepcopy(spec)
@@ -629,7 +652,7 @@ def emit_yaml(
         spec.dimensions = valid_dims
 
     # Enrich dimensions and measures with metadata (display_name, synonyms, format)
-    _meta_gen = MetadataGenerator()
+    _meta_gen = MetadataGenerator(pbi_format_strings=pbi_format_strings)
     _dm = dimension_metadata or {}
     for d in spec.dimensions:
         d_name = d["name"]
@@ -695,23 +718,7 @@ def emit_yaml(
             ]
 
     # Dimensions
-    if spec.dimensions:
-        lines.append("")
-        lines.append("# \u2500\u2500\u2500 Dimensions " + "\u2500" * 63)
-        lines.append("")
-        lines.append("dimensions:")
-        for d in spec.dimensions:
-            lines.append(f'  - name: {d["name"]}')
-            expr = d["expr"]
-            lines.append(f"    expr: {_yaml_scalar(expr, indent=4)}")
-            if d.get("comment"):
-                lines.append(f'    comment: {_yaml_val(d["comment"])}')
-            if d.get("display_name"):
-                lines.append(f'    display_name: {_yaml_val(d["display_name"])}')
-            if d.get("synonyms"):
-                lines.append("    synonyms:")
-                for syn in d["synonyms"]:
-                    lines.append(f"      - {_yaml_val(syn)}")
+    _render_dimensions(lines, spec.dimensions)
 
     lines.append("")
 
@@ -731,9 +738,9 @@ def emit_yaml(
             percentage_multiplier_patterns,
         )
     if switch_measures:
-        render_switch_measures(lines, switch_measures)
+        render_switch_measures(lines, switch_measures, _meta_gen)
     if implicit_measures:
-        render_implicit_measures(lines, implicit_measures)
+        render_implicit_measures(lines, implicit_measures, _meta_gen)
 
     # Untranslatable measures as comments (see render_untranslatable_comments).
     if spec.untranslatable:

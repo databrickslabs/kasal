@@ -9,6 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# ─── Severities ──────────────────────────────────────────────────────────────
+
+SEVERITY_ERROR = "error"
+SEVERITY_WARNING = "warning"
+
+
 # ─── Internal normalized field ───────────────────────────────────────────────
 
 
@@ -88,3 +94,28 @@ def _extract_fields(spec: object) -> tuple[list[_Field], list[_Field]]:
     dimensions = [_coerce_field(d, "dimension") for d in raw_dims]
     measures = [_coerce_field(m, "measure") for m in raw_meas]
     return dimensions, measures
+
+
+# ─── Finding ─────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class LintFinding:
+    """A single metadata-lint violation.
+
+    Attributes
+    ----------
+    rule_id : str
+        Stable id of the rule that fired (one of the ``RULE_*`` constants).
+    severity : str
+        ``"error"`` or ``"warning"``.
+    field : str
+        Name of the offending measure/dimension (``""`` for view-wide findings).
+    message : str
+        Human-readable explanation, actionable on its own.
+    """
+
+    rule_id: str
+    severity: str
+    field: str
+    message: str

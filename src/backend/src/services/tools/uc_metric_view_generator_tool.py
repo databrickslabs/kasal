@@ -54,6 +54,9 @@ from src.services.tools.uc_metric_view_generator_utils.pipeline_run import (
 from src.services.tools.uc_metric_view_generator_utils.reconciliation_gate import (
     run_reconciliation_gate,
 )
+from src.services.tools.uc_metric_view_generator_utils.report_scope_step import (
+    finalize_report_scope,
+)
 from src.services.tools.uc_metric_view_generator_utils.result_views import (
     build_fallback_extract,
     build_raw_dax_extract,
@@ -61,8 +64,8 @@ from src.services.tools.uc_metric_view_generator_utils.result_views import (
 )
 from src.services.tools.uc_metric_view_generator_utils.shared_types import (
     RawInputs,
-    UCMVDiagnostics,
     parse_json_input,
+    preinject_diagnostics,
 )
 from src.services.tools.uc_metric_view_generator_utils.source_layer_steps import (
     build_source_layer_outputs,
@@ -155,6 +158,14 @@ class UCMetricViewGeneratorSchema(BaseModel):
             "used_in_visuals, ...}, ...]} (from Pipeline Config Generator) — raw "
             "columns with PBI's own implicit aggregation that are drawn/filtered "
             "directly in a report visual with no named DAX measure behind them."
+        ),
+    )
+    report_scope: Optional[str] = Field(
+        None,
+        description=(
+            "JSON {rows, summary, pages} (from Pipeline Config Generator): the "
+            "report's reachability-based scope draft. Returned completed with "
+            "what this run translated (in_kasal) and where it went (mirrored_as)."
         ),
     )
     enable_reconciliation: Optional[bool] = Field(
@@ -302,6 +313,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "scan_data_json",
             "visual_usage_index",
             "implicit_column_measures",
+            "report_scope",
             "config_json",
             "naming_config",
             "domain_context",
@@ -568,37 +580,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             visual_usage=visual_usage_raw,
             implicit_column_measures=implicit_column_measures_raw,
         )
-        # Diagnostic: what arrived via flow injection/kwargs BEFORE any API-mode
-        # extraction or DB fallback runs. Carried into `output['_diagnostics']`
-        # (not just logged) so it is visible via the execution_trace pull.
-        diag: UCMVDiagnostics = {
-            "preinject_measures_json_chars": (
-                len(measures_raw) if isinstance(measures_raw, str) else None
-            ),
-            "preinject_mquery_json_chars": (
-                len(mquery_raw) if isinstance(mquery_raw, str) else None
-            ),
-            "preinject_config_json_chars": (
-                len(config_raw) if isinstance(config_raw, str) else None
-            ),
-            "preinject_visual_usage_index_chars": (
-                len(visual_usage_raw) if isinstance(visual_usage_raw, str) else None
-            ),
-            "preinject_implicit_column_measures_chars": (
-                len(implicit_column_measures_raw)
-                if isinstance(implicit_column_measures_raw, str)
-                else None
-            ),
-            "db_fallback_fired_for": [],
-            "db_fallback_extraction_id": None,
-            # Shows exactly what this tool instance saw on self.trace_context at the
-            # moment it ran, so it can be compared with the upstream crew's own log.
-            "trace_context_seen": (
-                dict(getattr(self, "trace_context", None) or {})
-                if isinstance(getattr(self, "trace_context", None), dict)
-                else getattr(self, "trace_context", None)
-            ),
-        }
+        diag = preinject_diagnostics(raw, getattr(self, "trace_context", None))
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
         inner_joins = _get("inner_dim_joins") or False
@@ -889,6 +871,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "pbi_only_ingestion_tasks": source_layers.pbi_only_ingestion_tasks,
             # rec#4: validation-loop status ("skipped" until a PBI callback is wired).
             "pbi_validation": source_layers.pbi_validation,
+            "report_scope": finalize_report_scope(_get_json("report_scope"), pipeline),
             "_diagnostics": diag,
         }
         output_json = json.dumps(output, indent=2)

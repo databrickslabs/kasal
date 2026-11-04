@@ -52,6 +52,8 @@ Rules implemented (rule_id — severity)
 * ``MV006_SYNONYM_LIMIT``         — error   : more than 10 synonyms on a field
 * ``MV007_MISSING_DISPLAY_NAME``  — warning : field has no display_name
 * ``MV008_WEAK_DESCRIPTION``      — warning : measure comment empty or trivially short
+* ``MV009_MISSING_FORMAT``        — warning : measure has no display ``format``
+* ``MV010_PERCENT_DOUBLE_SCALED`` — error   : percentage format on an expr that * 100
 """
 
 from __future__ import annotations
@@ -60,12 +62,16 @@ import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
-from .metadata_lint_fields import _extract_fields, _Field
+from .metadata_lint_format import check_measure_formats
+from .metadata_lint_fields import (
+    SEVERITY_ERROR,
+    SEVERITY_WARNING,
+    LintFinding,
+    _extract_fields,
+    _Field,
+)
 
 # ─── Severities ──────────────────────────────────────────────────────────────
-
-SEVERITY_ERROR = "error"
-SEVERITY_WARNING = "warning"
 
 # ─── Rule ids ────────────────────────────────────────────────────────────────
 
@@ -271,31 +277,6 @@ class LintConfig:
             dimension_alias_groups=alias_groups,
             min_description_len=min_len,
         )
-
-
-# ─── Finding ─────────────────────────────────────────────────────────────────
-
-
-@dataclass
-class LintFinding:
-    """A single metadata-lint violation.
-
-    Attributes
-    ----------
-    rule_id : str
-        Stable id of the rule that fired (one of the ``RULE_*`` constants).
-    severity : str
-        ``"error"`` or ``"warning"``.
-    field : str
-        Name of the offending measure/dimension (``""`` for view-wide findings).
-    message : str
-        Human-readable explanation, actionable on its own.
-    """
-
-    rule_id: str
-    severity: str
-    field: str
-    message: str
 
 
 # ─── Expression analysis helpers ─────────────────────────────────────────────
@@ -704,6 +685,7 @@ def lint_metric_view(
     findings.extend(_check_synonym_limit(all_fields))
     findings.extend(_check_display_name(all_fields))
     findings.extend(_check_description_quality(measures, cfg.min_description_len))
+    findings.extend(check_measure_formats(list(zip(measures, raw_measures))))
     return findings
 
 

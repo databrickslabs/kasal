@@ -358,6 +358,19 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     });
   }, [result.pbi_ucmv_mapping]);
 
+  // The report's scope table (which measures/tables/columns a viewer can reach) as one CSV.
+  const scopeCsv = result.report_scope?.csv || '';
+  const scopeGaps = result.report_scope?.kasal_gaps;
+  const handleDownloadScope = useCallback(() => {
+    const blob = new Blob([scopeCsv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scope.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [scopeCsv]);
+
   const hasDax = Array.isArray(result.measures_with_dax) && result.measures_with_dax.length > 0;
   const hasMquery = Array.isArray(result.mquery_raw) && result.mquery_raw.length > 0;
   const hasMapping =
@@ -435,6 +448,27 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
                 onClick={handleDownloadAllMappings}
               >
                 Download Mapping
+              </Button>
+            </Tooltip>
+          )}
+          {scopeCsv && (
+            <Tooltip
+              title={
+                'Download the scope table: every measure, table and column with a decision ' +
+                '(keep / snapshot / fold / genie / drop) from what a report viewer can reach' +
+                (scopeGaps
+                  ? ` — ${scopeGaps.kept_but_not_translated} kept but not translated, ` +
+                    `${scopeGaps.translated_but_dropped} translated but not reachable`
+                  : '')
+              }
+            >
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadScope}
+              >
+                Download Scope
               </Button>
             </Tooltip>
           )}

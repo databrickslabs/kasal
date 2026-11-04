@@ -562,3 +562,55 @@ class TestHumanize:
 
     def test_already_readable(self):
         assert _humanize("Order Accuracy %") == "Order Accuracy %"
+
+
+class TestFormatFromPbiFormatString:
+    def test_pbi_format_string_flat_map_skips_missing(self):
+        from src.services.tools.metric_view_utils.tmdl_enrichment import (
+            pbi_format_strings_from_harvest,
+        )
+
+        harvest = {
+            "Fill Rate": {"format_string": "0.00%", "display_name": "Fill Rate"},
+            "Other": {"description": "no format", "display_name": "Other"},
+        }
+        assert pbi_format_strings_from_harvest(harvest) == {"Fill Rate": "0.00%"}
+
+    def test_enrich_sets_format_from_formatstring(self):
+        meta = {"Fill Rate": {"format_string": "0.00%", "display_name": "Fill Rate"}}
+        measures = [{"original_name": "Fill Rate", "expr": "SUM(a)/SUM(b)"}]
+        enrich_ucmv_measures_with_metadata(measures, meta)
+        assert measures[0]["format"]["type"] == "percentage"
+
+    def test_enrich_keeps_existing_format(self):
+        meta = {"Fill Rate": {"format_string": "0.00%", "display_name": "Fill Rate"}}
+        existing = {"type": "number"}
+        measures = [{"original_name": "Fill Rate", "expr": "x", "format": existing}]
+        enrich_ucmv_measures_with_metadata(measures, meta)
+        assert measures[0]["format"] == existing
+
+
+class TestPbiFormatStringEnrichment:
+    def test_pbi_format_string_flat_map_skips_missing(self):
+        from src.services.tools.metric_view_utils.tmdl_enrichment import (
+            pbi_format_strings_from_harvest,
+        )
+
+        harvest = {
+            "Fill Rate": {"format_string": "0.00%", "display_name": "Fill Rate"},
+            "Other": {"description": "no format", "display_name": "Other"},
+        }
+        assert pbi_format_strings_from_harvest(harvest) == {"Fill Rate": "0.00%"}
+
+    def test_enrich_sets_format_from_formatstring(self):
+        meta = {"Fill Rate": {"format_string": "0.00%", "display_name": "Fill Rate"}}
+        measures = [{"original_name": "Fill Rate", "expr": "SUM(a)/SUM(b)"}]
+        enrich_ucmv_measures_with_metadata(measures, meta)
+        assert measures[0]["format"]["type"] == "percentage"
+
+    def test_enrich_keeps_existing_format(self):
+        meta = {"Fill Rate": {"format_string": "0.00%", "display_name": "Fill Rate"}}
+        existing = {"type": "number"}
+        measures = [{"original_name": "Fill Rate", "expr": "x", "format": existing}]
+        enrich_ucmv_measures_with_metadata(measures, meta)
+        assert measures[0]["format"] == existing

@@ -398,3 +398,26 @@ describe('BIArtifactsView — new artifact fields threaded from output_data', ()
     expect(screen.getByText('No warehouse')).toBeInTheDocument();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  report_scope                                                       */
+/* ------------------------------------------------------------------ */
+
+describe('UCMVResultViewer — report_scope', () => {
+  it('offers the scope table as a download when the run carries one', () => {
+    const result: UCMVResult = {
+      ...baseResult(),
+      report_scope: {
+        csv: 'object_type,pbi_table,name,decision\nmeasure,Fact,Sales,keep\n',
+        kasal_gaps: { kept_but_not_translated: 2, translated_but_dropped: 1 },
+      },
+    };
+    render(<UCMVResultViewer result={result} />);
+    expect(screen.getByText('Download Scope')).toBeInTheDocument();
+  });
+
+  it('shows no scope download without a scope table', () => {
+    render(<UCMVResultViewer result={baseResult()} />);
+    expect(screen.queryByText('Download Scope')).not.toBeInTheDocument();
+  });
+});

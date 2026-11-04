@@ -319,3 +319,124 @@ def test_config_injected_auth_not_in_schema():
     assert "pbi_access_token" not in props
     assert "pbi_client_secret" not in props
     assert tool._default_config["pbi_access_token"] == "secret"
+
+
+class _RoutingSQL:
+    """UC executor that answers the scale query with counts and the reconciliation
+    query with the frame."""
+
+    def __init__(self, ucmv_df, scale_row):
+        self._ucmv_df = ucmv_df
+        self._scale_row = scale_row
+
+    def execute(self, sql):
+        if "COUNT_IF" in sql:
+            return pd.DataFrame([self._scale_row]), None
+        return self._ucmv_df.copy(), None
+
+
+_UC_LEAK = 7654321.125
+_PBI_LEAK = 0.31415926
+
+
+def _leaky_frames():
+    ucmv_df = pd.DataFrame(
+        [
+            {
+                "country": "AT",
+                "period": "2025001",
+                "sweetener_yield_bp": _UC_LEAK,
+                "pet_yield_bp": 1.0,
+            },
+            {
+                "country": "AT",
+                "period": "2025002",
+                "sweetener_yield_bp": 0.5,
+                "pet_yield_bp": 2.0,
+            },
+        ]
+    )
+    pbi_df = pd.DataFrame(
+        [
+            {
+                "C_Dim_Geography[country]": "AT",
+                "C_Dim_calendar[fiscper]": "2025001",
+                "sweetener_yield_bp": _PBI_LEAK,
+                "pet_yield_bp": 1.0,
+            },
+            {
+                "C_Dim_Geography[country]": "AT",
+                "C_Dim_calendar[fiscper]": "2025002",
+                "sweetener_yield_bp": 0.5,
+                "pet_yield_bp": 9.0,
+            },
+        ]
+    )
+    return ucmv_df, pbi_df
+
+
+def test_statistics_only_output_contains_no_values(monkeypatch):
+    ucmv_df, pbi_df = _leaky_frames()
+    tool = UCMVReconciliationTool(statistics_only=True)
+    monkeypatch.setattr(tool, "_build_sql_executor", lambda *a, **k: _FakeSQL(ucmv_df))
+    monkeypatch.setattr(tool, "_build_pbi_executor", lambda *a, **k: _FakePBI(pbi_df))
+
+    raw = tool._run(
+        mapping=MAPPING_YAML,
+        warehouse_id="wh-1",
+        reference_years=[2025],
+        dimension_values=["AT"],
+    )
+
+    assert "7654321.125" not in raw
+    assert "0.31415926" not in raw
+    assert "sample_mismatches" not in raw
+    assert "max_abs_delta" not in raw
+    view = json.loads(raw)["views"]["cat.sch.fact_sc"]
+    assert view["statistics_only"] is True
+    sweet = view["measures"]["sweetener_yield_bp"]
+    assert sweet["missing_in_uc"] + sweet["extra_in_uc"] + sweet["comparable"] >= 1
+    assert sweet["comparable_aligned"] <= sweet["comparable"]
+    assert "classification" in sweet
+
+
+def test_default_output_still_has_sample_values(monkeypatch):
+    """The option is opt-in: without it the sample mismatches keep their values."""
+    ucmv_df, pbi_df = _leaky_frames()
+    tool = UCMVReconciliationTool()
+    monkeypatch.setattr(tool, "_build_sql_executor", lambda *a, **k: _FakeSQL(ucmv_df))
+    monkeypatch.setattr(tool, "_build_pbi_executor", lambda *a, **k: _FakePBI(pbi_df))
+
+    raw = tool._run(
+        mapping=MAPPING_YAML,
+        warehouse_id="wh-1",
+        reference_years=[2025],
+        dimension_values=["AT"],
+    )
+    view = json.loads(raw)["views"]["cat.sch.fact_sc"]
+    assert "sample_mismatches" in view["measures"]["sweetener_yield_bp"]
+    assert "statistics_only" not in view
+
+
+def test_scale_check_reports_verdicts_by_counts(monkeypatch):
+    ucmv_df, pbi_df = _leaky_frames()
+    # groups=2; sweetener: 2 non-null, 2 above -> 0-100; pet: 2 non-null, 0 above -> fraction
+    tool = UCMVReconciliationTool(scale_check=True)
+    monkeypatch.setattr(
+        tool,
+        "_build_sql_executor",
+        lambda *a, **k: _RoutingSQL(ucmv_df, [2, 2, 2, 2, 0]),
+    )
+    monkeypatch.setattr(tool, "_build_pbi_executor", lambda *a, **k: _FakePBI(pbi_df))
+
+    raw = tool._run(
+        mapping=MAPPING_YAML,
+        warehouse_id="wh-1",
+        reference_years=[2025],
+        dimension_values=["AT"],
+    )
+    scale = json.loads(raw)["views"]["cat.sch.fact_sc"]["scale_check"]
+    assert scale["measures"]["sweetener_yield_bp"]["verdict"] == "0-100"
+    assert scale["measures"]["pet_yield_bp"]["verdict"] == "fraction"
+    # The scale section is counts only, even when value output is enabled.
+    assert "7654321" not in json.dumps(scale)

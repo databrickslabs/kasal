@@ -11,6 +11,13 @@ pure or executor-injected so it can be unit-tested with no network.
 
 from __future__ import annotations
 
+from .cells import (
+    CELL_BOTH_EMPTY,
+    CELL_COMPARABLE,
+    CELL_EXTRA_IN_UC,
+    CELL_MISSING_IN_UC,
+    classify_cells,
+)
 from .classify import MismatchStats, classify
 from .compare import (
     LONG_FORMAT_COLUMNS,
@@ -53,7 +60,14 @@ from .periods import (
     matches_reference_years,
     normalize_snapshot_date,
 )
-from .runner import run_pbi_queries, run_ucmv_query
+from .runner import UcmvExecutor, run_pbi_queries, run_ucmv_query
+from .scale_check import (
+    DEFAULT_SCALE_THRESHOLD,
+    build_scale_query,
+    run_scale_check,
+    scale_verdict,
+)
+from .statistics import statistics_by_measure
 from .ucmv_query import build_ucmv_query
 from .values import parse_value, strip_percent
 
@@ -96,9 +110,23 @@ __all__ = [
     # classify
     "classify",
     "MismatchStats",
+    # cells
+    "classify_cells",
+    "CELL_COMPARABLE",
+    "CELL_MISSING_IN_UC",
+    "CELL_EXTRA_IN_UC",
+    "CELL_BOTH_EMPTY",
+    # statistics
+    "statistics_by_measure",
+    # scale check
+    "DEFAULT_SCALE_THRESHOLD",
+    "build_scale_query",
+    "run_scale_check",
+    "scale_verdict",
     # runner
     "run_pbi_queries",
     "run_ucmv_query",
+    "UcmvExecutor",
     # iterative loop
     "run_reconciliation_loop",
     "build_refinement_feedback",

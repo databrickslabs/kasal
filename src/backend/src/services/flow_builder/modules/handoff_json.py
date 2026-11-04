@@ -12,6 +12,17 @@ and the next crew silently received empty defaults instead of the real data.
 
 import json
 
+# Pipeline Config Generator result keys the flow injects into the next crew's UC
+# Metric View Generator config, by the same name (only into an empty value).
+UCMV_HANDOFF_KEYS = (
+    "measures_json",
+    "mquery_json",
+    "relationships_json",
+    "visual_usage_index",
+    "implicit_column_measures",
+    "report_scope",
+)
+
 
 def extract_first_json_object(raw: str) -> dict[str, object] | None:
     """The first complete top-level JSON object in ``raw``, or None.

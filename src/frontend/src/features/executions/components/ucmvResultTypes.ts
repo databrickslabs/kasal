@@ -54,6 +54,15 @@ export interface UCMVResult {
    *  entry per view (keyed by view name), from pbi_ucmv_mapping.py. Feeds the
    *  downstream KPI-reconciliation pipeline once reviewed. */
   pbi_ucmv_mapping?: Record<string, string>;
+  /** The report's reachability-based scope table (Pipeline Config Generator draft,
+   *  completed with what this run translated): one row per measure, table, column,
+   *  calculation item, function and RLS filter, with a keep/snapshot/fold/genie/drop
+   *  decision. `csv` is the review artifact; `kasal_gaps` counts the rows to look at first. */
+  report_scope?: {
+    csv?: string;
+    summary?: Record<string, unknown>;
+    kasal_gaps?: { kept_but_not_translated: number; translated_but_dropped: number };
+  } | null;
   /** Views backed by a LIVE connection to a semantic model (M-Query
    *  AnalysisServices.Database) — the transpiler can't resolve these, so the UI
    *  flags which semantic model/table to parse. {view_name: {server, database, table}}. */

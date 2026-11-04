@@ -370,6 +370,21 @@ def _harvest_measures_from_content(content: str, out: dict[str, dict]) -> None:
         i = j
 
 
+def pbi_format_strings_from_harvest(
+    measure_metadata: dict[str, dict],
+) -> dict[str, str]:
+    """``{pbi_measure_name: formatString}`` for every harvested measure that has one.
+
+    The flat form the pipeline passes to ``emit_yaml`` so each emitted measure
+    takes its display format from the PBI formatString.
+    """
+    return {
+        name: meta["format_string"]
+        for name, meta in (measure_metadata or {}).items()
+        if meta.get("format_string")
+    }
+
+
 def enrich_ucmv_measures_with_metadata(
     ucmv_measures: list[dict],
     measure_metadata: dict[str, dict],
@@ -396,6 +411,19 @@ def enrich_ucmv_measures_with_metadata(
 
         if desc and "description" not in m:
             m["description"] = desc
+
+        fmt_string = meta.get("format_string", "")
+        if "format" not in m and fmt_string:
+            # Imported here: this module is also loaded by file path in tests.
+            from src.services.tools.metric_view_utils.measure_format import (
+                derive_measure_format,
+            )
+
+            fmt = derive_measure_format(
+                orig, str(m.get("expr") or m.get("sql_expr") or ""), fmt_string
+            )
+            if fmt is not None:
+                m["format"] = fmt
 
         if "comment" not in m:
             tag = f"PBI measure: {orig}"

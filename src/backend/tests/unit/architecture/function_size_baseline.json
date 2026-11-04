@@ -50,8 +50,8 @@
   "src/backend/src/services/flow_builder/modules/flow_eval_context.py::build_eval_context": 202,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_hitl_gate_method": 260,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_hitl_gate_method.hitl_gate_method": 216,
-  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_listener_method": 732,
-  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_listener_method.listener_method": 685,
+  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_listener_method": 726,
+  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_listener_method.listener_method": 679,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_skipped_crew_method": 275,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_starting_point_crew_method": 467,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_starting_point_crew_method.starting_point_crew_method": 423,
@@ -89,7 +89,7 @@
   "src/backend/src/services/tools/measure_conversion_pipeline_tool.py::MeasureConversionPipelineTool._run": 410,
   "src/backend/src/services/tools/metric_view_deployer_tool.py::MetricViewDeployerTool._run": 235,
   "src/backend/src/services/tools/metric_view_utils/table_processor.py::process_table": 1204,
-  "src/backend/src/services/tools/metric_view_utils/yaml_emitter.py::emit_yaml": 554,
+  "src/backend/src/services/tools/metric_view_utils/yaml_emitter.py::emit_yaml": 539,
   "src/backend/src/services/tools/metric_view_validation_utils/expression_validator.py::ExpressionValidator._compare_aggregations": 210,
   "src/backend/src/services/tools/metric_view_validator_tool.py::MetricViewValidatorTool._run": 391,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._format_markdown_output": 256,
@@ -97,6 +97,6 @@
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._run": 226,
   "src/backend/src/services/tools/powerbi_report_references_tool.py::PowerBIReportReferencesTool._format_markdown_output_multi": 222,
   "src/backend/src/services/tools/tool_factory.py::ToolFactory._create_tool_impl": 1203,
-  "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 416,
+  "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 387,
   "src/backend/src/utils/databricks_auth.py::get_auth_context": 288
 }

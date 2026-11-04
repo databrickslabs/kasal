@@ -476,6 +476,7 @@ class MetricViewPipeline:
                 percentage_multiplier_patterns=self.config.get(
                     "percentage_multiplier_patterns"
                 ),
+                pbi_format_strings=self.config.get("measure_format_strings"),
             )
 
             if not yaml_content:
@@ -883,6 +884,7 @@ class MetricViewPipeline:
                     "percentage_multiplier_patterns"
                 ),
                 budget_suffix=self.config.get("budget_suffix"),
+                pbi_format_strings=self.config.get("measure_format_strings"),
             )
         return result
 

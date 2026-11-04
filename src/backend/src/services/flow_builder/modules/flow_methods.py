@@ -12,7 +12,10 @@ from src.config.settings import settings
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
-from src.services.flow_builder.modules.handoff_json import extract_first_json_object
+from src.services.flow_builder.modules.handoff_json import (
+    UCMV_HANDOFF_KEYS,
+    extract_first_json_object,
+)
 from src.services.flow_builder.modules.task_context import (
     task_with_context,
     tasks_for_review,
@@ -1601,13 +1604,7 @@ class FlowMethodFactory:
                                     # them to _default_config is exactly what JSON mode expects.
                                     # Only fill when the current value is empty so a manually
                                     # provided value is never clobbered.
-                                    for _hk in (
-                                        "measures_json",
-                                        "mquery_json",
-                                        "relationships_json",
-                                        "visual_usage_index",
-                                        "implicit_column_measures",
-                                    ):
+                                    for _hk in UCMV_HANDOFF_KEYS:
                                         payload = prev_data.get(_hk)
                                         if not payload:
                                             continue

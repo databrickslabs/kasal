@@ -27,6 +27,38 @@ from .yaml_scalars import _yaml_scalar, _yaml_val
 logger = logging.getLogger(__name__)
 
 
+def _format_block(lines: list[str], fmt: dict | None) -> None:
+    """Append a measure's ``format:`` block (no-op when there is no format)."""
+    if not fmt:
+        return
+    lines.append("    format:")
+    lines.append(f'      type: {fmt["type"]}')
+    if "currency_code" in fmt:
+        lines.append(f'      currency_code: {fmt["currency_code"]}')
+    if "decimal_places" in fmt:
+        dp = fmt["decimal_places"]
+        lines.append("      decimal_places:")
+        lines.append(f'        type: {dp.get("type", "exact")}')
+        lines.append(f'        places: {dp["places"]}')
+
+
+def _measure_format(
+    m_override: dict,
+    meta_gen: MetadataGenerator | None,
+    name: str,
+    expr: str,
+    original: str = "",
+) -> tuple[dict, dict | None]:
+    """Resolve ``(meta, format)``: an explicit per-measure override wins."""
+    meta = (
+        meta_gen.get_measure_meta(name, sql_expr=expr, pbi_name=original)
+        if meta_gen is not None
+        else {}
+    )
+    fmt = m_override.get("format") or meta.get("format")
+    return meta, fmt
+
+
 def render_base_measures(
     lines: list[str],
     base_measures: list[TranslationResult],
@@ -58,21 +90,14 @@ def render_base_measures(
         comment += _visual_usage_suffix(m)
         comment += _indirect_visual_usage_suffix(m)
         lines.append(f"    comment: {_yaml_val(comment)}")
-        m_meta = meta_gen.get_measure_meta(m.measure_name, expr)
+        m_meta, fmt = _measure_format(
+            m_override, meta_gen, m.measure_name, expr, m.original_name
+        )
         display_name = m_override.get("display_name") or m_meta.get("display_name", "")
         if display_name:
             lines.append(f"    display_name: {_yaml_val(display_name)}")
         # Format BEFORE synonyms (matching customer target style)
-        if m_meta.get("format"):
-            fmt = m_meta["format"]
-            lines.append("    format:")
-            lines.append(f'      type: {fmt["type"]}')
-            if "currency_code" in fmt:
-                lines.append(f'      currency_code: {fmt["currency_code"]}')
-            if "decimal_places" in fmt:
-                lines.append("      decimal_places:")
-                lines.append("        type: exact")
-                lines.append(f'        places: {fmt["decimal_places"]["places"]}')
+        _format_block(lines, fmt)
         synonyms = m_override.get("synonyms", [])
         if synonyms:
             lines.append("    synonyms:")
@@ -159,7 +184,9 @@ def render_dax_measures(
         if dax_comment:
             lines.append(f"    comment: {_yaml_val(dax_comment)}")
         # Display name
-        m_meta = meta_gen.get_measure_meta(m.measure_name, expr)
+        m_meta, fmt = _measure_format(
+            m_override, meta_gen, m.measure_name, expr, m.original_name
+        )
         dax_display = m_override.get("display_name", "")
         if not dax_display:
             dax_display = m_meta.get("display_name", "")
@@ -175,16 +202,7 @@ def render_dax_measures(
         if dax_display:
             lines.append(f"    display_name: {_yaml_val(dax_display)}")
         # Format BEFORE synonyms (matching customer target style)
-        if m_meta.get("format"):
-            fmt = m_meta["format"]
-            lines.append("    format:")
-            lines.append(f'      type: {fmt["type"]}')
-            if "currency_code" in fmt:
-                lines.append(f'      currency_code: {fmt["currency_code"]}')
-            if "decimal_places" in fmt:
-                lines.append("      decimal_places:")
-                lines.append("        type: exact")
-                lines.append(f'        places: {fmt["decimal_places"]["places"]}')
+        _format_block(lines, fmt)
         # Synonyms AFTER format
         synonyms = m_override.get("synonyms", [])
         if synonyms:
@@ -195,7 +213,9 @@ def render_dax_measures(
 
 
 def render_switch_measures(
-    lines: list[str], switch_measures: list[TranslationResult]
+    lines: list[str],
+    switch_measures: list[TranslationResult],
+    meta_gen: MetadataGenerator | None = None,
 ) -> None:
     """Append the SWITCH-decomposed measure entries."""
     lines.append(
@@ -224,11 +244,15 @@ def render_switch_measures(
         lines.append(
             f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
         )
+        _, fmt = _measure_format({}, meta_gen, m.measure_name, expr, m.original_name)
+        _format_block(lines, fmt)
         lines.append("")
 
 
 def render_implicit_measures(
-    lines: list[str], implicit_measures: list[TranslationResult]
+    lines: list[str],
+    implicit_measures: list[TranslationResult],
+    meta_gen: MetadataGenerator | None = None,
 ) -> None:
     """Append the aggregated-column (implicit visual column) measure entries."""
     # Its own labeled section \u2014 never folded into "DAX-Translated" \u2014 so a
@@ -251,6 +275,8 @@ def render_implicit_measures(
         lines.append(
             f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
         )
+        _, fmt = _measure_format({}, meta_gen, m.measure_name, expr, m.original_name)
+        _format_block(lines, fmt)
         lines.append("")
 
 

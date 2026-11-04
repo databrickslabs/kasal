@@ -51,6 +51,31 @@ class RawInputs:
     implicit_column_measures: object
 
 
+def _chars(value: object) -> int | None:
+    return len(value) if isinstance(value, str) else None
+
+
+def preinject_diagnostics(raw: RawInputs, trace_context: object) -> UCMVDiagnostics:
+    """What arrived via flow injection/kwargs BEFORE any API-mode extraction or DB
+    fallback runs. Carried into ``output['_diagnostics']`` (not just logged) so it is
+    visible via the execution_trace pull; ``trace_context_seen`` is what the tool saw
+    at the moment it ran, to compare with the upstream crew's own log."""
+    return {
+        "preinject_measures_json_chars": _chars(raw.measures),
+        "preinject_mquery_json_chars": _chars(raw.mquery),
+        "preinject_config_json_chars": _chars(raw.config),
+        "preinject_visual_usage_index_chars": _chars(raw.visual_usage),
+        "preinject_implicit_column_measures_chars": _chars(
+            raw.implicit_column_measures
+        ),
+        "db_fallback_fired_for": [],
+        "db_fallback_extraction_id": None,
+        "trace_context_seen": (
+            dict(trace_context) if isinstance(trace_context, dict) else trace_context
+        ),
+    }
+
+
 def as_dict(value: object) -> dict[str, object]:
     """``value`` itself when it is a dict, otherwise an empty dict."""
     return value if isinstance(value, dict) else {}

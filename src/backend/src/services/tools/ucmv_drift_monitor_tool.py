@@ -24,12 +24,15 @@ Logic lives in ``metric_view_utils/drift/``; this class only wires real I/O into
 import json
 import logging
 from collections.abc import Callable
-from typing import ClassVar, Optional, Tuple, Type
+from typing import TYPE_CHECKING, ClassVar, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
+
+if TYPE_CHECKING:
+    from src.services.tools.metric_view_utils.drift.semantic_step import SyncReport
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +68,11 @@ _OWN_KEYS = (
     "domain_context",
     "naming_config",
     "max_semantic_measures",
+    "semantic_baseline",
+    "semantic_snapshot_table",
+    "report_scope",
+    "semantic_ignore",
+    "semantic_proposals",
 )
 _DEFAULT_LLM = "databricks-claude-sonnet-4-5"
 
@@ -102,6 +110,36 @@ class UCMVDriftMonitorSchema(BaseModel):
     apply_suspected_changes: Optional[bool] = Field(
         False,
         description="Also patch measures the LLM only SUSPECTS changed (default: show, don't apply).",
+    )
+    semantic_snapshot_table: Optional[str] = Field(
+        None,
+        description=(
+            "catalog.schema.table that keeps Power BI semantic snapshots between runs "
+            "(created on first use; the first run stores the baseline). Enables the "
+            "semantic sync: table / column / relationship / Power Query / RLS / page changes."
+        ),
+    )
+    semantic_baseline: Optional[str] = Field(
+        None,
+        description="JSON semantic snapshot of a previous run (instead of semantic_snapshot_table).",
+    )
+    report_scope: Optional[str] = Field(
+        None,
+        description=(
+            "The report's signed-off scope table (CSV text, or JSON rows) — routes each "
+            "semantic change to the Databricks object it affects (mirrored_as)."
+        ),
+    )
+    semantic_ignore: Optional[str] = Field(
+        None,
+        description=(
+            'JSON list of {"object_type", "pbi_table", "name", "reason"}: objects that '
+            "change without a change in meaning (e.g. a load-date parameter)."
+        ),
+    )
+    semantic_proposals: Optional[bool] = Field(
+        True,
+        description="Ask the LLM for a proposal per semantic change that needs action (max 40; never applied).",
     )
 
 
@@ -324,4 +362,34 @@ class UCMVDriftMonitorTool(BaseTool):
                 "DAX are unreliable, so 'changed' results may be false positives.",
             )
         report["warnings"].extend(extraction.get("warnings") or [])
+        report["semantic_sync"] = self._semantic_sync(
+            get, extraction, report, sql_fn, model
+        )
         return json.dumps(report, indent=2, default=str)
+
+    def _semantic_sync(
+        self,
+        get: Getter,
+        extraction: dict[str, object],
+        report: dict,
+        sql_fn: Callable[[str], dict],
+        model: str,
+    ) -> "SyncReport":
+        from src.services.tools.metric_view_utils.drift.semantic_step import (
+            run_semantic_sync,
+        )
+
+        wants_proposals = get("semantic_proposals") not in (False, "false", "False")
+        return run_semantic_sync(
+            as_map(extraction.get("semantic_snapshot")),
+            baseline=get("semantic_baseline"),
+            scope=get("report_scope"),
+            draft_scope=extraction.get("report_scope"),
+            ignore=get("semantic_ignore"),
+            drift_report=report,
+            complete_fn=self._complete_fn(model) if wants_proposals else None,
+            sql_fn=sql_fn,
+            snapshot_table=str(get("semantic_snapshot_table") or ""),
+            dataset_id=str(get("dataset_id") or ""),
+            report_id=str(get("report_id") or ""),
+        )
