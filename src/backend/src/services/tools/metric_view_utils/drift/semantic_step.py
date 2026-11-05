@@ -56,6 +56,8 @@ class SyncReport(TypedDict, total=False):
     warnings: list[str]
     snapshot: dict[str, object]
     scope_problems: list[str]
+    scope_review: list[dict[str, object]]
+    scope_csv: str
 
 
 def _parse_json(raw: object) -> object:
@@ -133,6 +135,29 @@ def _deployed_specs(drift_report: Mapping[str, object]) -> dict[str, dict]:
     return specs
 
 
+def _review_scope(
+    out: SyncReport, rows: list[dict], draft: list[dict], drift_report: Mapping[str, object], choices: object
+) -> None:
+    """Bucket the open rows of the signed-off scope (evidence: the deployed views); apply ``choices``
+    (``{"L1": "accept", "G2": "drop"}``) and return the updated scope CSV when given."""
+    from src.services.powerbi.scope import scope_csv
+    from src.services.powerbi.scope.scope_review import apply, buckets, evidence, summary
+
+    specs = _deployed_specs(drift_report)
+    ev = evidence(rows, specs, draft_rows=draft)
+    result = buckets(rows, ev)
+    picked = _parse_json(choices)
+    if isinstance(picked, dict) and picked:
+        try:
+            apply(rows, result, {str(k): str(v) for k, v in picked.items()})
+        except ValueError as exc:
+            out["warnings"].append(f"scope review choices not applied: {exc}")
+        else:
+            out["scope_csv"] = scope_csv(rows)
+            result = buckets(rows, evidence(rows, specs, draft_rows=draft))
+    out["scope_review"] = summary(result)
+
+
 def _object_names(snapshot: Mapping[str, object], object_type: str, key: str) -> set[str]:
     objects = [obj(o) for o in arr(snapshot, "objects")]
     return {str(o.get(key)) for o in objects if o.get("object_type") == object_type}
@@ -165,6 +190,7 @@ def run_semantic_sync(
     dataset_id: str = "",
     report_id: str = "",
     max_proposals: int = MAX_PROPOSALS,
+    review_choices: object = None,
 ) -> SyncReport:
     """``{status, changes, counts, warnings}``; ``status`` is ``compared``, ``baseline_stored``,
     ``no_baseline`` or ``skipped``."""
@@ -204,6 +230,8 @@ def run_semantic_sync(
             model_measures=_object_names(current, "measure", "name"),
             model_tables=_object_names(current, "table", "pbi_table"),
         )
+    if signed_off:
+        _review_scope(out, signed_off, draft, drift_report or {}, review_choices)
     if not signed_off and draft:
         out["warnings"].append(
             "no signed-off report_scope given: changes are routed by today's scope draft"

@@ -20,6 +20,32 @@ Everything you need to configure before running any Power BI tool in Kasal.
 - A Power BI or Fabric workspace containing the semantic model you want to access
 - A running Kasal instance where you will store the credentials
 
+## Service principal only (no service account)
+
+Kasal can run on one service principal (SP) with no service account:
+
+- Auto-detection prefers the SP whenever `client_id`, `client_secret` and `tenant_id`
+  are set (`AadService._determine_auth_method`). Username and password are used only
+  when no client secret is supplied, or when `auth_method` is `service_account`.
+- Fabric `getDefinition` (report and semantic model definitions) and the report
+  listings use the SP token when the tool is configured with SP credentials
+  (`get_fabric_access_token`, `fetch_report_parts`).
+- DAX `executeQueries` in the DAX executor tool and the UCMV `PbiClient` use the SP
+  token with the same precedence.
+
+What the tenant must allow for this to work:
+
+- The tenant setting that lets service principals use Power BI APIs, and the SP added
+  as a workspace member for each workspace it reads. Check the permission the DAX
+  queries need on the semantic model before relying on a viewer role.
+- The Admin scanner (pipeline config, API 3) needs the separate admin SP described
+  below. The SP-only path does not run it.
+
+Known gap: `pipeline_config_generator_tool.py` (outside this change) tries the service
+account first for the measure DAX query when service account credentials are configured,
+and falls back to the SP when that call fails. An SP-only configuration does not hit this
+path.
+
 ## Why two service principals
 
 Power BI's API surface has two distinct access tiers with different permission requirements:

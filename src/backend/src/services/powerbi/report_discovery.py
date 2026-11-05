@@ -15,6 +15,22 @@ import logging
 
 import requests
 
+# Loaded by file path in the standalone CLI (see pipeline_config): mirror its sibling-import branches.
+if __package__:
+    from .http_retry import send_with_throttle_retry
+else:
+    import importlib.util as _ilu
+    from pathlib import Path as _Path
+
+    _spec = _ilu.spec_from_file_location(
+        "kasal_http_retry_cli", _Path(__file__).resolve().parent / "http_retry.py"
+    )
+    if _spec is None or _spec.loader is None:
+        raise ImportError("http_retry.py")
+    _retry_mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_retry_mod)
+    send_with_throttle_retry = _retry_mod.send_with_throttle_retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +111,11 @@ def discover_report_id(
         url = (
             f"https://api.powerbi.com/v1.0/myorg/groups/{_pbi_id(workspace_id)}/reports"
         )
-        resp = requests.get(url, headers=_headers(token), timeout=30)  # fixed Power BI host, id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+        headers = _headers(token)
+        resp = send_with_throttle_retry(
+            lambda: requests.get(url, headers=headers, timeout=30),  # fixed Power BI host, id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+            "Report discovery",
+        )
         if resp.status_code != 200:
             return None
         reports = resp.json().get("value", [])

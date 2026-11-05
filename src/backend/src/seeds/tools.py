@@ -219,6 +219,8 @@ _PBI_MIGRATION_TOOL_CONFIGS: Dict[str, Dict[str, object]] = {
         "semantic_ignore": "",
         "semantic_proposals": True,
         "tracked_tables": "",
+        "scope_review_choices": "",
+        "confidential_values": False,
     },  # UCMV Drift Monitor
     "99": {
         "result_as_answer": True,
@@ -226,6 +228,16 @@ _PBI_MIGRATION_TOOL_CONFIGS: Dict[str, Dict[str, object]] = {
         "warehouse_id": "",
         "check_sql": True,
         "reconciliation_mappings": "",
+        "use_benchmarks": True,
+        "eval_questions": "",
+        "max_questions": 50,
+        "statistics_only": False,
+        "llm_judge": False,
+        "llm_model": "databricks-claude-sonnet-4-5",
+        "fabric_agent_url": "",
+        "price_per_1k_tokens": "",
+        "results_table": "",
+        "confidential_values": False,
     },  # Genie Space Sync
     "100": {
         "result_as_answer": True,
@@ -243,6 +255,13 @@ _PBI_MIGRATION_TOOL_CONFIGS: Dict[str, Dict[str, object]] = {
         "tenant_id": "",
         "client_id": "",
         "client_secret": "",
+        "access_schema": "",
+        "reader_groups": "",
+        "access_rows": "",
+        "confirm": False,
+        "relationships_json": "",
+        "rls_dax_json": "",
+        "confidential_values": False,
     },  # UCMV Source Layer Manager
 }
 

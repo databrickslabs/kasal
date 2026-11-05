@@ -34,6 +34,16 @@ from .metadata_generator import MetadataGenerator
 from .pbi_parameter_resolver import PbiParameterResolver
 from .pipeline_results import build_results
 from .scan_columns import extract_columns_from_scan, extract_source_table_from_scan
+from .source_artifacts import build_source_layer
+from .source_layer_binding import (
+    SourceLayerBinding,
+    bind_metric_views,
+    binding_report_lines,
+    calc_columns_by_key,
+    raw_source_by_key,
+    read_from_source_layer,
+    source_layer_naming,
+)
 from .sql_emitter import emit_deploy_sql
 from .sql_post_processor import SqlPostProcessor
 from .switch_measure_builder import build_switch_measure
@@ -199,6 +209,9 @@ class MetricViewPipeline:
         self.cross_table_measures: list[TranslationResult] = []
         self._filter_warnings: list[str] = []
         self.all_specs: dict[str, MetricViewSpec] = {}
+        # Source-layer views (set by emit_all_yaml) and what read mode did with them.
+        self.source_layer_views: dict | None = None
+        self.source_layer_binding: SourceLayerBinding | None = None
         self._allocation_report: dict | None = None
 
         # Pipeline helper instances
@@ -783,7 +796,13 @@ class MetricViewPipeline:
 
     def get_results(self) -> dict:
         """Return pipeline results as a serializable dict."""
-        return build_results(self)
+        results = build_results(self)
+        if self.source_layer_binding is not None:
+            notes = binding_report_lines(self.source_layer_binding)
+            results["migration_report"] = "\n".join(
+                [results.get("migration_report", ""), *notes]
+            )
+        return results
 
     def _record_source_gaps(self) -> None:
         """Gaps the YAML does not show, for ``limitations`` and the report:
@@ -860,20 +879,62 @@ class MetricViewPipeline:
         if st.count(".") == 1 and not (low.startswith("todo") or st.startswith("{")):
             spec.source_table = f"{default_src_catalog}.{st}"
 
+    def _bind_source_layer(
+        self, catalog: str, schema: str
+    ) -> dict[str, MetricViewSpec]:
+        """Build the source-layer views and, in read mode, the specs rebound onto
+        them. Returns the rebound specs (empty when read mode is off or disabled)."""
+        self.source_layer_views = build_source_layer(
+            self.all_specs,
+            self.mquery_tables,
+            self.config,
+            catalog,
+            schema,
+            mquery_expressions=self._mquery_expressions,
+        )
+        if not read_from_source_layer(self.config):
+            return {}
+        try:
+            naming = source_layer_naming(self.config)
+        except ValueError as exc:
+            self.source_layer_binding = SourceLayerBinding.disabled(str(exc))
+            self._limitations["source_layer_binding"] = (
+                self.source_layer_binding.to_dict()
+            )
+            return {}
+        bound, self.source_layer_binding = bind_metric_views(
+            self.all_specs,
+            self.source_layer_views,
+            catalog=catalog,
+            schema=schema,
+            naming=naming,
+            raw_by_key=raw_source_by_key(self.all_specs, self.mquery_tables),
+            calc_columns=calc_columns_by_key(self.config),
+        )
+        self._limitations["source_layer_binding"] = self.source_layer_binding.to_dict()
+        return bound
+
     def emit_all_yaml(
         self, catalog: str = "main", schema: str = "default"
     ) -> dict[str, str]:
-        """Emit YAML for all specs. Returns dict[table_key -> yaml_string]."""
+        """Emit YAML for all specs. Returns dict[table_key -> yaml_string].
+
+        Also builds the source-layer views (``source_layer_views``). In read mode
+        (``read_from_source_layer``) each metric view is emitted against those views;
+        otherwise the raw bindings are kept, as before.
+        """
         result = {}
         default_src_catalog = self._infer_source_catalog()
-        for table_key, spec in self.all_specs.items():
+        for spec in self.all_specs.values():
             self._resolve_placeholders_in_spec(spec, catalog, schema)
             self._qualify_source_catalog(spec, default_src_catalog)
+        emit_specs = self._bind_source_layer(catalog, schema)
+        for table_key, spec in self.all_specs.items():
             dim_meta = self._dimension_metadata.get(table_key, {})
             meas_meta = self._measure_metadata.get(table_key, {})
             dim_order = self.metadata_gen.get_dimension_order(table_key)
             result[table_key] = emit_yaml(
-                spec,
+                emit_specs.get(table_key, spec),
                 measure_metadata=meas_meta,
                 dimension_metadata=dim_meta,
                 dimension_order=dim_order,

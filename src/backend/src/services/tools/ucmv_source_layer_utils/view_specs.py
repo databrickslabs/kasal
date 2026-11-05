@@ -28,6 +28,12 @@ from src.services.tools.ucmv_source_layer_utils.names import (
     quote_fqn,
     snake_case,
 )
+from src.services.tools.ucmv_source_layer_utils.rls_checks import (
+    fact_rls_findings,
+    parse_relationships,
+    relationships_from_scope,
+    rls_suggestion,
+)
 
 SOURCE_LAYER_PREFIX = "src_"
 
@@ -207,15 +213,23 @@ def _row_filter_summary(row_filter: RowFilter | None) -> dict[str, object] | Non
 
 
 def rls_review_hints(
-    scope_rows: list[dict[str, str]], filters: dict[str, RowFilter]
+    scope_rows: list[dict[str, str]],
+    filters: dict[str, RowFilter],
+    dax_by_table: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
-    """The scope table's ``rls_filter`` review rows as hints, never auto-applied."""
+    """The scope table's ``rls_filter`` review rows as hints, never auto-applied.
+
+    The RLS DAX is read from the row's ``dax`` key or ``dax_by_table``; when it is a
+    simple expression the hint carries a ``value_access`` suggestion.
+    """
     hints: list[dict[str, object]] = []
     for row in scope_rows:
         if row.get("object_type") != "rls_filter":
             continue
         table = row.get("pbi_table", "")
         configured = row_filter_for(table, filters) is not None
+        dax = row.get("dax") or (dax_by_table or {}).get(table, "")
+        suggestion = rls_suggestion(dax, row.get("name", "")) if dax else None
         hints.append(
             {
                 "pbi_table": table,
@@ -228,6 +242,7 @@ def rls_review_hints(
                     else "PBI restricts this table by role; configure row_filters "
                     "(a Unity Catalog function) or accept that it is unfiltered"
                 ),
+                "suggestion": suggestion,
             }
         )
     return hints
@@ -241,14 +256,27 @@ def emit_source_layer(
     row_filters_json: object,
     materialized: bool,
     scope_json: object,
+    access_schema: str | None = None,
+    relationships_json: object = None,
+    rls_dax_json: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    """Emit the source-layer DDL with its row filters and RLS hints (pure)."""
-    filters = parse_row_filters(row_filters_json)
+    """Emit the source-layer DDL with its row filters, RLS hints and fact checks (pure)."""
+    filters = parse_row_filters(row_filters_json, access_schema)
     entries = parse_view_entries(entries_json)
     plan = build_source_layer_plan(entries, catalog, schema, materialized=materialized)
     for spec in plan.specs:
         spec.row_filter = row_filter_for(spec.table_name, filters)
     emitted: list[EmittedView] = emit_views(plan.specs)
+    scope_rows = parse_scope_rows(scope_json)
+    relationships = list(
+        dict.fromkeys(
+            parse_relationships(relationships_json)
+            + relationships_from_scope(scope_rows)
+        )
+    )
+    rls_warnings = fact_rls_findings(
+        relationships, filters, {spec.table_name for spec in plan.specs}
+    )
     by_table = {spec.table_name: spec for spec in plan.specs}
     views: dict[str, dict[str, object]] = {}
     for view in emitted:
@@ -267,6 +295,7 @@ def emit_source_layer(
     ]
     return {
         "views": views,
-        "rls_hints": rls_review_hints(parse_scope_rows(scope_json), filters),
+        "rls_warnings": rls_warnings,
+        "rls_hints": rls_review_hints(scope_rows, filters, rls_dax_json),
         "notes": notes,
     }

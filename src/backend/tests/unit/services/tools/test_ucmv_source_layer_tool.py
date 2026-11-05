@@ -28,7 +28,14 @@ def test_default_config_and_actions():
     assert tool.name == "UCMV Source Layer Manager"
     assert tool._default_config["action"] == "emit"
     assert tool._default_config["materialized"] is True
-    assert ACTIONS == ("emit", "deploy", "load_snapshots", "refresh", "count_check")
+    assert ACTIONS == (
+        "emit",
+        "deploy",
+        "load_snapshots",
+        "refresh",
+        "count_check",
+        "setup_access",
+    )
 
 
 def test_unknown_action_is_reported_not_raised():
@@ -98,3 +105,74 @@ def test_sql_result_parses_statement_payload_without_failing_on_empty():
     assert result.columns == ["table_name", "n"]
     assert result.rows == [["a", "1"], [None, None]]
     assert _sql_result({}).rows == []
+
+
+def test_setup_access_is_dry_run_by_default_and_runs_only_when_confirmed():
+    tool = _tool()
+    cfg = {
+        "access_schema": "cat.common",
+        "reader_groups": "grp_a, grp_b",
+        "access_rows": json.dumps(
+            [
+                {
+                    "group_name": "grp_a",
+                    "field": "company_code",
+                    "value": "C1",
+                    "reason": "r",
+                }
+            ]
+        ),
+    }
+    dry = json.loads(tool._run(action="setup_access", **cfg))
+    assert dry["mode"] == "dry_run"
+    assert any("CREATE OR REPLACE FUNCTION" in s for s in dry["statements"])
+    assert any(
+        "GRANT EXECUTE ON FUNCTION" in s and "`grp_b`" in s for s in dry["statements"]
+    )
+    assert any(s.startswith("MERGE INTO") for s in dry["statements"])
+
+    executed = []
+    tool._sql = lambda _get: lambda statement: executed.append(statement) or SqlResult()
+    done = json.loads(tool._run(action="setup_access", confirm=True, **cfg))
+    assert done["mode"] == "executed"
+    assert done["all_applied"] is True
+    assert executed == dry["statements"]
+
+
+def test_setup_access_requires_a_catalog_schema_access_schema():
+    out = json.loads(_tool()._run(action="setup_access", access_schema="just_schema"))
+    assert "access_schema must be catalog.schema" in out["error"]
+
+
+def test_emit_reports_fact_rls_warning_and_accepts_shorthand():
+    entries = json.dumps(
+        [
+            {"table": "Dim", "source_table": "raw.sales.dim"},
+            {"table": "Fact", "source_table": "raw.sales.fact"},
+        ]
+    )
+    relationships = json.dumps(
+        [
+            {
+                "from_table": "Fact",
+                "from_column": "k",
+                "to_table": "Dim",
+                "to_column": "k",
+            }
+        ]
+    )
+    out = json.loads(
+        _tool(
+            view_specs_json=entries,
+            access_schema="cat.common",
+            row_filters=json.dumps(
+                {"Dim": {"value_access": {"field": "company_code", "column": "cc"}}}
+            ),
+            relationships_json=relationships,
+        )._run(action="emit")
+    )
+    assert out["rls_warnings"] == [
+        "Fact is not filtered by company_code: a filter on Dim does not reach it; "
+        "add the column to the fact MV and a value_access filter"
+    ]
+    assert out["views"]["Dim"]["row_filter"]["function"] == "cat.common.value_access"

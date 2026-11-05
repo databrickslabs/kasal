@@ -612,6 +612,7 @@ def test_rls_roles_give_one_review_row_per_table(work_plus):
     assert row["decision"] == "review"
     assert "2 role(s)" in row["reason"]
     assert row["reason"].endswith("reads Plan")
+    assert 'Dim[region_name] = "x"' in row["dax"] and "Dim[key] IN VALUES(Plan[key])" in row["dax"]
 
 
 def test_references_are_case_insensitive_like_dax():

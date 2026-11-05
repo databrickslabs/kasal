@@ -14,6 +14,7 @@ from src.seeds.skills_data.powerbi_migration_refs import (
     _GENIE_SPACE,
     _MATERIALIZED_VIEWS,
     _METRIC_VIEWS,
+    _MODEL_README,
 )
 
 _TRIAGE = """# Triage: both directions
@@ -172,6 +173,27 @@ row. A measure that is commented out in its YAML still counts.
 
 Show the user the counts per decision, every drop of an item that looks drawn, every table kept although
 the draft did not generate it, and the snapshot candidates. Proceed to the build only after sign-off.
+
+## Deciding open rows in buckets
+
+A real scope table has hundreds of open rows. Do not decide them one by one: the scope review groups them by
+what the metric views already show, with one proposed decision per bucket, and the user decides buckets
+(the UC Metric View Generator returns `report_scope.review`; the UCMV Drift Monitor reviews a signed-off
+scope against the deployed views and applies `scope_review_choices` such as `{"L1": "accept", "G2": "drop"}`):
+
+| Bucket | Rows | Proposal |
+|---|---|---|
+| L1 / L2 | a measure / table whose mirror exists (found by name, display name, synonym or a `PBI measure:` note) | link |
+| M1 | a dropped SWITCH wrapper whose branch measures are mirrored | fold (a drop would hide its changes) |
+| M2 | dropped (unreached), but a metric view measure was built for it | keep, or take it out of the YAML |
+| M3 | dropped, but a step of a mirrored measure | fold (as drop, a change to it would go unnoticed) |
+| B1 / B2 / B3 | building blocks used only by conditional formatting / only by dropped measures / only by mirrored ones | drop / drop / fold |
+| B4 / B5 | building blocks with open users / branches of a wrapper (the KPI itself) | the user decides |
+| C1 / C2 / C3 | unused columns: already a dimension / not a dimension / calculated | keep / drop / drop |
+| G* | drawn or filtering measures with nothing built, per table | translate, genie, or drop |
+
+Review again after applying: the remaining rows get new buckets. Chains of steps end at wrappers and Genie
+patterns: their branches and date plumbing are decided on their own.
 """
 
 _RECONCILIATION = """# Reconciliation: prove each measure against the report
@@ -370,6 +392,10 @@ done with a note.
 | Track data that carries meaning (a KPI status list) | Pipeline Config Generator / UCMV Drift Monitor `tracked_tables` |
 | Lint metric view metadata (missing `format`, double-scaled percentages, synonym clashes) | UC Metric View Generator metadata lint (MV001–MV010) |
 | Reconcile as statistics only; find 0–100 measures labelled as fractions | UCMV reconciliation tool with `statistics_only` and `scale_check` |
+| Create the access functions and their mapping table; row filters; facts a dimension filter does not reach (phase 3) | UCMV Source Layer Manager `action=setup_access`, `row_filters` (`value_access` / `object_access` shorthand), emit warnings |
+| Build metric views on the materialized-view layer (phase 4) | UC Metric View Generator with config `read_from_source_layer: true` |
+| Decide open scope rows in buckets (phase 2) | `report_scope.review` (UC Metric View Generator), `scope_review_choices` (UCMV Drift Monitor) |
+| Benchmark Genie, optionally side by side with a Fabric data agent (phase 6) | Genie Space Sync `action=eval` |
 | Semantic sync: model and report changes routed by the scope table (phase 8) | UCMV Drift Monitor with `semantic_snapshot_table`, `report_scope`, `semantic_ignore` |
 | Run a DAX query for metadata or a check | Power BI DAX Executor |
 | Generate metric view YAML and deploy SQL per fact table | UC Metric View Generator |
@@ -499,6 +525,20 @@ to the next session or colleague.
 - **No secrets in files, the conversation or the output.** Authenticate with the platform's CLI sign-in and
   secret scopes. Never ask for a token or password, never create or read a credentials file, and never print a
   secret. If a sign-in has expired, ask the user to renew it.
+- **A service principal is enough for Power BI.** It reads definitions (Fabric `getDefinition`) and, where the
+  tenant lets service principals use the Power BI APIs and the principal is a workspace member, also runs the
+  DAX queries and reads the refresh history. A service account for DAX is the fallback where the tenant only
+  allows users (often blocked by MFA / conditional access: check first). Throttling (HTTP 429) is retried.
+- **Legacy reports work.** A report the service cannot convert to PBIR (`FailedToExportReport`) is read through
+  the legacy fallback and converted locally; the run says so. Saving the report once in PBIR makes it easier to
+  review.
+- **Sources must be in Unity Catalog.** The materialized views read what the Power BI M queries read. If Power BI
+  reads SQL Server, Synapse, Snowflake or files directly, ingest or federate them first (Lakeflow Connect,
+  Lakehouse Federation). Plan this in phase 0a: it usually takes longest.
+- **Confidential data mode.** Where the AI policy keeps company figures away from assistants, turn on Kasal's
+  confidential mode for the workspace or the tools (`confidential_values`): value-returning tools then return
+  counts, names and categorical values only, and tools with a value-free mode (reconciliation, Genie eval) run in
+  it. Relax it where the policy allows.
 - **Checkpoints belong to the user:** measure and table scope, the snapshot choice, anything that deviates from
   the report, and every deploy to shared objects (ask the first time per session).
 - **Never trust generated output.** Generated YAML, mapping candidates and LLM-proposed mappings are candidates.
@@ -600,6 +640,7 @@ _FILES = [
     {"path": "references/reconciliation.md", "content": _RECONCILIATION},
     {"path": "references/refresh-and-sync.md", "content": _REFRESH_AND_SYNC},
     {"path": "templates/STATUS.md", "content": _STATUS},
+    {"path": "templates/MODEL_README.md", "content": _MODEL_README},
 ]
 
 SKILL = {

@@ -277,6 +277,7 @@ def run_from_generator(
         if cfg(gen_key) is not None
     }
     reconciler = UCMVReconciliationTool(**recon_ctor)
+    _inherit_confidential_policy(generator_tool, reconciler)
 
     return run_iterative_ucmv_generation(
         generator=generator_tool,
@@ -296,3 +297,17 @@ def run_from_generator(
         max_cycles=int(_positive_or(cfg("max_reconciliation_cycles"), 5)),
         target_pct=_positive_or(cfg("reconciliation_target_pct"), 100.0),
     )
+
+
+def _inherit_confidential_policy(parent: object, child: object) -> None:
+    """A tool built here, outside the ToolFactory, takes the parent's confidential
+    policy: the reconciler then runs value-free like a factory-built one."""
+    from src.services.tools.confidential import install_confidential_guard
+    from src.services.tools.tool_policies import CONFIDENTIAL_ATTR
+
+    policy = getattr(parent, CONFIDENTIAL_ATTR, None)
+    if not policy:
+        return
+    object.__setattr__(child, CONFIDENTIAL_ATTR, dict(policy))
+    if not install_confidential_guard(child):
+        logger.error("confidential_values is set but the reconciler could not be guarded")

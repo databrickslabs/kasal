@@ -12,6 +12,7 @@ from src.core.exceptions import (
     UnauthorizedError,
 )
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
+from src.services.powerbi.http_retry import send_with_throttle_retry_async
 from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
 
 if TYPE_CHECKING:
@@ -292,7 +293,10 @@ class PowerBIService:
             logger.debug(f"Query: {dax_query[:200]}...")  # Log first 200 chars
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(datasets_url, headers=headers, json=body)
+                response = await send_with_throttle_retry_async(
+                    lambda: client.post(datasets_url, headers=headers, json=body),
+                    "executeQueries",
+                )
 
             if response.status_code != 200:
                 error_msg = f"Power BI API error (status {response.status_code}): {response.text}"

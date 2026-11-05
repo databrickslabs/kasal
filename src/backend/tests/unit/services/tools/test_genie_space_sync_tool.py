@@ -9,6 +9,7 @@ from src.services.tools import genie_space_sync_tool as tool_module
 from src.services.tools.genie_space_sync_tool import GenieSpaceSyncTool
 from src.services.tools.genie_space_sync_utils.genie_api import GenieApiError
 from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
+
 from .genie_space_sync_utils._fakes import (
     SPACE_ID,
     FakeGenie,
@@ -271,3 +272,131 @@ def test_failed_authentication_is_an_error(env, monkeypatch):
     )
     result = _run(GenieSpaceSyncTool(), action="extract", space_id=SPACE_ID)
     assert result["error"] == "Databricks authentication failed"
+
+
+EVAL_CONVERSATION = f"/{SPACE_ID}/conversations/c1/messages/m1"
+
+
+def _eval_routes(answer_text="Total is 42"):
+    return {
+        ("GET", f"/{SPACE_ID}"): _space_record(),
+        ("POST", f"/{SPACE_ID}/start-conversation"): {
+            "conversation_id": "c1",
+            "message_id": "m1",
+        },
+        ("GET", EVAL_CONVERSATION): {
+            "status": "COMPLETED",
+            "attachments": [{"attachment_id": "t1", "text": {"content": answer_text}}],
+        },
+    }
+
+
+def test_eval_asks_each_dataset_question_and_grades_it(env):
+    env.genie = FakeGenie(_eval_routes())
+    questions = json.dumps([{"id": "q1", "question": "Total?", "key_facts": [42]}])
+    result = _run(
+        GenieSpaceSyncTool(),
+        action="eval",
+        space_id=SPACE_ID,
+        use_benchmarks=False,
+        eval_questions=questions,
+    )
+    assert result["action"] == "eval"
+    assert result["questions"] == {
+        "total": 1,
+        "from_benchmarks": 0,
+        "asked": 1,
+        "skipped": 0,
+        "max_questions": 50,
+    }
+    entry = result["results"][0]
+    assert entry["genie"]["verdict"] == "pass"
+    assert entry["genie"]["answer"] == "Total is 42"
+    assert result["summary"]["genie"]["score"] == 1.0
+    assert "results_table" not in result
+
+
+def test_eval_statistics_only_keeps_the_verdict_and_drops_the_values(env):
+    env.genie = FakeGenie(_eval_routes())
+    questions = json.dumps([{"question": "Total?", "key_facts": [42]}])
+    result = _run(
+        GenieSpaceSyncTool(),
+        action="eval",
+        space_id=SPACE_ID,
+        use_benchmarks=False,
+        eval_questions=questions,
+        statistics_only=True,
+    )
+    text = json.dumps(result)
+    assert "Total is 42" not in text
+    assert result["results"][0]["genie"]["verdict"] == "pass"
+
+
+def test_eval_uses_the_space_benchmarks_with_expected_sql(env):
+    env.genie = FakeGenie(
+        {
+            **_eval_routes("The fill rate is 7"),
+            ("GET", f"/{SPACE_ID}"): _space_record(),
+        }
+    )
+    result = _run(GenieSpaceSyncTool(), action="eval", space_id=SPACE_ID)
+    assert result["questions"]["from_benchmarks"] == 1
+    entry = result["results"][0]
+    assert entry["source"] == "benchmark"
+    assert entry["expected"]["source"] == "sql"
+    assert entry["genie"]["verdict"] in ("pass", "fail", "error")
+
+
+def test_eval_refuses_bad_limits_and_missing_questions(env):
+    env.genie = FakeGenie(_eval_routes())
+    bad_limit = _run(
+        GenieSpaceSyncTool(),
+        action="eval",
+        space_id=SPACE_ID,
+        use_benchmarks=False,
+        eval_questions=json.dumps([{"question": "x"}]),
+        max_questions=0,
+    )
+    assert "max_questions" in bad_limit["error"]
+    none = _run(
+        GenieSpaceSyncTool(), action="eval", space_id=SPACE_ID, use_benchmarks=False
+    )
+    assert "eval needs" in none["error"]
+
+
+def test_eval_fabric_needs_its_token_before_anything_is_asked(env):
+    env.genie = FakeGenie(_eval_routes())
+    result = _run(
+        GenieSpaceSyncTool(),
+        action="eval",
+        space_id=SPACE_ID,
+        use_benchmarks=False,
+        eval_questions=json.dumps([{"question": "x", "key_facts": [1]}]),
+        fabric_agent_url="https://api.fabric.microsoft.com/v1/mcp/workspaces/"
+        "11111111-1111-1111-1111-111111111111/dataagents/22222222-2222-2222-2222-222222222222/agent",
+    )
+    assert "fabric_token" in result["error"]
+    assert all(method != "POST" for method, _, _ in env.genie.calls)
+
+
+def test_eval_writes_rows_to_the_results_table_when_asked(env):
+    env.genie = FakeGenie(_eval_routes())
+    result = _run(
+        GenieSpaceSyncTool(),
+        action="eval",
+        space_id=SPACE_ID,
+        use_benchmarks=False,
+        eval_questions=json.dumps([{"question": "Total?", "key_facts": [42]}]),
+        warehouse_id="wh-1",
+        results_table="main.eval.genie_results",
+        statistics_only=True,
+    )
+    assert result["results_table"] == {
+        "table": "main.eval.genie_results",
+        "written": 1,
+        "error": "",
+    }
+    statements = [s for s in env.warehouse.statements if "genie_results" in s]
+    assert any(s.startswith("CREATE TABLE IF NOT EXISTS") for s in statements)
+    insert = next(s for s in env.warehouse.statements if s.startswith("INSERT INTO"))
+    assert "Total is 42" not in insert

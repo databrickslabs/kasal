@@ -14,6 +14,10 @@ from src.services.tools.metric_view_utils.source_layer_emitter import (
     row_filter_problems,
 )
 from src.services.tools.ucmv_source_layer_utils.names import is_identifier
+from src.services.tools.ucmv_source_layer_utils.row_filter_shorthand import (
+    is_shorthand,
+    shorthand_row_filter,
+)
 
 DEFAULT_ROW_FILTER_KEY = "*"
 _UUID = re.compile(
@@ -89,8 +93,29 @@ def parse_scope_rows(raw: object) -> list[dict[str, str]]:
     return [{str(k): str(v or "") for k, v in row.items() if k} for row in reader]
 
 
-def parse_row_filters(raw: object) -> dict[str, RowFilter]:
-    """``{"<PBI table or view or '*'>": {"function", "columns", "constants"}}``.
+def _row_filter_from_spec(
+    spec: dict[str, object], access_schema: str | None
+) -> RowFilter:
+    if is_shorthand(spec):
+        return shorthand_row_filter(spec, access_schema)
+    columns = spec.get("columns") or []
+    constants = spec.get("constants") or []
+    if not isinstance(columns, list) or not isinstance(constants, list):
+        raise ValueError("columns and constants must be lists")
+    return RowFilter(
+        function=str(spec.get("function") or ""),
+        columns=[str(c) for c in columns],
+        constants=list(constants),
+    )
+
+
+def parse_row_filters(
+    raw: object, access_schema: str | None = None
+) -> dict[str, RowFilter]:
+    """``{"<PBI table or view or '*'>": spec}``; spec is either the explicit form
+    ``{"function", "columns", "constants"}`` or a shorthand ``{"value_access":
+    {"field", "column"}}`` / ``{"object_access": "grp_a;grp_b"}`` that expands to
+    the access functions in ``access_schema`` (catalog.schema).
 
     ``"*"`` is the default for every table without its own entry. Every problem
     in the config is reported together.
@@ -106,16 +131,11 @@ def parse_row_filters(raw: object) -> dict[str, RowFilter]:
         if not isinstance(spec, dict):
             problems.append(f"{key}: entry must be an object")
             continue
-        columns = spec.get("columns") or []
-        constants = spec.get("constants") or []
-        if not isinstance(columns, list) or not isinstance(constants, list):
-            problems.append(f"{key}: columns and constants must be lists")
+        try:
+            row_filter = _row_filter_from_spec(spec, access_schema)
+        except ValueError as exc:
+            problems.append(f"{key}: {exc}")
             continue
-        row_filter = RowFilter(
-            function=str(spec.get("function") or ""),
-            columns=[str(c) for c in columns],
-            constants=list(constants),
-        )
         for problem in row_filter_problems(row_filter):
             problems.append(f"{key}: {problem}")
         result[str(key)] = row_filter

@@ -15,6 +15,7 @@ from typing import Any, Coroutine, Dict, Optional, Type, TypeVar
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi.http_retry import send_with_throttle_retry_async
 from src.services.tools.base import BaseTool
 from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
@@ -190,7 +191,10 @@ class PowerBIDaxExecutorTool(BaseTool):
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
-                response = await client.post(url, headers=headers, json=payload)
+                response = await send_with_throttle_retry_async(
+                    lambda: client.post(url, headers=headers, json=payload),
+                    "executeQueries",
+                )
                 response.raise_for_status()
                 data = response.json()
                 if "error" in data:

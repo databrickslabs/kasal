@@ -52,13 +52,20 @@ def build_source_layer_outputs(
         )
 
         mq_exprs = getattr(pipeline, "_mquery_expressions", {}) or {}
-        outputs.source_layer_ddl = build_source_layer(
-            pipeline.all_specs,
-            mquery_tables,
-            config,
-            catalog,
-            schema,
-            mquery_expressions=mq_exprs,
+        # The pipeline builds the views while emitting YAML (so read mode binds to
+        # the very same views); reuse them rather than planning them twice.
+        built_views = getattr(pipeline, "source_layer_views", None)
+        outputs.source_layer_ddl = (
+            built_views
+            if built_views is not None
+            else build_source_layer(
+                pipeline.all_specs,
+                mquery_tables,
+                config,
+                catalog,
+                schema,
+                mquery_expressions=mq_exprs,
+            )
         )
         outputs.pbi_only_ingestion_tasks = detect_pbi_only_tables(
             mq_exprs, catalog, schema

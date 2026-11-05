@@ -14,6 +14,11 @@ Actions:
   check    space_id (live) or space_files (offline) -> verdicts: SQL and snippet row
            counts, column settings, percentage scaling, prose identifiers, and
            reconciliation mappings against the deployed metric views.
+  eval     space_id + the space's benchmarks and/or eval_questions -> asks each
+           question through the Genie conversation API, grades the answer against its
+           expected SQL / key facts / expected answer (numbers, optional LLM judge,
+           optional side-by-side Fabric data agent), and returns per-question verdicts,
+           latencies, a summary score and optionally writes rows to a UC table.
 
 Logic lives in ``genie_space_sync_utils/``; this class wires real I/O into it. The
 Genie REST calls and the SQL Statement API are the same ones the Genie generator
@@ -37,6 +42,36 @@ from src.services.tools.genie_space_sync_utils.checks_report import build_report
 from src.services.tools.genie_space_sync_utils.deploy_plan import (
     build_payload,
     resolve_target,
+)
+from src.services.tools.genie_space_sync_utils.eval.answer import Answer
+from src.services.tools.genie_space_sync_utils.eval.conversation import ask_genie
+from src.services.tools.genie_space_sync_utils.eval.fabric import (
+    McpSend,
+    ask_fabric,
+    requests_mcp_send,
+)
+from src.services.tools.genie_space_sync_utils.eval.judge import (
+    DEFAULT_JUDGE_MODEL,
+    kasal_completion,
+)
+from src.services.tools.genie_space_sync_utils.eval.questions import (
+    EvalQuestion,
+    benchmark_questions,
+    dataset_questions,
+    select_questions,
+)
+from src.services.tools.genie_space_sync_utils.eval.report import (
+    NOTES,
+    build_eval_report,
+    new_run_identity,
+    table_rows,
+)
+from src.services.tools.genie_space_sync_utils.eval.results_table import write_rows
+from src.services.tools.genie_space_sync_utils.eval.retry import RetryingHttp
+from src.services.tools.genie_space_sync_utils.eval.runner import Backends, run_eval
+from src.services.tools.genie_space_sync_utils.eval.settings import (
+    parse_limit,
+    parse_price,
 )
 from src.services.tools.genie_space_sync_utils.genie_api import (
     GenieApiError,
@@ -62,7 +97,7 @@ from src.utils.url_security import is_trusted_databricks_host
 
 logger = logging.getLogger(__name__)
 
-_ACTIONS = ("extract", "deploy", "check")
+_ACTIONS = ("extract", "deploy", "check", "eval")
 _SPACE_ID = re.compile(r"[0-9a-f]{32}")
 #: Settings a tool instance may carry as defaults. confirm_deploy is deliberately
 #: absent: applying a change is always a per-call decision.
@@ -71,6 +106,15 @@ _CONFIG_KEYS = (
     "warehouse_id",
     "check_sql",
     "reconciliation_mappings",
+    "use_benchmarks",
+    "eval_questions",
+    "max_questions",
+    "statistics_only",
+    "llm_judge",
+    "llm_model",
+    "fabric_agent_url",
+    "price_per_1k_tokens",
+    "results_table",
 )
 
 
@@ -81,7 +125,8 @@ class GenieSpaceSyncSchema(BaseModel):
         ...,
         description=(
             "extract (space -> YAML files), deploy (YAML files -> space; dry run unless "
-            "confirm_deploy), or check (space or files vs the deployed metric views)."
+            "confirm_deploy), check (space or files vs the deployed metric views), or eval "
+            "(ask the space its benchmark and eval_questions, grade the answers)."
         ),
     )
     space_id: Optional[str] = Field(
@@ -112,6 +157,56 @@ class GenieSpaceSyncSchema(BaseModel):
             "check only: JSON object of mapping file name -> reconciliation mapping YAML; "
             "each is checked against its deployed metric view."
         ),
+    )
+    use_benchmarks: Optional[bool] = Field(
+        True,
+        description="eval only: ask the space's own benchmark questions (needs EDIT permission).",
+    )
+    eval_questions: Optional[str] = Field(
+        None,
+        description=(
+            'eval only: JSON list (or {"questions": [...]}) of questions. Each item: '
+            "question (required), id, expected_sql (one read-only SELECT/WITH), "
+            "expected_answer (text), key_facts (list of numbers)."
+        ),
+    )
+    max_questions: Optional[int] = Field(
+        None,
+        description="eval only: most questions asked in one run, 1 to 200 (default 50).",
+    )
+    statistics_only: Optional[bool] = Field(
+        False,
+        description=(
+            "eval only: leave answer values, result tables and expected values out of the "
+            "output; keep verdicts, counts, latencies and relative differences."
+        ),
+    )
+    llm_judge: Optional[bool] = Field(
+        False,
+        description="eval only: also grade each answer with an LLM judge (Kasal LLM layer).",
+    )
+    llm_model: Optional[str] = Field(
+        None,
+        description="eval only: serving model for the judge (default databricks-claude-sonnet-4-5).",
+    )
+    fabric_agent_url: Optional[str] = Field(
+        None,
+        description=(
+            "eval only: MCP URL of a Microsoft Fabric data agent to ask the same questions "
+            "side by side."
+        ),
+    )
+    fabric_token: Optional[str] = Field(
+        None,
+        description="eval only: bearer token for api.fabric.microsoft.com (used, never logged).",
+    )
+    price_per_1k_tokens: Optional[float] = Field(
+        None,
+        description="eval only: price per 1000 judge tokens, for the cost estimate.",
+    )
+    results_table: Optional[str] = Field(
+        None,
+        description="eval only: catalog.schema.table to append result rows to (created if missing).",
     )
     databricks_host: Optional[str] = Field(
         None,
@@ -315,6 +410,96 @@ def _check(get: Callable[[str], object], session: _Session) -> dict[str, object]
     }
 
 
+def _fabric_asker(send: McpSend | None) -> Callable[[str], Answer] | None:
+    if send is None:
+        return None
+    return lambda question: ask_fabric(send, question)
+
+
+def _backends(
+    get: Callable[[str], object], session: _Session, space_id: str
+) -> Backends:
+    """Real I/O for one eval run: retrying Genie calls, the warehouse, and the optional judge and Fabric agent."""
+    genie = RetryingHttp(session.http)
+    fabric_url = _text(get("fabric_agent_url"))
+    fabric_send = None
+    if fabric_url:
+        token = _text(get("fabric_token"))
+        if not token:
+            raise ValueError("fabric_agent_url needs fabric_token")
+        fabric_send = requests_mcp_send(fabric_url, token)
+    judge_on = _as_bool(get("llm_judge"), False)
+    model = _text(get("llm_model")) or DEFAULT_JUDGE_MODEL
+    return Backends(
+        ask_genie=lambda question: ask_genie(genie, space_id, question),
+        run_sql=session.sql,
+        ask_fabric=_fabric_asker(fabric_send),
+        complete=kasal_completion(model) if judge_on else None,
+    )
+
+
+def _eval(get: Callable[[str], object], session: _Session) -> dict[str, object]:
+    space_id = _space_id(get("space_id"))
+    use_benchmarks = _as_bool(get("use_benchmarks"), True)
+    space = get_space(session.http, space_id, serialized=use_benchmarks)
+    if space is None:
+        raise ValueError(f"space {space_id} was not found or is not visible")
+    questions: list[EvalQuestion] = []
+    benchmarks = 0
+    if use_benchmarks:
+        found = benchmark_questions(_serialized(space))
+        benchmarks = len(found)
+        questions += found
+    raw_questions = _text(get("eval_questions"))
+    if raw_questions:
+        questions += dataset_questions(raw_questions)
+    if not questions:
+        raise ValueError("eval needs eval_questions, or a space with benchmarks")
+    limit = parse_limit(get("max_questions"))
+    kept, skipped = select_questions(questions, limit)
+    statistics_only = _as_bool(get("statistics_only"), False)
+    price = parse_price(get("price_per_1k_tokens"))
+    outcomes = run_eval(kept, _backends(get, session, space_id))
+    entries, summary = build_eval_report(
+        outcomes, statistics_only=statistics_only, price_per_1k_tokens=price
+    )
+    run_id, run_ts = new_run_identity()
+    result: dict[str, object] = {
+        "action": "eval",
+        "space_id": space_id,
+        "title": _text(space.get("title")),
+        "run_id": run_id,
+        "run_ts": run_ts,
+        "statistics_only": statistics_only,
+        "checks": {
+            "numbers": True,
+            "judge": _as_bool(get("llm_judge"), False),
+            "fabric": bool(_text(get("fabric_agent_url"))),
+        },
+        "questions": {
+            "total": len(questions),
+            "from_benchmarks": benchmarks,
+            "asked": len(kept),
+            "skipped": skipped,
+            "max_questions": limit,
+        },
+        "summary": summary,
+        "results": entries,
+        "notes": list(NOTES),
+    }
+    table = _text(get("results_table"))
+    if table:
+        rows = table_rows(
+            run_id=run_id,
+            run_ts=run_ts,
+            space_id=space_id,
+            entries=entries,
+            statistics_only=statistics_only,
+        )
+        result["results_table"] = write_rows(session.sql, table, rows)
+    return result
+
+
 def _dump(result: dict[str, object]) -> str:
     return json.dumps(result, default=str, ensure_ascii=False)
 
@@ -334,8 +519,11 @@ class GenieSpaceSyncTool(BaseTool):
         "space (live, or offline from space_files) against the deployed Unity Catalog "
         "metric views: example and benchmark SQL as row counts, snippets, column settings, "
         "double-scaled percentages, prose identifiers that match no deployed name, and "
-        "optional reconciliation mappings. Returns a JSON verdict list with pass, fail "
-        "and review counts; review entries are hints for a human."
+        "optional reconciliation mappings. action=eval asks a space its benchmark and "
+        "supplied questions through the Genie conversation API and grades each answer "
+        "(numbers, optional LLM judge, optional Fabric data agent side by side); it returns "
+        "per-question verdicts, latencies and a summary score. Returns a JSON verdict list "
+        "with pass, fail and review counts; review entries are hints for a human."
     )
     args_schema: Type[BaseModel] = GenieSpaceSyncSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
@@ -368,6 +556,8 @@ class GenieSpaceSyncTool(BaseTool):
                 return _dump(_extract(get, session))
             if action == "deploy":
                 return _dump(_deploy(get, session))
+            if action == "eval":
+                return _dump(_eval(get, session))
             return _dump(_check(get, session))
         except (GenieApiError, SpaceFilesError, RuntimeError, ValueError) as exc:
             return _error(str(exc))

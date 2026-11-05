@@ -14,6 +14,8 @@ Actions (``action``):
 - ``refresh``        snapshots, then REFRESH MATERIALIZED VIEW (optionally skipped
                      when Power BI has not refreshed since the views were refreshed)
 - ``count_check``    PBI vs UC counts, per period, sums, members; verdicts only
+- ``setup_access``   row_access_map + object_access / value_access in access_schema,
+                     grants and mapping rows; dry-run unless confirm=true
 
 Logic lives in ``ucmv_source_layer_utils/``; this class wires real clients in.
 """
@@ -53,6 +55,14 @@ from src.services.tools.ucmv_source_layer_utils.names import (
     utc_stamp,
 )
 from src.services.tools.ucmv_source_layer_utils.pbi_client import PbiClient, PbiError
+from src.services.tools.ucmv_source_layer_utils.names import is_uc_schema
+from src.services.tools.ucmv_source_layer_utils.rls_checks import parse_rls_dax
+from src.services.tools.ucmv_source_layer_utils.row_access import (
+    access_setup_statements,
+    parse_access_rows,
+    run_setup,
+    setup_plan,
+)
 from src.services.tools.ucmv_source_layer_utils.refresh_plan import (
     RefreshRequest,
     list_views_sql,
@@ -77,7 +87,14 @@ from src.services.tools.ucmv_source_layer_utils.view_specs import emit_source_la
 logger = logging.getLogger(__name__)
 
 Getter = Callable[[str], object]
-ACTIONS = ("emit", "deploy", "load_snapshots", "refresh", "count_check")
+ACTIONS = (
+    "emit",
+    "deploy",
+    "load_snapshots",
+    "refresh",
+    "count_check",
+    "setup_access",
+)
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
 _TIMEOUT = 120.0
 _POLL_SECONDS = 2.0
@@ -123,6 +140,12 @@ _OWN_KEYS = (
     "sums",
     "column_map_json",
     "cutoff_column",
+    "access_schema",
+    "reader_groups",
+    "access_rows",
+    "confirm",
+    "relationships_json",
+    "rls_dax_json",
 )
 
 
@@ -131,7 +154,42 @@ class UCMVSourceLayerSchema(BaseModel):
 
     action: Optional[str] = Field(
         None,
-        description="emit | deploy | load_snapshots | refresh | count_check",
+        description=(
+            "emit | deploy | load_snapshots | refresh | count_check | setup_access"
+        ),
+    )
+    access_schema: Optional[str] = Field(
+        None,
+        description=(
+            "catalog.schema holding row_access_map and the access functions. Needed by "
+            "setup_access and by the value_access / object_access row_filters shorthand."
+        ),
+    )
+    reader_groups: Optional[str] = Field(
+        None,
+        description="setup_access: account groups that get EXECUTE / SELECT (comma or newline separated).",
+    )
+    access_rows: Optional[str] = Field(
+        None,
+        description=(
+            'setup_access: JSON list [{"group_name", "field", "value", "reason"}] merged into '
+            'row_access_map; value "*" = every value.'
+        ),
+    )
+    confirm: Optional[bool] = Field(
+        False,
+        description="setup_access: false (default) returns the statements only; true runs them.",
+    )
+    relationships_json: Optional[str] = Field(
+        None,
+        description=(
+            'JSON list [{"from_table", "from_column", "to_table", "to_column"}]; from_table is '
+            "the many side. Used by the fact-needs-the-RLS-column check."
+        ),
+    )
+    rls_dax_json: Optional[str] = Field(
+        None,
+        description='JSON {"PBI table": "DAX of its RLS expression"}: turns rls_filter rows into value_access suggestions.',
     )
     catalog: Optional[str] = Field(
         None, description="Unity Catalog catalog of the source layer."
@@ -234,6 +292,10 @@ def _flag(value: object) -> bool:
     return value in (True, "true", "True")
 
 
+def _access_schema_or_none(get: Getter) -> str | None:
+    return (opt_str(get("access_schema")) or "").strip() or None
+
+
 class UCMVSourceLayerTool(BaseTool):
     """Emit, deploy, load and check the materialized-view source layer."""
 
@@ -241,13 +303,19 @@ class UCMVSourceLayerTool(BaseTool):
     description: str = (
         "Manages the materialized-view layer beneath Unity Catalog metric views. "
         "action=emit: source-layer DDL per Power BI table, with row filters "
-        "(set at CREATE) and RLS review hints from the scope table. action=deploy: "
+        "(set at CREATE; value_access / object_access shorthand expands to the "
+        "access functions in access_schema), RLS review hints with value_access "
+        "suggestions (suggestions only), and warnings when a fact view is not "
+        "filtered by the field its dimension is filtered by. action=deploy: "
         "emit and CREATE the views in dependency-safe order. action=load_snapshots: "
         "PBI-only tables (typed-in, Excel, other models) read from the published "
         "model into typed pbi_<table> tables, with the row filter re-applied. "
         "action=refresh: reload snapshots, then REFRESH MATERIALIZED VIEW, optionally "
         "skipped when Power BI has not refreshed. action=count_check: PBI vs UC row "
-        "counts, per period, members and sums; verdicts and counts only."
+        "counts, per period, members and sums; verdicts and counts only. "
+        "action=setup_access: create row_access_map and the object_access / "
+        "value_access functions in access_schema, grant reader_groups, merge "
+        "access_rows; dry-run unless confirm=true."
     )
     args_schema: Type[BaseModel] = UCMVSourceLayerSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
@@ -376,6 +444,9 @@ class UCMVSourceLayerTool(BaseTool):
             row_filters_json=get("row_filters"),
             materialized=get("materialized") not in (False, "false", "False"),
             scope_json=get("report_scope"),
+            access_schema=_access_schema_or_none(get),
+            relationships_json=get("relationships_json"),
+            rls_dax_json=parse_rls_dax(get("rls_dax_json")),
         )
 
     def _emit(self, get: Getter) -> dict[str, object]:
@@ -420,6 +491,7 @@ class UCMVSourceLayerTool(BaseTool):
             "views_with_todo_steps": [
                 t for t, v in views.items() if as_map(v).get("todo_steps")
             ],
+            "rls_warnings": emitted.get("rls_warnings"),
             "notes": emitted.get("notes"),
         }
 
@@ -443,7 +515,7 @@ class UCMVSourceLayerTool(BaseTool):
             schema=schema,
             dax=pbi.dax,
             sql=sql,
-            filters=parse_row_filters(get("row_filters")),
+            filters=parse_row_filters(get("row_filters"), _access_schema_or_none(get)),
             loaded_at=utc_now_stamp(),
             refreshed_at=refreshed_at,
             tmdl=_tmdl,
@@ -489,6 +561,21 @@ class UCMVSourceLayerTool(BaseTool):
             load_snapshots=_load if has_snapshots else None,
             refresh_view=runner(sql),
         )
+
+    def _setup_access(self, get: Getter) -> dict[str, object]:
+        access_schema = (opt_str(get("access_schema")) or "").strip()
+        if not is_uc_schema(access_schema):
+            raise ValueError(
+                "access_schema must be catalog.schema (plain names) for setup_access"
+            )
+        statements = access_setup_statements(
+            access_schema,
+            parse_names(get("reader_groups")),
+            parse_access_rows(get("access_rows")),
+        )
+        if not _flag(get("confirm")):
+            return setup_plan(statements)
+        return run_setup(statements, self._sql(get))
 
     def _count_check(self, get: Getter) -> dict[str, object]:
         catalog, schema = self._catalog_schema(get)
@@ -539,6 +626,7 @@ class UCMVSourceLayerTool(BaseTool):
             "load_snapshots": self._load_snapshots,
             "refresh": self._refresh,
             "count_check": self._count_check,
+            "setup_access": self._setup_access,
         }
         if action not in handlers:
             return _fail(action, f"action must be one of {', '.join(ACTIONS)}")

@@ -26,6 +26,8 @@ import logging
 
 import requests
 
+from src.services.powerbi.http_retry import send_with_throttle_retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,10 @@ def extract_column_summarize_by(
         "serializerSettings": {"includeNulls": True},
     }
     try:
-        resp = requests.post(url, headers=_headers(token), json=body, timeout=60)
+        resp = send_with_throttle_retry(
+            lambda: requests.post(url, headers=_headers(token), json=body, timeout=60),
+            "column metadata executeQueries",
+        )
         if resp.status_code != 200:
             return {}
         data = resp.json()

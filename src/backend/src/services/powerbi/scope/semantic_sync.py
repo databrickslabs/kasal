@@ -42,7 +42,7 @@ _NO_SCOPE_ACTION = {
     "page_field": "triage: a field drawn on / filtering a reachable page changed (rebuild the scope draft)",
     "relationship": "check the joins of the metric views that use these tables",
     "expression": "check the tables loaded through this shared query",
-    "tracked_row": "data of a tracked table changed: reload its snapshot and check what it gates",
+    "tracked_row": "data of a tracked table changed: check what it gates (reload its snapshot if it has one)",
 }
 PROPOSAL_ACTIONS = (
     "update the mirror",
@@ -298,8 +298,8 @@ def action(change: Mapping[str, str], row: Mapping[str, str] | None) -> str:
         return f"update the mirror: {mirror or '(mirrored_as missing)'}"
     if decision == "genie":
         return "check the Genie pattern / examples that stand in for it"
-    if decision == "review":
-        return "open decision in the scope table"
+    if decision == "review":  # still undecided: the change must reach a person, not wait silently
+        return "triage: open decision in the scope table (decide it, then handle the change)"
     if decision in ("drop", "n/a"):
         return "none (not mirrored)"
     # a decision outside the vocabulary must not hide the change

@@ -28,6 +28,12 @@ def is_uc_fqn(name: str) -> bool:
     return len(parts) == 3 and all(_UC_PART.match(p) for p in parts)
 
 
+def is_uc_schema(name: str) -> bool:
+    """``catalog.schema`` with optional back-quotes around each part."""
+    parts = [p.strip("`") for p in (name or "").strip().split(".")]
+    return len(parts) == 2 and all(_UC_PART.match(p) for p in parts)
+
+
 def quote_part(part: str) -> str:
     return "`" + part.replace("`", "") + "`"
 

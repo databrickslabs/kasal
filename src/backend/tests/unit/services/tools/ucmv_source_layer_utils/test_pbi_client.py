@@ -76,3 +76,38 @@ def test_last_completed_refresh_none_when_never_completed():
 def test_clean_rows_renames_keys():
     rows = pbi_client.clean_rows([{"Sales[Month]": "2024-01-01", "[n]": 3}])
     assert rows == [{"Month": "2024-01-01", "n": 3}]
+
+
+def test_executequeries_waits_out_throttling_then_returns_rows(monkeypatch):
+    class _Resp:
+        def __init__(self, status_code, body=None, headers=None):
+            self.status_code, self._body, self.headers = status_code, body or {}, headers or {}
+            self.text = ""
+
+        def json(self):
+            return self._body
+
+    responses = [
+        _Resp(429, headers={"Retry-After": "2"}),
+        _Resp(200, {"results": [{"tables": [{"rows": [{"[Amount]": 3}]}]}]}),
+    ]
+    sleeps = []
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, *args, **kwargs):
+            return responses.pop(0)
+
+    monkeypatch.setattr(pbi_client.httpx, "Client", _Client)
+    monkeypatch.setattr("src.services.powerbi.http_retry.time.sleep", sleeps.append)
+    client = PbiClient("token", GUID, GUID)
+    assert client.dax("EVALUATE {1}") == [{"Amount": 3}]
+    assert sleeps == [3.0]

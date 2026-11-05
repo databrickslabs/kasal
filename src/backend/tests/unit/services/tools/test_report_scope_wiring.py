@@ -98,3 +98,30 @@ def test_a_signed_off_scope_is_checked_against_the_model_and_the_deployed_views(
     text = "\n".join(out["scope_problems"])
     assert "'ucm_fact.salez' is not a measure of the deployed metric views" in text
     assert "measure Fact[Gone]: the model no longer has this measure" in text
+
+
+def test_the_drift_monitor_reviews_the_signed_off_scope_and_applies_bucket_choices():
+    snapshot = {"objects": [{"object_type": "measure", "pbi_table": "Fact", "name": "Sales", "definition": "", "definition_hash": "1"}]}
+    scope = [
+        {"object_type": "measure", "pbi_table": "Fact", "name": "Sales", "decision": "keep", "mirrored_as": "",
+         "reason": "drawn", "load_bearing_for": ""},
+    ]
+    drift = {"views": [{"name": "ucm_fact", "baseline_yaml": "measures:\n  - name: sales\n    expr: SUM(source.x)\n"}]}
+    out = run_semantic_sync(snapshot, baseline=snapshot, scope=scope, drift_report=drift, review_choices={"L1": "accept"})
+    assert "ucm_fact.sales" in out["scope_csv"]
+    assert out["scope_review"] == []  # nothing left open
+
+
+def test_the_iterative_reconciler_inherits_the_generator_confidential_policy():
+    from src.services.tools.tool_policies import CONFIDENTIAL_ATTR
+    from src.services.tools.ucmv_iterative_recon import _inherit_confidential_policy
+    from src.services.tools.ucmv_reconciliation_tool import UCMVReconciliationTool
+
+    parent = SimpleNamespace(**{CONFIDENTIAL_ATTR: {"enabled": True}})
+    child = UCMVReconciliationTool()
+    _inherit_confidential_policy(parent, child)
+    assert getattr(child, CONFIDENTIAL_ATTR) == {"enabled": True}
+    assert child._default_config.get("statistics_only") is True
+    plain = UCMVReconciliationTool()
+    _inherit_confidential_policy(SimpleNamespace(), plain)
+    assert not getattr(plain, CONFIDENTIAL_ATTR, None)

@@ -268,3 +268,10 @@ def test_build_snapshot_reads_tmdl_parts_and_report_pages():
     )
     assert keys[("page", "", "Home")]["definition"] == "visible; reachable"
     assert keys[("page_field", "Home", "[Sales]")]["definition"] == "drawn"
+
+
+def test_a_change_to_an_undecided_review_object_needs_a_person():
+    scope = [{"object_type": "measure", "pbi_table": "Fact", "name": "Sales", "decision": "review", "mirrored_as": ""}]
+    [change] = semantic_sync.with_impact([_change("measure", "Sales")], scope)
+    assert change["action"].startswith("triage: open decision in the scope table")
+    assert semantic_sync.needs_action(change)

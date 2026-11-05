@@ -85,11 +85,28 @@ def finalize_report_scope(
                     row["mirrored_as"] = view
         scope["csv"] = scope_csv(rows)
         scope["kasal_gaps"] = _gaps(rows)
+        scope["review"] = _review(rows, pipeline)
     except (AttributeError, KeyError, TypeError, ValueError) as err:
         logger.warning(
             "[UCMVGenerator] report scope completion skipped: %s", err, exc_info=True
         )
     return scope
+
+
+def _review(rows: list[dict], pipeline: MetricViewPipeline) -> list[dict[str, object]]:
+    """The open rows in buckets with one proposed decision each (``services/powerbi/scope/scope_review``),
+    using what this run generated as evidence."""
+    from src.services.powerbi.scope.scope_review import buckets, evidence, summary
+
+    specs: dict[str, dict[str, object]] = {}
+    for spec in (getattr(pipeline, "all_specs", None) or {}).values():
+        specs[spec.view_name] = {
+            "measures": [
+                {"name": m.measure_name, "comment": f"PBI measure: {m.original_name}"} for m in spec.measures
+            ],
+            "dimensions": [d for d in spec.dimensions if isinstance(d, dict)],
+        }
+    return summary(buckets(rows, evidence(rows, specs)))
 
 
 def _gaps(rows: list[dict]) -> dict[str, int]:

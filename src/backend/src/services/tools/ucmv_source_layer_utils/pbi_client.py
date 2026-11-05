@@ -11,6 +11,7 @@ import re
 
 import httpx
 
+from src.services.powerbi.http_retry import send_with_throttle_retry
 from src.services.tools.ucmv_source_layer_utils.inputs import check_uuid
 
 PBI_API_BASE = "https://api.powerbi.com/v1.0/myorg"
@@ -75,8 +76,11 @@ class PbiClient:
             "serializerSettings": {"includeNulls": True},
         }
         with httpx.Client(timeout=_TIMEOUT) as client:
-            response = client.post(
-                f"{self._base}/executeQueries", headers=self._headers, json=payload
+            response = send_with_throttle_retry(
+                lambda: client.post(
+                    f"{self._base}/executeQueries", headers=self._headers, json=payload
+                ),
+                "executeQueries",
             )
         if response.status_code >= 400:
             raise PbiError(f"executeQueries failed: HTTP {response.status_code}")
@@ -109,8 +113,11 @@ class PbiClient:
 
     def _refreshes(self, top: int) -> list[dict[str, object]]:
         with httpx.Client(timeout=_TIMEOUT) as client:
-            response = client.get(
-                f"{self._base}/refreshes", headers=self._headers, params={"$top": top}
+            response = send_with_throttle_retry(
+                lambda: client.get(
+                    f"{self._base}/refreshes", headers=self._headers, params={"$top": top}
+                ),
+                "refresh history",
             )
         if response.status_code >= 400:
             raise PbiError(f"refresh history failed: HTTP {response.status_code}")

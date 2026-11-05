@@ -236,8 +236,10 @@ def _role_rows(model: Model) -> list[dict]:
     refs = References(model)
     roles: dict[str, set[str]] = defaultdict(set)
     reads: dict[str, set[str]] = defaultdict(set)
+    dax_by_table: dict[str, list[str]] = defaultdict(list)
     for role, table, dax in model.roles:
         roles[table].add(role)
+        dax_by_table[table].append(dax.strip())
         reads[table] |= refs.of(dax, table if table in model.tables else None)[2] - {
             table
         }
@@ -246,9 +248,10 @@ def _role_rows(model: Model) -> list[dict]:
         reason = f"row-level security in {len(roles[table])} role(s): decide the Unity Catalog row filter that replaces it"
         if reads[table]:
             reason += f"; reads {', '.join(sorted(reads[table]))}"
-        rows.append(
-            _row("rls_filter", table, "; ".join(sorted(roles[table])), "review", reason)
-        )
+        row = _row("rls_filter", table, "; ".join(sorted(roles[table])), "review", reason)
+        # Not a CSV column: the role filters' DAX, for the Source Layer Manager's value_access suggestions.
+        row["dax"] = "\n".join(sorted(set(dax_by_table[table])))
+        rows.append(row)
     return rows
 
 

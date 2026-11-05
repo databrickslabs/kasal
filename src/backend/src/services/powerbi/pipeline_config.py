@@ -12,7 +12,6 @@ import re
 import time
 from collections import defaultdict
 from typing import Any, cast
-from urllib.parse import urlparse
 
 __all__ = [
     "get_token",
@@ -56,6 +55,8 @@ if __package__:
     from .calculation_groups import derive_calculation_groups
     from .custom_function_resolution import derive_fx_otckpi_resolutions
     from .mapping_only_tables import derive_mapping_only_tables
+    from .fabric_definition import fetch_report_parts, follow_operation
+    from .http_retry import send_with_throttle_retry
     from .report_discovery import discover_report_id
     from .switch_decomposition import (
         _resolve_referenced_measure_dax,
@@ -92,6 +93,11 @@ else:
     _report_discovery_mod = _load_sibling(
         "kasal_report_discovery_cli", "report_discovery.py"
     )
+    _http_retry_mod = _load_sibling("kasal_http_retry_cli", "http_retry.py")
+    _fabric_mod = _load_sibling("kasal_fabric_definition_cli", "fabric_definition.py")
+    send_with_throttle_retry = _http_retry_mod.send_with_throttle_retry
+    fetch_report_parts = _fabric_mod.fetch_report_parts
+    follow_operation = _fabric_mod.follow_operation
     derive_switch_decompositions = _switch_mod.derive_switch_decompositions
     derive_geo_switch_decompositions = _switch_mod.derive_geo_switch_decompositions
     _resolve_referenced_measure_dax = _switch_mod._resolve_referenced_measure_dax
@@ -149,7 +155,10 @@ def fetch_tmdl_parts(
         "Content-Type": "application/json",
     }
     try:
-        resp = requests.post(url, headers=headers, timeout=180)  # fixed Fabric host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+        resp = send_with_throttle_retry(
+            lambda: requests.post(url, headers=headers, timeout=180),  # fixed Fabric host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+            "TMDL getDefinition",
+        )
         if resp.status_code == 200:
             return _definition_parts(resp)
         if resp.status_code == 202:
@@ -335,7 +344,11 @@ def _execute_queries(
 ) -> requests.Response:
     url = f"https://api.powerbi.com/v1.0/myorg/groups/{_pbi_id(workspace_id)}/datasets/{_pbi_id(dataset_id)}/executeQueries"
     body = {"queries": [{"query": query}], "serializerSettings": {"includeNulls": True}}
-    return requests.post(url, headers=_headers(token), json=body, timeout=60)  # fixed Power BI host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+    headers = _headers(token)
+    return send_with_throttle_retry(
+        lambda: requests.post(url, headers=headers, json=body, timeout=60),  # fixed Power BI host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+        "executeQueries",
+    )
 
 
 def _row_get(row: dict, col: str, default: str = "") -> str:
@@ -356,32 +369,13 @@ def _row_get(row: dict, col: str, default: str = "") -> str:
 def _fabric_operation_result(
     resp: requests.Response, headers: dict[str, str], poll_timeout: int, label: str
 ) -> requests.Response | None:
-    """Follow a Fabric 202 operation to its ``/result``. The poll carries the
-    Fabric token, so ``Location`` must be https on a Fabric host with no userinfo
-    or port — anything else reads as missing. ``None`` on failure or timeout."""
-    location = resp.headers.get("Location") or ""
-    parsed = urlparse(location)
-    host = parsed.hostname or ""
-    if not (
-        parsed.scheme == "https"
-        and host.endswith(".fabric.microsoft.com")
-        and parsed.netloc.lower() == host
-    ):
-        print(f"  {label}: 202 without a trusted Location")
+    """Follow a Fabric 202 operation to its ``/result`` (see ``fabric_definition``). ``None`` on failure,
+    untrusted Location or timeout, with the reason printed."""
+    try:
+        return follow_operation(resp, headers, poll_timeout, label)
+    except RuntimeError as error:  # FabricDefinitionError: failed, untrusted Location or timed out
+        print(f"  {error}")
         return None
-    for attempt in range(60):
-        time.sleep(2)
-        poll = requests.get(location, headers=headers, timeout=poll_timeout).json()  # Location pinned to https Fabric above — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
-        if poll.get("status") == "Succeeded":
-            print(f"  {label}: succeeded after {attempt + 1} poll(s)")
-            result = requests.get(location + "/result", headers=headers, timeout=60)  # Location pinned to https Fabric above — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
-            _check_response(result, f"{label} result")
-            return result
-        if poll.get("status") == "Failed":
-            print(f"  {label} failed: {poll.get('error', {})}")
-            return None
-    print(f"  {label}: timed out after 120s")
-    return None
 
 
 def _check_response(resp: Any, context: str = "") -> None:
@@ -901,11 +895,15 @@ def trigger_admin_scan(
 
     # Step 1: Trigger scan
     trigger_url = f"{base}/getInfo?datasetSchema=true&datasetExpressions=true"
-    resp = requests.post(
-        trigger_url,
-        headers=_headers(admin_token),
-        json={"workspaces": [workspace_id]},
-        timeout=30,
+    trigger_headers = _headers(admin_token)
+    resp = send_with_throttle_retry(
+        lambda: requests.post(
+            trigger_url,
+            headers=trigger_headers,
+            json={"workspaces": [workspace_id]},
+            timeout=30,
+        ),
+        "Admin scan trigger",
     )
     _check_response(resp, "API 3 (Admin Scan trigger)")
     scan_id = resp.json().get("id")
@@ -920,8 +918,11 @@ def trigger_admin_scan(
     while elapsed < max_wait:
         time.sleep(poll_interval)
         elapsed += poll_interval
-        status_resp = requests.get(  # fixed Power BI host, scan id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url
-            status_url, headers=_headers(admin_token), timeout=30
+        status_resp = send_with_throttle_retry(
+            lambda: requests.get(  # fixed Power BI host, scan id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url
+                status_url, headers=_headers(admin_token), timeout=30
+            ),
+            "Admin scan poll",
         )
         _check_response(status_resp, "API 3 (Admin Scan poll)")
         status = status_resp.json().get("status", "")
@@ -935,7 +936,10 @@ def trigger_admin_scan(
 
     # Step 3: Get results
     result_url = f"{base}/scanResult/{_pbi_id(scan_id)}"
-    result_resp = requests.get(result_url, headers=_headers(admin_token), timeout=60)  # fixed Power BI host, scan id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+    result_resp = send_with_throttle_retry(
+        lambda: requests.get(result_url, headers=_headers(admin_token), timeout=60),  # fixed Power BI host, scan id validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
+        "Admin scan result",
+    )
     _check_response(result_resp, "API 3 (Admin Scan result)")
     return cast("dict[str, Any]", result_resp.json())
 
@@ -1319,11 +1323,15 @@ def extract_report_definition(
     tenant_id/client_id/client_secret are provided, acquires a separate
     Fabric token. Otherwise tries with the PBI token (may fail).
 
-    Returns parsed report parts or None if unavailable.
+    A report the service cannot convert to PBIR is read in its legacy shape and
+    converted locally (``fabric_definition.fetch_report_parts``); the result then
+    carries a ``warnings`` list naming that fallback.
+
+    Returns ``{"definition": {"parts": [{path, payload}]}}`` (payloads decoded to
+    JSON where they are JSON) or None if unavailable.
     """
     import base64
 
-    # Get Fabric token if credentials provided
     fabric_token = token
     if tenant_id and client_id and client_secret:
         try:
@@ -1336,67 +1344,44 @@ def extract_report_definition(
         f"/reports/{_pbi_id(report_id)}/getDefinition"
     )
     try:
-        resp = requests.post(url, headers=_headers(fabric_token), timeout=120)  # fixed Fabric host, ids validated — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
-
-        # Handle 202 Accepted — long-running operation with polling
-        if resp.status_code == 202:
-            headers = _headers(fabric_token)
-            result = _fabric_operation_result(resp, headers, 30, "Report definition")
-            if result is None:
-                return None
-            data = result.json()
-        elif resp.status_code == 200:
-            data = resp.json()
-        else:
-            _check_response(resp, "API 4 (Report Definition)")
-            return None
-
-        # Parse response: {definition: {parts: [{path, payload, payloadType}]}}
-        definition = data.get("definition", data)
-        parts = definition.get("parts", [])
-
-        if not parts:
-            print(f"  Report definition: no parts found (keys: {list(data.keys())})")
-            return cast("dict | None", data)
-
-        # Decode base64 payloads into parsed JSON
-        decoded_parts = []
-        for part in parts:
-            path = part.get("path", "")
-            payload = part.get("payload", "")
-            payload_type = part.get("payloadType", "")
-
-            decoded = payload
-            if payload_type == "InlineBase64" and payload:
-                try:
-                    decoded = base64.b64decode(payload).decode("utf-8")
-                except Exception:
-                    decoded = payload
-
-            # Try to parse JSON payloads
-            parsed = decoded
-            if isinstance(decoded, str) and decoded.strip().startswith(("{", "[")):
-                try:
-                    parsed = json.loads(decoded)
-                except json.JSONDecodeError:
-                    parsed = decoded
-
-            decoded_parts.append(
-                {
-                    "path": path,
-                    "payload": parsed,
-                }
-            )
-
-        print(f"  Report definition: {len(decoded_parts)} parts")
-        paths = [p["path"] for p in decoded_parts[:10]]
-        print(f"  Parts: {paths}")
-
-        return {"definition": {"parts": decoded_parts}}
-
+        parts, used_legacy = fetch_report_parts(url, fabric_token)
     except Exception as e:
         print(f"  Report definition unavailable: {e}")
         return None
+
+    warnings: list[str] = []
+    if used_legacy:
+        warnings.append(
+            "Report definition: the service could not convert this report to PBIR; "
+            "its legacy definition was converted locally. Saving the report once in PBIR "
+            "format makes the definition exact."
+        )
+        print(f"  {warnings[0]}")
+    if not parts:
+        print("  Report definition: no parts found")
+        return {"definition": {"parts": []}, "warnings": warnings}
+
+    decoded_parts = []
+    for part in parts:
+        path = str(part.get("path", ""))
+        payload = part.get("payload", "")
+        decoded: object = payload
+        if part.get("payloadType") == "InlineBase64" and payload:
+            try:
+                decoded = base64.b64decode(str(payload)).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                decoded = payload
+        parsed = decoded
+        if isinstance(decoded, str) and decoded.strip().startswith(("{", "[")):
+            try:
+                parsed = json.loads(decoded)
+            except json.JSONDecodeError:
+                parsed = decoded
+        decoded_parts.append({"path": path, "payload": parsed})
+
+    print(f"  Report definition: {len(decoded_parts)} parts")
+    print(f"  Parts: {[p['path'] for p in decoded_parts[:10]]}")
+    return {"definition": {"parts": decoded_parts}, "warnings": warnings}
 
 
 def _extract_visual_synonym_map(report_def: dict | None) -> dict[str, dict]:

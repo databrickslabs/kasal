@@ -74,6 +74,7 @@ _OWN_KEYS = (
     "report_scope",
     "semantic_ignore",
     "semantic_proposals",
+    "scope_review_choices",
 )
 _DEFAULT_LLM = "databricks-claude-sonnet-4-5"
 
@@ -136,6 +137,13 @@ class UCMVDriftMonitorSchema(BaseModel):
         description=(
             'JSON list of {"object_type", "pbi_table", "name", "reason"}: objects that '
             "change without a change in meaning (e.g. a load-date parameter)."
+        ),
+    )
+    scope_review_choices: Optional[str] = Field(
+        None,
+        description=(
+            'JSON {bucket: "accept" | decision | "link"} for the scope review buckets; the '
+            "updated scope table comes back as semantic_sync.scope_csv."
         ),
     )
     semantic_proposals: Optional[bool] = Field(
@@ -393,4 +401,5 @@ class UCMVDriftMonitorTool(BaseTool):
             snapshot_table=str(get("semantic_snapshot_table") or ""),
             dataset_id=str(get("dataset_id") or ""),
             report_id=str(get("report_id") or ""),
+            review_choices=get("scope_review_choices"),
         )

@@ -64,46 +64,57 @@ permission errors before.
 
 ## Access control: a row filter on every MV
 
-An MV is refreshed and read under its owner's rights, and readers get SELECT on the MV
-only. The row-level security of the sources therefore does not reach the reader, and
-account-wide grants on the lake schema can be far too broad. Every MV, and every
-snapshot that holds business figures, gets a row filter function that checks the
-reader at query time. The functions live in one shared access schema.
+An MV is refreshed as its **owner** and read with SELECT on the MV only, so the access
+rules of its sources never reach the reader. Every MV, and every snapshot holding business
+figures, gets one of two shared functions from one access schema. Create them with the
+UCMV Source Layer Manager, `action=setup_access` (dry run until `confirm=true`): the
+mapping table `row_access_map` (account group -> field -> allowed value, `*` = all) and:
 
-Which function is a checkpoint per model (strategy phase). Compare with what the
-Power BI model restricts (roles in the model definition, user-identity functions in
-DAX):
+| Power BI | Row filter |
+|---|---|
+| no RLS | `object_access('<groups>')`: the reader must be in one of the `;`-separated account groups allowed to read the sources (PERMISSION_DENIED otherwise), then sees every row; `''` = everybody with SELECT |
+| RLS role on a column (region, company, country, ...) | `value_access('<field>', <column>)`: a reader sees a row if one of their groups has the row's value (or `*`) for that field in `row_access_map` |
 
-- **The model has no RLS:** an object-access check only. A reader with access to the
-  source schemas then sees what the report shows.
-- **The model has RLS:** a row filter on the column the role filters on, for example
-  company code or country.
-- **Row-level restriction although the model has none:** only when the user decides
-  so. It shows a restricted reader less than the report does, because rows without
-  that column reach only readers with all-data access.
-
-Pick the function per MV from the columns it has: a company-code column uses the company
-function, a country column the country function, neither the object-only function.
+Which function is a checkpoint per model (strategy phase): compare with what the Power BI
+model restricts (roles in the model definition, `USERPRINCIPALNAME()` / `USERNAME()` /
+`CUSTOMDATA()` in DAX). A model without RLS shows every row to everyone who can open the
+report. Mirror Power BI. The scope table has one `rls_filter` review row per filtered
+table, and the Source Layer Manager turns simple role filters into `value_access`
+suggestions. In its `row_filters` config the shorthand is
+`{"<table>": {"value_access": {"field": "region", "column": "region"}}}` or
+`{"<table>": {"object_access": "grp_a;grp_b"}}`.
 
 ```sql
 CREATE OR REPLACE MATERIALIZED VIEW <catalog>.<model_schema>.fact_orders
-  WITH ROW FILTER <catalog>.<access_schema>.company_access
-    ON ('<source_schema>=<source_object_id>', `company_code`)
+  WITH ROW FILTER <catalog>.<access_schema>.value_access ON ('region', region)
   AS SELECT ...
 ```
 
-- Constant arguments of a `ROW FILTER ... ON (...)` are limited to 255 characters each.
-  List the sources compactly, one entry per source schema, never one per table. A
-  longer list fails at CREATE; move it into a lookup table instead.
-- The filter can only be set at CREATE. Changing it means recreating the MV.
-- `CREATE OR REPLACE TABLE` drops a row filter from a snapshot, so the snapshot loader
-  must set it again after every load.
-- **Verify after deploy:** `DESCRIBE TABLE EXTENDED` shows a `Row Filter`. With
-  all-data access the view's count equals its backing table's count (the backing table
-  is owner-only and unfiltered).
-- **Test a restricted reader without a second account:** run the filter body with the
-  group check replaced by the groups of one role, and use the all-data role and one
-  restricted role as controls.
+- **The fact carries the RLS column.** Power BI RLS on a dimension filters the fact through
+  the relationship; in Unity Catalog a row filter on the dimension MV does NOT filter the
+  fact (the metric view's join keeps the fact rows). Put the column on the fact MV too and
+  filter both. The Source Layer Manager warns about every fact that a filtered dimension
+  does not reach.
+- **The customer's own rules.** If access rules already live in a table (a data-mesh rules
+  table, an entitlement export), point both functions at it instead of `row_access_map`,
+  keeping their names and arguments. Rule changes apply at once, without an MV refresh.
+  Where Unity Catalog ABAC policies are available, they can replace the functions.
+- **255-character limit:** each constant argument of `ROW FILTER ... ON (...)` holds at most
+  255 characters; a longer one fails at CREATE. Keep group lists short (one group per
+  audience, not per person); move longer lists into a table.
+- **Set only at CREATE:** changing a filter means recreating the MV.
+- **Readers need** `EXECUTE` on the functions and `SELECT` on `row_access_map`
+  (`setup_access` with `reader_groups` grants both): the filter runs as the reader.
+- **Snapshots:** `CREATE OR REPLACE TABLE` drops a row filter, so the snapshot loader
+  re-applies it after every load.
+- **Dropping an MV leaves its `__materialization_mat_<pipeline>_<name>_1` backing table**
+  (unfiltered data) and sometimes `event_log_<pipeline>`: drop them too. `CREATE OR REPLACE`
+  reuses the pipeline and leaves nothing behind.
+- **Verify after deploy:** `DESCRIBE TABLE EXTENDED` shows a `Row Filter`; as a reader with
+  `*` access the MV's count equals its backing table (owner-only, unfiltered).
+- **Test a restricted reader without a second account:** run the function body with
+  `is_account_group_member(x)` replaced by `x IN (<groups of one reader>)`; controls: a `*`
+  group sees everything, a one-value group exactly its rows.
 
 ## Snapshots (checkpoint: which tables)
 
@@ -407,6 +418,16 @@ Start with one question per period option of the report plus the headline KPIs, 
 differently from the examples. The user extends the set while testing. Expected SQL must be
 dynamic where the answer moves (the latest period with data), never hard-coded months.
 
+## Evaluation (objective quality score)
+
+Genie Space Sync `action=eval` asks every benchmark question through the Genie conversation
+API, compares the answer with the expected result (numeric check with tolerance, optionally an
+LLM judge), and reports pass / fail / error per question with latency and cost, plus a score.
+Optionally the same questions go to a Fabric data agent, side by side, to compare with what the
+business uses today. Run it after every tuning step and keep the score in the status file; with
+`statistics_only` the output carries verdicts, never answer values. A benchmark that also sits
+in the examples inflates the score: keep them apart.
+
 ## Deploy, verify, test
 
 1. Validate the space definition with the repo's validator.
@@ -419,4 +440,51 @@ dynamic where the answer moves (the latest period with data), never hard-coded m
    deployed views.
 5. **Checkpoint:** the user runs the benchmarks and the test questions. Fix from the reported
    descriptions, then run the consistency check again.
+"""
+
+
+_MODEL_README = """# <Model name> (`<model_schema>`)
+
+<One or two sentences: which Power BI report(s) this mirrors, for whom, and where users ask questions (Genie
+space).> Written for colleagues and business users; the working log of the translation is the status file. No
+KPI values in this page.
+
+| | |
+|---|---|
+| Power BI | report "<name>" (`<report id>`), semantic model `<id>`, workspace `<id>` |
+| Databricks | `<catalog>.<model_schema>`: <n> materialized views, <n> metric views, <n> snapshots |
+| Genie space | "<title>" (`<space id>`) |
+| Refresh | daily after the Power BI refresh at <time> |
+| Owner / contact | <team>, report owner <name> |
+
+## What it covers
+
+| Area (report page) | KPIs | Metric view |
+|---|---|---|
+| | | `ucm_<subject>` |
+
+Not covered: <pages, KPIs or linked reports left out, and why>.
+
+## Sources
+
+<Source tables by area; anything outside Databricks (snapshots of Power BI-only tables) and the follow-up to
+ingest it.>
+
+## Access
+
+<Who sees which rows. Default: the Power BI RLS mirrored with `value_access` / `object_access` on every MV.
+Describe every deviation and why.>
+
+## Differences from Power BI
+
+<Everything a user comparing numbers should know: documented deviations, renamed columns, logic the views carry
+instead of DAX, known model defects and what is returned instead.>
+
+## Using it in Genie
+
+<Time-intelligence rules (latest closed month, YTD, PY), the report's period options, a few example questions.>
+
+## Validation
+
+<Last reconciliation: share of measures aligned, open gap classes; last Genie evaluation score. Dates, no values.>
 """
