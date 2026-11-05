@@ -69,6 +69,19 @@ def build_source_layer(
     except Exception as e:  # module import must never break generation
         logger.warning("[source_layer] emitter import failed: %s", e, exc_info=True)
         return {}
+    from src.services.tools.ucmv_source_layer_utils.inputs import (
+        parse_row_filters,
+        row_filter_for,
+    )
+
+    try:
+        row_filters = parse_row_filters((config or {}).get("row_filters"))
+    except ValueError as e:
+        # A bad row_filters config is reported per view, never silently dropped.
+        return {
+            key: {"ddl": "", "todo_steps": [], "error": str(e)}
+            for key in (all_specs or {})
+        }
 
     calc_cfg = (config or {}).get("calculated_columns") or {}
     mq_exprs = mquery_expressions or {}
@@ -124,6 +137,9 @@ def build_source_layer(
             if isinstance(cc, dict) and cc.get("name")
         ]
         target = f"{_bq(catalog)}.{_bq(schema)}.`src_{to_snake_case(key)}`"
+        # A row filter exists only on materialized views (set at CREATE), so a
+        # filtered table is emitted as a MATERIALIZED VIEW.
+        row_filter = row_filter_for(key, row_filters)
         specs.append(
             ViewSpec(
                 table_name=key,
@@ -131,6 +147,8 @@ def build_source_layer(
                 source=source,
                 calc_columns=calc_columns,
                 comment=f"Source layer for PBI table {key} — read the metric view off this.",
+                materialized=row_filter is not None,
+                row_filter=row_filter,
             )
         )
     if not specs:

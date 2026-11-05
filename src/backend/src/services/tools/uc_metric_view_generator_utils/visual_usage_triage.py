@@ -28,6 +28,24 @@ class VisualUsageResult:
     pruned: int
 
 
+def stamp_page_filters(pipeline: MetricViewPipeline) -> int:
+    """Copy the report scope's per-measure page filters (config
+    ``page_filters_by_measure``: PBI measure -> [{table, column, values}]) onto the
+    measures, so the reconciliation mapping draft repeats them as ``extra_filter``."""
+    config = getattr(pipeline, "config", None)
+    by_measure = config.get("page_filters_by_measure") if isinstance(config, dict) else None
+    if not isinstance(by_measure, dict) or not by_measure:
+        return 0
+    stamped = 0
+    for spec in (getattr(pipeline, "all_specs", None) or {}).values():
+        for measure in list(spec.measures) + list(spec.untranslatable):
+            filters = by_measure.get(measure.original_name)
+            if isinstance(filters, list) and filters:
+                measure.page_filters = [f for f in filters if isinstance(f, dict)]
+                stamped += 1
+    return stamped
+
+
 def apply_visual_usage(
     pipeline: MetricViewPipeline,
     visual_usage_raw: object,
@@ -39,6 +57,7 @@ def apply_visual_usage(
     Mutates ``pipeline.all_specs`` in place, so it must run before emission to reach
     the YAML comment, migration report, and JSON output alike.
     """
+    stamp_page_filters(pipeline)
     annotated = 0
     # Kept so the none_allocated catch-all can annotate its own (freshly
     # translated) measures with the same visual reference.

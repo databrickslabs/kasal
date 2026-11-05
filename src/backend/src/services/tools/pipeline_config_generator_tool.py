@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, Optional, Type
 
+import requests
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
@@ -20,6 +21,12 @@ from src.services.tools.metric_view_utils.mquery_handoff import (
 from src.services.tools.metric_view_utils.utils import run_async as _run_async
 from src.services.tools.pipeline_config_generator_utils.dax_enrichment import (
     enrich_config_from_dax,
+)
+from src.services.tools.pipeline_config_generator_utils.scope_outputs import (
+    parse_tracked_tables,
+    report_scope,
+    semantic_snapshot,
+    tracked_rows,
 )
 from src.services.tools.pipeline_config_generator_utils.inputs import (
     ConfigGenInputs,
@@ -247,6 +254,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             # keys the PBI APIs can't (filter-set values, fact-join strategy).
             "warehouse_id",
             "databricks_host",
+            # Small PBI tables whose rows are semantics (semantic snapshot).
+            "tracked_tables",
         )
         default_config = {}
         for key in config_keys:
@@ -943,10 +952,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             "reconciliation_mapping_scaffolds": rec_scaffolds,
             # {original_measure_name: [{page, visual_type, role}, ...]}
             "visual_usage_index": run.visual_usage_index,
-            # Reachability closure → draft scope table (keep/snapshot/fold/genie/drop/n/a).
-            "report_scope": self._report_scope(run),
-            # Hashed semantic objects: the UCMV Drift Monitor diffs two of these.
-            "semantic_snapshot": self._semantic_snapshot(run),
+            # Reachability scope draft + hashed semantic snapshot (drift monitor).
+            **self._scope_outputs(run, config),
             # {table: [raw columns drawn in a visual with no named measure behind them]}
             "implicit_column_measures": implicit_column_measures,
             "summary": {
@@ -1014,55 +1021,21 @@ class PipelineConfigGeneratorTool(BaseTool):
                 exc_info=True,
             )
 
-    @staticmethod
-    def _report_scope(run: _ConfigGenRun) -> dict:
-        """What a viewer can reach and what it needs (``services/powerbi/scope``).
+    def _scope_outputs(self, run: _ConfigGenRun, config: dict) -> dict:
+        """``report_scope`` + ``semantic_snapshot`` (``pipeline_config_generator_utils/scope_outputs``)."""
+        from src.services.powerbi.pipeline_config import _execute_queries
 
-        Built from the TMDL and PBIR parts this run already fetched; empty when
-        either is missing (no report → every measure would read as unreached).
-        """
-        if not run.tmdl_parts or not run.report_def:
-            return {}
-        try:
-            from src.services.powerbi.scope import (
-                build_report_scope,
-                relationships_from_rows,
-            )
+        def dax(query: str) -> requests.Response:
+            return _execute_queries(run.token, run.workspace_id, run.dataset_id, query)
 
-            rels = (
-                relationships_from_rows(run.relationships)
-                if run.relationships
-                else None
-            )
-            scope = build_report_scope(
-                run.tmdl_parts, run.report_def, relationships=rels
-            )
-            if scope:
-                logger.info(
-                    "[PipelineConfigGen]   → report scope: %s", scope["summary"]
-                )
-            return scope
-        except (AttributeError, KeyError, TypeError, ValueError) as e:
-            logger.warning(
-                "[PipelineConfigGen] Report scope failed: %s", e, exc_info=True
-            )
-            return {}
-
-    @staticmethod
-    def _semantic_snapshot(run: _ConfigGenRun) -> dict:
-        """Every semantic object of the model (+ report), hashed: the UCMV Drift
-        Monitor compares two of these to find what changed in Power BI."""
-        if not run.tmdl_parts:
-            return {}
-        try:
-            from src.services.powerbi.scope import relationships_from_rows
-            from src.services.powerbi.scope.semantic_sync import build_snapshot
-
-            rels = relationships_from_rows(run.relationships) if run.relationships else None
-            return build_snapshot(run.tmdl_parts, run.report_def, relationships=rels)
-        except (AttributeError, KeyError, TypeError, ValueError) as e:
-            logger.warning("[PipelineConfigGen] Semantic snapshot failed: %s", e, exc_info=True)
-            return {}
+        tables = parse_tracked_tables(self._default_config.get("tracked_tables"))
+        tracked = tracked_rows(tables, dax, run.warnings) if tables else None
+        scope = report_scope(
+            run.tmdl_parts, run.report_def, run.relationships, config,
+            scan_result=run.scan_result, dataset_id=run.dataset_id, report_id=run.report_id or "",
+        )  # fmt: skip
+        snapshot = semantic_snapshot(run.tmdl_parts, run.report_def, run.relationships, tracked=tracked)
+        return {"report_scope": scope, "semantic_snapshot": snapshot}
 
     def _implicit_column_measures(
         self, run: _ConfigGenRun, config: dict, ucmv_measures: list[dict]

@@ -14,7 +14,8 @@ import math
 from collections.abc import Sequence
 
 from ..raw_fields import DimensionValue, RawMap, as_list, as_map, str_or
-from .mapping import Measure, UCMVMapping
+from .context_labels import ContextLabels
+from .mapping import Binding, Measure, UCMVMapping
 from .periods import normalize_snapshot_date
 
 # The separator every SUMMARIZECOLUMNS body is joined with.
@@ -148,29 +149,62 @@ def build_dimension_scope_query(mapping: UCMVMapping, dimension_name: str) -> st
     return f"EVALUATE CALCULATETABLE(DISTINCT('{table}'[{column}]), '{fact}')"
 
 
+def _time_table(binding: Binding) -> str:
+    return binding.time_dimension.pbi_table or binding.pbi_fact_table
+
+
+def _time_group_refs(binding: Binding) -> list[str]:
+    """The PBI grouping column(s) of the period: the period column, or the
+    calendar's year and month columns (month grain, pbi_year_column)."""
+    td = binding.time_dimension
+    table = _time_table(binding)
+    if td.pbi_year_month:
+        return [
+            f"'{table}'[{td.pbi_year_column}]",
+            f"'{table}'[{td.pbi_month_column}]",
+        ]
+    return [f"'{table}'[{td.pbi_column}]"]
+
+
+def _time_filter_lines(binding: Binding, period: str) -> list[str]:
+    """TREATAS filter(s) that select one period: on the period column, or on the
+    year and month numbers of a "YYYY0MM" key."""
+    td = binding.time_dimension
+    table = _time_table(binding)
+    if td.pbi_year_month:
+        return [
+            f"TREATAS({{{int(str(period)[:4])}}}, '{table}'[{td.pbi_year_column}])",
+            f"TREATAS({{{int(str(period)[4:])}}}, '{table}'[{td.pbi_month_column}])",
+        ]
+    return [f"TREATAS({{\"{period}\"}}, '{table}'[{td.pbi_column}])"]
+
+
 def build_direct_query(
     mapping: UCMVMapping,
     dimension_name: str,
     dimension_values: Sequence[DimensionValue],
     measures: Sequence[Measure],
+    period: str | None = None,
 ) -> str | None:
     """One combined SUMMARIZECOLUMNS call for plain direct-shaped measures (no
-    ``pbi_extra_group_by``). Returns None when there are none."""
+    ``pbi_extra_group_by``). Returns None when there are none. ``period`` limits
+    the query to one period (a chunk of a query that timed out)."""
     if not measures:
         return None
     binding = mapping.binding
     dim = binding.dimensions[dimension_name]
     dim_values_sql = _dax_set_literal(dimension_values) if dimension_values else None
-    time_table = binding.time_dimension.pbi_table or binding.pbi_fact_table
 
     lines = [
         f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]",
-        f"'{time_table}'[{binding.time_dimension.pbi_column}]",
+        *_time_group_refs(binding),
     ]
     if dim_values_sql:
         lines.append(
             f"TREATAS({{{dim_values_sql}}}, '{dim.pbi_dim_table}'[{dim.pbi_dim_column}])"
         )
+    if period is not None:
+        lines.extend(_time_filter_lines(binding, period))
     lines.extend(_extra_filter_lines(measures))
     for m in measures:
         lines.append(f'"{m.ucmv_measure}", {measure_dax_expr(m)}')
@@ -207,12 +241,18 @@ def _month_of_period(period: str) -> int:
     return int(str(period)[-3:])
 
 
-def _context_value(ref: str, period: str) -> str:
+def _context_value(ref: str, period: str, labels: ContextLabels | None) -> str:
+    """DAX literal of a context column for one period: the label the metric view
+    has for that period (``labels``), or the month number of the period for
+    ``C_Dim_Calendar[Month]``."""
+    period_labels = (labels or {}).get(str(period), {})
+    if ref in period_labels:
+        return _dax_literal(period_labels[ref])
     if ref == "C_Dim_Calendar[Month]":
         return str(_month_of_period(period))
     raise NotImplementedError(
-        f"No value-derivation rule for extra_group_by column {ref!r} — only "
-        "'C_Dim_Calendar[Month]' is implemented; add a case to _context_value()."
+        f"No value for extra_group_by column {ref!r} in period {period}: map it with "
+        "extra_group_by: [{pbi: ..., ucmv: ...}] or use 'C_Dim_Calendar[Month]'."
     )
 
 
@@ -222,35 +262,41 @@ def build_direct_context_queries(
     dimension_values: Sequence[DimensionValue],
     periods: Sequence[str],
     measures: Sequence[Measure],
+    context_labels: ContextLabels | None = None,
 ) -> list[tuple[str, str]]:
     """One SUMMARIZECOLUMNS call PER PERIOD for direct measures whose DAX needs a
     context column in single-value filter context (``pbi_extra_group_by``).
-    Filtering that column via TREATAS to a single derived value, one period at a
-    time, avoids the cross-join a naive grouping would produce. Returns a list of
-    (dax_query, period) tuples."""
+    Filtering that column via TREATAS to a single value, one period at a time,
+    avoids the cross-join a naive grouping would produce. A period that lacks a
+    label for one of the measures' label columns is not queried (see
+    ``context_labels``). Returns a list of (dax_query, period) tuples."""
     if not measures or not periods:
         return []
     binding = mapping.binding
     dim = binding.dimensions[dimension_name]
     dim_values_sql = _dax_set_literal(dimension_values) if dimension_values else None
-    time_table = binding.time_dimension.pbi_table or binding.pbi_fact_table
     extra_refs = sorted({ref for m in measures for ref in (m.pbi_extra_group_by or [])})
+    label_refs = sorted(
+        {ref for m in measures for ref in (m.ucmv_context_columns or {})}
+    )
 
     queries: list[tuple[str, str]] = []
     for period in periods:
+        if any(
+            ref not in (context_labels or {}).get(str(period), {}) for ref in label_refs
+        ):
+            continue  # no calendar label in the metric view for this period
         lines = [f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]"]
         if dim_values_sql:
             lines.append(
                 f"TREATAS({{{dim_values_sql}}}, '{dim.pbi_dim_table}'[{dim.pbi_dim_column}])"
             )
-        lines.append(
-            f"TREATAS({{\"{period}\"}}, '{time_table}'[{binding.time_dimension.pbi_column}])"
-        )
+        lines.extend(_time_filter_lines(binding, period))
         for ref in extra_refs:
             table, _, column = ref.partition("[")
             column = column.rstrip("]")
             lines.append(
-                f"TREATAS({{{_context_value(ref, period)}}}, '{table}'[{column}])"
+                f"TREATAS({{{_context_value(ref, period, context_labels)}}}, '{table}'[{column}])"
             )
         lines.extend(_extra_filter_lines(measures))
         for m in measures:
@@ -267,15 +313,16 @@ def build_switch_queries(
     dimension_name: str,
     dimension_values: Sequence[DimensionValue],
     measures: Sequence[Measure],
+    period: str | None = None,
 ) -> list[tuple[str, list[Measure], str, str | None]]:
     """One SUMMARIZECOLUMNS call per distinct (selector table/column[, selector2],
     pbi_measure, extra_filter) combination among switch measures — grouped BY the
-    selector column(s) with TREATAS restricted to the needed values. Returns a
+    selector column(s) with TREATAS restricted to the needed values. ``period``
+    limits every query to one period (a chunk of a timed-out query). Returns a
     list of (dax_query, group_measures, selector_column, selector2_column_or_None)."""
     binding = mapping.binding
     dim = binding.dimensions[dimension_name]
     dim_values_sql = _dax_set_literal(dimension_values) if dimension_values else None
-    time_table = binding.time_dimension.pbi_table or binding.pbi_fact_table
 
     groups: dict[tuple[object, ...], list[Measure]] = {}
     for m in measures:
@@ -286,6 +333,7 @@ def build_switch_queries(
             m.switch_selector2_column,
             m.pbi_measure,
             _extra_filter_key(m),
+            m.pbi_chunk_by,
         )
         groups.setdefault(key, []).append(m)
 
@@ -297,11 +345,12 @@ def build_switch_queries(
         sel2_col,
         pbi_measure,
         _,
+        _chunk_by,
     ), group_measures in groups.items():
         selector_values = sorted({str(m.switch_selector_value) for m in group_measures})
         lines = [
             f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]",
-            f"'{time_table}'[{binding.time_dimension.pbi_column}]",
+            *_time_group_refs(binding),
             f"'{sel_table}'[{sel_col}]",
         ]
         if sel2_table:
@@ -310,6 +359,8 @@ def build_switch_queries(
             lines.append(
                 f"TREATAS({{{dim_values_sql}}}, '{dim.pbi_dim_table}'[{dim.pbi_dim_column}])"
             )
+        if period is not None:
+            lines.extend(_time_filter_lines(binding, period))
         lines.append(
             f"TREATAS({{{_dax_set_literal(selector_values)}}}, '{sel_table}'[{sel_col}])"
         )

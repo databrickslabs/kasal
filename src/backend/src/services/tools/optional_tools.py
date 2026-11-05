@@ -59,10 +59,13 @@ if TYPE_CHECKING:
     from .uc_metric_view_generator_tool import (
         UCMetricViewGeneratorTool as _UCMetricViewGeneratorTool,
     )
+    from .genie_space_sync_tool import GenieSpaceSyncTool as _GenieSpaceSyncTool
     from .ucmv_drift_monitor_tool import UCMVDriftMonitorTool as _UCMVDriftMonitorTool
     from .ucmv_genie_config_generator_tool import (
         UCMVGenieConfigGeneratorTool as _UCMVGenieConfigGeneratorTool,
     )
+    from .ucmv_reevaluation_tool import UCMVReevaluationTool as _UCMVReevaluationTool
+    from .ucmv_source_layer_tool import UCMVSourceLayerTool as _UCMVSourceLayerTool
 
 
 PerplexitySearchTool: Optional[type[_PerplexitySearchTool]]
@@ -232,3 +235,26 @@ try:
 except ImportError as e:
     UCMVDriftMonitorTool = None
     logging.warning("Could not import %s: %s", "UCMVDriftMonitorTool", e)
+
+# Genie Space Sync Tool (Genie space as code + consistency check)
+GenieSpaceSyncTool: Optional[type[_GenieSpaceSyncTool]]
+try:
+    from .genie_space_sync_tool import GenieSpaceSyncTool
+except ImportError as e:
+    GenieSpaceSyncTool = None
+    logging.warning("Could not import %s: %s", "GenieSpaceSyncTool", e)
+
+UCMVReevaluationTool: Optional[type[_UCMVReevaluationTool]]
+try:
+    from .ucmv_reevaluation_tool import UCMVReevaluationTool
+except ImportError as e:
+    UCMVReevaluationTool = None
+    logging.warning("Could not import %s: %s", "UCMVReevaluationTool", e)
+
+# UCMV Source Layer Manager (materialized views, snapshots, refresh, count check)
+UCMVSourceLayerTool: Optional[type[_UCMVSourceLayerTool]]
+try:
+    from .ucmv_source_layer_tool import UCMVSourceLayerTool
+except ImportError as e:
+    UCMVSourceLayerTool = None
+    logging.warning("Could not import %s: %s", "UCMVSourceLayerTool", e)

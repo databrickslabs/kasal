@@ -27,12 +27,14 @@ from typing import Optional, TypedDict
 
 import yaml
 
+from src.services.powerbi.scope.scope_check import check_scope
 from src.services.powerbi.scope.semantic_sync import (
     compare,
     ignore_rules,
     with_ignores,
     with_impact,
 )
+from src.services.powerbi.scope.parts import arr, obj
 from src.services.tools.metric_view_utils.dax_condition_sql import _sql_str_literal
 from src.services.tools.metric_view_utils.drift.baseline import split_full_name
 from src.services.tools.metric_view_utils.drift.semantic_proposals import (
@@ -53,6 +55,7 @@ class SyncReport(TypedDict, total=False):
     counts: dict[str, object]
     warnings: list[str]
     snapshot: dict[str, object]
+    scope_problems: list[str]
 
 
 def _parse_json(raw: object) -> object:
@@ -130,6 +133,24 @@ def _deployed_specs(drift_report: Mapping[str, object]) -> dict[str, dict]:
     return specs
 
 
+def _object_names(snapshot: Mapping[str, object], object_type: str, key: str) -> set[str]:
+    objects = [obj(o) for o in arr(snapshot, "objects")]
+    return {str(o.get(key)) for o in objects if o.get("object_type") == object_type}
+
+
+def _deployed_measures(drift_report: Mapping[str, object]) -> set[str] | None:
+    """``<view>.<measure>`` of the monitored views; None when no view was read."""
+    specs = _deployed_specs(drift_report)
+    if not specs:
+        return None
+    return {
+        f"{view}.{m.get('name')}"
+        for view, spec in specs.items()
+        for m in spec.get("measures") or []
+        if isinstance(m, dict)
+    }
+
+
 def run_semantic_sync(
     current: Mapping[str, object] | None,
     *,
@@ -176,6 +197,13 @@ def run_semantic_sync(
 
     draft = scope_rows(draft_scope)
     signed_off = scope_rows(scope)
+    if signed_off:
+        out["scope_problems"] = check_scope(
+            signed_off,
+            deployed_measures=_deployed_measures(drift_report or {}),
+            model_measures=_object_names(current, "measure", "name"),
+            model_tables=_object_names(current, "table", "pbi_table"),
+        )
     if not signed_off and draft:
         out["warnings"].append(
             "no signed-off report_scope given: changes are routed by today's scope draft"

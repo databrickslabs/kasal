@@ -41,6 +41,7 @@ Typical caller flow::
 from __future__ import annotations
 
 import logging
+import re
 import textwrap
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
@@ -156,6 +157,95 @@ class CalcColumn:
     comment: Optional[str] = None
 
 
+#: Unity Catalog limit on one constant argument of a row filter.
+ROW_FILTER_CONSTANT_MAX_CHARS = 255
+_ROW_FILTER_FUNCTION_PART = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
+_ROW_FILTER_COLUMN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@dataclass
+class RowFilter:
+    """A row filter: ``WITH ROW FILTER <function> ON (constants..., columns...)``.
+
+    ``function`` is the fully qualified SQL function ``catalog.schema.fn``
+    (parts may be back-quoted). ``constants`` are literal arguments passed
+    first (e.g. a source list); ``columns`` are passed last, in order.
+    """
+
+    function: str
+    columns: List[str] = field(default_factory=list)
+    constants: List[object] = field(default_factory=list)
+
+
+def row_filter_problems(row_filter: RowFilter) -> List[str]:
+    """Every reason the row filter cannot be emitted; empty when it is valid.
+
+    Constant values are never echoed back (they can be sensitive); problems
+    name the constant by position and length only.
+    """
+    problems: List[str] = []
+    parts = [p.strip("`") for p in row_filter.function.strip().split(".")]
+    if len(parts) != 3 or not all(_ROW_FILTER_FUNCTION_PART.match(p) for p in parts):
+        problems.append(
+            f"function {row_filter.function!r} must be catalog.schema.function"
+        )
+    if not row_filter.columns and not row_filter.constants:
+        problems.append("a row filter needs at least one column or constant argument")
+    for column in row_filter.columns:
+        if not _ROW_FILTER_COLUMN.match(column):
+            problems.append(f"column {column!r} is not a plain identifier")
+    for index, constant in enumerate(row_filter.constants):
+        if isinstance(constant, bool) or isinstance(constant, (int, str)):
+            text = constant if isinstance(constant, str) else repr(constant)
+            if len(text) > ROW_FILTER_CONSTANT_MAX_CHARS:
+                problems.append(
+                    f"constant #{index + 1} is {len(text)} characters; Unity Catalog "
+                    f"allows at most {ROW_FILTER_CONSTANT_MAX_CHARS} per row-filter argument"
+                )
+        else:
+            problems.append(
+                f"constant #{index + 1} must be a string, integer or boolean"
+            )
+    return problems
+
+
+def _row_filter_function_sql(row_filter: RowFilter) -> str:
+    return ".".join(
+        "`" + part.strip("`") + "`" for part in row_filter.function.strip().split(".")
+    )
+
+
+def row_filter_arguments_sql(row_filter: RowFilter) -> str:
+    """The ``(constants..., columns...)`` argument list, validated first."""
+    problems = row_filter_problems(row_filter)
+    if problems:
+        raise ValueError("invalid row filter: " + "; ".join(problems))
+    args = [_sql_lit(c) for c in row_filter.constants]
+    args += [f"`{c}`" for c in row_filter.columns]
+    return ", ".join(args)
+
+
+def row_filter_clause_sql(row_filter: RowFilter) -> str:
+    """``WITH ROW FILTER fn ON (...)`` for a CREATE MATERIALIZED VIEW header."""
+    return (
+        f"WITH ROW FILTER {_row_filter_function_sql(row_filter)} "
+        f"ON ({row_filter_arguments_sql(row_filter)})"
+    )
+
+
+def alter_row_filter_sql(table_fqn: str, row_filter: RowFilter) -> str:
+    """``ALTER TABLE ... SET ROW FILTER`` for an existing table (snapshots).
+
+    CREATE OR REPLACE TABLE drops a row filter, so loaders call this after
+    every load.
+    """
+    return (
+        f"ALTER TABLE {table_fqn} SET ROW FILTER "
+        f"{_row_filter_function_sql(row_filter)} "
+        f"ON ({row_filter_arguments_sql(row_filter)})"
+    )
+
+
 #: Union type covering all M-step dataclasses.
 MStep = Union[FilterStep, ReplaceStep, DeduplicateStep, AppendRowsStep, GroupByStep]
 
@@ -173,6 +263,7 @@ class ViewSpec:
     or_replace: bool = True
     materialized: bool = False
     partition_by: Optional[List[str]] = None
+    row_filter: Optional[RowFilter] = None
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +334,7 @@ def _values_clause(columns: list[tuple], rows: list[dict[str, object]]) -> str:
 
     rows_sql = ",\n".join(_row(r) for r in rows)
     return (
-        f"SELECT\n    {col_casts}\n"
-        f"FROM VALUES\n"
-        f"{rows_sql}\n"
-        f"  AS _appended({col_names})"
+        f"SELECT\n    {col_casts}\nFROM VALUES\n{rows_sql}\n  AS _appended({col_names})"
     )
 
 
@@ -322,9 +410,7 @@ class _Builder:
         expr = f"replace({col}, {_sql_lit(step.old_value)}, {_sql_lit(step.new_value)})"
         # EXCEPT + re-add uses Databricks SELECT * EXCEPT (...) syntax
         body = (
-            f"SELECT * EXCEPT ({col}),\n"
-            f"       {expr} AS {col}\n"
-            f"FROM {self._current()}"
+            f"SELECT * EXCEPT ({col}),\n       {expr} AS {col}\nFROM {self._current()}"
         )
         self._ctes.append((alias, body))
 
@@ -339,7 +425,7 @@ class _Builder:
             f"         ORDER BY {step.order_expr}) AS _rn\n"
             f"FROM {self._current()}"
         )
-        body_dedup = f"SELECT * EXCEPT (_rn)\n" f"FROM {ranked}\n" f"WHERE _rn = 1"
+        body_dedup = f"SELECT * EXCEPT (_rn)\nFROM {ranked}\nWHERE _rn = 1"
         self._ctes.append((ranked, body_ranked))
         self._ctes.append((deduped, body_dedup))
 
@@ -350,7 +436,7 @@ class _Builder:
             body = f"SELECT *\nFROM {self._current()}"
         else:
             values_sql = _values_clause(step.columns, step.rows)
-            body = f"SELECT *\nFROM {self._current()}\n" f"UNION ALL\n" f"{values_sql}"
+            body = f"SELECT *\nFROM {self._current()}\nUNION ALL\n{values_sql}"
         self._ctes.append((alias, body))
 
     def _groupby(self, step: GroupByStep) -> None:
@@ -360,11 +446,7 @@ class _Builder:
             f"{expr} AS {col}" for col, expr in step.aggregations.items()
         )
         select_list = group_list + (f", {agg_items}" if agg_items else "")
-        body = (
-            f"SELECT {select_list}\n"
-            f"FROM {self._current()}\n"
-            f"GROUP BY {group_list}"
-        )
+        body = f"SELECT {select_list}\nFROM {self._current()}\nGROUP BY {group_list}"
         self._ctes.append((alias, body))
 
     # ------------------------------------------------------------------
@@ -423,6 +505,13 @@ class _Builder:
             header += f"\n  PARTITIONED BY ({', '.join(self._spec.partition_by)})"
         if self._spec.comment:
             header += f"\n  COMMENT {_sql_lit(self._spec.comment)}"
+        if self._spec.row_filter is not None:
+            if not self._spec.materialized:
+                raise ValueError(
+                    "a row filter needs a MATERIALIZED view (set materialized=True); "
+                    "Unity Catalog row filters are set at CREATE"
+                )
+            header += f"\n  {row_filter_clause_sql(self._spec.row_filter)}"
         header += "\nAS"
 
         return f"{header}\n{body}"

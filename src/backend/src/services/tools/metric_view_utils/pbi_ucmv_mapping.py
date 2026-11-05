@@ -340,7 +340,9 @@ def _emit_measure_entry(m: TranslationResult) -> list[str]:
     # raw_column / direct measures).  Composite operands already carry their
     # own per-operand filters above; this covers the flat measure case only.
     if info["kind"] in ("raw_column", "direct"):
-        ef = info.get("extra_filter")
+        # The decomposition's own filter wins; else the page filters the report
+        # scope found on every page drawing this measure.
+        ef = info.get("extra_filter") or m.page_filters
         if ef:
             _emit_filter_block(lines, ef, indent="    ")
 

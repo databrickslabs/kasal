@@ -650,10 +650,77 @@ def parse_window_sentinel(sentinel: str) -> dict:
     }
 
 
+# ── NORM.S.DIST / NORM.S.INV (standard normal CDF, PDF, quantile) ─────────────
+_NORM_S_CALL = re.compile(r"\s*NORM\.S\.(DIST|INV)\s*\(", re.IGNORECASE)
+_TRUE_LITERALS = frozenset({"TRUE", "TRUE()", "1"})
+_FALSE_LITERALS = frozenset({"FALSE", "FALSE()", "0"})
+
+
+def _call_spans_whole_text(text: str, open_idx: int) -> bool:
+    """True when the parenthesis opened at ``open_idx`` closes at the last character,
+    i.e. the whole text is ONE call (``NORM.S.INV(a) + NORM.S.INV(b)`` is not)."""
+    depth = 0
+    in_string = False
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if ch == '"':
+            in_string = not in_string
+        elif not in_string and ch == "(":
+            depth += 1
+        elif not in_string and ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i == len(text) - 1
+    return False
+
+
+def match_norm_s(dax: str, name: str) -> dict | None:
+    """Whole-measure ``NORM.S.DIST(<z>, TRUE|FALSE)`` or ``NORM.S.INV(<p>)``."""
+    text = dax.strip()
+    m = _NORM_S_CALL.match(text)
+    if not m or not _call_spans_whole_text(text, m.end() - 1):
+        return None
+    args = _split_top_args(text[m.end() : -1])
+    if m.group(1).upper() == "INV":
+        return {"fn": "INV", "arg": args[0].strip()} if len(args) == 1 else None
+    if len(args) != 2:
+        return None
+    flag = args[1].strip().upper()
+    if flag in _TRUE_LITERALS:
+        kind = "CDF"
+    elif flag in _FALSE_LITERALS:
+        kind = "PDF"
+    else:
+        kind = None  # non-literal cumulative flag: reported by the translator
+    return {"fn": "DIST", "arg": args[0].strip(), "kind": kind}
+
+
+def translate_norm_s(
+    match: dict, dax: str, table_key: str, translator: DaxTranslator
+) -> tuple[str | None, str]:
+    """Expand NORM.S.* inline (see dax_normal_sql). The argument goes through the same
+    scalar resolver as FORMAT, so aggregates and DIVIDE arguments translate; anything
+    else returns a reason and the measure stays untranslatable."""
+    from .dax_normal_sql import normal_cdf_sql, normal_inv_sql, normal_pdf_sql
+
+    label = f"NORM.S.{match['fn']}"
+    if match["fn"] == "DIST" and match["kind"] is None:
+        return None, f"{label} cumulative argument must be a literal TRUE or FALSE"
+    inner = translator._resolve_scalar_inner(match["arg"])
+    if not inner:
+        return None, f"{label} argument not translatable: {match['arg']}"
+    if match["fn"] == "INV":
+        return normal_inv_sql(inner), ""
+    if match["kind"] == "CDF":
+        return normal_cdf_sql(inner), ""
+    return normal_pdf_sql(inner), ""
+
+
 # Registered (name, match_fn, translate_fn) triples in priority order, consumed by
 # DaxTranslator._register_patterns and prepended before the generic catch-alls.
 # translate_fn takes (match, dax, table_key, translator).
 DEFECT_PATTERNS = [
+    ("norm_s_dist_inv", match_norm_s, translate_norm_s),
     (
         "otc_code_ratio",
         match_calc_measure_code_ratio,

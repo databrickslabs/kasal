@@ -26,6 +26,28 @@ Five resolvable ``pbi_kind`` values:
 
 ``unresolved`` measures carry a ``raw_hint`` and are excluded from querying.
 
+Time dimension (``time_dimension``):
+
+- ``grain``: ``month`` | ``quarter`` | ``year`` | ``snapshot`` | ``week``. Week
+  keys ``YYYYWW``, ``WW.YYYY`` and ``YYYY-WW`` all compare as ``YYYYWW``; every
+  week before the view's latest (open) week is compared.
+- ``pbi_column`` (the PBI period column), or with month grain
+  ``pbi_year_column`` + ``pbi_month_column`` (integer calendar columns; the
+  period key becomes ``YYYY0MM``). Needed by time-intelligence measures that
+  come back empty under a fiscper grouping.
+- ``year_filter_column``: the UCMV column the reference years filter on.
+- ``ucmv.mode`` / ``ucmv.name`` / ``ucmv.from``; ``ucmv.group_by`` (columns
+  grouped but not selected, e.g. a window order that must be 1:1 with the
+  period); ``ucmv.period_format: date_to_fiscper`` (a DATE or ``YYYY-MM``
+  period column becomes ``YYYY0MM`` in SQL).
+
+Measure options: ``value_format`` also takes ``raw_number_hundred`` (a PBI
+number on the 0-100 scale for a UCMV fraction; divided by 100);
+``pbi_chunk_by: period | member`` (split a heavy PBI query without trying it
+whole first); ``extra_group_by`` entries are ``"Table[Column]"`` or
+``{pbi: "Table[Column]", ucmv: column}`` for a calendar label the measure reads
+(a period whose label is NULL in the metric view is not queried or compared).
+
 Loader normalisation: ``raw_column``/composite operands may arrive either as a
 combined ``pbi_column: "Table[Column]"`` (reference convention) or as separate
 ``pbi_table`` + bare ``pbi_column`` (Kasal's emitter convention). Both are
@@ -62,10 +84,19 @@ _VALID_PBI_KINDS = {
     "composite",
     "unresolved",
 }
-_VALID_VALUE_FORMATS = {"raw_number", "percent_string", "percent_string_unscaled"}
+_VALID_VALUE_FORMATS = {
+    "raw_number",
+    "raw_number_hundred",
+    "percent_string",
+    "percent_string_unscaled",
+}
 _VALID_TOLERANCE_KINDS = {"absolute", "relative"}
-_VALID_GRAINS = {"month", "quarter", "year", "snapshot"}
+_VALID_GRAINS = {"month", "quarter", "year", "snapshot", "week"}
 _VALID_TIME_MODES = {"column", "reconstruct"}
+# Per-measure split of a PBI query that times out (see pbi_retry.py).
+_VALID_CHUNK_BY = {"period", "member"}
+# UCMV period column -> "YYYYNNN" key: a DATE or 'YYYY-MM[-DD]' text column.
+_VALID_UCMV_PERIOD_FORMATS = {"date_to_fiscper"}
 _VALID_COMPOSITE_OPERATORS = {"subtract", "add"}
 # PBI's 6 real SummarizeBy values ("None" excluded — not aggregatable).
 _VALID_PBI_AGGREGATIONS = {"Sum", "Average", "Count", "Min", "Max", "DistinctCount"}
@@ -102,15 +133,33 @@ def _normalize_operand(operand: Optional[RawMap]) -> Optional[RawMap]:
 
 @dataclass
 class TimeDimension:
-    grain: str  # "month" | "quarter" | "year" | "snapshot"
+    grain: str  # "month" | "quarter" | "year" | "snapshot" | "week"
     ucmv_mode: str  # "column" | "reconstruct"
-    pbi_column: str
+    # PBI period column. Optional only when pbi_year_column + pbi_month_column
+    # are given instead (month grain).
+    pbi_column: Optional[str] = None
     ucmv_column: Optional[str] = None  # required when ucmv_mode == "column"
     ucmv_reconstruct_from: Optional[list[str]] = None  # required when "reconstruct"
     year_filter_column: str = "fiscal_year"
     # Table pbi_column lives on, if not the fact table (reachable via a model
     # relationship in SUMMARIZECOLUMNS).
     pbi_table: Optional[str] = None
+    # Month grain: group PBI by the calendar's integer year and month columns
+    # (period key YYYY0MM) instead of one period column. Needed for time-
+    # intelligence measures that come back empty under a fiscper grouping.
+    pbi_year_column: Optional[str] = None
+    pbi_month_column: Optional[str] = None
+    # UCMV columns grouped (not selected) next to the period, e.g. the order
+    # dimension of a window measure. Each must be 1:1 with the period.
+    ucmv_group_by: Optional[list[str]] = None
+    # "date_to_fiscper": the UCMV period is a DATE or 'YYYY-MM[-DD]' text
+    # column, turned into YYYY0MM in SQL. None: already "YYYYNNN" shaped.
+    ucmv_period_format: Optional[str] = None
+
+    @property
+    def pbi_year_month(self) -> bool:
+        """True when PBI groups by the calendar's year and month columns."""
+        return bool(self.pbi_year_column)
 
     def __post_init__(self) -> None:
         if self.grain not in _VALID_GRAINS:
@@ -125,11 +174,40 @@ class TimeDimension:
             raise ValueError(
                 "Snapshot reconciliation requires a date column, not period reconstruction."
             )
+        if self.grain == "snapshot" and not self.pbi_column:
+            raise ValueError(
+                "Snapshot reconciliation requires time_dimension.pbi_column."
+            )
         if self.ucmv_mode == "column" and not self.ucmv_column:
             raise ValueError("time_dimension.ucmv.mode='column' requires ucmv.name")
         if self.ucmv_mode == "reconstruct" and not self.ucmv_reconstruct_from:
             raise ValueError(
                 "time_dimension.ucmv.mode='reconstruct' requires ucmv.from"
+            )
+        self._validate_pbi_time_columns()
+        if self.ucmv_period_format is not None:
+            if self.ucmv_period_format not in _VALID_UCMV_PERIOD_FORMATS:
+                raise ValueError(
+                    f"time_dimension.ucmv.period_format must be one of "
+                    f"{_VALID_UCMV_PERIOD_FORMATS}, got {self.ucmv_period_format!r}"
+                )
+            if self.ucmv_mode != "column":
+                raise ValueError(
+                    "time_dimension.ucmv.period_format needs ucmv.mode='column'"
+                )
+
+    def _validate_pbi_time_columns(self) -> None:
+        if bool(self.pbi_year_column) != bool(self.pbi_month_column):
+            raise ValueError(
+                "time_dimension.pbi_year_column and pbi_month_column go together"
+            )
+        if self.pbi_year_month and self.grain != "month":
+            raise ValueError(
+                "time_dimension.pbi_year_column / pbi_month_column need grain 'month'"
+            )
+        if not self.pbi_column and not self.pbi_year_month:
+            raise ValueError(
+                "time_dimension needs pbi_column, or pbi_year_column + pbi_month_column"
             )
 
 
@@ -183,6 +261,13 @@ class Measure:
     # extra grouping columns ("Table[Column]") and fixed filters
     pbi_extra_group_by: Optional[list[str]] = None
     pbi_extra_filter: Optional[list[RawMap]] = None
+    # extra_group_by entries given as {pbi, ucmv}: PBI label column -> the UCMV
+    # column holding the same label per period. A period whose label is NULL in
+    # the metric view is not queried in PBI and not compared.
+    ucmv_context_columns: Optional[dict[str, str]] = None
+    # Split of a PBI query that times out, set per measure: "period" | "member".
+    # Unset: one query, and only a timeout triggers the retry ladder.
+    pbi_chunk_by: Optional[str] = None
 
     # composite
     composite_operator: Optional[str] = None
@@ -236,6 +321,18 @@ class Measure:
         if not isinstance(self.null_equals_zero, bool):
             raise ValueError(
                 f"{self.ucmv_measure}: null_equals_zero must be true or false"
+            )
+        if self.pbi_chunk_by is not None and self.pbi_chunk_by not in _VALID_CHUNK_BY:
+            raise ValueError(
+                f"{self.ucmv_measure}: pbi_chunk_by must be one of {_VALID_CHUNK_BY}"
+            )
+        unmapped = set(self.ucmv_context_columns or {}) - set(
+            self.pbi_extra_group_by or []
+        )
+        if unmapped:
+            raise ValueError(
+                f"{self.ucmv_measure}: extra_group_by mapping for {sorted(unmapped)} "
+                "is not in extra_group_by"
             )
 
         validator = {
@@ -360,15 +457,52 @@ class UCMVMapping:
 
 def _build_time_dimension(td: RawMap) -> TimeDimension:
     ucmv_td = as_map(td.get("ucmv"))
+    group_by_raw = ucmv_td.get("group_by")
+    group_by = opt_str_list(group_by_raw)
+    if group_by_raw is not None and group_by is None:
+        raise ValueError("time_dimension.ucmv.group_by must be a list of UCMV columns")
     return TimeDimension(
         grain=str(td["grain"]),
         ucmv_mode=str_or(ucmv_td.get("mode"), "column"),
-        pbi_column=str(td["pbi_column"]),
+        pbi_column=opt_str(td.get("pbi_column")),
         ucmv_column=opt_str(ucmv_td.get("name")),
         ucmv_reconstruct_from=opt_str_list(ucmv_td.get("from")),
         year_filter_column=str_or(td.get("year_filter_column"), "fiscal_year"),
         pbi_table=opt_str(td.get("pbi_table")),
+        pbi_year_column=opt_str(td.get("pbi_year_column")),
+        pbi_month_column=opt_str(td.get("pbi_month_column")),
+        ucmv_group_by=group_by,
+        ucmv_period_format=opt_str(ucmv_td.get("period_format")),
     )
+
+
+def _parse_extra_group_by(
+    raw: object,
+) -> tuple[Optional[list[str]], Optional[dict[str, str]]]:
+    """``extra_group_by`` entries: "Table[Column]" (PBI grouping column, the
+    period is derived) or ``{pbi: "Table[Column]", ucmv: column}`` (a calendar
+    label: the UCMV column holds the same label per period)."""
+    if not isinstance(raw, list):
+        return None, None
+    refs: list[str] = []
+    context: dict[str, str] = {}
+    for entry in raw:
+        if isinstance(entry, Mapping):
+            pbi_ref = opt_str(entry.get("pbi"))
+            ucmv_col = opt_str(entry.get("ucmv"))
+            if not pbi_ref or not ucmv_col:
+                raise ValueError(
+                    "extra_group_by entries are 'Table[Column]' or {pbi: ..., ucmv: ...}"
+                )
+            refs.append(pbi_ref)
+            context[pbi_ref] = ucmv_col
+        elif isinstance(entry, str) and entry:
+            refs.append(entry)
+        else:
+            raise ValueError(
+                f"extra_group_by entries are 'Table[Column]' or {{pbi, ucmv}}, got {entry!r}"
+            )
+    return refs or None, context or None
 
 
 _DEFAULT_TOLERANCE: RawMap = {"kind": "absolute", "value": 0.001}
@@ -389,6 +523,7 @@ def _build_measure(m: RawMap) -> Measure:
         raise ValueError(
             f"{m.get('ucmv_measure')}: null_equals_zero must be true or false"
         )
+    extra_group_by, context_columns = _parse_extra_group_by(m.get("extra_group_by"))
     measure = Measure(
         ucmv_measure=str(m["ucmv_measure"]),
         pbi_kind=str(m["pbi_kind"]),
@@ -409,7 +544,9 @@ def _build_measure(m: RawMap) -> Measure:
         tolerance_value=0.001 if tolerance_value is None else tolerance_value,
         notes=str_or(m.get("notes"), ""),
         raw_hint=opt_str(m.get("raw_hint")),
-        pbi_extra_group_by=opt_str_list(m.get("extra_group_by")),
+        pbi_extra_group_by=extra_group_by,
+        ucmv_context_columns=context_columns,
+        pbi_chunk_by=opt_str(m.get("pbi_chunk_by")),
         pbi_extra_filter=_filter_list(m.get("extra_filter")),
         composite_operator=opt_str(m.get("composite_operator")),
         composite_a=_optional_map(m.get("composite_a")),

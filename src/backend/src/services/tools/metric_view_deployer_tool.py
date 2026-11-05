@@ -1,4 +1,13 @@
-"""Metric View Deployer Tool for CrewAI — deploy YAML to Databricks via SQL Statement API."""
+"""Metric View Deployer Tool for CrewAI — deploy YAML to Databricks via SQL Statement API.
+
+Modes:
+- ``deploy`` (default): CREATE OR REPLACE VIEW per YAML spec. Before a redeploy the direct
+  grants are read and re-applied after a successful deploy (``preserve_grants``). After each
+  deploy the live definition is DESCRIBEd and compared with the YAML.
+- ``verify``: read-only. Compares the deployed definition with the YAML field by field.
+- ``check``: read-only. Runs every measure as a count (optionally grouped by a dimension,
+  optionally timed).
+"""
 
 import json
 import logging
@@ -6,17 +15,42 @@ import re as _re
 import time
 import urllib.parse
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_deployer_utils.definition import (
+    definition_report,
+    parse_yaml_spec,
+    verify_view_definition,
+)
+from src.services.tools.metric_view_deployer_utils.grants import (
+    DirectGrant,
+    GrantReadError,
+    read_direct_grants,
+    restore_grants,
+)
+from src.services.tools.metric_view_deployer_utils.inspection import (
+    check_one,
+    deploy_summary,
+    inspection_summary,
+)
+from src.services.tools.metric_view_deployer_utils.sql_helpers import (
+    SqlRunner,
+    first_cell,
+    sanitize_identifier,
+)
 from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
 
 if TYPE_CHECKING:
     from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
+
+_MODES = ("deploy", "verify", "check")
+_DEFAULT_SLOW_S = 30.0
 
 
 class MetricViewDeployerSchema(BaseModel):
@@ -41,6 +75,60 @@ class MetricViewDeployerSchema(BaseModel):
         None,
         description='JSON dict of source catalog replacements, e.g. {"acme_prod": "main"}',
     )
+    mode: Optional[str] = Field(
+        None,
+        description="deploy (default) | verify: deployed definition vs YAML | "
+        "check: every measure executes. verify and check are read-only.",
+    )
+    preserve_grants: bool = Field(
+        True,
+        description="Re-apply direct grants after a redeploy (CREATE OR REPLACE drops them)",
+    )
+    group_by: Optional[str] = Field(
+        None, description="check mode: also run each measure grouped by this dimension"
+    )
+    timing: bool = Field(
+        False, description="check mode: report per-measure seconds and a SLOW flag"
+    )
+    slow_threshold_s: float = Field(
+        _DEFAULT_SLOW_S, description="check mode: seconds above which a measure is SLOW"
+    )
+
+
+@dataclass(frozen=True)
+class _RunOptions:
+    catalog: str
+    schema: str
+    host_override: Optional[str]
+    warehouse_id: str
+    preserve_grants: bool
+    group_by: Optional[str]
+    timing: bool
+    slow_s: float
+
+
+@dataclass
+class _DeployState:
+    schema_ensured: bool = False
+
+
+def _view_parts(table_key: str, catalog: str, schema: str) -> tuple[str, str, str]:
+    """Sanitised (catalog, schema, view) for a table key."""
+    return (
+        sanitize_identifier(catalog),
+        sanitize_identifier(schema),
+        sanitize_identifier(table_key.lower()),
+    )
+
+
+def _seconds(value: object, default: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return default
+    try:
+        seconds = float(value)
+    except ValueError:
+        return default
+    return seconds if seconds > 0 else default
 
 
 class MetricViewDeployerTool(BaseTool):
@@ -50,8 +138,10 @@ class MetricViewDeployerTool(BaseTool):
     description: str = (
         "Deploy UC Metric View definitions to Databricks. Accepts the full ucmv_output from "
         "the UC Metric View Generator tool (auto-injected in flow). "
-        "Executes CREATE OR REPLACE METRIC VIEW DDL via the Databricks SQL Statement API. "
-        "Output: deployment status per metric view."
+        "Executes CREATE OR REPLACE METRIC VIEW DDL via the Databricks SQL Statement API, "
+        "re-applies direct grants, and checks the deployed definition against the YAML. "
+        "mode='verify' compares the deployed definition with the YAML; mode='check' runs "
+        "every measure as a count (read-only). Output: status per metric view."
     )
     args_schema: Type[BaseModel] = MetricViewDeployerSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
@@ -76,6 +166,11 @@ class MetricViewDeployerTool(BaseTool):
             "databricks_host",
             "warehouse_id",
             "catalog_remap",
+            "mode",
+            "preserve_grants",
+            "group_by",
+            "timing",
+            "slow_threshold_s",
         )
         # Always seed ucmv_output so flow_methods.py injection check fires
         default_config: dict = {"ucmv_output": None}
@@ -167,8 +262,8 @@ class MetricViewDeployerTool(BaseTool):
 
     # ── Post-deploy schema guard rail ────────────────────────────────────────
     # The migration playbook warns that a truncated YAML deploys with no error as
-    # a metric view exposing NO measures. After each deploy we DESCRIBE the view
-    # and confirm the measures/dimensions declared in the YAML actually landed.
+    # a metric view exposing NO measures. After each deploy we DESCRIBE the view,
+    # confirm the declared names landed, and compare the live definition with the YAML.
 
     @staticmethod
     def _declared_names_from_yaml(yaml_content: str) -> tuple:
@@ -199,19 +294,21 @@ class MetricViewDeployerTool(BaseTool):
         return _names(spec.get("measures")), _names(spec.get("dimensions"))
 
     @staticmethod
-    def _parse_describe_json_columns(data: dict) -> Optional[tuple]:
+    def _parse_describe_json_columns(data: object) -> Optional[tuple]:
         """Parse a ``DESCRIBE TABLE EXTENDED <view> AS JSON`` result into
         (deployed_measure_names, deployed_dimension_names), lower-cased.
 
         The SQL Statement API returns the JSON document as a single string cell in
         result.data_array; metric-view measure columns carry ``"is_measure": true``.
         Returns None if the shape is not what we expect (caller skips the check)."""
+        cell = first_cell(data)
+        if not cell:
+            return None
         try:
-            rows = (data or {}).get("result", {}).get("data_array") or []
-            if not rows or not rows[0] or not rows[0][0]:
-                return None
-            doc = json.loads(rows[0][0])
-        except Exception:  # noqa: BLE001 — malformed DESCRIBE output → skip check
+            doc = json.loads(cell)
+        except ValueError:
+            return None
+        if not isinstance(doc, dict):
             return None
         cols = doc.get("columns")
         if not isinstance(cols, list):
@@ -257,39 +354,37 @@ class MetricViewDeployerTool(BaseTool):
         return result
 
     def _verify_deployed_schema(
-        self,
-        yaml_content: str,
-        view_name: str,
-        workspace_url: str,
-        warehouse_id: str,
-        headers: dict,
+        self, yaml_content: str, view_name: str, run_sql: SqlRunner
     ) -> Optional[dict]:
-        """DESCRIBE the just-created metric view and confirm its declared
-        measures/dimensions landed. Returns a schema-check dict, or None if the
-        check could not run. Never raises — a failed check must not fail an
-        otherwise-successful deploy."""
-        declared_m, declared_d = self._declared_names_from_yaml(yaml_content)
-        if not declared_m and not declared_d:
-            return None  # nothing to verify (or unparseable YAML)
-        describe = self._execute_sql_sync(
-            f"DESCRIBE TABLE EXTENDED {view_name} AS JSON",
-            workspace_url,
-            warehouse_id,
-            headers,
-        )
+        """DESCRIBE the just-created metric view once. Checks that the declared
+        measures/dimensions landed (``schema_check`` fields) and that the live
+        definition equals the YAML (``definition``). Returns None when the YAML is not
+        a mapping. Never raises — a failed check must not fail an otherwise-successful
+        deploy."""
+        spec = parse_yaml_spec(yaml_content)
+        if spec is None:
+            return None
+        describe = run_sql(f"DESCRIBE TABLE EXTENDED {view_name} AS JSON")
         if not describe.get("success"):
             return {
                 "schema_verified": None,
                 "note": "DESCRIBE failed; schema not verified",
+                "definition": {"verified": None, "note": "DESCRIBE failed"},
             }
-        parsed = self._parse_describe_json_columns(describe.get("data", {}))
+        result: dict = {"definition": definition_report(spec, describe.get("data"))}
+        declared_m, declared_d = self._declared_names_from_yaml(yaml_content)
+        if not declared_m and not declared_d:
+            return result
+        parsed = self._parse_describe_json_columns(describe.get("data"))
         if parsed is None:
-            return {
-                "schema_verified": None,
-                "note": "DESCRIBE output not parseable; schema not verified",
-            }
+            result["schema_verified"] = None
+            result["note"] = "DESCRIBE output not parseable; schema not verified"
+            return result
         deployed_m, deployed_d = parsed
-        return self._compare_schema(declared_m, declared_d, deployed_m, deployed_d)
+        return {
+            **result,
+            **self._compare_schema(declared_m, declared_d, deployed_m, deployed_d),
+        }
 
     @staticmethod
     def _resolve_yaml_specs(
@@ -378,6 +473,247 @@ class MetricViewDeployerTool(BaseTool):
             )
         return yaml_specs
 
+    # ── Run steps ────────────────────────────────────────────────────────────
+
+    def _open_session(
+        self, opts: _RunOptions
+    ) -> tuple[Optional[SqlRunner], Optional[str]]:
+        """Authenticate, check the workspace host (SEC #5, fails closed) and return a
+        SQL runner bound to it, or ``(None, error message)``."""
+        try:
+            auth = self._authenticate(host_override=opts.host_override)
+            if not auth:
+                return None, "Authentication failed"
+            headers = auth.get_headers()
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+            headers.update(get_user_agent_header(KasalProduct.POWERBI))
+            workspace_url = (auth.workspace_url or "").rstrip("/")
+        except Exception as e:
+            logger.warning("[MVDeployer] Authentication error: %s", e, exc_info=True)
+            return None, f"Authentication error: {e}"
+        if not workspace_url:
+            return None, "workspace_url not configured"
+        try:
+            from src.utils.url_security import is_trusted_databricks_host
+
+            host_ok = is_trusted_databricks_host(workspace_url)
+        except Exception:
+            logger.warning("[MVDeployer] Host check unavailable", exc_info=True)
+            host_ok = False
+        if not host_ok:
+            hostname = urllib.parse.urlparse(workspace_url).hostname
+            return None, f"Untrusted host: {hostname}"
+        warehouse_id = opts.warehouse_id
+
+        def run_sql(sql: str) -> dict:
+            return self._execute_sql_sync(sql, workspace_url, warehouse_id, headers)
+
+        return run_sql, None
+
+    def _validate_views(
+        self, yaml_specs: dict[str, object], opts: _RunOptions
+    ) -> dict[str, dict[str, object]]:
+        """Dry run: no SQL, only the view names and line counts."""
+        results: dict[str, dict[str, object]] = {}
+        for table_key in sorted(yaml_specs):
+            raw_yaml = yaml_specs.get(table_key)
+            yaml_content = raw_yaml if isinstance(raw_yaml, str) else ""
+            safe_key = _re.sub(r"[^a-zA-Z0-9_]", "_", table_key.lower())
+            results[table_key] = {
+                "status": "validated",
+                "view_name": f"{opts.catalog}.{opts.schema}.{safe_key}",
+                "yaml_lines": len(yaml_content.split("\n")),
+                "dry_run": True,
+            }
+        return results
+
+    def _deploy_views(
+        self, yaml_specs: dict[str, object], opts: _RunOptions
+    ) -> dict[str, dict[str, object]]:
+        results: dict[str, dict[str, object]] = {}
+        state = _DeployState()
+        for table_key in sorted(yaml_specs):
+            raw_yaml = yaml_specs.get(table_key)
+            yaml_content = raw_yaml if isinstance(raw_yaml, str) else ""
+            results[table_key] = self._deploy_one(table_key, yaml_content, opts, state)
+        return results
+
+    def _deploy_one(
+        self, table_key: str, yaml_content: str, opts: _RunOptions, state: _DeployState
+    ) -> dict[str, object]:
+        if not opts.warehouse_id:
+            return {"status": "error", "message": "warehouse_id is required"}
+        if not yaml_content or not yaml_content.strip():
+            return {"status": "error", "message": "Empty YAML content"}
+
+        cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
+        view_name = f"{cat}.{sch}.{view}"
+        try:
+            ddl = self._yaml_to_ddl(yaml_content, view_name)
+        except Exception as e:
+            logger.warning("[MVDeployer] DDL generation failed: %s", e, exc_info=True)
+            return {"status": "error", "message": f"DDL generation failed: {e}"}
+
+        runner, error = self._open_session(opts)
+        if runner is None:
+            return {"status": "error", "message": error or "Authentication failed"}
+
+        from src.services.tools.metric_view_utils.yaml_emitter import (
+            _check_dangerous_sql,
+        )
+
+        if not _check_dangerous_sql(yaml_content):
+            return {
+                "status": "error",
+                "message": "YAML contains dangerous SQL patterns",
+            }
+        try:
+            if not state.schema_ensured:
+                self._ensure_schema(runner, cat, sch)
+                state.schema_ensured = True
+            return self._execute_deploy(
+                runner, ddl, yaml_content, view_name, (cat, sch, view), opts
+            )
+        except Exception as e:
+            logger.warning("[MVDeployer] deploy failed: %s", e, exc_info=True)
+            return {"status": "error", "message": str(e)}
+
+    @staticmethod
+    def _ensure_schema(runner: SqlRunner, cat: str, sch: str) -> None:
+        """Create the target schema once per run (failure is logged, not fatal)."""
+        result = runner(f"CREATE SCHEMA IF NOT EXISTS {cat}.{sch}")
+        if not result.get("success"):
+            logger.warning(
+                "[MVDeployer] Could not ensure schema: %s", result.get("error")
+            )
+        else:
+            logger.info("[MVDeployer] Schema %s.%s ensured", cat, sch)
+
+    def _execute_deploy(
+        self,
+        runner: SqlRunner,
+        ddl: str,
+        yaml_content: str,
+        view_name: str,
+        parts: tuple[str, str, str],
+        opts: _RunOptions,
+    ) -> dict[str, object]:
+        """Read grants, run the DDL, re-apply grants, then run the post-deploy checks."""
+        cat, sch, view = parts
+        grants_before: list[DirectGrant] = []
+        if opts.preserve_grants:
+            try:
+                grants_before, _ = read_direct_grants(runner, cat, sch, view)
+            except GrantReadError as e:
+                return {
+                    "status": "error",
+                    "view_name": view_name,
+                    "message": (
+                        f"could not read direct grants before redeploy; view left as is ({e}). "
+                        "Grant SELECT on information_schema.table_privileges, or set "
+                        "preserve_grants=false to redeploy without preserving grants"
+                    ),
+                    "http_status": e.http_status,
+                }
+
+        outcome = runner(ddl)
+        if not outcome.get("success"):
+            return {
+                "status": "error",
+                "view_name": view_name,
+                "message": outcome.get("error", "Unknown error"),
+                "http_status": outcome.get("http_status"),
+            }
+
+        entry: dict[str, object] = {"status": "deployed", "view_name": view_name}
+        grants_ok = True
+        if opts.preserve_grants:
+            grants = (
+                restore_grants(runner, view_name, cat, sch, view, grants_before)
+                if grants_before
+                else {"before": 0, "after": 0, "preserved": True, "failures": []}
+            )
+            entry["grants"] = grants
+            grants_ok = bool(grants.get("preserved"))
+
+        problems: list[str] = []
+        try:
+            schema_check = self._verify_deployed_schema(yaml_content, view_name, runner)
+        except Exception as e:
+            logger.warning("[MVDeployer] schema check error: %s", e, exc_info=True)
+            schema_check = {"schema_verified": None, "note": f"schema check error: {e}"}
+        if schema_check is not None:
+            entry["schema_check"] = schema_check
+            if schema_check.get("truncated"):
+                entry["status"] = "deployed_incomplete"
+                problems.append(
+                    f"Metric view deployed but exposes 0 of "
+                    f"{schema_check['declared_measures']} declared measures "
+                    f"— YAML likely truncated"
+                )
+            definition = schema_check.get("definition")
+            if isinstance(definition, dict) and definition.get("verified") is False:
+                problems.append(
+                    f"live definition differs from the YAML in "
+                    f"{definition.get('difference_count')} place(s); see schema_check.definition"
+                )
+        if not grants_ok:
+            if entry["status"] == "deployed":
+                entry["status"] = "deployed_grants_incomplete"
+            problems.append(
+                "direct grants not fully re-applied after redeploy; see grants"
+            )
+        if problems:
+            entry["message"] = "; ".join(problems)
+        return entry
+
+    def _inspect_views(
+        self, mode: str, yaml_specs: dict[str, object], opts: _RunOptions
+    ) -> str:
+        """verify / check modes: read-only inspection of the deployed views."""
+        if not opts.warehouse_id:
+            return json.dumps({"error": f"warehouse_id is required for mode {mode!r}"})
+        runner, error = self._open_session(opts)
+        if runner is None:
+            return json.dumps({"error": error or "Authentication failed"})
+        results: dict[str, dict[str, object]] = {}
+        for table_key in sorted(yaml_specs):
+            raw_yaml = yaml_specs.get(table_key)
+            spec = parse_yaml_spec(raw_yaml) if isinstance(raw_yaml, str) else None
+            cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
+            view_name = f"{cat}.{sch}.{view}"
+            if spec is None:
+                results[table_key] = {
+                    "status": "error",
+                    "view_name": view_name,
+                    "message": "YAML is not a mapping",
+                }
+                continue
+            try:
+                if mode == "verify":
+                    results[table_key] = verify_view_definition(runner, view_name, spec)
+                else:
+                    results[table_key] = check_one(
+                        runner, view_name, spec, opts.group_by, opts.timing, opts.slow_s
+                    )
+            except Exception as e:
+                logger.warning("[MVDeployer] %s failed: %s", mode, e, exc_info=True)
+                results[table_key] = {
+                    "status": "error",
+                    "view_name": view_name,
+                    "message": str(e),
+                }
+        return json.dumps(
+            {
+                "mode": mode,
+                "results": results,
+                "summary": inspection_summary(results),
+                "yaml": yaml_specs,
+            },
+            indent=2,
+        )
+
     def _run(self, **kwargs: object) -> str:
         def _get(key: str) -> object:
             val = kwargs.get(key)
@@ -385,13 +721,24 @@ class MetricViewDeployerTool(BaseTool):
                 return val
             return self._default_config.get(key)
 
-        catalog = str(_get("catalog") or "main")
-        schema = str(_get("schema_name") or "default")
-        dry_run = _get("dry_run")
-        if dry_run is None:
-            dry_run = False
-        host_override = opt_str(_get("databricks_host")) or None
-        warehouse_id = str(_get("warehouse_id") or "")
+        mode = str(_get("mode") or "deploy").strip().lower()
+        if mode not in _MODES:
+            return json.dumps(
+                {
+                    "error": f"Unknown mode {mode!r}; expected one of: {', '.join(_MODES)}"
+                }
+            )
+        dry_run = bool(_get("dry_run"))
+        opts = _RunOptions(
+            catalog=str(_get("catalog") or "main"),
+            schema=str(_get("schema_name") or "default"),
+            host_override=opt_str(_get("databricks_host")) or None,
+            warehouse_id=str(_get("warehouse_id") or ""),
+            preserve_grants=_get("preserve_grants") is not False,
+            group_by=opt_str(_get("group_by")) or None,
+            timing=bool(_get("timing")),
+            slow_s=_seconds(_get("slow_threshold_s"), _DEFAULT_SLOW_S),
+        )
 
         # ── Parse yaml specs — manual upload wins over flow injection ────────
         yaml_specs, spec_error = self._resolve_yaml_specs(
@@ -409,204 +756,16 @@ class MetricViewDeployerTool(BaseTool):
         # ── Apply catalog remapping to every YAML spec ────────────────────────
         yaml_specs = self._apply_catalog_remap(yaml_specs, _get("catalog_remap"))
 
-        results: dict[str, dict[str, object]] = {}
-        schema_ensured = False  # create schema once before first deployment
-
-        for table_key in sorted(yaml_specs.keys()):
-            raw_yaml = yaml_specs.get(table_key)
-            yaml_content = raw_yaml if isinstance(raw_yaml, str) else ""
-
-            if dry_run:
-                safe_key = _re.sub(r"[^a-zA-Z0-9_]", "_", table_key.lower())
-                view_name = f"{catalog}.{schema}.{safe_key}"
-                results[table_key] = {
-                    "status": "validated",
-                    "view_name": view_name,
-                    "yaml_lines": len(yaml_content.split("\n")),
-                    "dry_run": True,
-                }
-                continue
-
-            # ── Actual deployment ─────────────────────────────────────────────
-            if not warehouse_id:
-                results[table_key] = {
-                    "status": "error",
-                    "message": "warehouse_id is required",
-                }
-                continue
-
-            if not yaml_content or not yaml_content.strip():
-                results[table_key] = {
-                    "status": "error",
-                    "message": "Empty YAML content",
-                }
-                continue
-
-            # Generate DDL
-            try:
-                safe_key = _re.sub(r"[^a-zA-Z0-9_]", "_", table_key.lower())
-                safe_cat = _re.sub(r"[^a-zA-Z0-9_]", "_", catalog)
-                safe_sch = _re.sub(r"[^a-zA-Z0-9_]", "_", schema)
-                view_name = f"{safe_cat}.{safe_sch}.{safe_key}"
-                ddl = self._yaml_to_ddl(yaml_content, view_name)
-            except Exception as e:
-                logger.warning(
-                    "[MVDeployer] DDL generation failed: %s", e, exc_info=True
-                )
-                results[table_key] = {
-                    "status": "error",
-                    "message": f"DDL generation failed: {e}",
-                }
-                continue
-
-            # Auth
-            try:
-                auth = self._authenticate(host_override=host_override)
-                if not auth:
-                    results[table_key] = {
-                        "status": "error",
-                        "message": "Authentication failed",
-                    }
-                    continue
-                headers = auth.get_headers()
-                from src.utils.telemetry import KasalProduct, get_user_agent_header
-
-                headers.update(get_user_agent_header(KasalProduct.POWERBI))
-                workspace_url = (auth.workspace_url or "").rstrip("/")
-            except Exception as e:
-                logger.warning(
-                    "[MVDeployer] Authentication error: %s", e, exc_info=True
-                )
-                results[table_key] = {
-                    "status": "error",
-                    "message": f"Authentication error: {e}",
-                }
-                continue
-
-            if not workspace_url:
-                results[table_key] = {
-                    "status": "error",
-                    "message": "workspace_url not configured",
-                }
-                continue
-
-            # SSRF check — shared source of truth (SEC #5), fails closed.
-            try:
-                from src.utils.url_security import is_trusted_databricks_host
-
-                _host_ok = is_trusted_databricks_host(workspace_url)
-            except Exception:
-                logger.warning("[MVDeployer] Host check unavailable", exc_info=True)
-                _host_ok = False
-            if not _host_ok:
-                parsed_host = urllib.parse.urlparse(workspace_url)
-                results[table_key] = {
-                    "status": "error",
-                    "message": f"Untrusted host: {parsed_host.hostname}",
-                }
-                continue
-
-            # Ensure schema exists (once per run, after SSRF validation)
-            if not schema_ensured:
-                safe_cat_s = _re.sub(r"[^a-zA-Z0-9_]", "_", catalog)
-                safe_sch_s = _re.sub(r"[^a-zA-Z0-9_]", "_", schema)
-                schema_result = self._execute_sql_sync(
-                    f"CREATE SCHEMA IF NOT EXISTS {safe_cat_s}.{safe_sch_s}",
-                    workspace_url,
-                    warehouse_id,
-                    headers,
-                )
-                if not schema_result["success"]:
-                    logger.warning(
-                        "[MVDeployer] Could not ensure schema: %s",
-                        schema_result.get("error"),
-                    )
-                else:
-                    logger.info(
-                        "[MVDeployer] Schema %s.%s ensured", safe_cat_s, safe_sch_s
-                    )
-                schema_ensured = True
-
-            # YAML safety check
-            from src.services.tools.metric_view_utils.yaml_emitter import (
-                _check_dangerous_sql,
-            )
-
-            if not _check_dangerous_sql(yaml_content):
-                results[table_key] = {
-                    "status": "error",
-                    "message": "YAML contains dangerous SQL patterns",
-                }
-                continue
-
-            # Execute DDL via SQL Statement API
-            try:
-                result = self._execute_sql_sync(
-                    ddl, workspace_url, warehouse_id, headers
-                )
-                if result["success"]:
-                    entry: dict[str, object] = {
-                        "status": "deployed",
-                        "view_name": view_name,
-                    }
-                    try:
-                        schema_check = self._verify_deployed_schema(
-                            yaml_content,
-                            view_name,
-                            workspace_url,
-                            warehouse_id,
-                            headers,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "[MVDeployer] schema check error: %s", e, exc_info=True
-                        )
-                        schema_check = {
-                            "schema_verified": None,
-                            "note": f"schema check error: {e}",
-                        }
-                    if schema_check is not None:
-                        entry["schema_check"] = schema_check
-                        if schema_check.get("truncated"):
-                            entry["status"] = "deployed_incomplete"
-                            entry["message"] = (
-                                f"Metric view deployed but exposes 0 of "
-                                f"{schema_check['declared_measures']} declared measures "
-                                f"— YAML likely truncated"
-                            )
-                    results[table_key] = entry
-                else:
-                    results[table_key] = {
-                        "status": "error",
-                        "view_name": view_name,
-                        "message": result.get("error", "Unknown error"),
-                        "http_status": result.get("http_status"),
-                    }
-            except Exception as e:
-                logger.warning("[MVDeployer] deploy failed: %s", e, exc_info=True)
-                results[table_key] = {"status": "error", "message": str(e)}
-
+        if mode != "deploy":
+            return self._inspect_views(mode, yaml_specs, opts)
+        if dry_run:
+            results = self._validate_views(yaml_specs, opts)
+        else:
+            results = self._deploy_views(yaml_specs, opts)
         return json.dumps(
             {
                 "deployment_results": results,
-                "summary": {
-                    "total": len(results),
-                    "validated": sum(
-                        1 for r in results.values() if r.get("status") == "validated"
-                    ),
-                    "deployed": sum(
-                        1 for r in results.values() if r.get("status") == "deployed"
-                    ),
-                    "deployed_incomplete": sum(
-                        1
-                        for r in results.values()
-                        if r.get("status") == "deployed_incomplete"
-                    ),
-                    "errors": sum(
-                        1 for r in results.values() if r.get("status") == "error"
-                    ),
-                    "dry_run": dry_run,
-                },
+                "summary": deploy_summary(results, dry_run),
                 # Pass yaml_specs through so downstream steps (Genie Config Generator)
                 # can pick them up via the 'yaml' key in flow injection
                 "yaml": yaml_specs,

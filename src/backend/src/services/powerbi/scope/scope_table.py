@@ -38,6 +38,7 @@ from src.services.powerbi.scope.decisions import (
     table_decision,
 )
 from src.services.powerbi.scope.parts import PartTree
+from src.services.powerbi.scope.report_context import report_context
 from src.services.powerbi.scope.tmdl_model import (
     Model,
     Relationship,
@@ -397,8 +398,12 @@ def build_report_scope(
     relationships: list[Relationship] | None = None,
     kasal_status: Mapping[str, str] | None = None,
     include_measure_dt: bool = False,
+    scan_result: Mapping[str, object] | None = None,
+    dataset_id: str = "",
+    report_id: str = "",
 ) -> dict[str, object]:
-    """``{rows, csv, summary, pages}`` for one report on one semantic model, or ``{}`` without inputs.
+    """``{rows, csv, summary, pages}`` plus the ``report_context`` evidence (filters, page
+    scopes, measure page filters, links, related reports, inventory), or ``{}`` without inputs.
 
     Without a report definition no page is reachable and every measure would read
     as unreached, so the scope is not built at all rather than built wrong.
@@ -413,9 +418,13 @@ def build_report_scope(
         include_measure_dt=include_measure_dt,
     )
     rows = build_scope(model, seeds, closure, kasal_status)
+    context = report_context(
+        model, seeds, closure, report, rows, scan_result=scan_result, dataset_id=dataset_id, report_id=report_id
+    )
     return {
         "rows": rows,
         "csv": scope_csv(rows),
         "summary": scope_summary(rows, seeds, closure),
         "pages": seeds.page_rows,
+        **context,
     }

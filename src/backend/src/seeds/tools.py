@@ -178,10 +178,73 @@ tools_data = [
     (
         98,
         "UCMV Drift Monitor",
-        "Keeps deployed Unity Catalog metric views in sync with the Power BI semantic model they were generated from. Reads each monitored view's DEPLOYED YAML as the verified baseline, extracts today's measures from Power BI (same APIs and credentials as the Pipeline Config Generator; visuals are not compared), and classifies every measure: unchanged, changed in PBI, new in PBI, removed from PBI, or unassigned. New and changed measures are translated DAX→SQL (LLM fallback) and appended to the baseline YAML without touching anything else — a structural check rejects any patch that alters the verified view. Change detection is exact for views generated with DAX fingerprints; older views get an optional batched LLM comparison. Read-only: produces a proposal for the Metric View Deployer, never deploys.",
+        "Keeps deployed Unity Catalog metric views in sync with the Power BI semantic model they were generated from. Reads each monitored view's DEPLOYED YAML as the verified baseline, extracts today's measures from Power BI (same APIs and credentials as the Pipeline Config Generator; visuals are not compared), and classifies every measure: unchanged, changed in PBI, new in PBI, removed from PBI, or unassigned. New and changed measures are translated DAX→SQL (LLM fallback) and appended to the baseline YAML without touching anything else — a structural check rejects any patch that alters the verified view. Change detection is exact for views generated with DAX fingerprints; older views get an optional batched LLM comparison. Read-only: produces a proposal for the Metric View Deployer, never deploys. With semantic_snapshot_table (or semantic_baseline) it also runs the semantic sync: tables, columns, relationships, Power Query, RLS, pages, page fields and tracked tables are diffed against the previous snapshot and each change is routed through the report's scope table (report_scope), with an ignore list and LLM proposals.",
+        "database",
+    ),
+    (
+        99,
+        "Genie Space Sync",
+        "Treats a Genie space as code. extract reads a space and returns its configuration as YAML files (header, config, data sources, instructions, benchmarks) — the backup to commit after every change. deploy creates or updates a space from those files (dry run unless confirm_deploy is true). check verifies a space against the DEPLOYED Unity Catalog metric views: every example, benchmark and snippet SQL runs as a row count (never values), column settings and data sources must reference existing objects, percentage measures multiplied by 100 are flagged, unknown identifiers in instructions become review hints, and reconciliation mappings can be checked too. Run it after every metric view change: a change belongs in the YAML, the Genie space and the mappings together.",
+        "database",
+    ),
+    (
+        100,
+        "UCMV Source Layer Manager",
+        "Manages the materialized-view layer under the metric views: one materialized view per Power BI table (its M query, applied steps and calculated columns), so the metric views stay thin. emit produces the source-layer DDL with Unity Catalog row filters (WITH ROW FILTER, 255-character constant check) and hints for every Power BI RLS role. deploy creates the views in dependency order. load_snapshots copies tables that exist only inside Power BI (typed-in data, Excel/SharePoint, other models) from the PUBLISHED model into typed pbi_<table> tables, pages large tables, decodes typed-in TMDL data and re-applies the row filter after every load. refresh reloads the snapshots, then refreshes the materialized views, optionally only when Power BI refreshed since. count_check compares a Power BI table with its Unity Catalog object — total and per-period row counts, members on one side only, which numeric columns differ — and separates drift after Power BI's last refresh from real differences. Verdicts and counts only, never values.",
         "database",
     ),
 ]
+
+
+# UCMV Drift Monitor, Genie Space Sync, UCMV Source Layer Manager.
+_PBI_MIGRATION_TOOL_CONFIGS: Dict[str, Dict[str, object]] = {
+    "98": {
+        "result_as_answer": True,
+        "ucmv_names": "",
+        "warehouse_id": "",
+        "databricks_host": "",
+        "workspace_id": "",
+        "dataset_id": "",
+        "report_id": "",
+        "tenant_id": "",
+        "client_id": "",
+        "client_secret": "",
+        "admin_client_id": "",
+        "admin_client_secret": "",
+        "llm_compare_legacy": True,
+        "apply_suspected_changes": False,
+        "llm_model": "databricks-claude-sonnet-4-5",
+        "semantic_snapshot_table": "",
+        "report_scope": "",
+        "semantic_ignore": "",
+        "semantic_proposals": True,
+        "tracked_tables": "",
+    },  # UCMV Drift Monitor
+    "99": {
+        "result_as_answer": True,
+        "databricks_host": "",
+        "warehouse_id": "",
+        "check_sql": True,
+        "reconciliation_mappings": "",
+    },  # Genie Space Sync
+    "100": {
+        "result_as_answer": True,
+        "action": "emit",
+        "materialized": True,
+        "skip_if_unchanged": False,
+        "sums": False,
+        "warehouse_id": "",
+        "databricks_host": "",
+        "catalog": "",
+        "schema_name": "",
+        "row_filters": "",
+        "workspace_id": "",
+        "dataset_id": "",
+        "tenant_id": "",
+        "client_id": "",
+        "client_secret": "",
+    },  # UCMV Source Layer Manager
+}
 
 
 def get_tool_configs() -> Dict[str, Dict[str, Any]]:
@@ -464,23 +527,7 @@ def get_tool_configs() -> Dict[str, Dict[str, Any]]:
             "parent_path": "/Workspace/Shared",
             "publish_dashboard": True,
         },  # Databricks Dashboard Creator
-        "98": {
-            "result_as_answer": True,
-            "ucmv_names": "",
-            "warehouse_id": "",
-            "databricks_host": "",
-            "workspace_id": "",
-            "dataset_id": "",
-            "report_id": "",
-            "tenant_id": "",
-            "client_id": "",
-            "client_secret": "",
-            "admin_client_id": "",
-            "admin_client_secret": "",
-            "llm_compare_legacy": True,
-            "apply_suspected_changes": False,
-            "llm_model": "databricks-claude-sonnet-4-5",
-        },  # UCMV Drift Monitor
+        **_PBI_MIGRATION_TOOL_CONFIGS,
     }
 
 

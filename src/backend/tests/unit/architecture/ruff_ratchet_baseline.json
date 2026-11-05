@@ -793,7 +793,7 @@
   "src/services/tools/powerbi_report_references_tool.py::TRY400": 3,
   "src/services/tools/skill_tools.py::S110": 1,
   "src/services/tools/tool_factory.py::BLE001": 22,
-  "src/services/tools/tool_factory.py::G004": 117,
+  "src/services/tools/tool_factory.py::G004": 116,
   "src/services/tools/tool_factory.py::S110": 2,
   "src/services/tools/tool_factory.py::TRY400": 27,
   "src/services/tools/tool_policies.py::G004": 1,

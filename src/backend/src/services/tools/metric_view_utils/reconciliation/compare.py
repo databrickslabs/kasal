@@ -18,6 +18,7 @@ import pandas as pd
 
 from .mapping import Measure, UCMVMapping
 from .periods import is_closed_period, matches_reference_years, normalize_snapshot_date
+from .weeks import closed_weeks, week_key
 
 LONG_FORMAT_COLUMNS = [
     "run_id",
@@ -47,7 +48,8 @@ def compare(
 ) -> pd.DataFrame:
     """Wide comparison: one row per (dimension, period), one
     ``<measure>_ucmv``/``_pbi``/``_delta`` triple per measure."""
-    snapshot = mapping.binding.time_dimension.grain == "snapshot"
+    grain = mapping.binding.time_dimension.grain
+    snapshot = grain == "snapshot"
     if snapshot:
         ucmv_df, pbi_df = ucmv_df.copy(), pbi_df.copy()
         for frame in (ucmv_df, pbi_df):
@@ -63,14 +65,34 @@ def compare(
         ]
         periods = set(ucmv_df["period"])
         pbi_df = pbi_df[pbi_df["period"].isin(periods)]
+    elif grain == "week":
+        # Week keys: every spelling -> YYYYWW; blank keys drop out; only weeks
+        # before the metric view's open latest week are compared.
+        ucmv_df, pbi_df = ucmv_df.copy(), pbi_df.copy()
+        ucmv_df["period"] = ucmv_df["period"].map(week_key)
+        pbi_df["period"] = pbi_df["period"].map(week_key)
+        closed = closed_weeks(ucmv_df["period"])
+        ucmv_df = ucmv_df[
+            ucmv_df["period"].isin(closed)
+            & ucmv_df["period"].apply(
+                lambda p: matches_reference_years(p, reference_years)
+            )
+        ].reset_index(drop=True)
+        pbi_df = pbi_df[
+            pbi_df["period"].isin(closed)
+            & pbi_df["period"].apply(
+                lambda p: matches_reference_years(p, reference_years)
+            )
+        ].reset_index(drop=True)
     else:
         ucmv_df = ucmv_df[ucmv_df["period"].apply(is_closed_period)].reset_index(
             drop=True
         )
         pbi_df = pbi_df[
             pbi_df["period"].apply(
-                lambda p: matches_reference_years(p, reference_years)
-                and is_closed_period(p)
+                lambda p: (
+                    matches_reference_years(p, reference_years) and is_closed_period(p)
+                )
             )
         ].reset_index(drop=True)
 

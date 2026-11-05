@@ -12,6 +12,8 @@ Three formats:
 - ``percent_string_unscaled``: ``"0.06%"`` -> ``0.06`` (strip the ``%`` only, no
   divide) — for a specific PBI-model defect where a SWITCH branch is missing the
   ``*100`` its siblings have. Never a first guess; use only when confirmed.
+- ``raw_number_hundred``: a plain number on the 0-100 scale (``25.3``) for a
+  percentage the UCMV keeps as a fraction (``0.253``) -> divided by 100.
 
 ``coerce`` (the default) turns an unparseable cell into NaN rather than raising,
 so one mismapped measure returning a differently-shaped string cannot take down
@@ -46,6 +48,9 @@ def parse_value(
 ) -> pd.Series:
     """Parse a PBI result column into numbers according to ``value_format``."""
     errors: _Errors = "raise" if strict else "coerce"
+    if value_format == "raw_number_hundred":
+        hundred: pd.Series = pd.to_numeric(series, errors=errors)
+        return hundred / 100
     if value_format == "percent_string":
         scaled: pd.Series = pd.to_numeric(strip_percent(series), errors=errors)
         return scaled / 100

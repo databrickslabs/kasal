@@ -365,6 +365,9 @@ done with a note.
 | Read the report's visuals and their measure references | Power BI Report References Tool |
 | Pull model definitions (tables, measures, relationships) | Pipeline Config Generator |
 | Draft the scope table from page reachability (phase 2) | Pipeline Config Generator: `report_scope` (rows, CSV, counts); the UC Metric View Generator returns it with `in_kasal` / `mirrored_as` filled and `kasal_gaps` |
+| Every filter, slicer selection and page scope; per-measure page filters; links, linked and sibling reports; table inventory (phases 0a, 2) | Pipeline Config Generator `report_scope`: `filters`, `page_scopes`, `measure_page_filters` (also carried into the mapping drafts as `extra_filter`), `links`, `related_reports`, `inventory` |
+| Check a signed-off scope file (vocabulary, links that point to nothing, stale rows) | UCMV Drift Monitor: `scope_problems` in the semantic sync output |
+| Track data that carries meaning (a KPI status list) | Pipeline Config Generator / UCMV Drift Monitor `tracked_tables` |
 | Lint metric view metadata (missing `format`, double-scaled percentages, synonym clashes) | UC Metric View Generator metadata lint (MV001–MV010) |
 | Reconcile as statistics only; find 0–100 measures labelled as fractions | UCMV reconciliation tool with `statistics_only` and `scale_check` |
 | Semantic sync: model and report changes routed by the scope table (phase 8) | UCMV Drift Monitor with `semantic_snapshot_table`, `report_scope`, `semantic_ignore` |

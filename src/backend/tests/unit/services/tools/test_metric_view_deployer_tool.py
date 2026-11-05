@@ -347,6 +347,7 @@ class TestDeployment:
                 "_execute_sql_sync",
                 side_effect=[
                     {"success": True, "state": "SUCCEEDED"},  # schema
+                    {"success": True, "state": "SUCCEEDED"},  # grants read (none)
                     {"success": True, "state": "SUCCEEDED"},  # DDL
                     _describe_result(  # DESCRIBE guard rail
                         measures=["total_revenue"], dimensions=["region"]
@@ -377,6 +378,7 @@ class TestDeployment:
                 "_execute_sql_sync",
                 side_effect=[
                     {"success": True, "state": "SUCCEEDED"},  # schema creation succeeds
+                    {"success": True, "state": "SUCCEEDED"},  # grants read (none)
                     {
                         "success": False,
                         "http_status": 404,
@@ -553,6 +555,7 @@ class TestPostDeployGuardRail:
                 "_execute_sql_sync",
                 side_effect=[
                     {"success": True, "state": "SUCCEEDED"},  # schema
+                    {"success": True, "state": "SUCCEEDED"},  # grants read (none)
                     {"success": True, "state": "SUCCEEDED"},  # DDL
                     describe_ret,  # DESCRIBE
                 ],

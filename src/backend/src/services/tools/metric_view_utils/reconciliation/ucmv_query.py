@@ -23,6 +23,21 @@ def _quote_ident(name: str) -> str:
     return "`{}`".format(str(name).replace("`", "``"))
 
 
+def ucmv_context_alias(ref: str) -> str:
+    """Result column holding the UCMV label that matches PBI label column ``ref``."""
+    return "ctx__" + "".join(c if c.isalnum() else "_" for c in ref)
+
+
+def _period_expression(column: str, period_format: Optional[str]) -> str:
+    """The UCMV period column as the "YYYYNNN" key. "date_to_fiscper": a DATE
+    or 'YYYY-MM[-DD]' text column becomes YYYY0MM, computed in SQL."""
+    quoted = _quote_ident(column)
+    if period_format == "date_to_fiscper":
+        text = f"CAST({quoted} AS STRING)"
+        return f"CONCAT(SUBSTR({text}, 1, 4), '0', SUBSTR({text}, 6, 2))"
+    return quoted
+
+
 def _quote_sql_string(value: object) -> str:
     """A Databricks SQL string literal for a filter value.
 
@@ -65,7 +80,9 @@ def build_ucmv_query(
 
     if td.ucmv_mode == "column":
         time_col = _quote_ident(str(td.ucmv_column))
-        select_cols.append(f"{time_col} AS period")
+        select_cols.append(
+            f"{_period_expression(str(td.ucmv_column), td.ucmv_period_format)} AS period"
+        )
         group_cols.append(time_col)
     else:  # "reconstruct"
         cols = td.ucmv_reconstruct_from or []
@@ -73,6 +90,25 @@ def build_ucmv_query(
         concat_parts = [f"CAST({quoted_cols[0]} AS STRING)"] + quoted_cols[1:]
         select_cols.append(f"CONCAT({', '.join(concat_parts)}) AS period")
         group_cols.extend(quoted_cols)
+    # Window measures order by a column that is not the period: grouped, not
+    # selected. Each must be 1:1 with the period or rows multiply.
+    for extra in td.ucmv_group_by or []:
+        if _quote_ident(extra) not in group_cols:
+            group_cols.append(_quote_ident(extra))
+
+    # Calendar labels (extra_group_by {pbi, ucmv}): selected so each period's PBI
+    # query can be filtered to the same label, and grouped.
+    label_columns = sorted(
+        {
+            (ref, col)
+            for m in measures
+            for ref, col in (m.ucmv_context_columns or {}).items()
+        }
+    )
+    for ref, column in label_columns:
+        select_cols.append(f"{_quote_ident(column)} AS {ucmv_context_alias(ref)}")
+        if _quote_ident(column) not in group_cols:
+            group_cols.append(_quote_ident(column))
 
     for m in measures:
         select_cols.append(

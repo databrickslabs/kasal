@@ -55,6 +55,7 @@ _PBI_KEYS = (
     "admin_client_secret",
     "admin_username",
     "admin_password",
+    "tracked_tables",
 )
 _OWN_KEYS = (
     "ucmv_names",

@@ -10,6 +10,35 @@ The tool does I/O + orchestration only. Every query is built and every
 comparison is made by the deterministic core in
 ``metric_view_utils/reconciliation/`` — the LLM is never in the comparison path.
 
+Mapping features (per measure or per time dimension, in the mapping YAML):
+
+- ``value_format: raw_number_hundred``: PBI's 0-100 number divided by 100 for a
+  UCMV fraction.
+- ``time_dimension.grain: week``: ``YYYYWW``, ``WW.YYYY`` and ``YYYY-WW`` keys all
+  compare as ``YYYYWW``; every week before the view's latest (open) week counts.
+- ``time_dimension.pbi_year_column`` + ``pbi_month_column`` (month grain): PBI is
+  grouped by the calendar's year and month numbers instead of a fiscper column.
+- ``time_dimension.ucmv.group_by`` / ``ucmv.period_format: date_to_fiscper``: the
+  UCMV side groups an order column, and turns a date period column into YYYY0MM.
+- ``pbi_chunk_by: period | member`` (per measure): a heavy PBI query is split
+  without trying it all at once first.
+- ``extra_group_by: [{pbi: "Table[Column]", ucmv: column}]``: a calendar label
+  read by the measure; a period where the label is NULL in the metric view is
+  not queried in PBI and not compared (counted per measure in the output).
+
+Operator options (constructor, never LLM-set):
+
+- ``cross_breakdown``: add a per-measure period x member table for every measure
+  below 100 % (cell class counts and relative difference only, no values).
+- ``lock`` / ``lock_wait_seconds``: one reconciliation at a time per SQL
+  warehouse, across processes (a lock file in the temp dir; a stale lock whose
+  process is gone is taken over). Off by default; with ``lock_wait_seconds`` the
+  run waits up to that long for a held lock.
+
+Timeouts: a PBI query that times out is retried per measure, then in chunks. A
+measure that still times out is listed under ``timed_out_measures`` and is not
+compared; the run goes on.
+
 Reuse (no reinvention):
 
 - PBI auth: ``powerbi_auth_utils.get_powerbi_access_token`` (same as
@@ -30,11 +59,10 @@ import concurrent.futures
 import contextvars
 import json
 import logging
-import math
 from collections.abc import Coroutine, Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Optional, Type, TypeVar
 
-import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -57,10 +85,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-
-# Cap the number of mismatching cells reported per measure — enough to see the
-# pattern, not the whole failing set.
-_MAX_SAMPLE_MISMATCHES = 10
 
 # Constructor-injected config keys (kept out of the LLM-facing schema). Defined
 # at module scope, not as a class attribute: a leading-underscore class
@@ -92,6 +116,10 @@ _CONFIG_KEYS = (
     "statistics_only",
     "scale_check",
     "scale_threshold",
+    # Output and run options. Operator-set (constructor), never LLM-set.
+    "cross_breakdown",
+    "lock",
+    "lock_wait_seconds",
 )
 
 
@@ -216,6 +244,16 @@ class _SQLExecutor:
         if not result.get("success"):
             return pd.DataFrame(), result.get("error")
         return _sql_result_to_df(as_map(result.get("data"))), None
+
+
+def _as_seconds(value: object) -> float:
+    """A non-negative number of seconds from a config value (0 when unusable)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return 0.0
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return 0.0
 
 
 class UCMVReconciliationTool(BaseTool):
@@ -451,21 +489,23 @@ class UCMVReconciliationTool(BaseTool):
                     ucmv_df[m.ucmv_measure], errors="coerce"
                 )
 
-        # PBI side — context periods cover snapshot dates + monthly extra_group_by
+        # PBI side — context periods cover snapshot dates + calendar-label measures
         context_periods = periods or sorted(
             str(p) for p in ucmv_df["period"].astype(str).unique().tolist()
         )
-        pbi_df = recon.run_pbi_queries(
+        labels = recon.labels_from_ucmv(ucmv_df, mapping.resolved_measures())
+        pbi_df, report = recon.run_pbi_queries_reported(
             pbi_executor,
             model_id,
             mapping,
             dimension_name,
             dimension_values,
             context_periods=context_periods,
+            context_labels=labels,
         )
 
-        result = self._compare_and_summarize(
-            view_name, mapping, dimension_name, reference_years, ucmv_df, pbi_df, kwargs
+        result = self._compare_view(
+            mapping, dimension_name, reference_years, ucmv_df, pbi_df, report, kwargs
         )
         if scale is not None:
             result["scale_check"] = scale
@@ -496,142 +536,65 @@ class UCMVReconciliationTool(BaseTool):
         )
         return {"threshold": threshold, "measures": verdicts}
 
-    def _compare_and_summarize(
+    def _compare_view(
         self,
-        view_name: str,
         mapping: recon.UCMVMapping,
         dimension_name: str,
         reference_years: list[object],
         ucmv_df: pd.DataFrame,
         pbi_df: pd.DataFrame,
+        report: recon.PbiRunReport,
         kwargs: Mapping[str, object],
     ) -> dict[str, object]:
-        wide = recon.compare(ucmv_df, pbi_df, mapping, dimension_name, reference_years)
-        long_df = recon.to_long_format(wide, mapping, dimension_name)
-        if self._cfg(kwargs, "statistics_only"):
-            # Values never reach the output on this path: the report is built
-            # from the value-free statistics only (see reconciliation/statistics).
-            return self._statistics_view(mapping, dimension_name, long_df, kwargs)
-        summary = recon.summarize(long_df)
-
-        pbi_refresh = self._cfg(kwargs, "pbi_refresh_period")
-        mv_refresh = self._cfg(kwargs, "mv_refresh_period")
-
-        measures_out: dict[str, dict[str, object]] = {}
-        measures_at_100 = 0
-        for _, row in summary.iterrows():
-            name = row["ucmv_kbi_name"]
-            measure = mapping.measure(name)
-            cell_mask = long_df["ucmv_kbi_name"] == name
-            cells = long_df[cell_mask]
-            failing = cells[~cells["within_tolerance"].astype(bool)]
-            failing_periods = sorted(failing["period"].astype(str).unique().tolist())
-            stats = recon.MismatchStats(
-                pct_aligned=float(row["pct_aligned"]),
-                n_periods=int(row["n_periods"]),
-                periods_failing=int(row["periods_failing"]),
-                n_dims=int(row["n_dims"]),
-                dims_failing=int(row["dims_failing"]),
-                failing_periods=failing_periods,
-                value_format=measure.value_format,
-            )
-            classification = recon.classify(
-                stats,
-                pbi_refresh_period=opt_str(pbi_refresh),
-                mv_refresh_period=opt_str(mv_refresh),
-            )
-            samples = [
-                {
-                    "dimension": s["dimension"],
-                    "period": s["period"],
-                    "ucmv_value": _num(s["ucmv_value"]),
-                    "pbi_value": _num(s["pbi_value"]),
-                    "delta": _num(s["delta"]),
-                }
-                for _, s in failing.head(_MAX_SAMPLE_MISMATCHES).iterrows()
-            ]
-            pct_aligned = float(row["pct_aligned"])
-            if pct_aligned >= 100:
-                measures_at_100 += 1
-            measures_out[name] = {
-                "pct_aligned": pct_aligned,
-                "cells_total": int(row["total"]),
-                "cells_aligned": int(row["aligned"]),
-                "classification": classification,
-                "sample_mismatches": samples,
-            }
-
-        total_cells = int(long_df.shape[0])
-        aligned_cells = int(long_df["within_tolerance"].astype(bool).sum())
-        return {
-            "dimension": dimension_name,
-            "measures": measures_out,
-            "summary": {
-                "measures_at_100": measures_at_100,
-                "total_measures": len(measures_out),
-                "cells_total": total_cells,
-                "cells_aligned": aligned_cells,
-                "overall_cell_pct": (
-                    round(100 * aligned_cells / total_cells, 2) if total_cells else 0.0
-                ),
+        """Compare the two sides cell-by-cell and build the view's report. Measures
+        that timed out are left out of the comparison, and so are the cells of
+        periods the PBI side did not query."""
+        compared = [
+            m
+            for m in mapping.resolved_measures()
+            if m.ucmv_measure not in report.timed_out
+        ]
+        scoped = replace(mapping, measures=compared)
+        wide = recon.compare(ucmv_df, pbi_df, scoped, dimension_name, reference_years)
+        long_df = recon.to_long_format(wide, scoped, dimension_name)
+        long_df, cells_left_out = recon.drop_skipped_cells(
+            long_df, report.skipped_periods, mapping.binding.time_dimension.grain
+        )
+        run_info = recon.ViewRunInfo(
+            timed_out=sorted(report.timed_out),
+            periods_skipped={
+                name: len(periods) for name, periods in report.skipped_periods.items()
             },
-        }
-
-    def _statistics_view(
-        self,
-        mapping: recon.UCMVMapping,
-        dimension_name: str,
-        long_df: pd.DataFrame,
-        kwargs: Mapping[str, object],
-    ) -> dict[str, object]:
-        """Statistics-only view (``statistics_only``): counts, shares and the
-        largest RELATIVE difference per measure, no values and no absolute deltas."""
-        pbi_refresh = opt_str(self._cfg(kwargs, "pbi_refresh_period"))
-        mv_refresh = opt_str(self._cfg(kwargs, "mv_refresh_period"))
-        measures_out: dict[str, dict[str, object]] = {}
-        measures_at_100 = 0
-        for name, stats in recon.statistics_by_measure(long_df).items():
-            measure = mapping.measure(name)
-            classification = recon.classify(
-                recon.MismatchStats(
-                    pct_aligned=stats["pct_aligned"],
-                    n_periods=stats["n_periods"],
-                    periods_failing=stats["periods_failing"],
-                    n_dims=stats["n_dims"],
-                    dims_failing=stats["dims_failing"],
-                    failing_periods=stats["failing_periods"],
-                    value_format=measure.value_format,
-                ),
-                pbi_refresh_period=pbi_refresh,
-                mv_refresh_period=mv_refresh,
-            )
-            if stats["pct_aligned"] >= 100:
-                measures_at_100 += 1
-            # failing_periods is the classifier's input; the report lists periods once.
-            entry: dict[str, object] = {
-                key: value for key, value in stats.items() if key != "failing_periods"
-            }
-            entry["classification"] = classification
-            measures_out[name] = entry
-
-        cells_total = int(long_df.shape[0])
-        cells_aligned = int(long_df["within_tolerance"].astype(bool).sum())
-        return {
-            "dimension": dimension_name,
-            "statistics_only": True,
-            "measures": measures_out,
-            "summary": {
-                "measures_at_100": measures_at_100,
-                "total_measures": len(measures_out),
-                "cells_total": cells_total,
-                "cells_aligned": cells_aligned,
-                "overall_cell_pct": (
-                    round(100 * cells_aligned / cells_total, 2) if cells_total else 0.0
-                ),
-            },
-        }
+            cells_left_out=cells_left_out,
+        )
+        options = recon.ViewOptions(
+            statistics_only=bool(self._cfg(kwargs, "statistics_only")),
+            cross_breakdown=bool(self._cfg(kwargs, "cross_breakdown")),
+            pbi_refresh_period=opt_str(self._cfg(kwargs, "pbi_refresh_period")),
+            mv_refresh_period=opt_str(self._cfg(kwargs, "mv_refresh_period")),
+        )
+        return recon.build_view_report(
+            long_df, scoped, dimension_name, options, run_info
+        )
 
     # ── entry point ───────────────────────────────────────────────────────────
+
+    def _reconcile_all(
+        self,
+        mappings: dict[str, recon.UCMVMapping],
+        kwargs: Mapping[str, object],
+        dry_run: bool,
+    ) -> dict[str, dict[str, object]]:
+        views: dict[str, dict[str, object]] = {}
+        for view_name, mapping in mappings.items():
+            try:
+                views[view_name] = self._reconcile_view(
+                    view_name, mapping, kwargs, dry_run
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[UCMVReconciliation] %s failed: %s", view_name, e)
+                views[view_name] = {"error": str(e)}
+        return views
 
     def _run(self, **kwargs: object) -> str:
         dry_run = bool(self._cfg(kwargs, "dry_run") or False)
@@ -647,39 +610,30 @@ class UCMVReconciliationTool(BaseTool):
                 {"error": "No mapping provided (mapping or mappings_json required)."}
             )
 
-        views: dict[str, dict[str, object]] = {}
-        for view_name, mapping in mappings.items():
+        warehouse_id = str(self._cfg(kwargs, "warehouse_id") or "")
+        if dry_run or not self._cfg(kwargs, "lock") or not warehouse_id:
+            views = self._reconcile_all(mappings, kwargs, dry_run)
+        else:
+            # One run at a time per warehouse (shared SQL warehouse and PBI account).
             try:
-                views[view_name] = self._reconcile_view(
-                    view_name, mapping, kwargs, dry_run
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("[UCMVReconciliation] %s failed: %s", view_name, e)
-                views[view_name] = {"error": str(e)}
+                with recon.warehouse_run_lock(
+                    warehouse_id,
+                    wait_seconds=_as_seconds(self._cfg(kwargs, "lock_wait_seconds")),
+                ):
+                    views = self._reconcile_all(mappings, kwargs, dry_run)
+            except (recon.RunLockHeldError, OSError) as e:
+                return json.dumps({"error": f"Reconciliation not started: {e}"})
 
         return json.dumps(
             {"views": views, "overall": _overall(views)}, indent=2, default=str
         )
 
 
-def _num(value: object) -> object:
-    """Coerce a pandas/NumPy cell into a JSON-friendly number or None."""
-    if value is None or value is pd.NA or value is pd.NaT:
-        return None
-    if isinstance(value, (float, np.floating)) and math.isnan(float(value)):
-        return None
-    if isinstance(value, (int, float, str)):
-        try:
-            return float(value)
-        except ValueError:
-            return value
-    return value
-
-
 def _overall(views: dict[str, dict[str, object]]) -> dict[str, object]:
     summaries = [as_map(v["summary"]) for v in views.values() if "summary" in v]
     measures_at_100 = sum(as_int(s.get("measures_at_100")) for s in summaries)
     total_measures = sum(as_int(s.get("total_measures")) for s in summaries)
+    measures_timed_out = sum(as_int(s.get("measures_timed_out")) for s in summaries)
     cells_total = sum(as_int(s.get("cells_total")) for s in summaries)
     cells_aligned = sum(as_int(s.get("cells_aligned")) for s in summaries)
     scored = summaries
@@ -688,6 +642,7 @@ def _overall(views: dict[str, dict[str, object]]) -> dict[str, object]:
         "views_scored": len(scored),
         "measures_at_100": measures_at_100,
         "total_measures": total_measures,
+        "measures_timed_out": measures_timed_out,
         "cells_total": cells_total,
         "cells_aligned": cells_aligned,
         "overall_cell_pct": (

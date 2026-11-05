@@ -19,6 +19,8 @@ from .cells import (
     classify_cells,
 )
 from .classify import MismatchStats, classify
+from .context_labels import drop_skipped_cells, labels_from_ucmv, periods_without_label
+from .cross import cross_breakdown
 from .compare import (
     LONG_FORMAT_COLUMNS,
     compare,
@@ -60,7 +62,15 @@ from .periods import (
     matches_reference_years,
     normalize_snapshot_date,
 )
-from .runner import UcmvExecutor, run_pbi_queries, run_ucmv_query
+from .pbi_retry import TimeoutLadder, is_timeout
+from .run_lock import RunLockHeldError, lock_path_for, warehouse_run_lock
+from .runner import (
+    PbiRunReport,
+    UcmvExecutor,
+    run_pbi_queries,
+    run_pbi_queries_reported,
+    run_ucmv_query,
+)
 from .scale_check import (
     DEFAULT_SCALE_THRESHOLD,
     build_scale_query,
@@ -70,6 +80,8 @@ from .scale_check import (
 from .statistics import statistics_by_measure
 from .ucmv_query import build_ucmv_query
 from .values import parse_value, strip_percent
+from .view_report import ViewOptions, ViewRunInfo, build_view_report
+from .weeks import closed_weeks, is_week_key, week_key
 
 __all__ = [
     # mapping
@@ -125,8 +137,31 @@ __all__ = [
     "scale_verdict",
     # runner
     "run_pbi_queries",
+    "run_pbi_queries_reported",
+    "PbiRunReport",
     "run_ucmv_query",
     "UcmvExecutor",
+    # timeouts
+    "TimeoutLadder",
+    "is_timeout",
+    # calendar labels / skipped periods
+    "labels_from_ucmv",
+    "periods_without_label",
+    "drop_skipped_cells",
+    # cross breakdown
+    "cross_breakdown",
+    # run lock
+    "warehouse_run_lock",
+    "RunLockHeldError",
+    "lock_path_for",
+    # view report
+    "build_view_report",
+    "ViewOptions",
+    "ViewRunInfo",
+    # weeks
+    "week_key",
+    "closed_weeks",
+    "is_week_key",
     # iterative loop
     "run_reconciliation_loop",
     "build_refinement_feedback",

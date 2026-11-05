@@ -48,6 +48,9 @@ class TranslationResult:
     # distinct from `referenced_by`, which is measure→measure DAX in-degree,
     # not dashboard usage.
     used_in_visuals: list = field(default_factory=list)
+    # Page filters every page drawing this measure shares (report scope →
+    # config ``page_filters_by_measure``): the mapping draft's ``extra_filter``.
+    page_filters: list = field(default_factory=list)
     # INDIRECT visual usage: this measure is not drawn/filtered in a visual
     # itself, but a measure that IS uses it (transitively) in its DAX. Each
     # entry [{"page", "visual_type", "role", "via"}] mirrors `used_in_visuals`

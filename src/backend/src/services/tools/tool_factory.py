@@ -16,6 +16,7 @@ from src.services.tools.optional_tools import (  # tests patch these names here
     DatabricksJobsTool,
     DatabricksKnowledgeSearchTool,
     GenieSpaceGeneratorTool,
+    GenieSpaceSyncTool,
     GenieTool,
     GmailTool,
     MCPTool,
@@ -33,6 +34,8 @@ from src.services.tools.optional_tools import (  # tests patch these names here
     UCMetricViewGeneratorTool,
     UCMVDriftMonitorTool,
     UCMVGenieConfigGeneratorTool,
+    UCMVReevaluationTool,
+    UCMVSourceLayerTool,
 )
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
@@ -118,67 +121,33 @@ class ToolFactory:
         if MCPTool is not None:
             self._tool_implementations["MCPTool"] = MCPTool
 
-        # Add converter tools if successfully imported
-        if PowerBIConnectorTool is not None:
-            self._tool_implementations["PowerBIConnectorTool"] = PowerBIConnectorTool
-        if MeasureConversionPipelineTool is not None:
-            self._tool_implementations["Measure Conversion Pipeline"] = (
-                MeasureConversionPipelineTool
-            )
-        if PowerBIHierarchiesTool is not None:
-            self._tool_implementations["Power BI Hierarchies Tool"] = (
-                PowerBIHierarchiesTool
-            )
-        if PowerBIFieldParametersCalculationGroupsTool is not None:
-            self._tool_implementations[
-                "Power BI Field Parameters & Calculation Groups Tool"
-            ] = PowerBIFieldParametersCalculationGroupsTool
-        if PowerBIReportReferencesTool is not None:
-            self._tool_implementations["Power BI Report References Tool"] = (
-                PowerBIReportReferencesTool
-            )
-        if PowerBIDaxExecutorTool is not None:
-            self._tool_implementations["Power BI DAX Executor"] = PowerBIDaxExecutorTool
-
-        # UC Metric View tools
-        if UCMetricViewGeneratorTool is not None:
-            self._tool_implementations["UC Metric View Generator"] = (
-                UCMetricViewGeneratorTool
-            )
-        if MetricViewDeployerTool is not None:
-            self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
-        if MetricViewValidatorTool is not None:
-            self._tool_implementations["Metric View Validator"] = (
-                MetricViewValidatorTool
-            )
-        try:  # imported here so a failed import needs no None-typed module name
-            from .ucmv_reevaluation_tool import UCMVReevaluationTool
-
-            self._tool_implementations["UCMV Re-evaluation"] = UCMVReevaluationTool
-        except ImportError as e:
-            logging.warning(f"Could not import UCMVReevaluationTool: {e}")
-        if UCMVDriftMonitorTool is not None:
-            self._tool_implementations["UCMV Drift Monitor"] = UCMVDriftMonitorTool
-        if PipelineConfigGeneratorTool is not None:
-            self._tool_implementations["Pipeline Config Generator"] = (
-                PipelineConfigGeneratorTool
-            )
-        if GenieSpaceGeneratorTool is not None:
-            self._tool_implementations["Genie Space Generator"] = (
-                GenieSpaceGeneratorTool
-            )
-        if UCMVGenieConfigGeneratorTool is not None:
-            self._tool_implementations["UCMV Genie Space Config Generator"] = (
-                UCMVGenieConfigGeneratorTool
-            )
-        if PBIVisualUCMVMapperTool is not None:
-            self._tool_implementations["PBI Visual-UCMV Mapper"] = (
-                PBIVisualUCMVMapperTool
-            )
-        if DatabricksDashboardCreatorTool is not None:
-            self._tool_implementations["Databricks Dashboard Creator"] = (
-                DatabricksDashboardCreatorTool
-            )
+        # Optional tools (None when their module failed to import), by seeded title.
+        optional: Tuple[Tuple[str, object], ...] = (
+            ("PowerBIConnectorTool", PowerBIConnectorTool),
+            ("Measure Conversion Pipeline", MeasureConversionPipelineTool),
+            ("Power BI Hierarchies Tool", PowerBIHierarchiesTool),
+            (
+                "Power BI Field Parameters & Calculation Groups Tool",
+                PowerBIFieldParametersCalculationGroupsTool,
+            ),
+            ("Power BI Report References Tool", PowerBIReportReferencesTool),
+            ("Power BI DAX Executor", PowerBIDaxExecutorTool),
+            ("UC Metric View Generator", UCMetricViewGeneratorTool),
+            ("Metric View Deployer", MetricViewDeployerTool),
+            ("Metric View Validator", MetricViewValidatorTool),
+            ("UCMV Re-evaluation", UCMVReevaluationTool),
+            ("UCMV Drift Monitor", UCMVDriftMonitorTool),
+            ("UCMV Source Layer Manager", UCMVSourceLayerTool),
+            ("Pipeline Config Generator", PipelineConfigGeneratorTool),
+            ("Genie Space Generator", GenieSpaceGeneratorTool),
+            ("Genie Space Sync", GenieSpaceSyncTool),
+            ("UCMV Genie Space Config Generator", UCMVGenieConfigGeneratorTool),
+            ("PBI Visual-UCMV Mapper", PBIVisualUCMVMapperTool),
+            ("Databricks Dashboard Creator", DatabricksDashboardCreatorTool),
+        )
+        for title, tool_class in optional:
+            if tool_class is not None:
+                self._tool_implementations[title] = tool_class
 
         # Initialize _initialized flag
         self._initialized = False
