@@ -79,6 +79,7 @@ def deploy_summary(
         "deployed": count("deployed"),
         "deployed_incomplete": count("deployed_incomplete"),
         "deployed_grants_incomplete": count("deployed_grants_incomplete"),
+        "skipped": count("skipped"),
         "errors": count("error"),
         "dry_run": dry_run,
     }

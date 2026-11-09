@@ -42,6 +42,7 @@ from src.services.tools.metric_view_deployer_utils.sql_helpers import (
     first_cell,
     sanitize_identifier,
 )
+from src.services.tools.metric_view_deployer_utils.yaml_safety import yaml_is_safe
 from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 _MODES = ("deploy", "verify", "check")
 _DEFAULT_SLOW_S = 30.0
+_EMPTY_YAML = "no metric view: empty YAML (a table without measures)"
 
 
 class MetricViewDeployerSchema(BaseModel):
@@ -545,7 +547,7 @@ class MetricViewDeployerTool(BaseTool):
         if not opts.warehouse_id:
             return {"status": "error", "message": "warehouse_id is required"}
         if not yaml_content or not yaml_content.strip():
-            return {"status": "error", "message": "Empty YAML content"}
+            return {"status": "skipped", "message": _EMPTY_YAML}
 
         cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
         view_name = f"{cat}.{sch}.{view}"
@@ -559,11 +561,7 @@ class MetricViewDeployerTool(BaseTool):
         if runner is None:
             return {"status": "error", "message": error or "Authentication failed"}
 
-        from src.services.tools.metric_view_utils.yaml_emitter import (
-            _check_dangerous_sql,
-        )
-
-        if not _check_dangerous_sql(yaml_content):
+        if not yaml_is_safe(yaml_content):
             return {
                 "status": "error",
                 "message": "YAML contains dangerous SQL patterns",

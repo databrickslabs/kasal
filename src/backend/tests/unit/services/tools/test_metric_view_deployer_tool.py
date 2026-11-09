@@ -187,8 +187,8 @@ class TestYamlSpecsPriority:
 
 
 class TestErrorCases:
-    def test_empty_yaml_content_returns_error(self):
-        """yaml dict has key with empty string value → error for that key."""
+    def test_empty_yaml_content_is_skipped(self):
+        """yaml dict has key with empty string value → skipped (a table without measures)."""
         yaml_specs = json.dumps({"fact_empty": ""})
         tool = MetricViewDeployerTool()
         # Not dry_run so it hits the empty YAML check
@@ -200,8 +200,8 @@ class TestErrorCases:
         data = json.loads(result)
         # Authentication will fail without real credentials, but the key should exist
         assert "fact_empty" in data["deployment_results"]
-        # Should be error — either empty content or auth error
-        assert data["deployment_results"]["fact_empty"]["status"] == "error"
+        # Checked before authentication: nothing to deploy, not a failure
+        assert data["deployment_results"]["fact_empty"]["status"] == "skipped"
 
     def test_no_yaml_specs_returns_error(self):
         """No ucmv_output and no yaml_specs_json → error JSON."""
