@@ -178,6 +178,20 @@ def expand_calculation_groups(
     return expanded
 
 
+def _keep_switch(
+    built: TranslationResult,
+    switch_measures: list[TranslationResult],
+    untranslatable: list[TranslationResult],
+) -> bool:
+    """File a built SWITCH measure; one the config cannot build (join alias still a
+    TODO) becomes a gap instead of aborting the table."""
+    if not built.is_translatable:
+        untranslatable.append(built)
+        return False
+    switch_measures.append(built)
+    return True
+
+
 def process_table(
     table_key: str,
     table_info: TableInfo,
@@ -675,12 +689,11 @@ def process_table(
                     defn["name"] not in base_names
                     or defn["name"] in dax_translated_names
                 ):
-                    switch_measures.append(
-                        build_switch_measure_fn(
-                            defn, filter_sets=ctx.translator.filter_sets
-                        )
+                    built = build_switch_measure_fn(
+                        defn, filter_sets=ctx.translator.filter_sets
                     )
-                    base_names.add(defn["name"])
+                    if _keep_switch(built, switch_measures, untranslatable):
+                        base_names.add(defn["name"])
         elif isinstance(entries, dict):
             for parent_name, branches in entries.items():
                 if not isinstance(branches, dict):

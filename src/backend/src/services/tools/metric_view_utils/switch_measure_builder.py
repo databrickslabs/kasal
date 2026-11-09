@@ -11,6 +11,11 @@ from .data_classes import TranslationResult
 from .dax_condition_sql import _sql_in_list
 from .join_detector import _sanitize_alias
 
+_UNSET_JOIN = (
+    "SWITCH decomposition needs a valid switch_join_alias and switch_join_col in the "
+    "pipeline config (still a TODO)"
+)
+
 
 def build_switch_measure(
     defn: dict,
@@ -20,11 +25,9 @@ def build_switch_measure(
     filter_sets: dict | None = None,
 ) -> TranslationResult:
     """Build a TranslationResult from a SWITCH decomposition definition."""
-    join_alias = join_alias or config.get("switch_join_alias", "")
-    join_col = join_col or config.get("switch_join_col", "")
+    join_alias = join_alias or config.get("switch_join_alias") or ""
+    join_col = join_col or config.get("switch_join_col") or ""
     _fs = filter_sets or {}
-    if _fs:  # config identifiers reach the deployed SQL unquoted
-        join_alias, join_col = _sanitize_alias(join_alias), _sanitize_alias(join_col)
 
     # Filter-set values are model/warehouse data deployed as metric-view
     # SQL: escaped literals, never raw '{v}'.
@@ -51,6 +54,23 @@ def build_switch_measure(
             pbi_sources=defn.get("pbi_sources") or [],
             pbi_operator=defn.get("pbi_operator"),
         )
+
+    if _fs:  # config identifiers reach the deployed SQL unquoted
+        try:
+            join_alias, join_col = _sanitize_alias(join_alias), _sanitize_alias(join_col)
+        except ValueError:
+            # switch_join_alias / switch_join_col still a TODO (or unsafe): only
+            # this measure is lost, never the whole run.
+            return TranslationResult(
+                measure_name=defn["name"],
+                original_name=defn.get("original_name") or defn["name"],
+                sql_expr="",
+                is_translatable=False,
+                skip_reason=_UNSET_JOIN,
+                dax_expression="SWITCH decomposition",
+                confidence="low",
+                category="switch_decomposition",
+            )
 
     num = defn["num"]
     den = defn["den"]

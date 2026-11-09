@@ -12,7 +12,6 @@ metric view deploys or a draft a person runs, unquoted or unescaped:
 * recovery_recommender / generated_table_emitter: draft names unescaped.
 """
 
-import pytest
 
 from src.services.tools.metric_view_utils.data_classes import MStep
 from src.services.tools.metric_view_utils.dax_translator import DaxTranslator
@@ -77,10 +76,30 @@ class TestSwitchJoinIdentifiers:
     def test_a_hostile_join_alias_is_refused(self):
         defn = {"name": "m", "num": "a", "den": "b", "num_fs": "A", "den_fs": "A"}
         pipeline = MetricViewPipeline(mapping=[], mquery_tables={})
-        with pytest.raises(ValueError):
-            pipeline._build_switch_measure(
-                defn, join_alias="d) OR (1=1", join_col="code", filter_sets={"A": ["x"]}
-            )
+        result = pipeline._build_switch_measure(
+            defn, join_alias="d) OR (1=1", join_col="code", filter_sets={"A": ["x"]}
+        )
+        assert not result.is_translatable and result.sql_expr == ""
+
+    def test_a_todo_join_alias_loses_only_that_measure(self):
+        # Pipeline Config Generator writes a TODO marker when the model has SWITCH
+        # measures; it used to abort the whole run ("Invalid SQL alias: TODO: ...").
+        defn = {"name": "m", "num": "a", "den": "b", "num_fs": "A", "den_fs": "A"}
+        pipeline = MetricViewPipeline(mapping=[], mquery_tables={})
+        pipeline.config = {
+            "switch_join_alias": "TODO: SWITCH decomposition join alias",
+            "switch_join_col": "TODO: SWITCH decomposition join column",
+        }
+        result = pipeline._build_switch_measure(defn, filter_sets={"A": ["x"]})
+        assert not result.is_translatable
+        assert "switch_join_alias" in result.skip_reason
+
+    def test_a_raw_sql_decomposition_needs_no_join_alias(self):
+        defn = {"name": "m", "raw_expr": "SUM(source.x)"}
+        pipeline = MetricViewPipeline(mapping=[], mquery_tables={})
+        pipeline.config = {"switch_join_alias": "TODO: SWITCH decomposition join alias"}
+        result = pipeline._build_switch_measure(defn, filter_sets={"A": ["x"]})
+        assert result.is_translatable and result.sql_expr == "SUM(source.x)"
 
 
 class TestDaxTranslator:
