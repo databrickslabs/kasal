@@ -18,7 +18,8 @@ The tables below map common goals to the tools and guide that cover them.
 | Use case | Tools | Guide |
 |----------|-------|-------|
 | Migrate a PBI model to UC Metric Views | 86, 88, 90, 91 | [UCMV migration guide](./ucmv-migration-guide.md) |
-| Keep deployed metric views in sync with PBI | 98 | Continuous Drift Monitor crew (BI Specialist workspace) |
+| Keep deployed metric views in sync with PBI | 98, 100 | [Production readiness](./ucmv-production-readiness.md#step-7-keep-it-in-sync-scheduled) |
+| Take generated metric views to production (scope, source layer, verify, reconcile, Genie as code) | 86, 88, 90, 98, 99, 100 | [From generated to production-ready](./ucmv-production-readiness.md) |
 | Convert KPI definitions (YAML to DAX / SQL / UC Metrics) | 73 | [Tool 73 - measure conversion](./tool-73-measure-conversion.md) |
 | Execute a known DAX query | 82 | [Tool 82 - DAX executor](./tool-82-dax-executor.md) |
 | Migrate Fabric hierarchies | 76 | [Tool 76 - hierarchies](./tool-76-hierarchies.md) |
@@ -50,6 +51,9 @@ The tables below map common goals to the tools and guide that cover them.
 - [Tool 88 - metric view deployer](./tool-88-metric-view-deployer.md)
 - [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
 - [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+- [From generated to production-ready metric views](./ucmv-production-readiness.md): scope, source layer, verify, reconcile, Genie as code, daily sync, with the test status of each step
+- [Tool 99 - Genie Space Sync](./tool-99-genie-space-sync.md)
+- [Tool 100 - UCMV Source Layer Manager](./tool-100-ucmv-source-layer-manager.md)
 
 ## Tool map
 
@@ -70,6 +74,8 @@ preseeded crew for each step.
       |
   Tool 98: Continuous drift monitoring against the live PBI model
 ```
+
+The steps after a first deploy are in [From generated to production-ready metric views](./ucmv-production-readiness.md).
 
 ## Authentication at a glance
 

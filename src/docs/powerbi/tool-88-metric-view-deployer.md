@@ -56,6 +56,9 @@ If dry_run=false:
 | `databricks_host` | Deploy only | - | Workspace URL (e.g. `https://xyz.cloud.databricks.com`) |
 | `databricks_token` | Deploy only | - | PAT token for deployment |
 | `warehouse_id` | Deploy only | - | SQL warehouse ID |
+| `preserve_grants` | No | `true` | Read the grants before a replace and re-apply them; fails closed if they cannot be read |
+| `mode` | No | `deploy` | `verify`: compare each deployed definition with the YAML; `check`: run every measure once. Both read-only |
+| `group_by`, `timing`, `slow_threshold_s` | No | - | `check` only: group the test query, measure duration, flag slow measures |
 
 ---
 

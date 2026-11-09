@@ -332,6 +332,7 @@ Ready-to-import crew definitions are in [`src/docs/examples/`](../examples/):
 
 ## Related
 
+- [From generated to production-ready metric views](./ucmv-production-readiness.md): the steps after this guide
 - [Power BI integration hub](./README.md)
 - [Authentication and service principal setup](./01-authentication-setup.md)
 - [Simple migration story](./02-simple-migration-story.md)

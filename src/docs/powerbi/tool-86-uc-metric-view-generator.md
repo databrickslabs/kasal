@@ -77,6 +77,10 @@ JSON mode is preferred for the full pipeline (each extraction tool runs separate
 | `llm_token` | LLM | - | Databricks PAT |
 | `inner_dim_joins` | No | `false` | Use INNER JOIN for dimensions |
 | `unflatten_tables` | No | `false` | Convert `cat__sch__tbl` to `cat.sch.tbl` |
+| `report_scope` | No | - | Scope table from Tool 90 (injected in a flow); completed with `in_kasal`, `mirrored_as` and the review buckets |
+| `enable_reconciliation` | No | `false` | Deploy and reconcile against Power BI each cycle (needs `warehouse_id`) |
+
+Pipeline config keys added for production readiness: `read_from_source_layer` and `source_layer_naming` (metric views read from the `src_<table>` views). Each measure now carries a `format` derived from its Power BI format string. See [Step 2: convert](./ucmv-production-readiness.md#step-2-convert).
 
 ---
 
@@ -172,6 +176,7 @@ Pass the output directly to:
 - `config_json` is the key to improving translation rate. See the [Pipeline Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) and [Tool 90](./tool-90-pipeline-config-generator.md) for how to generate it
 - LLM fallback (`use_llm_fallback: true`) can push translation rate from 70% to 85%+ on complex models, at the cost of non-determinism
 - Each re-run with the same inputs produces identical output (without LLM fallback), safe to iterate
+- SWITCH decompositions that need `switch_join_alias` / `switch_join_col` are reported as untranslatable while those config keys are still TODO markers; the rest of the run continues
 
 ## See also
 

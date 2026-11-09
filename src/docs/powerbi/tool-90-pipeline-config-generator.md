@@ -45,6 +45,10 @@ You **must** configure both SPs. See [Authentication Setup](./01-authentication-
 | `report_id` | Recommended | PBIR Report GUID. **Strongly affects measure quality** — the report's visual bindings carry the full measure DAX; without it, measure extraction is degraded (bare column names, ~half the measures translatable). Auto-discovered from `dataset_id` when omitted; the tool warns if none is found. |
 | `catalog` | No | Target UC catalog (default: `main`) |
 | `schema_name` | No | Target UC schema (default: `default`) |
+| `tracked_tables` | No | Small data tables to watch in the semantic sync (comma separated); their rows go into `semantic_snapshot` |
+| `confidential_values` | No | Withhold fractional values in the output (see [confidential mode](./ucmv-production-readiness.md#confidential-mode)) |
+
+Besides the config, the output carries `report_scope` (the scope table built from what the report can reach; it needs `report_id` and the Fabric model and report definitions) and `semantic_snapshot` (the baseline for the semantic sync). See [Step 1: scope](./ucmv-production-readiness.md#step-1-scope).
 
 ---
 
