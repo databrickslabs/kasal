@@ -2,8 +2,6 @@
 
 **What it is:** The workbench an agent uses to finish generated metric views until they reconcile with Power BI at 100 %. It holds the UC Metric View Generator output as a working copy for the run and offers small, safe steps: look at the open measures, change one measure, deploy to a sandbox, reconcile, classify what cannot be fixed, and export.
 
-**Status:** unit tested only; not yet run against a live workspace.
-
 **Crew:** "4 · Finish Metric Views to 100 %" in the BI Specialist workspace. Its agent carries the `powerbi-to-metric-views` skill.
 
 ---

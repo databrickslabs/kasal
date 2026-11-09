@@ -2,8 +2,6 @@
 
 **What it is:** Treats a Genie space as code. It exports a space as YAML files, deploys a space from them, checks a space against the deployed metric views, and evaluates its answers.
 
-**Status:** unit tested only; not yet run against a live space.
-
 ---
 
 ## Why it exists

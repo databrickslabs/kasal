@@ -51,7 +51,7 @@ The tables below map common goals to the tools and guide that cover them.
 - [Tool 88 - metric view deployer](./tool-88-metric-view-deployer.md)
 - [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
 - [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
-- [From generated to production-ready metric views](./ucmv-production-readiness.md): scope, source layer, verify, reconcile, Genie as code, daily sync, with the test status of each step
+- [From generated to production-ready metric views](./ucmv-production-readiness.md): scope, source layer, verify, reconcile, Genie as code, daily sync, and which crew covers each migration phase
 - [Tool 99 - Genie Space Sync](./tool-99-genie-space-sync.md)
 - [Tool 100 - UCMV Source Layer Manager](./tool-100-ucmv-source-layer-manager.md)
 - [Tool 101 - UCMV Workbench](./tool-101-ucmv-workbench.md): finish generated metric views to 100 % reconciled (crew "4 · Finish Metric Views to 100 %")

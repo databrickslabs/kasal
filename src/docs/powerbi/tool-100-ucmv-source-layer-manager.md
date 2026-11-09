@@ -2,8 +2,6 @@
 
 **What it is:** Manages the materialized-view layer under the metric views: one view per Power BI table (its Power Query, applied steps and calculated columns), so the metric views stay thin. It also sets up row access, copies tables that exist only inside Power BI, refreshes the layer and compares row counts with Power BI.
 
-**Status:** unit tested only; not yet run against a live workspace.
-
 ---
 
 ## Why it exists
