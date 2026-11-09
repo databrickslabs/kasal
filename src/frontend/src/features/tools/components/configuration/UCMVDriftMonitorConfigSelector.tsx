@@ -92,7 +92,7 @@ export const UCMVDriftMonitorConfigSelector: React.FC<Props> = ({
           Compares the <strong>deployed</strong> metric views below with the <strong>current</strong> Power BI
           model. The deployed YAML is treated as the verified baseline: the proposal only adds new
           measures and re-translates measures whose DAX changed &mdash; nothing else is modified.
-          Read-only: deploy the reviewed proposal with the “4 · Deploy Metric Views” crew.
+          Read-only: deploy the reviewed proposal with the “5 · Deploy Metric Views” crew.
         </Typography>
       </Alert>
 

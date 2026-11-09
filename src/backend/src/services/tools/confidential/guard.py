@@ -35,6 +35,7 @@ from src.services.tools.confidential.redactor import redact_output, scrub_error_
 VALUE_FREE_MODES: dict[str, dict[str, object]] = {
     "UCMVReconciliationTool": {"statistics_only": True},
     "GenieSpaceSyncTool": {"statistics_only": True},
+    "UCMVWorkbenchTool": {"statistics_only": True},
 }
 
 #: Set on a guarded instance so a second stamp does not wrap twice.

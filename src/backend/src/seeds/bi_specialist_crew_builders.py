@@ -20,6 +20,7 @@ def _agent_node(agent_id: str, agent_data: dict, x: int, y: int) -> dict:
             "goal": agent_data["goal"],
             "backstory": agent_data["backstory"],
             "tools": agent_data.get("tools", []),
+            "skills": agent_data.get("skills", []),
             "tool_configs": agent_data.get("tool_configs"),
             "agentId": agent_id,
             "taskId": None,

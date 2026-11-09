@@ -133,7 +133,7 @@ UCMV_REEVAL_CREW = {
 # of one report with the CURRENT Power BI model, and proposes a patch that only
 # adds new / re-translates changed measures (and the joins they need) on top of
 # the verified deployed YAML. Read-only — deploy the reviewed proposal with the
-# "4 · Deploy Metric Views" crew.
+# "5 · Deploy Metric Views" crew.
 
 UCMV_DRIFT_AGENT_ID = "bi-ucmv-drift-agent-001"
 UCMV_DRIFT_TASK_ID = "bi-ucmv-drift-task-001"

@@ -32,7 +32,7 @@ Read this before relying on a step.
 | Report scope (page reachability, filters, review buckets) | Unit tested. In the live run it produced nothing: the workspace returned no Fabric definitions (see [Known limits](#known-limits)) |
 | Deploy verify / check, `preserve_grants` | Unit tested only |
 | Reconciliation options (`statistics_only`, week grain, retry, lock) | Unit tested only |
-| Source Layer Manager (Tool 100), Genie Space Sync (Tool 99), semantic sync in the Drift Monitor (Tool 98), confidential mode | Unit tested only |
+| Source Layer Manager (Tool 100), Genie Space Sync (Tool 99), UCMV Workbench (Tool 101), semantic sync in the Drift Monitor (Tool 98), confidential mode | Unit tested only |
 
 "Unit tested only" means the logic is covered by tests but has not yet run against a live workspace. Use a sandbox schema the first time.
 
@@ -46,6 +46,7 @@ Each step is one crew with one agent and one task. The agent calls its tool with
  3  Source layer     Tool 100 ->  access objects, materialized views, snapshots, row-count check        ✋ counts OK
  4  Deploy + verify  Tool 88  ->  deploy (keep grants), verify definitions, check every measure runs
  5  Reconcile        Tool 86 (+ reconciliation) -> share of aligned cells per measure, no values      ✋ 100 % or explained
+ 5b Finish to 100 %  Tool 101 (agent + skill) -> fix, deploy to sandbox, reconcile, repeat; classify the rest  ✋ open gaps = 0
  6  Genie            Tools 93, 92, 99 -> create the space, export as YAML, check, eval                ✋ benchmarks pass
  7  Sync (scheduled) Tool 100 refresh, Tool 98 drift + semantic sync
 ```
@@ -142,9 +143,26 @@ The reconciliation tool itself also supports these options:
 
 The tool has no catalog entry of its own yet, so the generator runs it with defaults.
 
+## Step 5b: finish to 100 %
+
+**Crew:** "4 · Finish Metric Views to 100 %": one agent with the [UCMV Workbench (Tool 101)](./tool-101-ucmv-workbench.md) and the `powerbi-to-metric-views` skill.
+
+- Put it in a flow after "2 · Convert to Metric Views". The flow injects the generator output.
+- Set a **sandbox** catalog/schema, the warehouse and the Power BI credentials in the task form.
+
+For each view, the agent:
+
+1. deploys and reconciles for a baseline;
+2. works the open measures one at a time: writes the SQL, deploys, reconciles;
+3. classifies what cannot reach 100 % (`data_drift`, `pbi_defect`, `structural`, `out_of_scope`) with a note.
+
+Its final answer is the workbench export. "5 · Deploy Metric Views" deploys it to the target.
+
+This is the in-Kasal version of the finishing loop that took field migrations from the generator's first pass (about 73 %) to 100 % reconciled.
+
 ## Step 6: Genie space as code
 
-Create the space with the crews "Prepare Genie Space" (Tool 93) and "Create Genie Space" (Tool 92). Then use [Genie Space Sync (Tool 99)](./tool-99-genie-space-sync.md):
+Create the space with the crews "9 · Prepare Genie Space" (Tool 93) and "10 · Create Genie Space" (Tool 92). Then use [Genie Space Sync (Tool 99)](./tool-99-genie-space-sync.md):
 
 | Action | Use it to |
 |---|---|

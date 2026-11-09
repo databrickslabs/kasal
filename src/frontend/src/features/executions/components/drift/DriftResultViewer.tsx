@@ -6,7 +6,7 @@
  * wrote that SQL), what was flagged but deliberately left alone, and the exact
  * proposed YAML with every line that is not in the deployed definition highlighted.
  *
- * Read-only: deploying goes through the "4 · Deploy Metric Views" crew.
+ * Read-only: deploying goes through the "5 · Deploy Metric Views" crew.
  */
 import React, { useMemo, useState } from 'react';
 import {
@@ -180,7 +180,7 @@ const DriftResultViewer: React.FC<{ result: DriftResult }> = ({ result }) => {
         proposals > 0 ? (
           <Alert severity="info">
             {proposals} view{proposals === 1 ? '' : 's'} with a proposed update. Nothing was deployed. Review the
-            highlighted lines, then deploy with the <strong>4 · Deploy Metric Views</strong> crew — its post-deploy
+            highlighted lines, then deploy with the <strong>5 · Deploy Metric Views</strong> crew — its post-deploy
             check confirms every measure landed.
           </Alert>
         ) : (

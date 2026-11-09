@@ -51,6 +51,7 @@ from src.seeds.bi_specialist_crew_builders import (
     _agent_to_task_edge,
     _task_node,
 )
+from src.seeds.bi_specialist_finish_crews import FINISH_AGENT, FINISH_CREW, FINISH_TASK
 from src.seeds.bi_specialist_maintenance_crews import (
     UCMV_DRIFT_AGENT as UCMV_DRIFT_AGENT,
 )
@@ -111,8 +112,9 @@ from src.seeds.bi_specialist_output_crews import GENIE_GEN_TASK_ID as GENIE_GEN_
 # Tools required by the PBI migration pipeline — pre-enabled for bi-specialist.
 # These become GroupTool rows (explicit (group_id, tool_id) eligibility), so a
 # tool missing here is filtered out of the workspace's Tools list and the crew UI.
-# 97 = UCMV Re-evaluation, 98 = UCMV Drift Monitor (the standalone crews below).
-BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95, 97, 98]
+# 97 = UCMV Re-evaluation, 98 = UCMV Drift Monitor (the standalone crews below);
+# 99 = Genie Space Sync, 100 = UCMV Source Layer Manager, 101 = UCMV Workbench.
+BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95, 97, 98, 99, 100, 101]
 
 logger = logging.getLogger(__name__)
 
@@ -642,9 +644,9 @@ DEPLOYER_TASK = {
 
 DEPLOYER_CREW = {
     "id": DEPLOYER_CREW_ID,
-    "name": "4 · Deploy Metric Views",
+    "name": "5 · Deploy Metric Views",
     # Older seeded name(s) — renamed in place on existing installs.
-    "previous_names": ["Metric View Deployer"],
+    "previous_names": ["Metric View Deployer", "4 · Deploy Metric Views"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -725,9 +727,9 @@ REFERENCES_TASK = {
 
 REFERENCES_CREW = {
     "id": REFERENCES_CREW_ID,
-    "name": "Find Report Fields & Visuals",
+    "name": "6 · Find Report Fields & Visuals",
     # Older seeded name(s) — renamed in place on existing installs.
-    "previous_names": ["references"],
+    "previous_names": ["references", "Find Report Fields & Visuals"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -809,9 +811,9 @@ MAPPER_TASK = {
 
 MAPPER_CREW = {
     "id": MAPPER_CREW_ID,
-    "name": "Map Report Visuals to Metric Views",
+    "name": "7 · Map Report Visuals to Metric Views",
     # Older seeded name(s) — renamed in place on existing installs.
-    "previous_names": ["PBI Visual-UCMV Mapper"],
+    "previous_names": ["PBI Visual-UCMV Mapper", "Map Report Visuals to Metric Views"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -843,6 +845,7 @@ ALL_CREWS: List[Dict[str, dict]] = [
         "task": UCMV_GEN_RECON_TASK,
     },
     {"crew": UCMV_VAL_CREW, "agent": UCMV_VAL_AGENT, "task": UCMV_VAL_TASK},
+    {"crew": FINISH_CREW, "agent": FINISH_AGENT, "task": FINISH_TASK},
     {"crew": DEPLOYER_CREW, "agent": DEPLOYER_AGENT, "task": DEPLOYER_TASK},
     {"crew": REFERENCES_CREW, "agent": REFERENCES_AGENT, "task": REFERENCES_TASK},
     {"crew": MAPPER_CREW, "agent": MAPPER_AGENT, "task": MAPPER_TASK},
@@ -889,6 +892,7 @@ async def _seed_agent(session: AsyncSession, data: dict) -> None:
         group_id=BI_GROUP_ID,
         llm=data.get("llm", "databricks-claude-sonnet-4-5"),
         tools=data.get("tools", []),
+        skills=data.get("skills", []),
         tool_configs=data.get("tool_configs"),
         max_iter=data.get("max_iter", 25),
         max_rpm=data.get("max_rpm", 10),

@@ -193,6 +193,12 @@ tools_data = [
         "Manages the materialized-view layer under the metric views: one materialized view per Power BI table (its M query, applied steps and calculated columns), so the metric views stay thin. emit produces the source-layer DDL with Unity Catalog row filters (WITH ROW FILTER, 255-character constant check) and hints for every Power BI RLS role. deploy creates the views in dependency order. load_snapshots copies tables that exist only inside Power BI (typed-in data, Excel/SharePoint, other models) from the PUBLISHED model into typed pbi_<table> tables, pages large tables, decodes typed-in TMDL data and re-applies the row filter after every load. refresh reloads the snapshots, then refreshes the materialized views, optionally only when Power BI refreshed since. count_check compares a Power BI table with its Unity Catalog object — total and per-period row counts, members on one side only, which numeric columns differ — and separates drift after Power BI's last refresh from real differences. Verdicts and counts only, never values.",
         "database",
     ),
+    (
+        101,
+        "UCMV Workbench",
+        "Finishes generated UC metric views to 100 % reconciled with Power BI, step by step. Holds the UC Metric View Generator output (flow-injected ucmv_output, or this run's / the latest from the database) as a working copy and gives an agent small, safe actions: overview; gaps (untranslated measures with DAX, reason and proposal, and measures below 100 % in the last reconciliation); show; set_measure (one measure: name, SQL expression, the Power BI measure it reproduces); remove_measure; deploy (to the sandbox catalog/schema of the task form) and check (every measure executes) through the Metric View Deployer; reconcile (per-measure alignment against the live Power BI model through the UCMV Reconciliation tool, statistics only by default); classify (data_drift | pbi_defect | structural | out_of_scope, with a note) for a gap that is not a translation error; report; export (final YAML and mappings for the Metric View Deployer). Credentials, sandbox and warehouse come from the task form, the agent only passes view / measure / expression arguments. Outputs carry shares, counts, names and definitions, never data values.",
+        "database",
+    ),
 ]
 
 
@@ -263,6 +269,22 @@ _PBI_MIGRATION_TOOL_CONFIGS: Dict[str, Dict[str, object]] = {
         "rls_dax_json": "",
         "confidential_values": False,
     },  # UCMV Source Layer Manager
+    "101": {
+        "result_as_answer": False,
+        "ucmv_output": None,
+        "catalog": "",
+        "schema_name": "",
+        "warehouse_id": "",
+        "databricks_host": "",
+        "workspace_id": "",
+        "dataset_id": "",
+        "tenant_id": "",
+        "client_id": "",
+        "client_secret": "",
+        "reference_years": "",
+        "statistics_only": True,
+        "confidential_values": False,
+    },  # UCMV Workbench
 }
 
 

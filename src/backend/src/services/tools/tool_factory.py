@@ -36,6 +36,7 @@ from src.services.tools.optional_tools import (  # tests patch these names here
     UCMVGenieConfigGeneratorTool,
     UCMVReevaluationTool,
     UCMVSourceLayerTool,
+    UCMVWorkbenchTool,
 )
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
@@ -117,12 +118,9 @@ class ToolFactory:
             "A2AAgentTool": A2AAgentTool,
         }
 
-        # Add MCPTool if it was successfully imported
-        if MCPTool is not None:
-            self._tool_implementations["MCPTool"] = MCPTool
-
         # Optional tools (None when their module failed to import), by seeded title.
         optional: Tuple[Tuple[str, object], ...] = (
+            ("MCPTool", MCPTool),
             ("PowerBIConnectorTool", PowerBIConnectorTool),
             ("Measure Conversion Pipeline", MeasureConversionPipelineTool),
             ("Power BI Hierarchies Tool", PowerBIHierarchiesTool),
@@ -138,6 +136,7 @@ class ToolFactory:
             ("UCMV Re-evaluation", UCMVReevaluationTool),
             ("UCMV Drift Monitor", UCMVDriftMonitorTool),
             ("UCMV Source Layer Manager", UCMVSourceLayerTool),
+            ("UCMV Workbench", UCMVWorkbenchTool),
             ("Pipeline Config Generator", PipelineConfigGeneratorTool),
             ("Genie Space Generator", GenieSpaceGeneratorTool),
             ("Genie Space Sync", GenieSpaceSyncTool),

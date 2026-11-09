@@ -162,4 +162,5 @@ def test_value_free_table_is_keyed_by_class_name():
     assert guard_module.VALUE_FREE_MODES == {
         "UCMVReconciliationTool": {"statistics_only": True},
         "GenieSpaceSyncTool": {"statistics_only": True},
+        "UCMVWorkbenchTool": {"statistics_only": True},
     }

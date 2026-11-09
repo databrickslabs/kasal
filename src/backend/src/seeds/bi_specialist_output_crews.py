@@ -80,9 +80,9 @@ DASHBOARD_TASK = {
 
 DASHBOARD_CREW = {
     "id": DASHBOARD_CREW_ID,
-    "name": "Rebuild Report as AI/BI Dashboard",
+    "name": "8 · Rebuild Report as AI/BI Dashboard",
     # Older seeded name(s) — renamed in place on existing installs.
-    "previous_names": ["Databricks Dashboard Creator"],
+    "previous_names": ["Databricks Dashboard Creator", "Rebuild Report as AI/BI Dashboard"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -162,9 +162,9 @@ GENIE_CFG_TASK = {
 
 GENIE_CFG_CREW = {
     "id": GENIE_CFG_CREW_ID,
-    "name": "Prepare Genie Space",
+    "name": "9 · Prepare Genie Space",
     # Older seeded name(s) — renamed in place on existing installs.
-    "previous_names": ["UCMV Genie Space Config Generator"],
+    "previous_names": ["UCMV Genie Space Config Generator", "Prepare Genie Space"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,
@@ -250,9 +250,9 @@ GENIE_GEN_TASK = {
 
 GENIE_GEN_CREW = {
     "id": GENIE_GEN_CREW_ID,
-    "name": "Create Genie Space",
+    "name": "10 · Create Genie Space",
     # Older seeded name(s) — renamed in place on existing installs.
-    "previous_names": ["Genie Space Generator"],
+    "previous_names": ["Genie Space Generator", "Create Genie Space"],
     "process": "sequential",
     "reasoning": False,
     "memory": False,

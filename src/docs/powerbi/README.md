@@ -54,6 +54,7 @@ The tables below map common goals to the tools and guide that cover them.
 - [From generated to production-ready metric views](./ucmv-production-readiness.md): scope, source layer, verify, reconcile, Genie as code, daily sync, with the test status of each step
 - [Tool 99 - Genie Space Sync](./tool-99-genie-space-sync.md)
 - [Tool 100 - UCMV Source Layer Manager](./tool-100-ucmv-source-layer-manager.md)
+- [Tool 101 - UCMV Workbench](./tool-101-ucmv-workbench.md): finish generated metric views to 100 % reconciled (crew "4 · Finish Metric Views to 100 %")
 
 ## Tool map
 
@@ -69,6 +70,8 @@ preseeded crew for each step.
   Tool 86: Generate UC Metric View YAML (+ optional reconciliation vs PBI)
       |
   Tool 91: Validate translated measures against the original DAX
+      |
+  Tool 101: Finish to 100 % reconciled (agent + skill, sandbox deploys)
       |
   Tool 88: Deploy (dry-run first)
       |

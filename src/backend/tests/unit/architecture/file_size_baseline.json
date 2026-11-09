@@ -70,7 +70,7 @@
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py": 1829,
   "src/backend/src/services/tools/powerbi_hierarchies_tool.py": 977,
   "src/backend/src/services/tools/powerbi_report_references_tool.py": 2203,
-  "src/backend/src/services/tools/tool_factory.py": 1788,
+  "src/backend/src/services/tools/tool_factory.py": 1787,
   "src/backend/src/services/tools/uc_metric_view_generator_tool.py": 907,
   "src/backend/src/services/trace/service.py": 827,
   "src/backend/src/utils/databricks_auth.py": 1546,

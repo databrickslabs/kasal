@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     )
     from .ucmv_reevaluation_tool import UCMVReevaluationTool as _UCMVReevaluationTool
     from .ucmv_source_layer_tool import UCMVSourceLayerTool as _UCMVSourceLayerTool
+    from .ucmv_workbench_tool import UCMVWorkbenchTool as _UCMVWorkbenchTool
 
 
 PerplexitySearchTool: Optional[type[_PerplexitySearchTool]]
@@ -258,3 +259,11 @@ try:
 except ImportError as e:
     UCMVSourceLayerTool = None
     logging.warning("Could not import %s: %s", "UCMVSourceLayerTool", e)
+
+# UCMV Workbench (finish generated metric views to 100 % reconciled, step by step)
+UCMVWorkbenchTool: Optional[type[_UCMVWorkbenchTool]]
+try:
+    from .ucmv_workbench_tool import UCMVWorkbenchTool
+except ImportError as e:
+    UCMVWorkbenchTool = None
+    logging.warning("Could not import %s: %s", "UCMVWorkbenchTool", e)
