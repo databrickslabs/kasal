@@ -636,6 +636,7 @@ DEPLOYER_TASK = {
             "ucmv_output": None,
             "catalog": "",
             "schema_name": "",
+            "warehouse_id": "",  # required for a real deploy (no fallback)
             "dry_run": False,
         }
     },
