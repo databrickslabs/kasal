@@ -901,6 +901,93 @@ class TestListenerMethodBranches:
         assert result is not None
 
     @pytest.mark.asyncio
+    async def test_listener_injects_into_crewai_adapted_tool(self):
+        """The CrewAI harness wraps every tool in a KasalToolAdapter that has
+        no `_default_config` of its own — only a `.kasal_tool` property
+        pointing at the real Kasal tool. Without unwrapping, the injection
+        loop's `hasattr(tool, "_default_config")` is always False for these,
+        so a chained flow (Pipeline Config Generator -> UC Metric View
+        Generator) silently injects nothing and UCMV falls back to its own
+        weaker direct-API extraction. Regression for that unwrap."""
+        import json
+
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
+
+        class _RealKasalTool:
+            """No MagicMock: a real object so hasattr() behaves like prod."""
+
+            def __init__(self):
+                self._default_config = {"config_json": ""}
+
+        class _CrewAIAdapter:
+            """Mirrors harnesses/crewai/tools.py's KasalToolAdapter shape:
+            name/description carried, no _default_config of its own."""
+
+            def __init__(self, inner):
+                self.name = type(inner).__name__
+                self.kasal_tool = inner
+
+        real_tool = _RealKasalTool()
+        adapted_tool = _CrewAIAdapter(real_tool)
+
+        agent = MagicMock()
+        agent.role = "Listener Agent"
+        agent.tools = [adapted_tool]
+        agent._kasal_memory_disabled = False
+
+        task = MagicMock()
+        task.description = "Process output"
+        task.expected_output = "Processed"
+        task.agent = agent
+
+        mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
+
+        method = FlowMethodFactory.create_listener_method(
+            method_name="listener_0",
+            listener_tasks=[task],
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
+            group_context=None,
+            create_execution_callbacks=mock_create_callbacks,
+            crew_name="Listener Crew",
+        )
+
+        mock_flow = MagicMock()
+        mock_flow.state = {}
+
+        pipeline_output = json.dumps(
+            {
+                "join_key_map": {"key": "val"},
+                "enrichment_joins": [],
+                "filter_sets": {},
+            }
+        )
+
+        with (
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as mock_crew_cls,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
+            mock_crew_cls.return_value = MagicMock()
+            mock_task_cls.return_value = MagicMock()
+            mock_wait.return_value = MagicMock(raw="processed result")
+
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
+            await inner(mock_flow, pipeline_output)
+
+        assert real_tool._default_config["config_json"] != ""
+        assert json.loads(real_tool._default_config["config_json"]) == {
+            "join_key_map": {"key": "val"},
+            "enrichment_joins": [],
+            "filter_sets": {},
+        }
+
+    @pytest.mark.asyncio
     async def test_listener_with_memory_disabled_agent(self):
         """All agents memory disabled -> crew_memory=False for listener."""
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory

@@ -302,3 +302,34 @@ class TestOutputFormats:
         )
         assert result is not None
         assert len(result) > 0
+
+
+class TestDaxExecutorThrottling:
+    """executeQueries HTTP 429 is waited out and retried (shared policy in powerbi/http_retry)."""
+
+    def test_throttled_execute_queries_is_retried(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.services.tools.powerbi_dax_executor_tool import PowerBIDaxExecutorTool
+
+        throttled = MagicMock(status_code=429, headers={"Retry-After": "2"}, text="")
+        ok = MagicMock(status_code=200, headers={}, text="")
+        ok.raise_for_status = MagicMock()
+        ok.json.return_value = {"results": [{"tables": [{"rows": [{"Amount": 1}]}]}]}
+
+        from types import SimpleNamespace
+
+        from src.services.powerbi import http_retry
+
+        # Only the retry module's sleep: a global asyncio.sleep patch also catches
+        # unrelated awaits on a busy worker, which made assert_awaited_once flaky.
+        sleep = AsyncMock()
+        with patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=[throttled, ok])) as post, \
+                patch.object(http_retry, "asyncio", SimpleNamespace(sleep=sleep)):
+            tool = PowerBIDaxExecutorTool()
+            result = asyncio.run(tool._execute_dax_query("ws", "ds", "tok", "EVALUATE {1}"))
+
+        assert result["success"] is True
+        assert post.await_count == 2
+        sleep.assert_awaited_once_with(3.0)

@@ -10,190 +10,72 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 from collections import OrderedDict
 
 from src.services.settings.engine_settings import setting as engine_setting
 
 from .data_classes import TranslationResult
+from .dax_llm_prompts import _BATCH_OUTPUT_CONTRACT as _BATCH_OUTPUT_CONTRACT
+from .dax_llm_prompts import _FALLBACK_INSTRUCTIONS as _FALLBACK_INSTRUCTIONS
+from .dax_llm_prompts import _OUTPUT_CONTRACT as _OUTPUT_CONTRACT
+from .dax_llm_prompts import _SKILL_CORPUS as _SKILL_CORPUS
+from .dax_llm_prompts import _SKILL_FILES as _SKILL_FILES
+from .dax_llm_prompts import _SKILLS_DIR as _SKILLS_DIR
+from .dax_llm_prompts import _SQL_RULES as _SQL_RULES
+from .dax_llm_prompts import _SYSTEM_PROMPT as _SYSTEM_PROMPT
+from .dax_llm_prompts import _SYSTEM_PROMPT_BATCH as _SYSTEM_PROMPT_BATCH
+from .dax_llm_prompts import _load_skill_corpus as _load_skill_corpus
 from .function_ref_retriever import render_function_refs
 
 logger = logging.getLogger(__name__)
 
 _RUN_CACHE_MAX = 128
 
-# ── Skill corpus (LLM-first) ────────────────────────────────────────────────
-# The engineering DAX-translation + UC-metric-view skill files are vendored
-# under skills/. Loaded once at module import and embedded as a STABLE system
-# prefix marked with Anthropic cache_control:ephemeral so the serving endpoint
-# caches it (full price once per run, ~10% per subsequent measure). The dax/
-# files teach WHAT to translate; the uc-metric-views/ files teach HOW to write
-# the target YAML — the LLM needs both to emit deployable, correct output.
-_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "skills")
-_SKILL_FILES = (
-    ("dax", "SKILL.md"),
-    ("dax", "PATTERNS.md"),
-    ("dax", "UNSUPPORTED.md"),
-    ("dax", "EDGE_CASES.md"),
-    ("uc-metric-views", "SYNTAX.md"),
-    ("uc-metric-views", "WINDOW.md"),
-    ("uc-metric-views", "LOD.md"),
-    ("uc-metric-views", "JOINS.md"),
-    ("uc-metric-views", "COMPOSABILITY.md"),
-    ("uc-metric-views", "MATERIALIZATION.md"),
-)
-
-
-def _load_skill_corpus() -> str:
-    """Concatenate the vendored skill .md files into one corpus string.
-
-    Missing files are skipped with a warning (fail-open — a partial corpus still
-    beats none). Returns '' if the skills dir is absent, in which case the
-    translator falls back to the terse built-in guidance.
-    """
-    parts: list[str] = []
-    for group, name in _SKILL_FILES:
-        path = os.path.join(_SKILLS_DIR, group, name)
-        try:
-            with open(path, encoding="utf-8") as fh:
-                parts.append(f"# === {group}/{name} ===\n\n{fh.read().strip()}")
-        except FileNotFoundError:
-            logger.warning("[DAX_LLM] skill file missing (skipped): %s/%s", group, name)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "[DAX_LLM] skill file unreadable (%s/%s): %s", group, name, e
-            )
-    return "\n\n".join(parts)
-
-
-# Loaded once at import. If empty (skills not vendored), the terse fallback
-# system prompt below is used instead.
-_SKILL_CORPUS = _load_skill_corpus()
-
-# Terse built-in guidance used ONLY when the skill corpus is unavailable.
-_FALLBACK_INSTRUCTIONS = """You are an expert DAX-to-Spark-SQL translator for Databricks Unity Catalog Metric Views.
-
-Given a DAX measure expression, translate it to the equivalent Spark SQL expression.
-
-Rules:
-1. Use `source.column_name` for fact table columns
-2. Use `alias.column_name` for joined dimension/fact columns
-3. Use `MEASURE(measure_name)` to reference other translated measures
-4. Use `SUM(source.col) FILTER (WHERE condition)` for filtered aggregations
-5. Use `expr / NULLIF(expr, 0)` instead of DIVIDE()
-6. Use bare column names in FILTER clauses (no table prefix)
-7. DAX functions → SQL equivalents:
-   - SUM(Table[col]) → SUM(source.col)
-   - CALCULATE(expr, filter) → expr FILTER (WHERE filter)
-   - DIVIDE(a, b) → a / NULLIF(b, 0)
-   - DISTINCTCOUNTNOBLANK → COUNT(DISTINCT col)
-   - SUMX(FILTER(T, cond), T[col]) → SUM(source.col) FILTER (WHERE cond)
-   - COUNTX(FILTER(T, cond), T[col]) → COUNT(source.col) FILTER (WHERE cond)
-   - AVERAGEX(FILTER(T, cond), T[col]) → AVG(source.col) FILTER (WHERE cond)
-   - Table[col] = "val" → source.col = 'val'
-   - Table[col] in {"a","b"} → source.col IN ('a', 'b')
-   - && → AND, || → OR
-8. If the expression CANNOT be translated to UC Metric View SQL, return success=false.
-9. Use snake_case for measure names."""
-
-# Two SQL rules restated where the model attends to them most (the full
-# examples live in the skill corpus dax/PATTERNS.md §0, but a rule there can get
-# diluted — these two are the ones that were violated in practice).
-_SQL_RULES = """
-
-CRITICAL SQL rules for every "sql_expr" (see skill corpus §0 for detail):
-1. Qualify EVERY source column as source.<col> — including inside FILTER (WHERE ...)
-   and CASE WHEN predicates. (Unqualified defaults to source, but always write the
-   explicit source. prefix.)
-2. SINGLE-SOURCE only: never SELECT FROM another table in a subquery — no
-   "... IN (SELECT ... FROM other_table)", no "... = (SELECT ... FROM other_table)".
-   Only source and declared join aliases are valid namespaces. If a measure needs a
-   table that is neither source nor a declared join, set success=false with
-   dax_class="architecture_change" and explain the source-view change needed — do
-   NOT fabricate a cross-table subquery."""
-
-# The JSON output contract (shared by corpus + fallback prompts). Adds the
-# 7-category `dax_class` provenance label alongside the existing fields.
-_OUTPUT_CONTRACT = """
-Classify each measure into exactly one `dax_class`:
-- "translatable_direct": a direct aggregation / simple expression
-- "composed": references other measures via MEASURE()
-- "filtered": CALCULATE/FILTER context that maps to a FILTER (WHERE ...) clause
-- "architecture_change": needs a window/LOD/join restructure (still emittable)
-- "display_layer": a formatting/UI artifact (FORMAT, color, label) — not a real metric
-- "unsupported": PBI-specific semantics with no UCMV equivalent (ALLSELECTED, USERELATIONSHIP on inactive rels, visual-level filters, recursive iteration)
-- "out_of_scope": not a measure translation task
-
-ALWAYS respond with valid JSON (no markdown code blocks):
-{
-  "success": true/false,
-  "sql_expr": "the SQL expression" or null,
-  "dax_class": "one of the 7 categories above",
-  "confidence": "high"/"medium"/"low",
-  "explanation": "brief explanation of the translation",
-  "error": "reason if success=false" or null
-}""" + _SQL_RULES
-
-# Corpus-backed system prompt when skills are vendored; terse otherwise. The
-# corpus is the STABLE prefix that gets cache_control:ephemeral at call time.
-if _SKILL_CORPUS:
-    _SYSTEM_PROMPT = (
-        "You are an expert Power BI DAX → Databricks UC Metric View translator. "
-        "Use the following skill corpus (engineering's DAX-translation decision "
-        "framework + UC-metric-view target-language spec) as your authoritative "
-        "guide for WHAT to translate and HOW to write the target YAML/SQL.\n\n"
-        f"{_SKILL_CORPUS}\n\n"
-        "----\n"
-        "Translate the given DAX measure to a Spark SQL expression for a UC Metric "
-        "View, following the corpus above." + _OUTPUT_CONTRACT
-    )
-else:
-    _SYSTEM_PROMPT = _FALLBACK_INSTRUCTIONS + "\n" + _OUTPUT_CONTRACT
-
-# Batch output contract: the model is handed SEVERAL measures in one call (so the
-# ~14k-token skill corpus is sent ONCE and amortised across the whole batch,
-# instead of re-sent per measure — Databricks silently drops Anthropic prompt
-# caching, so per-measure calls pay the full corpus every time). It must return a
-# JSON ARRAY, one object per measure, echoing the measure name so results map back.
-_BATCH_OUTPUT_CONTRACT = """
-
-You are given SEVERAL DAX measures in one request. Respond with a SINGLE valid
-JSON ARRAY (no markdown code fences), containing exactly one object per measure
-you were given:
-[
-  {
-    "measure_name": "<echo the EXACT measure name you were given>",
-    "success": true or false,
-    "sql_expr": "the Spark SQL expression" or null,
-    "dax_class": "translatable_direct|composed|filtered|architecture_change|display_layer|unsupported|out_of_scope",
-    "confidence": "high" or "medium" or "low",
-    "explanation": "brief explanation of the translation",
-    "error": "reason if success=false" or null
-  }
-]
-Include EVERY measure exactly once. Do not merge, skip, or invent measures.
-Classify each into exactly one dax_class (same definitions as above).""" + _SQL_RULES
-
-# Corpus-backed batch system prompt (corpus sent ONCE per batch call).
-if _SKILL_CORPUS:
-    _SYSTEM_PROMPT_BATCH = (
-        "You are an expert Power BI DAX → Databricks UC Metric View translator. "
-        "Use the following skill corpus (engineering's DAX-translation decision "
-        "framework + UC-metric-view target-language spec) as your authoritative "
-        "guide for WHAT to translate and HOW to write the target YAML/SQL.\n\n"
-        f"{_SKILL_CORPUS}\n\n"
-        "----\n"
-        "Translate EACH of the given DAX measures to a Spark SQL expression for a "
-        "UC Metric View, following the corpus above." + _BATCH_OUTPUT_CONTRACT
-    )
-else:
-    _SYSTEM_PROMPT_BATCH = _FALLBACK_INSTRUCTIONS + "\n" + _BATCH_OUTPUT_CONTRACT
-
 
 def _content_hash(text: str) -> str:
     """SHA-256 hash for cache key."""
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _domain_context_block(domain_context: str) -> str:
+    """Render the optional customer-supplied domain-context block.
+
+    Free text (vocabulary, business rules, fiscal-calendar quirks, cost-accounting
+    terms). Goes in the VARIABLE user message like ``table_context``, so the
+    cached skill-corpus prefix stays reusable. Empty string when none supplied.
+    """
+    if not domain_context:
+        return ""
+    return (
+        "\n## Domain context (customer-supplied — authoritative business "
+        f"semantics for this model)\n{domain_context}\n"
+    )
+
+
+def _time_intel_directive(enabled: bool) -> str:
+    """Per-run time-intelligence gate.
+
+    Time-intelligence (prior year/period, YTD/QTD) is expressible as a window
+    function, but a window over the wrong period count is silently wrong — so we
+    only let the model translate it when the reconciliation loop is ACTIVE to
+    validate the numbers cell-by-cell. Off → decline it (an honest TODO beats an
+    unvalidated prior-year figure).
+    """
+    if enabled:
+        return (
+            "\n## Time-intelligence: ENABLED this run (PBI reconciliation will "
+            "validate the numbers)\nTranslate prior-year/period, YTD, QTD, MTD and "
+            "SAMEPERIODLASTYEAR / DATEADD / PARALLELPERIOD / TOTALYTD via a WINDOW "
+            "function over the period/fiscal column shown in the context (rule 5) — "
+            "do NOT decline them.\n"
+        )
+    return (
+        "\n## Time-intelligence: NOT validated this run\nIf a measure needs "
+        "prior-year/period, YTD/QTD or period-shift semantics (SAMEPERIODLASTYEAR, "
+        "DATEADD, PARALLELPERIOD, TOTALYTD, …), DECLINE it: success=false, "
+        'dax_class="architecture_change". Do NOT emit unvalidated period math.\n'
+    )
 
 
 def _build_user_prompt(
@@ -202,6 +84,8 @@ def _build_user_prompt(
     base_names: set[str],
     original_to_snake: dict[str, str],
     table_context: str = "",
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> str:
     """Build the user prompt with context.
 
@@ -210,14 +94,19 @@ def _build_user_prompt(
     It goes in the VARIABLE user message (not the cached skill prefix) so the
     LLM emits real column/join names instead of guessing — while the corpus
     stays cacheable. Stable within a table, so cheap relative to the corpus.
+
+    ``domain_context`` is optional customer-supplied business context, appended
+    the same way (see ``_domain_context_block``).
     """
     available_measures = ", ".join(
         sorted(base_names)[:50]
     )  # cap at 50 for token efficiency
     ctx_block = f"\n## Fact table context\n{table_context}\n" if table_context else ""
+    dc_block = _domain_context_block(domain_context)
+    ti_block = _time_intel_directive(time_intel_enabled)
 
     return f"""Translate this DAX measure to Spark SQL for a UC Metric View.
-{ctx_block}
+{ctx_block}{dc_block}{ti_block}
 ## Measure
 Name: {measure_name}
 
@@ -229,6 +118,7 @@ Name: {measure_name}
 
 ## Instructions
 - Use ONLY the source columns / join aliases listed in the fact table context above; do not invent column names.
+- Honour the domain context above (terminology, business rules, calendar) when interpreting the measure's intent.
 - If referencing another measure, use MEASURE(snake_case_name)
 - Column references: source.column_name (fact) or alias.column_name (joined dimension)
 - Return JSON with success, sql_expr, dax_class, confidence, explanation"""
@@ -263,6 +153,9 @@ def _build_batch_user_prompt(
     measures: list[TranslationResult],
     base_names: set[str],
     table_context: str = "",
+    feedback: dict | None = None,
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> str:
     """Build ONE user prompt covering all measures in a batch.
 
@@ -274,16 +167,28 @@ def _build_batch_user_prompt(
     """
     available_measures = ", ".join(sorted(base_names)[:50])
     ctx_block = f"\n## Fact table context\n{table_context}\n" if table_context else ""
+    dc_block = _domain_context_block(domain_context)
+    ti_block = _time_intel_directive(time_intel_enabled)
     lines = []
     for i, m in enumerate(measures, start=1):
-        lines.append(f"{i}. name: {m.original_name}\n   DAX: {m.dax_expression}")
+        entry = f"{i}. name: {m.original_name}\n   DAX: {m.dax_expression}"
+        # Reconciliation feedback (iterative loop): a prior cycle's SQL for this
+        # measure did NOT match Power BI — show the model where it diverged so it
+        # corrects THIS measure rather than repeating the same translation.
+        # Feedback may be keyed by the PBI measure name (original_name) or the
+        # UCMV measure name (measure_name) — reconciliation reports the latter.
+        _fb = feedback or {}
+        hint = _fb.get(m.original_name) or _fb.get(m.measure_name)
+        if hint:
+            entry += f"\n   PREVIOUS ATTEMPT MISMATCHED POWER BI — FIX IT: {hint}"
+        lines.append(entry)
     measures_block = "\n".join(lines)
     # Retrieval: inject deep UCMV-legal references for the long-tail DAX functions
     # this batch uses (skips functions already taught deeply in the cached prefix).
     # Goes in the VARIABLE user message so the corpus prefix stays cacheable.
     func_refs = render_function_refs(m.dax_expression for m in measures)
     return f"""Translate the following {len(measures)} DAX measures to Spark SQL for a UC Metric View, using the shared fact-table context below.
-{ctx_block}
+{ctx_block}{dc_block}{ti_block}
 ## Available MEASURE() references (already translated)
 {available_measures}
 {func_refs}
@@ -292,6 +197,7 @@ def _build_batch_user_prompt(
 
 ## Instructions
 - Use ONLY the source columns / join aliases listed in the fact table context above; do not invent column names.
+- Honour the domain context above (terminology, business rules, calendar) when interpreting each measure's intent.
 - If referencing another measure, use MEASURE(snake_case_name)
 - Column references: source.column_name (fact) or alias.column_name (joined dimension)
 - Return a JSON ARRAY with one object per measure, echoing "measure_name" exactly as given."""
@@ -484,6 +390,8 @@ async def translate_with_llm(
     model: str = "databricks-claude-sonnet-4-5",
     cache: OrderedDict | None = None,
     table_context: str = "",
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> TranslationResult:
     """Attempt LLM translation of a single untranslatable measure.
 
@@ -522,6 +430,8 @@ async def translate_with_llm(
         base_names,
         original_to_snake,
         table_context=table_context,
+        domain_context=domain_context,
+        time_intel_enabled=time_intel_enabled,
     )
 
     # Inject a deep, UCMV-legal reference for the long-tail DAX functions THIS
@@ -617,6 +527,9 @@ async def translate_batch_with_llm(
     model: str = "databricks-claude-sonnet-4-5",
     topo_priority: dict[str, int] | None = None,
     table_context: str = "",
+    feedback: dict | None = None,
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> list[TranslationResult]:
     """Attempt LLM translation of a batch of untranslatable measures.
 
@@ -711,7 +624,14 @@ async def translate_batch_with_llm(
                 need_llm.append(m)
 
         if need_llm:
-            prompt = _build_batch_user_prompt(need_llm, snap_names, table_context)
+            prompt = _build_batch_user_prompt(
+                need_llm,
+                snap_names,
+                table_context,
+                feedback,
+                domain_context,
+                time_intel_enabled,
+            )
             # Budget output for the whole batch (each measure ~a few hundred tokens).
             batch_max_tokens = min(len(need_llm) * 400 + 800, 16000)
             response = await _call_llm(
@@ -736,6 +656,8 @@ async def translate_batch_with_llm(
                             model=model,
                             cache=run_cache,
                             table_context=table_context,
+                            domain_context=domain_context,
+                            time_intel_enabled=time_intel_enabled,
                         )
                         for m in need_llm
                     )

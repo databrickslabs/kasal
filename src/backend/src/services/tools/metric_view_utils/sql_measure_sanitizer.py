@@ -19,6 +19,32 @@ from __future__ import annotations
 
 import re
 
+# M8: a UC Metric View measure name must be a valid [a-z0-9_] identifier. PBI
+# names carry dots, parens, `&`, commas, `%`, spaces (e.g.
+# `cycle_time(order intake to settlement)`, `DSD ... & settled ...`,
+# `Touchless settlement, billing ...`). Left unsanitized they produce invalid
+# YAML / a rejected metric view.
+_INVALID_NAME_CHARS = re.compile(r"[^a-z0-9_]")
+_MULTI_UNDERSCORE = re.compile(r"_+")
+
+
+def sanitize_measure_name(name: str) -> str:
+    """Return a valid ``[a-z0-9_]`` measure identifier (M8).
+
+    Lower-cases, maps ``&`` to ``and`` (a common, meaning-preserving name part),
+    replaces every remaining invalid char with ``_``, collapses runs of ``_`` and
+    trims leading/trailing ``_``. Idempotent and a no-op on names that are already
+    valid, so it is safe to layer on top of ``to_snake_case``.
+    """
+    if not name:
+        return name
+    s = name.strip().lower()
+    s = s.replace("&", " and ")
+    s = _INVALID_NAME_CHARS.sub("_", s)
+    s = _MULTI_UNDERSCORE.sub("_", s).strip("_")
+    return s
+
+
 # x / NULLIF(1, 0)  → x   (denominator is a literal 1; the divide is a no-op)
 _NULLIF_ONE = re.compile(r"\s*/\s*NULLIF\(\s*1\s*,\s*0\s*\)")
 

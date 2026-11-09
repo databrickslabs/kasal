@@ -24,6 +24,8 @@ from typing import Any, Coroutine, Dict, List, Optional, Set, Type
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi.fabric_definition import fetch_report_parts
+from src.services.powerbi.http_retry import send_with_throttle_retry_async
 from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -601,7 +603,9 @@ class PowerBIReportReferencesTool(BaseTool):
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                response = await client.get(url, headers=headers)
+                response = await send_with_throttle_retry_async(
+                    lambda: client.get(url, headers=headers), "report listing"
+                )
                 response.raise_for_status()
                 data = response.json()
                 reports: List[Dict[str, Any]] = data.get("value", [])
@@ -616,90 +620,24 @@ class PowerBIReportReferencesTool(BaseTool):
         report_id: str,
         access_token: str,
     ) -> List[Dict[str, Any]]:
-        """Fetch report definition from Fabric API."""
+        """Fetch the report's PBIR parts (base64 payloads) from the Fabric API.
+
+        Shared with the pipeline config: throttling retry, the 202 operation, and the
+        PBIR-Legacy fallback (``fabric_definition.fetch_report_parts``) run in a worker
+        thread. A report whose legacy definition is converted locally is logged as a warning.
+        Returns [] when the definition cannot be read.
+        """
         url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
-
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            try:
-                # POST to initiate getDefinition
-                response = await client.post(url, headers=headers)
-
-                if response.status_code == 202:
-                    # Long-running operation
-                    location = response.headers.get("Location")
-                    if not location:
-                        logger.error("No Location header in 202 response")
-                        return []
-
-                    # Poll until complete
-                    for attempt in range(60):
-                        await asyncio.sleep(2)
-                        poll_response = await client.get(location, headers=headers)
-                        poll_data = poll_response.json()
-                        status = poll_data.get("status", "")
-
-                        if status == "Succeeded":
-                            logger.info(
-                                f"Report definition fetch succeeded after {attempt + 1} poll(s)"
-                            )
-                            result_url = location + "/result"
-                            result_response = await client.get(
-                                result_url, headers=headers
-                            )
-                            result_response.raise_for_status()
-                            definition = result_response.json()
-                            parts: List[Dict[str, Any]] = definition.get(
-                                "definition", {}
-                            ).get("parts", [])
-                            # Log the paths found for debugging
-                            if parts:
-                                paths = [p.get("path", "") for p in parts[:20]]
-                                logger.info(
-                                    f"Report definition paths (first 20): {paths}"
-                                )
-                            else:
-                                logger.warning(
-                                    f"Report definition returned no parts for report {report_id}"
-                                )
-                            return parts
-                        elif status == "Failed":
-                            error = poll_data.get("error", {})
-                            logger.error(f"Report definition fetch failed: {error}")
-                            return []
-
-                    logger.error("Report definition fetch timed out")
-                    return []
-
-                elif response.status_code == 200:
-                    definition = response.json()
-                    parts = definition.get("definition", {}).get("parts", [])
-                    # Log the paths found for debugging
-                    if parts:
-                        paths = [p.get("path", "") for p in parts[:20]]
-                        logger.info(f"Report definition paths (first 20): {paths}")
-                    else:
-                        logger.warning(
-                            f"Report definition returned no parts for report {report_id}"
-                        )
-                    return parts
-                else:
-                    logger.error(f"Unexpected status code: {response.status_code}")
-                    logger.error(f"Response: {response.text}")
-                    return []
-
-            except httpx.HTTPStatusError as e:
-                logger.error(
-                    f"HTTP error: {e.response.status_code} - {e.response.text}"
-                )
-                return []
-            except Exception as e:
-                logger.error(f"Error fetching report definition: {e}")
-                return []
+        try:
+            parts, used_legacy = await asyncio.to_thread(fetch_report_parts, url, access_token)
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error("Error fetching report definition for %s: %s", report_id, e)
+            return []
+        if used_legacy:
+            logger.warning("Report %s: legacy definition converted to PBIR parts", report_id)
+        if not parts:
+            logger.warning("Report definition returned no parts for report %s", report_id)
+        return parts
 
     def _parse_report_info(self, report_parts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Parse report.json to get report metadata."""

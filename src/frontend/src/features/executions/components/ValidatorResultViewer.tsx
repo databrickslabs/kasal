@@ -4,7 +4,8 @@
  * Shows per-table validation status with green/amber/red indicators,
  * measure counts, and expandable details.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { ConverterService } from '../../../api/tools/ConverterService';
 import { NonTranspiledPanel, type UntranslatableItem } from './NonTranspiledPanel';
 // The validator passes generator untranslatable_items straight through; same shape.
 export type ValidatorUntranslatableItem = UntranslatableItem;
@@ -174,11 +175,49 @@ function getStatusColor(status: string): 'success' | 'warning' | 'error' | 'defa
 /*  Component                                                           */
 /* ------------------------------------------------------------------ */
 
-const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }) => {
+const ValidatorResultViewer: React.FC<{ result: ValidatorResult; jobId?: string }> = ({ result, jobId }) => {
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [viewYamlTable, setViewYamlTable] = useState<string | null>(null);
+  // The compact validator shape omits the YAML/SQL (they live in
+  // conversion_history to keep the agent payload small), so the download
+  // buttons below would otherwise never appear here. Fetch the full artifacts
+  // for this execution on demand so the quality report is downloadable too.
+  const [fetchedYaml, setFetchedYaml] = useState<Record<string, string> | null>(null);
+  const [fetchedSql, setFetchedSql] = useState<Record<string, string> | null>(null);
 
-  const { summary, stats, yaml: yamlData } = result;
+  const { summary, stats } = result;
+  const inlineYaml = result.yaml;
+  const inlineHasYaml = !!inlineYaml && Object.keys(inlineYaml).length > 0;
+
+  useEffect(() => {
+    if (inlineHasYaml || !jobId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await ConverterService.listHistory({
+          execution_id: jobId,
+          target_format: 'uc_metrics',
+          limit: 5,
+        });
+        const rec = (resp.history || []).find(
+          (h) => h.output_data?.yaml && Object.keys(h.output_data.yaml).length > 0,
+        );
+        if (!cancelled && rec?.output_data) {
+          setFetchedYaml(rec.output_data.yaml as Record<string, string>);
+          setFetchedSql((rec.output_data.sql as Record<string, string>) ?? null);
+        }
+      } catch {
+        /* leave downloads hidden if the fetch fails — the report still renders */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [inlineHasYaml, jobId]);
+
+  // Prefer inline YAML/SQL; fall back to what we fetched from conversion_history.
+  const yamlData = inlineYaml ?? fetchedYaml ?? undefined;
+  const sqlData = fetchedSql ?? undefined;
   // Support both shapes: legacy `per_table` (with inline per-measure details) and
   // the compact `per_table_summary` (counts only). For the compact shape, fold
   // the top-level `attention` list (REVIEW/INVALID measures) back into each
@@ -239,6 +278,25 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
     });
   };
 
+  // Download each deploy SQL as its OWN .sql file (one per fact table), staggered.
+  const handleDownloadAllSql = () => {
+    if (!sqlData) return;
+    const entries = Object.entries(sqlData).filter(([, v]) => v && v.trim());
+    entries.forEach(([tableName, content], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([content], { type: 'text/sql;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${tableName}_deploy_metric_view.sql`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
+  };
+
+  const hasSql = !!sqlData && Object.keys(sqlData).length > 0;
+
   // Calculate aggregate stats
   const tableEntries = useMemo(() => {
     return Object.entries(perTable).map(([name, data]) => ({
@@ -271,17 +329,30 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
         {summary.source && (
           <Chip size="small" label={summary.source} variant="outlined" />
         )}
-        {hasYaml && (
-          <Box sx={{ ml: 'auto' }}>
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<DownloadIcon />}
-              onClick={handleDownloadAllYamls}
-              title="Downloads each metric view as a separate .yml file"
-            >
-              Download All YAMLs
-            </Button>
+        {(hasYaml || hasSql) && (
+          <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
+            {hasYaml && (
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadAllYamls}
+                title="Downloads each metric view as a separate .yml file"
+              >
+                Download All YAMLs
+              </Button>
+            )}
+            {hasSql && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadAllSql}
+                title="Downloads each metric view's deploy SQL as a separate .sql file"
+              >
+                Download SQL
+              </Button>
+            )}
           </Box>
         )}
       </Box>

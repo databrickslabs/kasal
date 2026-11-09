@@ -2,8 +2,7 @@
 Extended tests for tool_factory.py — targeting uncovered branches.
 
 Focus areas:
-- PowerBI Relationships, Hierarchies, Field Parameters tool creation
-- M-Query Conversion Pipeline
+- PowerBI Hierarchies, Field Parameters tool creation
 - Measure Conversion Pipeline with credentials
 - MCPTool marker path
 - PowerBIConnectorTool path
@@ -12,8 +11,6 @@ Focus areas:
 - _get_api_key sync path
 - _update_tool_config_async path
 - initialize with api_keys_service
-- JSON field parsing in PowerBI tools
-- Context enrichment injection
 - Placeholder resolution with sensitive key masking
 """
 
@@ -55,51 +52,6 @@ def _mock_tool_cls():
     cls = MagicMock()
     cls.return_value = MagicMock()
     return cls
-
-
-# ─── PowerBI Relationships Tool ──────────────────────────────────────────────
-
-
-class TestPowerBIRelationshipsToolCreation:
-
-    def _setup(self, config=None):
-        f = _make_factory()
-        info = _tool_info("Power BI Relationships Tool", 10, config or {})
-        f._available_tools["Power BI Relationships Tool"] = info
-        cls = _mock_tool_cls()
-        f._tool_implementations["Power BI Relationships Tool"] = cls
-        return f, cls
-
-    def test_creates_relationships_tool_with_creds(self):
-        f, cls = self._setup(
-            {
-                "workspace_id": "ws1",
-                "dataset_id": "ds1",
-                "tenant_id": "t1",
-                "client_id": "c1",
-                "client_secret": "s1",
-            }
-        )
-        result = f.create_tool("Power BI Relationships Tool")
-        assert result is cls.return_value
-
-    def test_relationships_tool_passes_result_as_answer(self):
-        f, cls = self._setup({"workspace_id": "ws1"})
-        f.create_tool("Power BI Relationships Tool", result_as_answer=True)
-        call_kwargs = cls.call_args[1]
-        assert call_kwargs.get("result_as_answer") is True
-
-    def test_relationships_tool_exception_returns_none(self):
-        """When tool constructor raises, create_tool returns None (outer except catches it)."""
-        f, cls = self._setup({})
-        cls.side_effect = RuntimeError("tool error")
-        result = f.create_tool("Power BI Relationships Tool")
-        assert result is None
-
-    def test_relationships_tool_without_creds_still_creates(self):
-        f, cls = self._setup({})
-        result = f.create_tool("Power BI Relationships Tool")
-        assert result is cls.return_value
 
 
 # ─── PowerBI Hierarchies Tool ────────────────────────────────────────────────
@@ -227,45 +179,6 @@ class TestMeasureConversionPipelineCreation:
         assert call_kwargs.get("inbound_connector") == "override_val"
 
 
-# ─── M-Query Conversion Pipeline ─────────────────────────────────────────────
-
-
-class TestMQueryConversionPipelineCreation:
-
-    def _setup(self, config=None):
-        f = _make_factory()
-        info = _tool_info("M-Query Conversion Pipeline", 21, config or {})
-        f._available_tools["M-Query Conversion Pipeline"] = info
-        cls = _mock_tool_cls()
-        f._tool_implementations["M-Query Conversion Pipeline"] = cls
-        return f, cls
-
-    def test_creates_mquery_pipeline_tool(self):
-        f, cls = self._setup(
-            {
-                "workspace_id": "ws1",
-                "client_id": "c1",
-                "tenant_id": "t1",
-                "client_secret": "s1",
-            }
-        )
-        result = f.create_tool("M-Query Conversion Pipeline")
-        assert result is cls.return_value
-
-    def test_mquery_pipeline_exception_returns_none(self):
-        """When tool constructor raises, create_tool catches and returns None."""
-        f, cls = self._setup({})
-        cls.side_effect = RuntimeError("mquery error")
-        result = f.create_tool("M-Query Conversion Pipeline")
-        assert result is None
-
-    def test_mquery_pipeline_result_as_answer(self):
-        f, cls = self._setup({})
-        f.create_tool("M-Query Conversion Pipeline", result_as_answer=True)
-        call_kwargs = cls.call_args[1]
-        assert call_kwargs.get("result_as_answer") is True
-
-
 # ─── MCPTool path ─────────────────────────────────────────────────────────────
 
 
@@ -352,23 +265,6 @@ class TestGenericToolNullConfig:
 
 class TestExecutionInputsInjection:
 
-    def test_user_question_injected_from_execution_inputs(self):
-        """user_question from execution_inputs injected into empty tool config."""
-        f = _make_factory(
-            config={
-                "group_id": "g1",
-                "inputs": {"inputs": {"user_question": "What is revenue?"}},
-            }
-        )
-        info = _tool_info("ScrapeWebsiteTool", 1, {})
-        f._available_tools["ScrapeWebsiteTool"] = info
-        cls = _mock_tool_cls()
-        f._tool_implementations["ScrapeWebsiteTool"] = cls
-
-        f.create_tool("ScrapeWebsiteTool")
-        call_kwargs = cls.call_args[1]
-        assert call_kwargs.get("user_question") == "What is revenue?"
-
     def test_direct_inputs_with_user_inputs_filtered(self):
         """Direct inputs (not nested, no inner 'inputs' key) get filtered of system keys."""
         f = _make_factory(
@@ -429,56 +325,6 @@ class TestExecutionInputsInjection:
         f.create_tool("ScrapeWebsiteTool")
         call_kwargs = cls.call_args[1]
         assert "execution_inputs" not in call_kwargs
-
-
-# ─── JSON parsing for PowerBI DAX tool ───────────────────────────────────────
-
-
-class TestPowerBIJSONFieldParsing:
-
-    def test_json_fields_parsed_for_dax_tool(self):
-        """business_mappings etc. are parsed from JSON strings for PowerBI DAX tool."""
-        import json
-
-        f = _make_factory()
-        bm = json.dumps({"Revenue": "sum(sales)"})
-        info = _tool_info(
-            "Power BI Semantic Model DAX Generator",
-            40,
-            {
-                "workspace_id": "ws1",
-                "business_mappings": bm,
-            },
-        )
-        f._available_tools["Power BI Semantic Model DAX Generator"] = info
-        cls = _mock_tool_cls()
-        f._tool_implementations["Power BI Semantic Model DAX Generator"] = cls
-
-        # Force the 'else' / generic path (not Analysis Tool) - but still triggers JSON parse
-        # The parse only runs for "Power BI" + ("Analysis" or "DAX") tools
-        f.create_tool("Power BI Semantic Model DAX Generator")
-        call_kwargs = cls.call_args[1]
-        # business_mappings was a JSON string, should now be a dict
-        assert isinstance(call_kwargs.get("business_mappings"), dict)
-
-    def test_invalid_json_kept_as_string(self):
-        """Invalid JSON in business_mappings kept as string."""
-        f = _make_factory()
-        info = _tool_info(
-            "Power BI Comprehensive Analysis Tool",
-            41,
-            {
-                "workspace_id": "ws1",
-                "business_mappings": "not valid json {{{",
-            },
-        )
-        f._available_tools["Power BI Comprehensive Analysis Tool"] = info
-        cls = _mock_tool_cls()
-        f._tool_implementations["Power BI Comprehensive Analysis Tool"] = cls
-
-        # Should not raise
-        result = f.create_tool("Power BI Comprehensive Analysis Tool")
-        assert result is not None
 
 
 # ─── cleanup_after_crew_execution ────────────────────────────────────────────

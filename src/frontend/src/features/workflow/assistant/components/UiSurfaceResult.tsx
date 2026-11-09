@@ -3,6 +3,7 @@ import { Box, Button, Dialog, DialogContent, IconButton } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import A2uiSurface from '../../../chat/components/Chat/A2uiSurface';
 import { downloadSurfacePdf } from '../../../chat/utils/surfacePdf';
+import BIArtifactsView from '../../../executions/components/BIArtifactsView';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
 import { useThemeStore } from '../../../../store/theme';
 import type { Surface } from '../../../../shared/a2ui/index';
@@ -19,7 +20,7 @@ export const UiSurfaceView: React.FC<{ surface: Surface }> = ({ surface }) => {
 };
 
 /** Render at the conversation's width, using Chat's surface controls and theme. */
-export const UiSurfaceResult: React.FC<{ surface: Surface; messageId?: string; onRestyle?: (surface: Surface) => void }> = ({ surface, messageId, onRestyle }) => {
+export const UiSurfaceResult: React.FC<{ surface: Surface; messageId?: string; jobId?: string; onRestyle?: (surface: Surface) => void }> = ({ surface, messageId, jobId, onRestyle }) => {
   const preview = useContext(BuilderPreviewContext);
   const dark = useThemeStore(state => state.isDarkMode);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -29,6 +30,10 @@ export const UiSurfaceResult: React.FC<{ surface: Surface; messageId?: string; o
     else setDialogOpen(true);
   };
   return <Box sx={{ width: '100%', minWidth: 0, whiteSpace: 'normal' }}>
+    {/* BI-migration runs render as an A2UI dashboard here; surface the real
+        UCMV/config downloads + review above it (from conversion_history by
+        job_id). Renders nothing for non-BI runs. */}
+    {jobId && <BIArtifactsView jobId={jobId} />}
     {inPane ? <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: 12, color: 'text.secondary' }}>
       Opened in the side panel
       <Button size="small" color="inherit" onClick={preview?.closePreview}>Show here</Button>

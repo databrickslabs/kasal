@@ -56,35 +56,32 @@ class TestMetadataGeneratorFormats:
         meta = gen.get_measure_meta("market_share")
         assert meta["format"]["type"] == "percentage"
 
-    def test_currency_detection_cost(self):
+    def test_no_currency_without_known_code(self):
+        """Money-named measures get a number format, never a guessed currency."""
         gen = MetadataGenerator()
-        meta = gen.get_measure_meta("total_cost")
-        assert "format" in meta
-        assert meta["format"]["type"] == "currency"
-        assert meta["format"]["currency_code"] == "USD"
+        for name in ("total_cost", "net_revenue", "order_amount", "annual_budget"):
+            meta = gen.get_measure_meta(name, sql_expr="SUM(src.x)")
+            assert meta["format"] == {
+                "type": "number",
+                "decimal_places": {"type": "max", "places": 2},
+            }
 
-    def test_currency_detection_revenue(self):
-        gen = MetadataGenerator()
-        meta = gen.get_measure_meta("net_revenue")
+    def test_pbi_currency_symbol_maps_to_known_code(self):
+        gen = MetadataGenerator(pbi_format_strings={"total_cost": "€#,##0.00"})
+        meta = gen.get_measure_meta("total_cost", sql_expr="SUM(src.x)", pbi_name="total_cost")
         assert meta["format"]["type"] == "currency"
-        assert meta["format"]["currency_code"] == "USD"
+        assert meta["format"]["currency_code"] == "EUR"
 
-    def test_currency_detection_amount(self):
-        gen = MetadataGenerator()
-        meta = gen.get_measure_meta("order_amount")
-        assert meta["format"]["type"] == "currency"
-        assert meta["format"]["currency_code"] == "USD"
-
-    def test_currency_detection_budget(self):
-        gen = MetadataGenerator()
-        meta = gen.get_measure_meta("annual_budget")
-        assert meta["format"]["type"] == "currency"
-        assert meta["format"]["currency_code"] == "USD"
-
-    def test_no_format_for_count(self):
+    def test_no_format_for_bare_name_without_expression(self):
+        """Without an expression or a PBI formatString nothing can be derived."""
         gen = MetadataGenerator()
         meta = gen.get_measure_meta("order_count")
         assert "format" not in meta
+
+    def test_aggregate_count_gets_number_format(self):
+        gen = MetadataGenerator()
+        meta = gen.get_measure_meta("order_count", sql_expr="COUNT(src.id)")
+        assert meta["format"]["type"] == "number"
 
     def test_decimal_places_in_format(self):
         gen = MetadataGenerator()

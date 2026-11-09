@@ -251,6 +251,48 @@ class TestRunFlowInProcess:
                     assert call_args.kwargs["status"] == ExecutionStatus.FAILED.value
 
     @pytest.mark.asyncio
+    async def test_preserves_completed_when_ipc_result_lost(
+        self, mock_config, mock_running_jobs
+    ):
+        """Fix: the parent reported no IPC result, but the subprocess already
+        persisted COMPLETED to the DB (large-result queue race). The run must
+        NOT be overwritten with FAILED — the status update is skipped so the
+        persisted success stands."""
+        execution_id = "exec-123"
+
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
+            mock_executor.run_flow_isolated = AsyncMock(
+                return_value={
+                    "status": "FAILED",
+                    "error": "Process ended without producing result (may have been stopped)",
+                }
+            )
+
+            with patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_service:
+                mock_service.get_status = AsyncMock(
+                    return_value=MagicMock(status="COMPLETED")
+                )
+
+                with patch(
+                    "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+                ) as mock_update:
+                    mock_update.return_value = True
+
+                    await run_flow_in_process(
+                        execution_id=execution_id,
+                        config=mock_config,
+                        running_jobs=mock_running_jobs,
+                    )
+
+                    # Preserved: no status write issued (final_status is None),
+                    # so the DB's COMPLETED row is not clobbered with FAILED.
+                    mock_update.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_run_flow_in_process_preserves_stopped_status(
         self, mock_config, mock_running_jobs
     ):

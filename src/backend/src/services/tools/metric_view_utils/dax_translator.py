@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from . import dax_patterns
 from .constants import (
     RE_AVERAGEX_FILTER,
     RE_COUNTX_FILTER,
@@ -19,7 +20,9 @@ from .dax_condition_sql import (
     _sql_str_literal,
     split_top_level_args,
 )
+from .dax_preclean import preclean_dax
 from .join_detector import _sanitize_alias
+from .sql_measure_sanitizer import sanitize_measure_name
 from .utils import to_snake_case
 
 
@@ -41,7 +44,18 @@ class DaxTranslator(DaxConditionMixin):
 
     def _register_patterns(self) -> None:
         """Register translation patterns in priority order. First match wins."""
-        self._patterns = [
+        # ── Defect-class matchers (IDOR/DQA post-mortem M1–M5, M9, M11) ──
+        # Prepended FIRST so they win over the generic catch-alls AND before
+        # quick_reject (M4's `IF(ISBLANK(...), BLANK(), 1 - x)` would otherwise be
+        # dropped as an "ISBLANK+BLANK guard"). Each returns None unless it fully
+        # parses its shape, so anything else falls straight through. Logic lives in
+        # dax_patterns (keeps this module from growing); translate_fn is bound to
+        # this translator so it can read _measure_resolutions.
+        defect = [
+            (name, mfn, (lambda m, d, tk, _tf=tfn: _tf(m, d, tk, self)))
+            for name, mfn, tfn in dax_patterns.DEFECT_PATTERNS
+        ]
+        self._patterns = defect + [
             ("quick_reject", self._match_quick_reject, self._translate_noop),
             (
                 "sameperiodlastyear",
@@ -131,7 +145,10 @@ class DaxTranslator(DaxConditionMixin):
     # In llm_first mode, only these patterns run as the regex fast-path (Step 3.8):
     # display-artifact rejects + the trivial single-column, high-confidence
     # aggregations. Everything else falls through to the LLM-first translator.
-    _TRIVIAL_FAST_PATH = frozenset(
+    # Defect-class matchers (dax_patterns.DEFECT_FAST_PATH) join the fast-path via
+    # the union below — deterministic, exact, reproducible, so they run in
+    # llm_first mode instead of burning an LLM call.
+    _TRIVIAL_FAST_PATH = dax_patterns.DEFECT_FAST_PATH | frozenset(
         {
             "quick_reject",
             "simple_sum",
@@ -189,7 +206,10 @@ class DaxTranslator(DaxConditionMixin):
         name = measure.get("measure_name", "")
         dax = self._preclean_dax(measure.get("dax_expression", ""))
         original_name = measure.get("original_name", name)
-        snake = to_snake_case(original_name)
+        # M8: guarantee a valid [a-z0-9_] identifier (dots, parens, &, commas out).
+        # to_snake_case already does this; sanitize_measure_name makes the invariant
+        # explicit and holds even if an upstream name path changes.
+        snake = sanitize_measure_name(to_snake_case(original_name))
 
         for pattern_name, match_fn, translate_fn in self._patterns:
             if trivial_only and pattern_name not in self._TRIVIAL_FAST_PATH:
@@ -224,6 +244,11 @@ class DaxTranslator(DaxConditionMixin):
                         "range": "trailing 12 month",
                         "semiadditive": "last",
                     }
+                elif skip_reason.startswith("__WINDOW__:"):
+                    # M11: a latest-period semi-additive measure — the matcher emits
+                    # `__WINDOW__:order=<col>;range=<r>;semiadditive=<s>`.
+                    window_spec = dax_patterns.parse_window_sentinel(skip_reason)
+                    skip_reason = ""
                 return TranslationResult(
                     measure_name=snake,
                     original_name=original_name,
@@ -1254,64 +1279,8 @@ class DaxTranslator(DaxConditionMixin):
 
     @staticmethod
     def _preclean_dax(dax: str) -> str:
-        """PROP-6: strip DAX comments and normalize BLANK() before translation.
-
-        - Remove ``//`` and ``--`` line comments (DAX allows both); left in, an
-          inline ``-- Denominator`` leaks into the emitted SQL and comments out the
-          rest of the line.
-        - Remove ``/* ... */`` block comments.
-        - Replace standalone ``BLANK()`` with ``NULL`` (emitted literally it is not
-          valid Spark SQL).
-        """
-        if not dax:
-            return dax
-        dax = re.sub(r"/\*.*?\*/", " ", dax, flags=re.DOTALL)
-        cleaned_lines = []
-        for line in dax.split("\n"):
-            line = re.sub(r"//.*$", "", line)
-            line = re.sub(r"--.*$", "", line)
-            cleaned_lines.append(line)
-        dax = "\n".join(cleaned_lines)
-        # BLANK() → NULL, but ONLY when it's part of a larger expression. A measure
-        # that is *only* BLANK() is a display placeholder — leave it for the
-        # quick-reject matcher to drop (converting it to bare NULL would hide it).
-        if dax.strip().upper() not in ("BLANK()", "BLANK ()"):
-            dax = re.sub(r"\bBLANK\s*\(\s*\)", "NULL", dax, flags=re.IGNORECASE)
-
-        # Strip slicer-scalar date-window scaffolding vars. Many real-world ratio
-        # measures prefix the real formula with:
-        #     var std = CALCULATE([F_Start_date])
-        #     var etd = CALCULATE([F_End_date])
-        # These reference dynamic date-picker measures ([F_Start_date] etc.) that
-        # are NOT translatable and NOT used by the ratio aggregation — but left in,
-        # they poison the LLM translation (leftover [F_Start_date] trips the
-        # DAX-construct validator) and block the ~36 ratios underneath. Drop any
-        # `var <n> = ...` line whose body references only these window pickers,
-        # AND drop bare references to them elsewhere. Only touches measures that
-        # actually contain the window-picker names, so normal DAX is untouched.
-        if re.search(r"F_Start_date|F_End_date|PY_Start_date|PY_End_date", dax, re.I):
-            _picker = re.compile(
-                r"F_Start_date|F_End_date|PY_Start_date|PY_End_date", re.I
-            )
-            kept = []
-            dropped_vars: set[str] = set()
-            for line in dax.split("\n"):
-                vm = re.match(r"\s*var\s+(\w+)\s*=\s*(.+)$", line, re.IGNORECASE)
-                if (
-                    vm
-                    and _picker.search(vm.group(2))
-                    and not re.search(
-                        r"\b(SUM|SUMX|COUNT|AVERAGE|MIN|MAX)\s*\(", vm.group(2), re.I
-                    )
-                ):
-                    dropped_vars.add(vm.group(1))  # e.g. std, etd
-                    continue  # drop the scaffolding var line
-                kept.append(line)
-            dax = "\n".join(kept)
-            # remove now-dangling references to the dropped vars (bare tokens)
-            for v in dropped_vars:
-                dax = re.sub(rf"(?<![\w.])\b{re.escape(v)}\b(?![\w.(])", "", dax)
-        return dax
+        """PROP-6: strip DAX comments and normalize BLANK() before translation."""
+        return preclean_dax(dax)
 
     @staticmethod
     def _extract_divide_args(text: str) -> tuple[str, str] | None:

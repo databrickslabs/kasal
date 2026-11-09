@@ -58,6 +58,18 @@ _DISPOSED_CONNECTION_PHRASES = (
 )
 
 
+def _is_disposed_connection_error(exc: Exception) -> bool:
+    """Whether ``exc`` is the engine-disposed teardown race, not a real failure.
+
+    Deliberately phrase-based: the drivers do not share an exception type for
+    this, and asyncpg's ``InterfaceError`` also covers genuine protocol misuse
+    that must NOT be swallowed. Used by ``utils.asyncio_utils`` (dispose-and-retry)
+    and the flow runner's soft-complete path.
+    """
+    message = str(exc).lower()
+    return any(phrase in message for phrase in _DISPOSED_CONNECTION_PHRASES)
+
+
 # Token refresh interval: 50 minutes (tokens expire at 60 min, 10 min safety margin)
 TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
 
@@ -745,6 +757,19 @@ async def dispose_thread_local_lakebase_factory() -> None:
 def _is_crew_thread() -> bool:
     """Check if we're running in a crew thread (USE_NULLPOOL indicates sync-async bridge)."""
     return os.environ.get("USE_NULLPOOL", "").lower() == "true"
+
+
+async def dispose_current_lakebase_factory() -> None:
+    """Dispose the Lakebase factory this caller uses, so the next session reconnects.
+
+    In crew/flow subprocess threads only THIS thread's factory is disposed; the
+    shared global factory is touched only off those threads, where no concurrent
+    traffic can be disrupted mid-flight.
+    """
+    if _is_crew_thread():
+        await dispose_thread_local_lakebase_factory()
+    else:
+        await dispose_lakebase_factory()
 
 
 @asynccontextmanager

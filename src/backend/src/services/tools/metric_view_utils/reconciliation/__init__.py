@@ -1,0 +1,171 @@
+"""Deterministic reconciliation core for PBI -> UC Metric View migration.
+
+Given a reconciliation MAPPING, this package builds the UCMV-side SQL and the
+PBI-side DAX, parses PBI display values back into numbers, joins the two sides
+cell-by-cell within tolerance, and classifies mismatches — all deterministically
+(no LLM in the comparison path). The live orchestration (running the queries
+against a Databricks SQL warehouse + the PBI Execute Queries API) lives in
+``src/services/tools/ucmv_reconciliation_tool.py``; everything here is either
+pure or executor-injected so it can be unit-tested with no network.
+"""
+
+from __future__ import annotations
+
+from .cells import (
+    CELL_BOTH_EMPTY,
+    CELL_COMPARABLE,
+    CELL_EXTRA_IN_UC,
+    CELL_MISSING_IN_UC,
+    classify_cells,
+)
+from .classify import MismatchStats, classify
+from .context_labels import drop_skipped_cells, labels_from_ucmv, periods_without_label
+from .cross import cross_breakdown
+from .compare import (
+    LONG_FORMAT_COLUMNS,
+    compare,
+    summarize,
+    summarize_by_dimension,
+    summarize_by_period,
+    to_long_format,
+)
+from .loop import (
+    CycleResult,
+    LoopResult,
+    build_refinement_feedback,
+    feedback_to_prompt_map,
+    run_reconciliation_loop,
+)
+from .mapping import (
+    Binding,
+    Dimension,
+    Measure,
+    TimeDimension,
+    UCMVMapping,
+    load_mapping,
+    load_mapping_dict,
+)
+from .pbi_query import (
+    build_dimension_scope_query,
+    build_direct_context_queries,
+    build_direct_queries,
+    build_direct_query,
+    build_switch_queries,
+    filter_expression,
+    measure_dax_expr,
+    partition_measures_by_shape,
+    validate_dimension_conditional_usage,
+)
+from .periods import (
+    current_period,
+    is_closed_period,
+    matches_reference_years,
+    normalize_snapshot_date,
+)
+from .pbi_retry import TimeoutLadder, is_timeout
+from .run_lock import RunLockHeldError, lock_path_for, warehouse_run_lock
+from .runner import (
+    PbiRunReport,
+    UcmvExecutor,
+    run_pbi_queries,
+    run_pbi_queries_reported,
+    run_ucmv_query,
+)
+from .scale_check import (
+    DEFAULT_SCALE_THRESHOLD,
+    build_scale_query,
+    run_scale_check,
+    scale_verdict,
+)
+from .statistics import statistics_by_measure
+from .ucmv_query import build_ucmv_query
+from .values import parse_value, strip_percent
+from .view_report import ViewOptions, ViewRunInfo, build_view_report
+from .weeks import closed_weeks, is_week_key, week_key
+
+__all__ = [
+    # mapping
+    "Binding",
+    "Dimension",
+    "Measure",
+    "TimeDimension",
+    "UCMVMapping",
+    "load_mapping",
+    "load_mapping_dict",
+    # ucmv query
+    "build_ucmv_query",
+    # pbi query
+    "build_direct_query",
+    "build_direct_queries",
+    "build_direct_context_queries",
+    "build_switch_queries",
+    "build_dimension_scope_query",
+    "filter_expression",
+    "measure_dax_expr",
+    "partition_measures_by_shape",
+    "validate_dimension_conditional_usage",
+    # values
+    "parse_value",
+    "strip_percent",
+    # periods
+    "current_period",
+    "is_closed_period",
+    "matches_reference_years",
+    "normalize_snapshot_date",
+    # compare
+    "compare",
+    "to_long_format",
+    "summarize",
+    "summarize_by_period",
+    "summarize_by_dimension",
+    "LONG_FORMAT_COLUMNS",
+    # classify
+    "classify",
+    "MismatchStats",
+    # cells
+    "classify_cells",
+    "CELL_COMPARABLE",
+    "CELL_MISSING_IN_UC",
+    "CELL_EXTRA_IN_UC",
+    "CELL_BOTH_EMPTY",
+    # statistics
+    "statistics_by_measure",
+    # scale check
+    "DEFAULT_SCALE_THRESHOLD",
+    "build_scale_query",
+    "run_scale_check",
+    "scale_verdict",
+    # runner
+    "run_pbi_queries",
+    "run_pbi_queries_reported",
+    "PbiRunReport",
+    "run_ucmv_query",
+    "UcmvExecutor",
+    # timeouts
+    "TimeoutLadder",
+    "is_timeout",
+    # calendar labels / skipped periods
+    "labels_from_ucmv",
+    "periods_without_label",
+    "drop_skipped_cells",
+    # cross breakdown
+    "cross_breakdown",
+    # run lock
+    "warehouse_run_lock",
+    "RunLockHeldError",
+    "lock_path_for",
+    # view report
+    "build_view_report",
+    "ViewOptions",
+    "ViewRunInfo",
+    # weeks
+    "week_key",
+    "closed_weeks",
+    "is_week_key",
+    # iterative loop
+    "run_reconciliation_loop",
+    "build_refinement_feedback",
+    "feedback_to_prompt_map",
+    "CycleResult",
+    "LoopResult",
+]

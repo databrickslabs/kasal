@@ -666,3 +666,67 @@ class TestCatalogSchemaPlaceholderResolution:
         MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
         assert "{catalog}" not in spec.joins[0]["source"]
         assert "{schema}" not in spec.joins[0]["source"]
+
+
+class TestNativeQuerySourceCatalogQualification:
+    """A source resolved from a Value.NativeQuery native-SQL FROM uses an
+    implicit-catalog schema.table and must be qualified to 3-level
+    catalog.schema.table like its connector-M siblings, instead of emitting a
+    2-part source that cannot deploy (the reference customer Fact_FX_Rate (2) bug)."""
+
+    @staticmethod
+    def _ns(source_table):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(source_table=source_table)
+
+    def _pipeline_with_sources(self, sources):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            all_specs={f"t{i}": self._ns(s) for i, s in enumerate(sources)}
+        )
+
+    def test_infers_modal_source_catalog_from_siblings(self):
+        fake = self._pipeline_with_sources(
+            [
+                "acme_prod.acme_datamart_ftd.pe002",
+                "acme_prod.acme_md.ca_dim_calendar_v1",
+                "acme_datamart_mtc.fm016_write_offs",  # 2-part native-SQL source
+            ]
+        )
+        assert MetricViewPipeline._infer_source_catalog(fake) == "acme_prod"
+
+    def test_placeholder_and_todo_sources_ignored_for_inference(self):
+        fake = self._pipeline_with_sources(
+            ["main.default.x", "TODO.none_allocated.y", "udm_x.tbl"]
+        )
+        # No real 3-level source catalog → no guess.
+        assert MetricViewPipeline._infer_source_catalog(fake) is None
+
+    def test_qualifies_two_part_source(self):
+        spec = self._ns("acme_datamart_mtc.fm016_write_offs")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        assert spec.source_table == "acme_prod.acme_datamart_mtc.fm016_write_offs"
+
+    def test_leaves_three_part_source_untouched(self):
+        spec = self._ns("acme_prod.udm_x.tbl")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        assert spec.source_table == "acme_prod.udm_x.tbl"
+
+    def test_noop_without_inferred_catalog(self):
+        spec = self._ns("udm_x.tbl")
+        MetricViewPipeline._qualify_source_catalog(spec, None)
+        assert spec.source_table == "udm_x.tbl"  # no guess
+
+    def test_skips_placeholder_and_token_sources(self):
+        for src in ("TODO.none_allocated.measures", "{catalog}.{schema}.x"):
+            spec = self._ns(src)
+            MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+            assert spec.source_table == src
+
+    def test_idempotent(self):
+        spec = self._ns("udm_x.tbl")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        MetricViewPipeline._qualify_source_catalog(spec, "acme_prod")
+        assert spec.source_table == "acme_prod.udm_x.tbl"

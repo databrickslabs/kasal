@@ -115,7 +115,7 @@ class PowerBIContextConfigBulkResponse(BaseModel):
 class PowerBIContextConfigDict(BaseModel):
     """
     Schema for context configuration in dictionary format (used by tools).
-    Matches the format expected by powerbi_analysis_tool.
+    The Power BI context-config dictionary shape.
     """
 
     business_mappings: Optional[dict] = Field(

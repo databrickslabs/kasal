@@ -116,7 +116,7 @@ class TestLivePathErrors:
         assert "warehouse_id" in data["deployment_results"]["fact_test"]["message"]
 
     def test_live_path_empty_yaml_content(self):
-        """Empty YAML content → error result."""
+        """Empty YAML content (a table without measures) → skipped, not an error."""
         tool = MetricViewDeployerTool()
         yaml_specs = {"fact_test": ""}  # Empty YAML
         result = tool._run(
@@ -125,10 +125,9 @@ class TestLivePathErrors:
             warehouse_id="wh-123",
         )
         data = json.loads(result)
-        assert data["deployment_results"]["fact_test"]["status"] == "error"
-        assert (
-            "Empty YAML content" in data["deployment_results"]["fact_test"]["message"]
-        )
+        assert data["deployment_results"]["fact_test"]["status"] == "skipped"
+        assert "empty YAML" in data["deployment_results"]["fact_test"]["message"]
+        assert data["summary"]["skipped"] == 1 and data["summary"]["errors"] == 0
 
     def test_live_path_no_yaml_specs(self):
         """No yaml_specs → top-level error dict."""

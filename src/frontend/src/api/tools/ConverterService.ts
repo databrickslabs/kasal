@@ -24,7 +24,11 @@ import type {
 } from '../../types/config/converter';
 
 export class ConverterService {
-  private static readonly BASE_PATH = '/converters';
+  // The backend converter_router is mounted at prefix "/api/converters" and the
+  // apiClient already prepends the "/api/v1" base, so the full path is
+  // "/api/v1/api/converters/…". Using "/converters" here 404'd every call
+  // (conversion history, config-editor loader, the BI download/review views).
+  private static readonly BASE_PATH = '/api/converters';
 
   // ===== Conversion History Methods =====
 

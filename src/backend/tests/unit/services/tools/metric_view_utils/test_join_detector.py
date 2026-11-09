@@ -163,6 +163,70 @@ class TestJoinDetectorDimJoins:
         joins = detector.detect("fact", measures, tables["fact"])
         assert joins == []
 
+    def test_placeholder_source_replaced_by_join_key_map(self):
+        """S1 regression: when the generation-time parser only produced a
+        `main.default.*` placeholder for a parametric dim source, the resolved
+        `join_key_map[dim].source_table` (from config-gen enrichment) must win —
+        the join must not ship pointing at `main.default.*`."""
+        tables = {
+            "fact": _make_table("fact", "cat.sch.fact", ["country_id"]),
+            "Dim_Country": _make_table(
+                "Dim_Country",
+                "main.default.cust_exp_dim_company_v1",  # unresolved parametric stub
+                ["country_id", "region"],
+                agg=[],
+                is_fact=False,
+            ),
+        }
+        config = {
+            "join_key_map": {
+                "Dim_Country": {
+                    "alias": "dim_country",
+                    "join_key": "country_id",
+                    "dim_columns": ["region"],
+                    # authoritative path resolved during enrichment
+                    "source_table": "acme_prod.acme_datamart_cust_exp.cust_exp_dim_company",
+                },
+            }
+        }
+        detector = JoinDetector(tables, config)
+        measures = [{"dax_expression": "Dim_Country[region]"}]
+        joins = detector.detect("fact", measures, tables["fact"])
+        assert len(joins) == 1
+        assert (
+            joins[0]["source"]
+            == "acme_prod.acme_datamart_cust_exp.cust_exp_dim_company"
+        )
+
+    def test_real_source_not_overridden_by_join_key_map(self):
+        """The override only fires for placeholders — a real resolved dim source
+        is kept even when join_key_map also carries a source_table."""
+        tables = {
+            "fact": _make_table("fact", "cat.sch.fact", ["key"]),
+            "Dim_X": _make_table(
+                "Dim_X",
+                "real_cat.real_sch.dim_x",
+                ["key", "label"],
+                agg=[],
+                is_fact=False,
+            ),
+        }
+        config = {
+            "join_key_map": {
+                "Dim_X": {
+                    "alias": "dim_x",
+                    "join_key": "key",
+                    "dim_columns": ["label"],
+                    "source_table": "other_cat.other_sch.other_dim",
+                },
+            }
+        }
+        detector = JoinDetector(tables, config)
+        measures = [{"dax_expression": "Dim_X[label]"}]
+        joins = detector.detect("fact", measures, tables["fact"])
+        assert len(joins) == 1
+        assert joins[0]["source"] == "real_cat.real_sch.dim_x"
+
     def test_inner_join_type(self):
         tables = {
             "fact": _make_table("fact", "cat.sch.fact", ["key"]),
@@ -257,6 +321,102 @@ class TestJoinDetectorGetDimDimensions:
         detector = JoinDetector(tables)
         dims = detector.get_dim_dimensions([], tables["fact"])
         assert dims == []
+
+    def test_calendar_period_columns_folded_to_canonical(self):
+        """A joined calendar with closed-period columns → generic per-column dims
+        are replaced by canonical, documented period dimensions on this view."""
+        tables = {"fact": _make_table("fact", "cat.sch.fact", ["date_key"])}
+        config = {
+            "join_key_map": {
+                "C_Dim_calendar": {
+                    "alias": "dim_calendar",
+                    "join_key": "date_key",
+                    "dim_columns": [
+                        "MonthName",
+                        "Past_flag",
+                        "Latest_Month_Label",
+                        "Latest_Year_Label",
+                        "fiscper",
+                    ],
+                },
+            }
+        }
+        detector = JoinDetector(tables, config)
+        joins = [
+            {
+                "name": "dim_calendar",
+                "source": "cat.sch.c_dim_calendar",
+                "join_on": "source.date_key = dim_calendar.date_id",
+            }
+        ]
+        dims = detector.get_dim_dimensions(joins, tables["fact"])
+        by_name = {d["name"]: d for d in dims}
+        # canonical period dims present, with alias-qualified exprs + metadata
+        assert by_name["past_flag"]["expr"] == "dim_calendar.Past_flag"
+        assert by_name["past_flag"]["display_name"] == "Closed Period Flag"
+        assert "latest_month_label" in by_name
+        assert "latest_year_label" in by_name
+        assert by_name["fiscper"]["expr"] == "dim_calendar.fiscper"
+        # non-period calendar column kept as-is
+        assert by_name["MonthName"]["expr"] == "dim_calendar.MonthName"
+        # generic pre-canonicalisation names for period columns are gone
+        assert "Past_flag" not in by_name
+        assert "Latest_Month_Label" not in by_name
+
+    def test_naming_config_period_override_applied(self):
+        """A per-model period override in config.naming_config.period is honored:
+        a non-standard closed-period column is detected and canonicalised."""
+        tables = {"fact": _make_table("fact", "cat.sch.fact", ["date_key"])}
+        config = {
+            "naming_config": {
+                "period": {"column_overrides": {"latest_month_label": "IsCurrentMonth"}}
+            },
+            "join_key_map": {
+                "Dim_Cal": {
+                    "alias": "dim_cal",
+                    "join_key": "date_key",
+                    "dim_columns": ["IsCurrentMonth", "fiscper"],
+                },
+            },
+        }
+        detector = JoinDetector(tables, config)
+        joins = [
+            {
+                "name": "dim_cal",
+                "source": "cat.sch.dim_cal",
+                "join_on": "source.date_key = dim_cal.date_id",
+            }
+        ]
+        dims = detector.get_dim_dimensions(joins, tables["fact"])
+        by_name = {d["name"]: d for d in dims}
+        # the override turned a non-standard flag into the canonical period dim
+        assert by_name["latest_month_label"]["expr"] == "dim_cal.IsCurrentMonth"
+        assert "IsCurrentMonth" not in by_name
+
+    def test_plain_date_dim_not_folded(self):
+        """A date dimension WITHOUT closed-period columns is left untouched."""
+        tables = {"fact": _make_table("fact", "cat.sch.fact", ["date_key"])}
+        config = {
+            "join_key_map": {
+                "Dim_Date": {
+                    "alias": "dim_date",
+                    "join_key": "date_key",
+                    "dim_columns": ["Year", "Month", "fiscper"],
+                },
+            }
+        }
+        detector = JoinDetector(tables, config)
+        joins = [
+            {
+                "name": "dim_date",
+                "source": "cat.sch.dim_date",
+                "join_on": "source.date_key = dim_date.date_id",
+            }
+        ]
+        dims = detector.get_dim_dimensions(joins, tables["fact"])
+        names = {d["name"] for d in dims}
+        # no closed-period column → no folding; original generic names preserved
+        assert names == {"Year", "Month", "fiscper"}
 
 
 class TestJoinDetectorFactJoins:

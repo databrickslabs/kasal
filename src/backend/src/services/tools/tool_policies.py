@@ -12,7 +12,7 @@ and ``stamp_tool_policies`` puts them back on the built instance under a private
 attribute. The engine hooks then read one attribute regardless of which of the
 factory's many construction branches built the tool.
 
-Two policies today, deliberately the same shape:
+Three policies today. The first two are deliberately the same shape:
 
 ``requires_approval: true`` (+ optional ``approval: {...}``)
     Every use pauses until a human approves it. Read by
@@ -29,6 +29,15 @@ Two policies today, deliberately the same shape:
     Never turn it on for a tool that writes, that is gated on approval, or
     whose answer is scoped to the caller's identity rather than the workspace.
 
+``confidential_values: true``
+    Confidential-values mode. Fractional numbers (measure results, sums,
+    averages, Genie answers that carry numbers) never reach the agent or the
+    trace: the tool's output is redacted on the way out, its exceptions are
+    scrubbed of numeric literals, and tools with a value-free mode (see
+    ``confidential.guard.VALUE_FREE_MODES``) get that mode forced on instead.
+    Category, name, count and definition stay visible. Opt-in per tool; an
+    override may switch it on but never off.
+
 Both are the TEAMSPACE's decision. A per-agent, per-task or run ``tool_configs``
 entry is merged over the teamspace tool config by ``merge_tool_config_override``,
 which keeps policy, identity, endpoint and naming keys out of it (see
@@ -44,6 +53,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from src.services.tools.confidential import install_confidential_guard
 from src.utils.coercion import positive_int
 
 logger = logging.getLogger(__name__)
@@ -63,6 +73,7 @@ DEFAULT_REPLAY_SCOPE = "group"
 #: outside the engine hooks should be reading them.
 APPROVAL_ATTR = "_approval_policy"
 REPLAY_ATTR = "_replay_policy"
+CONFIDENTIAL_ATTR = "_confidential_policy"
 
 #: A tool's config, or one policy's options: JSON-shaped, keyed by name.
 ToolConfig = Dict[str, Any]
@@ -79,7 +90,15 @@ _IDENTITY_KEYS = frozenset(
 )
 #: Where a teamspace provider key is sent (Serper, Image Generation).
 _ENDPOINT_KEYS = frozenset({"base_url"})
-_POLICY_KEYS = frozenset({"requires_approval", "approval", "replayable", "replay"})
+_POLICY_KEYS = frozenset(
+    {
+        "requires_approval",
+        "approval",
+        "replayable",
+        "replay",
+        "confidential_values",
+    }
+)
 #: What the model and the approval prompt know the tool by. An approval
 #: decision is remembered per tool name for the run.
 _NAMING_KEYS = frozenset({"name", "description"})
@@ -127,6 +146,9 @@ def extract_tool_policies(tool_config: ToolConfig) -> ToolPolicies:
             ),
         }
 
+    if _pop_flag(tool_config, flag="confidential_values"):
+        policies[CONFIDENTIAL_ATTR] = {"enabled": True}
+
     return policies
 
 
@@ -142,8 +164,8 @@ def merge_tool_config_override(
     - ``tool_config``: the teamspace config with that override on top and the
       policy keys popped, ready for a constructor.
     - ``policies``: from the teamspace config. An override may add an approval
-      gate the teamspace does not have; it cannot remove or change one, and it
-      cannot turn replay on.
+      gate or confidential-values mode the teamspace does not have; it cannot
+      remove or change either, and it cannot turn replay on.
 
     A teamspace credential is not sent to a host the override chose (see
     ``_ENDPOINT_CREDENTIALS``). Neither input is mutated. Dropped keys are
@@ -160,6 +182,9 @@ def merge_tool_config_override(
     if APPROVAL_ATTR in requested and APPROVAL_ATTR not in policies:
         policies[APPROVAL_ATTR] = requested[APPROVAL_ATTR]
         dropped = [k for k in dropped if k not in ("requires_approval", "approval")]
+    if CONFIDENTIAL_ATTR in requested and CONFIDENTIAL_ATTR not in policies:
+        policies[CONFIDENTIAL_ATTR] = requested[CONFIDENTIAL_ATTR]
+        dropped = [k for k in dropped if k != "confidential_values"]
 
     if dropped:
         logger.warning(
@@ -225,20 +250,38 @@ def stamp_tool_policies(result: object, policies: ToolPolicies) -> None:
     if result is None or not policies:
         return
     for instance in result if isinstance(result, list) else [result]:
-        for attr, policy in policies.items():
-            try:
-                object.__setattr__(instance, attr, dict(policy))
-            except Exception as stamp_err:  # noqa: BLE001
-                logger.warning(
-                    f"[ToolFactory] could not stamp {attr} on "
-                    f"{type(instance).__name__}: {stamp_err}"
-                )
+        _stamp_one(instance, policies)
+
+
+def _stamp_one(instance: object, policies: ToolPolicies) -> None:
+    for attr, policy in policies.items():
+        try:
+            object.__setattr__(instance, attr, dict(policy))
+        except Exception as stamp_err:  # noqa: BLE001
+            logger.warning(
+                f"[ToolFactory] could not stamp {attr} on "
+                f"{type(instance).__name__}: {stamp_err}"
+            )
+    if CONFIDENTIAL_ATTR in policies and not install_confidential_guard(instance):
+        # Not raised: the tool is fine and losing the run is worse. But the tool
+        # now answers without the redaction it was configured for, so say so loudly.
+        logger.error(
+            "[ToolFactory] confidential_values is set on %s but its run path could "
+            "not be guarded; its output is NOT redacted",
+            type(instance).__name__,
+        )
 
 
 def replay_policy(tool: object) -> Optional[ToolConfig]:
     """This tool's cassette policy, or None when it is not replayable."""
     policy = getattr(tool, REPLAY_ATTR, None)
     return dict(policy) if isinstance(policy, dict) else None
+
+
+def _pop_flag(tool_config: ToolConfig, *, flag: str) -> bool:
+    """Pop a bare ``flag: true`` policy key. Truthy means on: a stray string is
+    read as on, which is the safe direction for a confidentiality switch."""
+    return bool(tool_config.pop(flag, False))
 
 
 def _pop_policy(

@@ -68,6 +68,19 @@ class TestToolAdapter:
         """It holds sessions, credentials and a group context."""
         assert "_kasal_tool" not in adapt_tool(_Search()).model_dump()
 
+    def test_result_as_answer_is_carried_onto_the_adapter(self):
+        """CrewAI's own executor reads THIS object's result_as_answer to decide
+        whether to short-circuit the agent loop and use the tool's raw output
+        as the Final Answer. If it stays at the adapter's default (False), the
+        LLM paraphrases the tool output in prose instead of relaying it — the
+        adapter must carry the flag, not just the wrapped tool."""
+        inner = _Search()
+        inner.result_as_answer = True
+        assert adapt_tool(inner).result_as_answer is True
+
+    def test_result_as_answer_defaults_false(self):
+        assert adapt_tool(_Search()).result_as_answer is False
+
     def test_an_uncallable_tool_is_dropped_with_a_warning_not_raised(self):
         """One malformed tool must not fail a run that has twelve others.
 

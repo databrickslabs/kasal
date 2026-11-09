@@ -7,15 +7,9 @@ check, and the dashboard mapper's fallback queries skipped the safe-SELECT gate
 the LLM path applies.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-
 from src.services.tools.metric_view_utils.sql_guard import (
     is_read_only_select,
     sql_value_literal,
-)
-from src.services.tools.mquery_conversion_pipeline_tool import (
-    MqueryConversionPipelineTool,
 )
 from src.services.tools.pbi_visual_ucmv_mapper_tool import PBIVisualUCMVMapperTool
 from tests.unit.services.tools.metric_view_utils.test_sql_literal_security import (
@@ -56,51 +50,6 @@ class TestReadOnlySelect:
     def test_refuses_writes_stacks_and_breakouts(self):
         for sql in ("DELETE FROM t", "SELECT 1; DROP TABLE t", "SELECT $$x$$", ""):
             assert not is_read_only_select(sql)
-
-
-class TestMqueryValidationRunsOnlyReadOnlySql:
-    def _validate(self, tool, sql):
-        conv = MagicMock(databricks_sql=sql, create_view_sql=None)
-        conv.original_expression = "let Source = ...\nin\nSource"
-        return asyncio.run(
-            tool._validate_databricks_table(
-                "T1",
-                conv,
-                "ws",
-                "ds",
-                "tok",
-                "https://workspace.example.com",
-                "wh",
-                "pat",
-                3,
-                {},
-            )
-        )
-
-    def test_a_non_select_is_never_executed(self):
-        tool = MqueryConversionPipelineTool()
-        with patch.object(tool, "_run_dbsql", new_callable=AsyncMock) as run:
-            result = self._validate(tool, "SELECT 1 FROM t; DROP TABLE t")
-        assert result["status"] == "skipped"
-        run.assert_not_called()
-
-    def test_an_llm_correction_is_checked_before_it_runs(self):
-        tool = MqueryConversionPipelineTool()
-        failed = {"success": False, "error": "syntax error"}
-        with (
-            patch.object(
-                tool, "_run_dbsql", new_callable=AsyncMock, return_value=failed
-            ) as run,
-            patch.object(
-                tool,
-                "_llm_correct_sql",
-                new_callable=AsyncMock,
-                return_value="DELETE FROM t",
-            ),
-        ):
-            result = self._validate(tool, "SELECT * FROM t")
-        assert result["status"] == "skipped"
-        assert run.await_count == 1  # the original only; the rewrite never ran
 
 
 class TestDashboardFallbackSql:

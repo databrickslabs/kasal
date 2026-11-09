@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import { apiClient } from '../shared/api/client';
+import { isLateTimeoutError } from '../utils/lateTimeout';
 
 interface CrewNodeState {
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  // 'warning' = the run timed out while finalizing but its outputs were produced
+  // (shown orange, not the red 'failed' error). See src/utils/lateTimeout.ts.
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'warning';
   started_at?: string;
   completed_at?: string;
   failed_at?: string;
@@ -32,7 +35,7 @@ interface FlowExecutionState {
   // Is flow execution in progress
   isExecuting: boolean;
   // Overall flow completion status — used as fallback when no per-crew traces arrived
-  flowStatus: 'idle' | 'running' | 'completed' | 'failed' | null;
+  flowStatus: 'idle' | 'running' | 'completed' | 'failed' | 'warning' | null;
   // Track task counts per crew for completion detection
   crewTaskCounts: Map<string, number>;
   crewCompletedTasks: Map<string, number>;
@@ -492,10 +495,16 @@ if (typeof window !== 'undefined') {
     if (detail && detail.jobId === store.currentJobId) {
       console.log('[FlowExecutionStore] Flow execution failed:', detail.jobId);
 
-      // Set flow-level status to failed — CrewNode uses this as fallback
-      useFlowExecutionStore.setState({ flowStatus: 'failed' });
+      // A run that merely TIMED OUT while finalizing produced its outputs (e.g. the
+      // UC Metric Views were deployed) — present the crew nodes as an orange
+      // 'warning', not the red 'failed' error. See src/utils/lateTimeout.ts.
+      const lateTimeout = isLateTimeoutError(detail.error);
+      const terminalStatus = lateTimeout ? 'warning' : 'failed';
 
-      // Mark all still-running crew nodes as failed since the job failed
+      // Set flow-level status — CrewNode uses this as fallback
+      useFlowExecutionStore.setState({ flowStatus: terminalStatus });
+
+      // Mark all still-running crew nodes with the terminal status
       const { crewNodeStates } = store;
       if (crewNodeStates.size > 0) {
         const updatedStates = new Map(crewNodeStates);
@@ -504,11 +513,13 @@ if (typeof window !== 'undefined') {
           if (crewState.status === 'running' || crewState.status === 'pending') {
             updatedStates.set(key, {
               ...crewState,
-              status: 'failed',
-              failed_at: new Date().toISOString(),
+              status: terminalStatus,
+              ...(lateTimeout
+                ? { completed_at: new Date().toISOString() }
+                : { failed_at: new Date().toISOString() }),
             });
             updated = true;
-            console.log('[FlowExecutionStore] Marked crew as failed on job failure:', key);
+            console.log(`[FlowExecutionStore] Marked crew as ${terminalStatus} on job end:`, key);
           }
         }
         if (updated) {

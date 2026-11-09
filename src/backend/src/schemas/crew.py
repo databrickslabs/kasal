@@ -199,6 +199,15 @@ class CrewUpdate(BaseModel):
     max_rpm: Optional[int] = None
 
 
+class CrewCloneRequest(BaseModel):
+    """Request to clone a crew into a new, independent crew ("Save as new crew")."""
+
+    name: Optional[str] = Field(
+        None,
+        description="Name for the cloned crew. Defaults to '<original> (copy)' when omitted.",
+    )
+
+
 # Properties shared by models stored in DB
 class CrewInDBBase(CrewBase):
     """Base Pydantic model for crews in the database, including id and timestamps."""
