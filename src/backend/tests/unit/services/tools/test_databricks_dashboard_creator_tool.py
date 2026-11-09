@@ -405,7 +405,8 @@ class TestLakeviewJsonBuilding:
         result = tool._build_lakeview_json(SAMPLE_VISUAL_MAPPINGS, "wh-123")
         for ds in result["datasets"]:
             assert "name" in ds
-            assert "query" in ds
+            # metric-view datasets name the view; SQL datasets carry their query
+            assert ds.get("asset_name") or ds.get("query")
 
     def test_pages_grouped_by_page_name(self):
         """Visuals from same page_name are on the same page."""

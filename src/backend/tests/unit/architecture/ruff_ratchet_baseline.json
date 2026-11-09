@@ -774,7 +774,7 @@
   "src/services/tools/metric_view_validator_tool.py::G004": 14,
   "src/services/tools/metric_view_validator_tool.py::S110": 2,
   "src/services/tools/pbi_visual_ucmv_mapper_tool.py::BLE001": 10,
-  "src/services/tools/pbi_visual_ucmv_mapper_tool.py::G004": 11,
+  "src/services/tools/pbi_visual_ucmv_mapper_tool.py::G004": 10,
   "src/services/tools/pbi_visual_ucmv_mapper_tool.py::S110": 3,
   "src/services/tools/pbi_visual_ucmv_mapper_tool.py::TRY400": 1,
   "src/services/tools/perplexity_tool.py::BLE001": 1,

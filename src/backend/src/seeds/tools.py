@@ -156,7 +156,7 @@ tools_data = [
     (
         95,
         "Databricks Dashboard Creator",
-        "Creates Databricks AI/BI (Lakeview) dashboards from visual-to-UCMV mappings. Takes the structured visual mappings from the PBI Visual-UCMV Mapper (tool 94), generates a Lakeview dashboard JSON with correct widget types (bar, line, table, counter), datasets with MEASURE() SQL queries, and page layouts. Calls the Databricks Lakeview REST API to create or update the dashboard and optionally publishes it. Returns the dashboard URL. Final step in the CI/CD dashboard pipeline.",
+        "Creates Databricks AI/BI (Lakeview) dashboards from visual-to-UCMV mappings. Takes the structured visual mappings from the PBI Visual-UCMV Mapper (tool 94) and builds the dashboard on the UC metric views themselves (measures evaluated at each widget's grain and under every filter): ~40 Power BI visual types mapped to bar (horizontal / vertical, clustered / stacked), line, area, pie, scatter, counter and table widgets, slicers rebuilt as filter widgets (multi-select, date range), one page per report page, and a per-visual coverage report (mapped / approximated / table fallback / filter / decorative / unsupported / unmapped, with a note for every loss). Calls the Databricks Lakeview REST API to create or update the dashboard and optionally publishes it. Returns the dashboard URL. Final step in the CI/CD dashboard pipeline.",
         "database",
     ),
     (
