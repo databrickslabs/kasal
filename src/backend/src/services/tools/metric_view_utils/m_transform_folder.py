@@ -50,6 +50,18 @@ _UNTRANSLATABLE_STEPS = frozenset(
 )
 
 
+def _keep_one_row_per_key(sql: str, keys: list[str]) -> str:
+    """``Table.Distinct(t, {keys})``: one row per key. Power BI keeps the first row in
+    source order, which a query does not define either, so any one row is as faithful;
+    what matters for a dimension is that a join cannot fan out."""
+    key_list = ", ".join(keys)
+    return (
+        "SELECT * EXCEPT (_kasal_rn)\nFROM (\n"
+        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY {key_list} ORDER BY {key_list}) AS _kasal_rn\n"
+        f"  FROM (\n{sql}\n  ) _kasal_keyed\n) _kasal_dedup\nWHERE _kasal_rn = 1"
+    )  # keys are plain identifiers (regex above) — nosemgrep: tmp.databricks.sql-injection.fstring-select
+
+
 def _todo_note(step: MStep) -> str:
     """Render an M step that could not be translated as a one-line SQL comment."""
     compact = " ".join(step.raw_expression.split())
@@ -71,6 +83,7 @@ class MTransformFolder:
         recorded on ``self.transform_todos`` and appended to the returned SQL as a
         ``-- TODO:`` comment so it surfaces in the emitted source (S5)."""
         self.transform_todos: list[str] = []
+        self._added_columns: set[str] = set()
         if not m_steps:
             return base_sql
 
@@ -79,6 +92,7 @@ class MTransformFolder:
         remove_columns = []
         rename_map = {}
         distinct_all = False
+        distinct_keys: list[str] = []
 
         i = 0
         while i < len(m_steps):
@@ -98,7 +112,14 @@ class MTransformFolder:
                 # Full-row Table.Distinct(t) → SELECT DISTINCT; a keyed
                 # Table.Distinct(t, {"col"}) keeps the first row per key (a
                 # non-deterministic pick) → not translatable, emit a TODO.
-                if re.search(r"Table\.Distinct\s*\([^,]+,", step.raw_expression):
+                keyed = re.search(
+                    r"Table\.Distinct\s*\([^,]+,\s*\{([^}]*)\}\s*\)",
+                    step.raw_expression,
+                )
+                keys = re.findall(r'"([A-Za-z_]\w*)"', keyed.group(1)) if keyed else []
+                if keys:
+                    distinct_keys = keys
+                elif re.search(r"Table\.Distinct\s*\([^,]+,", step.raw_expression):
                     self.transform_todos.append(_todo_note(step))
                 else:
                     distinct_all = True
@@ -149,6 +170,9 @@ class MTransformFolder:
                 count=1,
                 flags=re.IGNORECASE,
             )
+
+        if distinct_keys:
+            base_sql = _keep_one_row_per_key(base_sql, distinct_keys)
 
         if self.transform_todos:
             base_sql = base_sql + "\n" + "\n".join(self.transform_todos)
@@ -501,7 +525,11 @@ class MTransformFolder:
             for rm in re.finditer(r'"([^"]+)"', step.raw_expression.split("{", 1)[-1]):
                 remove_set.add(rm.group(1))
 
+        added = self.__dict__.setdefault("_added_columns", set())
         for step in transforms:
+            if step.step_type == "AddColumn":
+                self._add_columns(step, col_exprs, added)
+                continue
             if step.step_type == "ReplaceValue":
                 m = re.search(
                     r'Table\.ReplaceValue\([^,]+,\s*(null|"[^"]*")\s*,\s*"([^"]*)"\s*,'
@@ -631,6 +659,25 @@ class MTransformFolder:
 
         return col_exprs
 
+    def _add_columns(
+        self, step: MStep, col_exprs: dict[str, str | None], added: set[str]
+    ) -> None:
+        """``Table.AddColumn``: a new column from an ``each`` expression. One that does
+        not translate is a TODO, never dropped silently."""
+        from .generated_table_emitter import _find_addcols
+        from .m_column_expressions import m_column_expression_to_sql
+
+        found = _find_addcols(step.raw_expression)
+        for name, body in found:
+            sql = m_column_expression_to_sql(body)
+            if sql is None or not re.match(r"^[A-Za-z_]\w*$", name):
+                self.__dict__.setdefault("transform_todos", []).append(_todo_note(step))
+                return
+            col_exprs[name] = sql
+            added.add(name)
+        if not found:
+            self.__dict__.setdefault("transform_todos", []).append(_todo_note(step))
+
     def _apply_with_wrapper(
         self, base_sql: str, where_conditions: list, col_exprs: dict, pbi_columns: list
     ) -> str:
@@ -648,7 +695,8 @@ class MTransformFolder:
             # be built (empty is invalid SQL, transforms alone drop every other column),
             # so keep all columns and replace or remove only the ones the steps name.
             # A step that names a column the source lacks then fails on deploy, by name.
-            replaced = sorted(set(remove_set) | set(transform_exprs))
+            added = self.__dict__.get("_added_columns") or set()
+            replaced = sorted((set(remove_set) | set(transform_exprs)) - added)
             star = f"* EXCEPT ({', '.join(replaced)})" if replaced else "*"
             select_list = ",\n".join(
                 [f"  {star}"]

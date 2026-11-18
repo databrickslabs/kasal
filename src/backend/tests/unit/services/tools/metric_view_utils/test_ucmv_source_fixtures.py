@@ -218,11 +218,11 @@ class TestS5TransformFolding:
         assert "'republic of ireland', 'ireland')" in country
 
     def test_dim_country_untranslatable_steps_become_todos(self):
-        """Table.Distinct (keyed), Table.Combine (appended rows) are surfaced as
-        TODOs — never silently dropped (S5)."""
+        """Table.Combine (appended rows) is surfaced as a TODO — never silently dropped
+        (S5). A keyed Table.Distinct now folds to one row per key."""
         folder = MTransformFolder()
         base = "SELECT * FROM cat.sch.cust_exp_dim_company"
-        folder.fold_from_mquery(
+        sql = folder.fold_from_mquery(
             base,
             DIM_COUNTRY_M,
             [
@@ -233,7 +233,7 @@ class TestS5TransformFolding:
             ],
         )
         joined = "\n".join(folder.transform_todos)
-        assert "Table.Distinct" in joined
+        assert "Table.Distinct" not in joined and "PARTITION BY" in sql
         assert "Table.Combine" in joined
 
     def test_dim_country_region_filter_translated(self):

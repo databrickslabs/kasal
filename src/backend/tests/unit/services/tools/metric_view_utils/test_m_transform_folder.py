@@ -110,12 +110,12 @@ class TestFold:
         assert "drop_col" not in result or "None" not in result
 
     def test_add_column_step(self, folder: MTransformFolder):
-        """AddColumn steps are added to column_transforms but only matter
-        if _build_column_transforms can parse them (currently no handler)."""
+        """An AddColumn step that cannot be read is a TODO, not silently dropped
+        (translatable ones: test_m_column_expressions.py)."""
         sql = "SELECT a FROM t"
         steps = [MStep(step_type="AddColumn", raw_expression="ignored")]
-        # No matching handler in _build_column_transforms → no col_exprs
-        assert folder.fold(sql, steps, []) == sql
+        out = folder.fold(sql, steps, [])
+        assert out.startswith(sql) and "-- TODO:" in out and folder.transform_todos
 
 
 # ── _split_union() ──────────────────────────────────────────────────
