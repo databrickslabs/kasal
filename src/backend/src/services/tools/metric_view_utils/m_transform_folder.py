@@ -6,6 +6,7 @@ import re
 
 from .data_classes import MStep
 from .dax_condition_sql import _sql_str_literal
+from .m_column_expressions import keep_one_row_per_key
 from .m_sql_formatter import (
     _compact_where,
     _reformat_arm,
@@ -48,18 +49,6 @@ _UNTRANSLATABLE_STEPS = frozenset(
         "Buffer",
     }
 )
-
-
-def _keep_one_row_per_key(sql: str, keys: list[str]) -> str:
-    """``Table.Distinct(t, {keys})``: one row per key. Power BI keeps the first row in
-    source order, which a query does not define either, so any one row is as faithful;
-    what matters for a dimension is that a join cannot fan out."""
-    key_list = ", ".join(keys)
-    return (
-        "SELECT * EXCEPT (_kasal_rn)\nFROM (\n"
-        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY {key_list} ORDER BY {key_list}) AS _kasal_rn\n"
-        f"  FROM (\n{sql}\n  ) _kasal_keyed\n) _kasal_dedup\nWHERE _kasal_rn = 1"
-    )  # keys are plain identifiers (regex above) — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
 
 def _todo_note(step: MStep) -> str:
@@ -149,7 +138,8 @@ class MTransformFolder:
             column_transforms, rename_map, remove_columns
         )
 
-        if col_exprs:
+        self._renames = dict(rename_map)
+        if col_exprs or rename_map:
             arms = self._split_union(base_sql)
             if len(arms) > 1:
                 base_sql = self._apply_union_inline(
@@ -172,7 +162,7 @@ class MTransformFolder:
             )
 
         if distinct_keys:
-            base_sql = _keep_one_row_per_key(base_sql, distinct_keys)
+            base_sql = keep_one_row_per_key(base_sql, distinct_keys)
 
         if self.transform_todos:
             base_sql = base_sql + "\n" + "\n".join(self.transform_todos)
@@ -510,6 +500,11 @@ class MTransformFolder:
             return ""
         condition = re.sub(r"\[([^\]]+)\]", r"\1", condition)
         condition = condition.replace('"', "'")
+        # M's [x] <> null is true for a non-null x; SQL's x <> NULL never is.
+        condition = re.sub(
+            r"(\w+)\s*<>\s*null\b", r"\1 IS NOT NULL", condition, flags=re.I
+        )
+        condition = re.sub(r"(\w+)\s*=\s*null\b", r"\1 IS NULL", condition, flags=re.I)
         return condition
 
     def _build_column_transforms(
@@ -696,10 +691,25 @@ class MTransformFolder:
             # so keep all columns and replace or remove only the ones the steps name.
             # A step that names a column the source lacks then fails on deploy, by name.
             added = self.__dict__.get("_added_columns") or set()
-            replaced = sorted((set(remove_set) | set(transform_exprs)) - added)
+            renames = {
+                old: new
+                for old, new in (self.__dict__.get("_renames") or {}).items()
+                if old not in remove_set
+            }
+            # A renamed column's old name always goes, even when a step re-adds it.
+            replaced = sorted(
+                ((set(remove_set) | set(transform_exprs)) - added) | set(renames)
+            )
             star = f"* EXCEPT ({', '.join(replaced)})" if replaced else "*"
+            # Renamed columns first: a later added column may read the new name
+            # (a lateral column alias in Databricks SQL).
             select_list = ",\n".join(
                 [f"  {star}"]
+                + [
+                    f"  {old} AS {new}"
+                    for old, new in renames.items()
+                    if new not in transform_exprs
+                ]
                 + [f"  {expr} AS {col}" for col, expr in transform_exprs.items()]
             )
             where_clause = (
@@ -712,9 +722,12 @@ class MTransformFolder:
         for col in base_cols:
             if col in remove_set or col.lower() in {r.lower() for r in remove_set}:
                 continue
+            renamed = (self.__dict__.get("_renames") or {}).get(col)
             if col in transform_exprs:
                 select_parts.append(f"  {transform_exprs[col]} AS {col}")
                 used_transforms.add(col)
+            elif renamed and renamed not in transform_exprs:
+                select_parts.append(f"  {col} AS {renamed}")
             else:
                 select_parts.append(f"  {col}")
 
@@ -761,7 +774,11 @@ class MTransformFolder:
         m = re.match(r"\s*SELECT\s+(.*?)\s+FROM\s+", sql, re.IGNORECASE | re.DOTALL)
         if not m:
             return []
-        select_body = m.group(1)
+        select_body = re.sub(r"^\s*(DISTINCT|ALL)\s+", "", m.group(1), flags=re.I)
+        if any(
+            p.strip() == "*" or p.strip().endswith(".*") for p in select_body.split(",")
+        ):
+            return []  # SELECT * : the columns are not known
         cols = []
         for part in select_body.split(","):
             part = part.strip()

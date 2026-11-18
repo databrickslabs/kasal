@@ -95,8 +95,11 @@ class TestFold:
                 raw_expression='Table.RenameColumns(prev, {{"old_col", "new_col"}})',
             ),
         ]
-        # RenameColumns alone produces no col_exprs → returns base
-        assert folder.fold(sql, steps, []) == sql
+        # The rename is applied (it used to be ignored, so the PBI name was missing)
+        assert (
+            folder.fold(sql, steps, [])
+            == "SELECT\n  old_col AS new_col\nFROM (\nSELECT old_col FROM t\n) _src"
+        )
 
     def test_remove_columns(self, folder: MTransformFolder):
         sql = "SELECT keep_col, drop_col FROM t"

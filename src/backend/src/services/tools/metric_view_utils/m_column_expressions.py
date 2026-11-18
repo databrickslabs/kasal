@@ -170,3 +170,15 @@ def m_column_expression_to_sql(body: str) -> str | None:
         return sql
     except (_Unsupported, IndexError):
         return None
+
+
+def keep_one_row_per_key(sql: str, keys: list[str]) -> str:
+    """``Table.Distinct(t, {keys})``: one row per key. Power BI keeps the first row in
+    source order, which a query does not define either, so any one row is as faithful;
+    what matters for a dimension is that a join cannot fan out."""
+    key_list = ", ".join(keys)
+    return (
+        "SELECT * EXCEPT (_kasal_rn)\nFROM (\n"
+        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY {key_list} ORDER BY {key_list}) AS _kasal_rn\n"
+        f"  FROM (\n{sql}\n  ) _kasal_keyed\n) _kasal_dedup\nWHERE _kasal_rn = 1"
+    )  # keys are plain identifiers (regex above) — nosemgrep: tmp.databricks.sql-injection.fstring-select

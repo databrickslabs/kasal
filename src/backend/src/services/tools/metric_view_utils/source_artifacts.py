@@ -63,6 +63,40 @@ def _planned_tables(
     return planned
 
 
+_TWO_PART_REF = re.compile(
+    r"\b(FROM|JOIN)\s+([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?![\w.`])", re.I
+)
+
+
+def _native_base(m_expression: str, src_tbl: str) -> str:
+    """The table's ``Value.NativeQuery`` SQL as the base of its source-layer view, "" if none.
+
+    Reading the raw table instead loses what the native SQL selects (``fiscper3 AS Month``,
+    DISTINCT, its WHERE). Only complete SQL is used: one that Power Query assembles from
+    parameters (``'"& Filter &"'``) is cut off where the parameter starts. Two-part names
+    get the source table's catalog, so the view does not depend on the session's catalog.
+    """
+    from .mquery_parser import extract_native_query_sql
+
+    sql = (extract_native_query_sql(m_expression or "") or "").strip()
+    if not sql or not re.match(r"(?is)^\s*(SELECT|WITH)\b", sql):
+        return ""
+    if (
+        sql.count("(") != sql.count(")")
+        or sql.count("'") % 2
+        or '"&' in sql
+        or '&"' in sql
+    ):
+        return ""
+    parts = [p.strip("`") for p in (src_tbl or "").split(".")]
+    if len(parts) == 3 and parts[0]:
+        catalog = parts[0]
+        sql = _TWO_PART_REF.sub(
+            lambda m: f"{m.group(1)} {catalog}.{m.group(2)}.{m.group(3)}", sql
+        )
+    return sql
+
+
 def _fold_dimension_read(
     key: str,
     src_tbl: str,
@@ -78,7 +112,8 @@ def _fold_dimension_read(
     from .m_transform_folder import MTransformFolder
 
     folder = MTransformFolder()
-    base = f"SELECT * FROM {_bq(src_tbl)}"
+    native = _native_base(m_expression, src_tbl)
+    base = native or f"SELECT * FROM {_bq(src_tbl)}"
     cols = getattr(info, "group_by_columns", None) if info is not None else None
     try:
         folded = folder.fold_from_mquery(base, m_expression, cols)
@@ -89,12 +124,12 @@ def _fold_dimension_read(
             exc,
             exc_info=True,
         )
-        return ""
+        return native
     if getattr(folder, "transform_todos", None):
         fold_todos[key] = list(folder.transform_todos)
     if folded and folded.strip() != base.strip():
         return folded
-    return ""
+    return native  # the native SQL itself, or "" for a plain passthrough
 
 
 def _calc_columns(key: str, calc_cfg: dict, calc_column_cls: type) -> list:
