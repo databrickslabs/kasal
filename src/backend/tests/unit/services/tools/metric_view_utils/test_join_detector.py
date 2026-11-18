@@ -586,3 +586,33 @@ class TestP4RichJoinSql:
             "fact", [{"dax_expression": "SUM(Dim_Geo[x])"}], tables["fact"]
         )
         assert joins[0]["source"] == "cat.sch.dim_geo"
+
+
+class TestDimensionWithoutPhysicalTable:
+    """A mapping table whose rows are embedded in the M has no physical source. The join was
+    dropped at generation even in read mode, where the source layer gives it a view."""
+
+    def _detect(self, config):
+        tables = {"fact": _make_table("fact", "cat.sch.fact", ["kbi"])}
+        config = {
+            "join_key_map": {
+                "Mapping_KBI": {
+                    "alias": "mapping_kbi",
+                    "join_key": "kbi",
+                    "dim_columns": ["name"],
+                }
+            },
+            **config,
+        }
+        detector = JoinDetector(tables, config)
+        return detector, detector.detect(
+            "fact", [{"dax_expression": "Mapping_KBI[name]"}], tables["fact"]
+        )
+
+    def test_read_mode_keeps_the_join_on_the_placeholder(self):
+        _, joins = self._detect({"read_from_source_layer": True})
+        assert [j["source"] for j in joins] == ["{catalog}.{schema}.mapping_kbi"]
+
+    def test_without_read_mode_it_is_dropped_and_reported_as_before(self):
+        detector, joins = self._detect({})
+        assert joins == [] and detector.dropped_dims[0]["dimension"] == "Mapping_KBI"

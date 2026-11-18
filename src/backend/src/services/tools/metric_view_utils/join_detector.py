@@ -111,6 +111,11 @@ class JoinDetector:
         # P4a: global opt-in to dedup ALL dim joins with a QUALIFY subquery
         # (per-dim `dedup_dim` in join_key_map takes precedence / adds to this).
         self._dedup_all_dim_joins = bool(cfg.get("dedup_dim_joins", False))
+        # Read mode: every PBI table gets a source-layer view, including tables with
+        # no physical source (rows embedded in the M), so their joins are kept.
+        from .source_layer_binding import read_from_source_layer
+
+        self._read_mode = read_from_source_layer(cfg)
         # Dimensions a measure references but no join could be built for;
         # reported in the migration report (the view would otherwise just
         # lack them).
@@ -199,6 +204,10 @@ class JoinDetector:
             if source and "." not in source and "(" not in source:
                 # A bare name (an Excel sheet, "Sheet1") is no table: use the standard
                 # placeholder, where the PBI-only ingestion task loads the table.
+                source = "{catalog}.{schema}." + to_snake_case(dim_name)
+            if not source and self._read_mode:
+                # The source layer binds this placeholder to the table's view; if it
+                # has none, the deploy heal removes the join and reports it.
                 source = "{catalog}.{schema}." + to_snake_case(dim_name)
             if not source:
                 self._record_dropped(fact_table_key, dim_name)

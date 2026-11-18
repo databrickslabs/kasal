@@ -38,6 +38,14 @@ _CATALOG_NAV_CONNECTORS = re.compile(
 )
 
 
+def _is_pbi_only(mquery: str) -> bool:
+    """A table Power BI builds itself (embedded rows, Excel, SharePoint, web): no source
+    table can be recovered from it, by any parser or LLM."""
+    from .pbi_only_ingestion import detect_pbi_only_source
+
+    return detect_pbi_only_source(mquery) is not None
+
+
 def looks_like_raw_mquery(sql: str) -> bool:
     """Heuristic: does this string look like raw Power Query M rather than SQL?
 
@@ -689,6 +697,7 @@ class MQueryParser:
         tables: dict[str, TableInfo] = {}
         dropped_validation = 0
         raw_m_tables: list[str] = []
+        pbi_only_tables: list[str] = []
         non_fact_tables: list[str] = []
         for entry in entries:
             table_name = entry.get("table_name", "")
@@ -714,7 +723,10 @@ class MQueryParser:
             if not info.is_fact:
                 non_fact_tables.append(table_name)
                 if looks_like_raw_mquery(sql):
-                    raw_m_tables.append(table_name)
+                    if _is_pbi_only(sql):
+                        pbi_only_tables.append(table_name)
+                    else:
+                        raw_m_tables.append(table_name)
 
         if dropped_validation:
             logger.warning(
@@ -729,6 +741,14 @@ class MQueryParser:
                 len(non_fact_tables),
                 len(tables),
                 ", ".join(non_fact_tables[:20]),
+            )
+        if pbi_only_tables:
+            logger.info(
+                "[MQueryParser] %d Power BI-only table(s) (rows in the model, Excel, "
+                "SharePoint, web): no warehouse source by nature; the source layer reads "
+                "embedded rows, the others need their ingestion task: %s",
+                len(pbi_only_tables),
+                ", ".join(pbi_only_tables[:20]),
             )
         if raw_m_tables:
             logger.warning(

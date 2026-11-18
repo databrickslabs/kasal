@@ -158,14 +158,18 @@ def recover_raw_m_sources(
     if use_llm and isinstance(entries, list) and entries:
         try:
             from src.services.tools.metric_view_utils.mquery_parser import (
+                _is_pbi_only,
                 looks_like_raw_mquery,
             )
 
+            # Power BI-only tables have no source to recover; counting them made a
+            # correct "nothing recovered" read as a failed LLM.
             raw_m_count = sum(
                 1
                 for e in entries
                 if isinstance(e, dict)
                 and looks_like_raw_mquery(as_str(e.get("transpiled_sql")))
+                and not _is_pbi_only(as_str(e.get("transpiled_sql")))
             )
             if raw_m_count:
                 from src.services.tools.metric_view_utils.mquery_llm_fallback import (
