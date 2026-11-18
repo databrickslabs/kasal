@@ -2,11 +2,16 @@
 
 import json
 
+import httpx
+import pytest
+
 from src.services.tools.ucmv_source_layer_tool import (
     ACTIONS,
     UCMVSourceLayerTool,
+    _operation_url,
     _sql_result,
 )
+from src.services.tools.ucmv_source_layer_utils.pbi_client import PbiError
 from src.services.tools.ucmv_source_layer_utils.sql_types import SqlError, SqlResult
 
 ENTRIES = json.dumps(
@@ -176,3 +181,19 @@ def test_emit_reports_fact_rls_warning_and_accepts_shorthand():
         "add the column to the fact MV and a value_access filter"
     ]
     assert out["views"]["Dim"]["row_filter"]["function"] == "cat.common.value_access"
+
+
+OP_GUID = "0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
+
+
+def test_the_model_definition_operation_is_polled_on_fabric_only():
+    fabric = f"https://api.fabric.microsoft.com/v1/operations/{OP_GUID}"
+    assert _operation_url(httpx.Headers({"Location": fabric})) == fabric
+    cluster = httpx.Headers(
+        {
+            "Location": f"https://wabi-north-europe-redirect.analysis.windows.net/v1/operations/{OP_GUID}"
+        }
+    )
+    assert _operation_url(cluster) == fabric
+    with pytest.raises(PbiError):
+        _operation_url(httpx.Headers({"Location": "https://evil.example.com/op"}))

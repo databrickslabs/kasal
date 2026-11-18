@@ -8,8 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.services.powerbi import fabric_definition, pipeline_config
-from src.services.powerbi import legacy_report
+from src.services.powerbi import fabric_definition, legacy_report, pipeline_config
 
 WS = "11111111-2222-3333-4444-555555555555"
 RPT = "66666666-7777-8888-9999-000000000000"
@@ -224,3 +223,48 @@ def test_legacy_converter_is_loaded_for_the_standalone_cli():
     # The standalone CLI loads pipeline_config (and so this module) by file path; it must still import.
     assert legacy_report.CONVERSION_FAILURE == "FailedToExportReport"
     assert fabric_definition.FabricDefinitionError.__mro__[1] is RuntimeError
+
+
+POWER_BI_CLUSTER = (
+    "https://wabi-west-europe-redirect.analysis.windows.net/v1/operations/{}"
+)
+OP_GUID = "0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
+FABRIC_OPERATION = f"https://api.fabric.microsoft.com/v1/operations/{OP_GUID}"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Location": POWER_BI_CLUSTER.format(OP_GUID), "x-ms-operation-id": OP_GUID},
+        {
+            "Location": POWER_BI_CLUSTER.format(OP_GUID)
+        },  # id taken from the Location path
+        {"x-ms-operation-id": OP_GUID},
+    ],
+)
+def test_an_operation_on_a_power_bi_cluster_host_is_polled_on_fabric(
+    monkeypatch, headers
+):
+    """Some regions answer the 202 with a wabi-….analysis.windows.net Location. The token stays on
+    Fabric: the same operation is polled on Fabric's operations endpoint, by its id."""
+    _queue(monkeypatch, "post", [_Resp(202, headers=headers)])
+    gets = _queue(
+        monkeypatch,
+        "get",
+        [_Resp(200, {"status": "Succeeded"}), _Resp(200, _pbir_parts())],
+    )
+    parts, _ = fabric_definition.fetch_report_parts(DEF_URL, "tok")
+    assert len(parts) == 1
+    assert [c[0][0] for c in gets] == [FABRIC_OPERATION, FABRIC_OPERATION + "/result"]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Location": POWER_BI_CLUSTER.format("not-a-guid")},
+        {"Location": "https://evil.example.com/op", "x-ms-operation-id": "../../x"},
+        {"Location": "https://evil.example.com/elsewhere/" + OP_GUID},
+    ],
+)
+def test_without_a_valid_operation_id_nothing_is_polled(headers):
+    assert fabric_definition.operation_location(headers) == ""

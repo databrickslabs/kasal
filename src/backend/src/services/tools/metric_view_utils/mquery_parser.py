@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # regex walk in extract_source_table/resolve_mquery_to_sql applies to all of
 # them — only the connector-function gate below differs per family.
 _CATALOG_NAV_CONNECTORS = re.compile(
-    r"\b(Databricks\.\w+|Snowflake\.Databases|PostgreSQL\.Database|"
+    r"\b(Databricks(?:MultiCloud)?\.\w+|Snowflake\.Databases|PostgreSQL\.Database|"
     r"MySQL\.Database|Oracle\.Database|AmazonRedshift\.Database|"
     r"GoogleBigQuery\.Database)\b"
 )
@@ -56,7 +56,7 @@ def looks_like_raw_mquery(sql: str) -> bool:
         re.search(r"^\s*let\b", s, re.IGNORECASE)
         or re.search(r"\bin\b\s*$", s, re.IGNORECASE)
         or re.search(
-            r"\b(Sql\.Database|Value\.NativeQuery|Databricks\.\w+|"
+            r"\b(Sql\.Database|Value\.NativeQuery|Databricks(?:MultiCloud)?\.\w+|"
             r'Source\s*\{|\[Schema\s*=|\[Item\s*=|Table\.|#"|Excel\.Workbook)\b',
             s,
         )
@@ -417,7 +417,7 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
 
 def _databricks_navigation_fqn(m: str) -> str | None:
     """Walk the ordered ``[Name="…"]`` chain (catalog, schema, table)."""
-    if not re.search(r"\bDatabricks\.\w+", m):
+    if not re.search(r"\bDatabricks(?:MultiCloud)?\.\w+", m):
         return None
     names = re.findall(r'\[\s*Name\s*=\s*"([^"]+)"', m)
     if len(names) >= 3:

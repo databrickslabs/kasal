@@ -37,7 +37,9 @@ _TABLE_LINE = "table "
 _AUTO_DATE_TABLES = ("LocalDateTable_", "DateTableTemplate_")
 
 # M source of an import table
-_DATABRICKS = re.compile(r"Databricks\.(Catalogs|Query)|Value\.NativeQuery", re.I)
+_DATABRICKS = re.compile(
+    r"Databricks(?:MultiCloud)?\.(Catalogs|Query)|Value\.NativeQuery", re.I
+)
 _EXTERNAL = re.compile(
     r"SharePoint\.|Excel\.Workbook|Sql\.Databases?|Web\.Contents|Odbc\.|Csv\.Document|File\.Contents",
     re.I,

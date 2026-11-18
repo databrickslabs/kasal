@@ -31,6 +31,7 @@ from typing import ClassVar, Optional, Tuple, Type
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi.fabric_definition import operation_location
 from src.services.tools.async_bridge import run_async_with_context
 from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
@@ -50,25 +51,25 @@ from src.services.tools.ucmv_source_layer_utils.inputs import (
 )
 from src.services.tools.ucmv_source_layer_utils.names import (
     is_uc_fqn,
+    is_uc_schema,
     parse_utc,
     quote_fqn,
     utc_stamp,
 )
 from src.services.tools.ucmv_source_layer_utils.pbi_client import PbiClient, PbiError
-from src.services.tools.ucmv_source_layer_utils.names import is_uc_schema
-from src.services.tools.ucmv_source_layer_utils.rls_checks import parse_rls_dax
-from src.services.tools.ucmv_source_layer_utils.row_access import (
-    access_setup_statements,
-    parse_access_rows,
-    run_setup,
-    setup_plan,
-)
 from src.services.tools.ucmv_source_layer_utils.refresh_plan import (
     RefreshRequest,
     list_views_sql,
     parse_views,
     run_refresh,
     runner,
+)
+from src.services.tools.ucmv_source_layer_utils.rls_checks import parse_rls_dax
+from src.services.tools.ucmv_source_layer_utils.row_access import (
+    access_setup_statements,
+    parse_access_rows,
+    run_setup,
+    setup_plan,
 )
 from src.services.tools.ucmv_source_layer_utils.snapshot_loader import (
     SnapshotContext,
@@ -413,7 +414,7 @@ class UCMVSourceLayerTool(BaseTool):
                 return expressions_tmdl_text(response.json())
             if response.status_code != 202:
                 raise PbiError(f"getDefinition failed: HTTP {response.status_code}")
-            operation = _operation_url(response.headers.get("Location"))
+            operation = _operation_url(response.headers)
             for _ in range(_POLL_LIMIT):
                 time.sleep(_POLL_SECONDS)  # sync tool, runs in a worker thread
                 state = client.get(operation, headers=headers)
@@ -642,9 +643,12 @@ def _fail(action: str, message: str) -> str:
     return json.dumps({"action": action, "error": message}, indent=2)
 
 
-def _operation_url(location: str | None) -> str:
-    """A Fabric long-running operation URL; only Fabric's own host is followed."""
-    if not location or not location.startswith(FABRIC_API + "/"):
+def _operation_url(headers: Mapping[str, str]) -> str:
+    """A Fabric long-running operation URL; only Fabric's own host is followed (see
+    ``fabric_definition.operation_location`` for regions that answer on another host).
+    """
+    location = operation_location(headers)
+    if not location:
         raise PbiError("getDefinition returned no usable operation location")
     return location
 

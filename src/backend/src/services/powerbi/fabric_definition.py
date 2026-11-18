@@ -11,7 +11,9 @@ imports below mirror ``pipeline_config``'s two branches.
 from __future__ import annotations
 
 import logging
+import re
 import time
+from collections.abc import Mapping
 from types import ModuleType
 from urllib.parse import urlparse
 
@@ -44,6 +46,8 @@ else:
 logger = logging.getLogger(__name__)
 
 _FABRIC_TRUSTED_SUFFIX = ".fabric.microsoft.com"
+_FABRIC_OPERATIONS = "https://api.fabric.microsoft.com/v1/operations/"
+_OPERATION_ID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
 _OPERATION_POLLS = 60
 _POLL_INTERVAL_S = 2
 _ERROR_TEXT_CHARS = 400
@@ -89,6 +93,41 @@ def trusted_location(location: str) -> bool:
     )
 
 
+def _operation_id(headers: Mapping[str, str], location: str) -> str:
+    """The operation's id: the ``x-ms-operation-id`` header, else the last segment of an
+    ``.../operations/<id>`` Location. Only a GUID counts."""
+    header = next(
+        (value for key, value in headers.items() if key.lower() == "x-ms-operation-id"),
+        "",
+    )
+    path = urlparse(location).path.rstrip("/")
+    from_path = path.rsplit("/", 1)[-1] if "/operations/" in path else ""
+    for candidate in (str(header or "").strip(), from_path):
+        if _OPERATION_ID.match(candidate):
+            return candidate
+    return ""
+
+
+def operation_location(headers: Mapping[str, str]) -> str:
+    """Where to poll a Fabric 202 operation, or ``""`` when there is nowhere safe.
+
+    The Location is used as is when it is on a Fabric host. In some regions Fabric answers with a
+    Power BI cluster host instead (``wabi-….analysis.windows.net``); the token must not go there, so
+    the same operation is polled on Fabric's own operations endpoint, by its id.
+    """
+    location = str(headers.get("Location") or headers.get("location") or "")
+    if trusted_location(location):
+        return location
+    operation_id = _operation_id(headers, location)
+    if not operation_id:
+        return ""
+    logger.info(
+        "Fabric operation: Location on %s, polling the Fabric operations endpoint instead",
+        urlparse(location).hostname or "no host",
+    )
+    return _FABRIC_OPERATIONS + operation_id
+
+
 def follow_operation(
     accepted: requests.Response, headers: dict[str, str], poll_timeout: int, label: str
 ) -> requests.Response:
@@ -97,8 +136,8 @@ def follow_operation(
     Raises :class:`FabricDefinitionError` when the Location is not trusted, the operation fails (with the
     service's error code) or it does not finish in time.
     """
-    location = accepted.headers.get("Location") or ""
-    if not trusted_location(location):
+    location = operation_location(accepted.headers)
+    if not location:
         raise FabricDefinitionError(f"{label}: 202 without a trusted Location")
     for attempt in range(_OPERATION_POLLS):
         time.sleep(_POLL_INTERVAL_S)
