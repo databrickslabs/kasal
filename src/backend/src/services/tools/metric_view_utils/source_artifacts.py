@@ -69,7 +69,12 @@ _TWO_PART_REF = re.compile(
 )
 
 
-def _native_base(m_expression: str, src_tbl: str) -> str:
+def _native_base(
+    m_expression: str,
+    src_tbl: str,
+    parameters: dict | None = None,
+    assumed: list[str] | None = None,
+) -> str:
     """The table's ``Value.NativeQuery`` SQL as the base of its source-layer view, "" if none.
 
     Reading the raw table instead loses what the native SQL selects (``fiscper3 AS Month``,
@@ -77,9 +82,15 @@ def _native_base(m_expression: str, src_tbl: str) -> str:
     parameters (``'"& Filter &"'``) is cut off where the parameter starts. Two-part names
     get the source table's catalog, so the view does not depend on the session's catalog.
     """
+    from .m_native_sql import native_sql_with_parameters
     from .mquery_parser import extract_native_query_sql
 
-    sql = (extract_native_query_sql(m_expression or "") or "").strip()
+    # SQL assembled from literals and parameters ("..." & FiscperFilter & "..."); a
+    # parameter with no known value is assumed '' and reported by the caller.
+    sql, unknown = native_sql_with_parameters(m_expression or "", parameters or {})
+    if sql and assumed is not None:
+        assumed.extend(unknown)
+    sql = sql or (extract_native_query_sql(m_expression or "") or "").strip()
     if not sql or not re.match(r"(?is)^\s*(SELECT|WITH)\b", sql):
         return ""
     if (
@@ -128,6 +139,7 @@ def _fold_dimension_read(
     info: TableInfo | None,
     m_expression: str,
     fold_todos: dict[str, list],
+    parameters: dict | None = None,
 ) -> str:
     """The M transform steps folded onto a base ``SELECT * FROM`` read ("" if none).
 
@@ -137,7 +149,13 @@ def _fold_dimension_read(
     from .m_transform_folder import MTransformFolder
 
     folder = MTransformFolder()
-    native = _native_base(m_expression, src_tbl)
+    assumed: list[str] = []
+    native = _native_base(m_expression, src_tbl, parameters, assumed)
+    if assumed:
+        fold_todos.setdefault(key, []).extend(
+            f"parameter {name} has no known value in the model; '' assumed in the native SQL"
+            for name in assumed
+        )
     base = native or f"SELECT * FROM {_bq(src_tbl)}"
     cols = getattr(info, "group_by_columns", None) if info is not None else None
     try:
@@ -151,7 +169,7 @@ def _fold_dimension_read(
         )
         return native
     if getattr(folder, "transform_todos", None):
-        fold_todos[key] = list(folder.transform_todos)
+        fold_todos.setdefault(key, []).extend(folder.transform_todos)
     if folded and folded.strip() != base.strip():
         return folded
     return native  # the native SQL itself, or "" for a plain passthrough
@@ -244,6 +262,7 @@ def build_source_layer(
 
     calc_cfg = (config or {}).get("calculated_columns") or {}
     mq_exprs = mquery_expressions or {}
+    parameters = dict((config or {}).get("parameter_defaults") or {})
     fold_todos: dict[str, list] = {}
     specs: list = []
     errors: dict[str, str] = {}
@@ -259,8 +278,13 @@ def build_source_layer(
                 src_tbl = ""
         if not native and not src_tbl:
             continue  # nothing resolvable to read from — skip (not a stub)
-        if not native and src_tbl and mq_exprs.get(key):
-            folded = _fold_dimension_read(key, src_tbl, info, mq_exprs[key], fold_todos)
+        m_expr = mq_exprs.get(key) or ""
+        # The parser keeps a native SQL that a parameter splice cut off; assemble it.
+        spliced = bool(re.search(r'"\s*&\s*(?:#"|[A-Za-z_])', m_expr))
+        if src_tbl and m_expr and (not native or spliced):
+            folded = _fold_dimension_read(
+                key, src_tbl, info, m_expr, fold_todos, parameters
+            )
             if folded:
                 native = folded
         try:

@@ -32,8 +32,15 @@ def test_the_native_sql_is_the_base_with_its_catalog():
     )
 
 
-def test_sql_assembled_from_parameters_is_not_used():
-    assert _native_base(PARAMETERISED, "prod.md.t") == ""
+def test_sql_assembled_from_parameters_uses_known_values_and_reports_unknown_ones():
+    """Was rejected (cut off at the splice), so the view fell back to the raw table and lost
+    the native SQL's columns (sum(fltp) AS value)."""
+    assumed = []
+    sql = _native_base(PARAMETERISED, "prod.md.t", {}, assumed)
+    assert "CASE WHEN '' = 'x' THEN 1 END" in sql and assumed == ["Filter"]
+    assumed = []
+    sql = _native_base(PARAMETERISED, "prod.md.t", {"Filter": "x"}, assumed)
+    assert "CASE WHEN 'x' = 'x'" in sql and assumed == []
 
 
 def test_the_native_projection_survives_and_the_added_column_reads_it():
