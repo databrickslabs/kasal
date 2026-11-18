@@ -182,3 +182,56 @@ def keep_one_row_per_key(sql: str, keys: list[str]) -> str:
         f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY {key_list} ORDER BY {key_list}) AS _kasal_rn\n"
         f"  FROM (\n{sql}\n  ) _kasal_keyed\n) _kasal_dedup\nWHERE _kasal_rn = 1"
     )  # keys are plain identifiers (regex above) — nosemgrep: tmp.databricks.sql-injection.fstring-select
+
+
+def sql_ident(name: str) -> str:
+    """A column name as SQL needs it: bare when plain, back-quoted otherwise (Power Query
+    names such as ``fis_code - Copy`` from a duplicated column)."""
+    return name if _COLUMN.match(name) else "`" + name.replace("`", "``") + "`"
+
+
+def star_select_list(
+    removed: set[str],
+    transforms: dict[str, str],
+    renames: dict[str, str],
+    added: set[str],
+    duplicates: dict[str, str],
+) -> str:
+    """The column list over a ``SELECT *`` read whose columns are unknown.
+
+    Keeps every source column and replaces or removes only those the steps name. Columns the
+    steps create (added, duplicated, renamed-to) are not in the source, so they never go into
+    ``EXCEPT``, and an expression on a duplicated column reads the column it was copied from
+    (``DuplicateColumn fis_code -> "fis_code - Copy"``, renamed ``Func_area``, then replaced).
+    Renamed columns come before added ones: an added column may read the new name (a lateral
+    column alias in Databricks SQL).
+    """
+    origin = dict(duplicates)  # {new column: the source column it copies}
+    for old, new in renames.items():
+        if old in origin:
+            origin[new] = origin[old]
+    created = set(added) | set(duplicates) | set(renames.values())
+    renamed_source = {
+        o: n for o, n in renames.items() if o not in origin and o not in removed
+    }
+    excepted = sorted(
+        ((set(removed) | set(transforms)) - created) | set(renamed_source)
+    )
+    parts = [f"* EXCEPT ({', '.join(map(sql_ident, excepted))})" if excepted else "*"]
+    parts += [
+        f"{sql_ident(o)} AS {sql_ident(n)}"
+        for o, n in renamed_source.items()
+        if n not in transforms
+    ]
+    parts += [
+        f"{sql_ident(src)} AS {sql_ident(new)}"
+        for new, src in origin.items()
+        if new not in renames and new not in transforms and new not in removed
+    ]
+    for col, expr in transforms.items():
+        if col in origin:
+            expr = re.sub(
+                rf"(?<![\w`]){re.escape(col)}(?![\w`])", sql_ident(origin[col]), expr
+            )
+        parts.append(f"{expr} AS {sql_ident(col)}")
+    return ",\n".join(f"  {part}" for part in parts)

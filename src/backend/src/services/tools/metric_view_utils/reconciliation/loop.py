@@ -209,8 +209,13 @@ def run_reconciliation_loop(
             for k, v in as_map(deploy_out.get("healed")).items()
         }
         # A healed view is compared as deployed: its healed YAML, its fresh mapping.
-        yaml_specs = {**yaml_specs, **as_map(deploy_out.get("yaml_overrides"))}
-        mappings = {**mappings, **as_map(deploy_out.get("mapping_overrides"))}
+        yaml_overrides = as_map(deploy_out.get("yaml_overrides"))
+        mapping_overrides = as_map(deploy_out.get("mapping_overrides"))
+        yaml_specs = {**yaml_specs, **yaml_overrides}
+        # A healed view without a new mapping is not compared: its old mapping may name
+        # a dimension or measure the heal removed.
+        mappings = {k: v for k, v in mappings.items() if k not in yaml_overrides}
+        mappings = {**mappings, **mapping_overrides}
         if "deployed_views" in deploy_out:
             deployed = {str(v) for v in as_list(deploy_out.get("deployed_views"))}
             mappings = {k: v for k, v in mappings.items() if k in deployed}

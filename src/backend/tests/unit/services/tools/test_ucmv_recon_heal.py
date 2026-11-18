@@ -201,3 +201,44 @@ def test_the_loop_compares_the_healed_view_and_feeds_the_removed_measure_back():
         item.get("measure") == "fte" and item.get("deploy_error") for item in second
     )
     assert "failed to deploy" in feedback_to_prompt_map(second)["fte"]
+
+
+def test_a_missing_struct_field_drops_every_reference_outside_the_listed_fields():
+    text = YAML.replace(
+        "  - name: country\n    expr: dim_geo.country\n",
+        "  - name: country\n    expr: dim_geo.country\n  - name: bu\n    expr: dim_geo.business_unit\n"
+        "  - name: code\n    expr: dim_geo.comp_code\n",
+    )
+    healed, removed = heal_view(
+        text,
+        "[FIELD_NOT_FOUND] No such struct field `country` in `region`, `co_code_bw`, `comp_code`.",
+    )
+    assert sorted(removed) == [
+        "dimension bu",
+        "dimension country",
+    ]  # one round, not two
+    assert "code" in _names(healed, "dimensions")
+
+
+def test_a_healed_view_without_a_new_mapping_keeps_no_stale_one():
+    from src.services.tools.metric_view_utils.reconciliation.loop import (
+        run_reconciliation_loop,
+    )
+
+    seen = []
+    run_reconciliation_loop(
+        generate=lambda fb: {
+            "yaml": {"A": "a", "B": "b"},
+            "mappings": {"A": "old-a", "B": "old-b"},
+        },
+        deploy=lambda y: {
+            "ok": True,
+            "deployed_views": ["A", "B"],
+            "yaml_overrides": {"A": "healed-a", "B": "healed-b"},
+            "mapping_overrides": {"A": "new-a"},
+        },
+        reconcile=lambda y, m: seen.append(dict(m))
+        or {"overall": {"cells_total": 1, "overall_cell_pct": 100.0}},
+        max_cycles=1,
+    )
+    assert seen == [{"A": "new-a"}]

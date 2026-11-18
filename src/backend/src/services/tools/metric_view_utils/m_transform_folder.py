@@ -6,7 +6,7 @@ import re
 
 from .data_classes import MStep
 from .dax_condition_sql import _sql_str_literal
-from .m_column_expressions import keep_one_row_per_key
+from .m_column_expressions import keep_one_row_per_key, sql_ident, star_select_list
 from .m_sql_formatter import (
     _compact_where,
     _reformat_arm,
@@ -139,6 +139,14 @@ class MTransformFolder:
         )
 
         self._renames = dict(rename_map)
+        self._duplicates = {
+            new: src
+            for step in column_transforms
+            for src, new in re.findall(
+                r'DuplicateColumn\([^,]+,\s*"([^"]+)"\s*,\s*"([^"]+)"',
+                step.raw_expression,
+            )
+        }
         if col_exprs or rename_map:
             arms = self._split_union(base_sql)
             if len(arms) > 1:
@@ -444,7 +452,7 @@ class MTransformFolder:
 
         for col, expr in transform_exprs.items():
             if col not in added_transforms:
-                new_entry = f"{expr} AS {col}"
+                new_entry = f"{expr} AS {sql_ident(col)}"
                 agg_idx = next(
                     (
                         i
@@ -690,27 +698,12 @@ class MTransformFolder:
             # be built (empty is invalid SQL, transforms alone drop every other column),
             # so keep all columns and replace or remove only the ones the steps name.
             # A step that names a column the source lacks then fails on deploy, by name.
-            added = self.__dict__.get("_added_columns") or set()
-            renames = {
-                old: new
-                for old, new in (self.__dict__.get("_renames") or {}).items()
-                if old not in remove_set
-            }
-            # A renamed column's old name always goes, even when a step re-adds it.
-            replaced = sorted(
-                ((set(remove_set) | set(transform_exprs)) - added) | set(renames)
-            )
-            star = f"* EXCEPT ({', '.join(replaced)})" if replaced else "*"
-            # Renamed columns first: a later added column may read the new name
-            # (a lateral column alias in Databricks SQL).
-            select_list = ",\n".join(
-                [f"  {star}"]
-                + [
-                    f"  {old} AS {new}"
-                    for old, new in renames.items()
-                    if new not in transform_exprs
-                ]
-                + [f"  {expr} AS {col}" for col, expr in transform_exprs.items()]
+            select_list = star_select_list(
+                remove_set,
+                transform_exprs,
+                self.__dict__.get("_renames") or {},
+                self.__dict__.get("_added_columns") or set(),
+                self.__dict__.get("_duplicates") or {},
             )
             where_clause = (
                 "\nWHERE " + " AND ".join(where_conditions) if where_conditions else ""
@@ -724,7 +717,7 @@ class MTransformFolder:
                 continue
             renamed = (self.__dict__.get("_renames") or {}).get(col)
             if col in transform_exprs:
-                select_parts.append(f"  {transform_exprs[col]} AS {col}")
+                select_parts.append(f"  {transform_exprs[col]} AS {sql_ident(col)}")
                 used_transforms.add(col)
             elif renamed and renamed not in transform_exprs:
                 select_parts.append(f"  {col} AS {renamed}")
@@ -733,7 +726,7 @@ class MTransformFolder:
 
         for col, expr in transform_exprs.items():
             if col not in used_transforms:
-                select_parts.append(f"  {expr} AS {col}")
+                select_parts.append(f"  {expr} AS {sql_ident(col)}")
 
         select_clause = ",\n".join(select_parts)
 

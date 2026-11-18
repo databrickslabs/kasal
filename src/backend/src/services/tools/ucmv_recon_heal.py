@@ -27,10 +27,10 @@ from src.services.tools.metric_view_utils.raw_fields import RawMap, as_list, as_
 _MEASURE_AT = re.compile(r"\[measures\.`?([^`\]]+?)`?\.expr\]")
 _DIMENSION_AT = re.compile(r"\[dimensions\.`?([^`\]]+?)`?\.expr\]")
 _UNRESOLVED = re.compile(r"with name `([^`]+)`(?:\.`([^`]+)`)? cannot be resolved")
-_FIELD = re.compile(r"No such struct field `([^`]+)`")
+_FIELD = re.compile(r"No such struct field `([^`]+)` in ((?:`[^`]+`(?:,\s*)?)+)")
 _MISSING_TABLE = re.compile(r"The table or view ((?:`[^`]+`\.?)+) cannot be found")
 _SUBQUERY_SOURCE = "__auto_generated_subquery_name_source"
-MAX_ROUNDS = 4
+MAX_ROUNDS = 8
 
 
 def _norm(name: str) -> str:
@@ -88,6 +88,29 @@ class _View:
             )
         return 1
 
+    def drop_fields(self, missing: str, available: set[str]) -> int:
+        """Every reference of the join that lacks ``missing`` to a field it does not have."""
+        pattern = re.compile(rf"\b(\w+)\.`?{re.escape(missing)}`?\b", re.I)
+        aliases = {
+            m.group(1)
+            for key in ("dimensions", "measures")
+            for item in self._items(key)
+            for m in pattern.finditer(str(item.get("expr") or ""))
+        } - {"source"}
+        removed = 0
+        for alias in aliases:
+            ref = re.compile(rf"\b{re.escape(alias)}\.`?(\w+)`?")
+            for key, what in (("dimensions", "dimension"), ("measures", "measure")):
+                removed += self.drop_items(
+                    key,
+                    lambda i: all(
+                        f.lower() in available
+                        for f in ref.findall(str(i.get("expr") or ""))
+                    ),
+                    what,
+                )
+        return removed or self.drop_column(None, missing)
+
     def drop_column(self, alias: str | None, column: str) -> int:
         removed = 0
         for key, what in (("measures", "measure"), ("dimensions", "dimension")):
@@ -121,7 +144,10 @@ def heal_view(yaml_text: str, error: str) -> tuple[str | None, list[str]]:
         alias, column = (m.group(1), m.group(2)) if m.group(2) else (None, m.group(1))
         view.drop_column("source" if alias == _SUBQUERY_SOURCE else alias, column)
     elif m := _FIELD.search(error):
-        view.drop_column(None, m.group(1))
+        # The error lists every field the struct has: drop all references of that
+        # join to fields outside the list at once, not one per round.
+        available = {f.lower() for f in re.findall(r"`([^`]+)`", m.group(2))}
+        view.drop_fields(m.group(1), available)
     elif m := _MISSING_TABLE.search(error):
         missing = _norm(m.group(1))
         if _norm(str(spec.get("source") or "")) == missing:
@@ -172,12 +198,13 @@ def heal_failed_views(
     merged = dict(verdict)
     merged["deployed_views"] = sorted(set(deployed))
     merged["failures"] = failures
-    if deployed and not verdict.get("ok"):
+    if deployed:
         merged["ok"] = True
-        merged["note"] = str(verdict.get("error") or "")
-    if healed:
-        note = f"healed {len(healed)} view(s) on deploy"
-        merged["note"] = f"{merged.get('note') or ''}; {note}".strip("; ")[:1000]
+        merged.pop("error", None)
+    merged["note"] = (
+        f"{len(set(deployed))} view(s) deployed, {len(healed)} of them after healing; "
+        f"{len(failures)} not deployed"
+    )
     return merged, healed_yaml, healed
 
 

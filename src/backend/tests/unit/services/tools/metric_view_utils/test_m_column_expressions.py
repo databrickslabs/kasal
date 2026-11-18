@@ -81,3 +81,30 @@ def test_an_untranslatable_added_column_is_a_todo_not_dropped():
     folder = MTransformFolder()
     folder.fold_from_mquery("SELECT * FROM t", mquery, None)
     assert any("Table.AddColumn" in todo for todo in folder.transform_todos)
+
+
+def test_a_duplicated_renamed_and_replaced_column_reads_its_origin():
+    from src.services.tools.metric_view_utils.m_column_expressions import (
+        sql_ident,
+        star_select_list,
+    )
+
+    select = star_select_list(
+        removed=set(),
+        transforms={
+            "comp_code": "CAST(comp_code AS BIGINT)",
+            "Func_area": "REPLACE(Func_area, 'NSR', '')",
+        },
+        renames={"fis_code - Copy": "Func_area"},
+        added=set(),
+        duplicates={"fis_code - Copy": "fis_code"},
+    )
+    assert select.splitlines() == [
+        "  * EXCEPT (comp_code),",  # created columns are never excepted
+        "  CAST(comp_code AS BIGINT) AS comp_code,",
+        "  REPLACE(fis_code, 'NSR', '') AS Func_area",
+    ]
+    assert (
+        sql_ident("fis_code - Copy") == "`fis_code - Copy`"
+        and sql_ident("a_b") == "a_b"
+    )
