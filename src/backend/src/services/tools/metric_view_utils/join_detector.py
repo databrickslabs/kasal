@@ -13,7 +13,7 @@ from .period_folding import (
     fold_period_dimensions,
     has_closed_period_logic,
 )
-from .utils import col_to_readable
+from .utils import col_to_readable, to_snake_case
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,10 @@ class JoinDetector:
                 source = jk_source
             elif not source:
                 source = jk_source
+            if source and "." not in source and "(" not in source:
+                # A bare name (an Excel sheet, "Sheet1") is no table: use the standard
+                # placeholder, where the PBI-only ingestion task loads the table.
+                source = "{catalog}.{schema}." + to_snake_case(dim_name)
             if not source:
                 self._record_dropped(fact_table_key, dim_name)
                 continue

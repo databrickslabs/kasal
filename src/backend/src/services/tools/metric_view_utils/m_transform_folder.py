@@ -722,7 +722,7 @@ class MTransformFolder:
             elif renamed and renamed not in transform_exprs:
                 select_parts.append(f"  {col} AS {renamed}")
             else:
-                select_parts.append(f"  {col}")
+                select_parts.append(f"  {sql_ident(col)}")
 
         for col, expr in transform_exprs.items():
             if col not in used_transforms:
@@ -782,6 +782,9 @@ class MTransformFolder:
                 cols.append(as_match.group(1))
             else:
                 col = part.split(".")[-1].strip()
+                if re.match(r"^`[^`]+`$", col):
+                    cols.append(col[1:-1])  # a quoted name (AC_UC_%age)
+                    continue
                 col = re.sub(r"\W+$", "", col)
                 if re.match(r"^[a-zA-Z_]\w*$", col):
                     cols.append(col)

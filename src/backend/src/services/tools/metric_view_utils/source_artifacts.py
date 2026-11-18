@@ -23,6 +23,7 @@ from .source_layer_binding import (
     source_layer_leaf_name,
     source_layer_naming,
 )
+from .utils import to_snake_case
 
 if TYPE_CHECKING:
     from .data_classes import MetricViewSpec, TableInfo
@@ -95,6 +96,30 @@ def _native_base(m_expression: str, src_tbl: str) -> str:
             lambda m: f"{m.group(1)} {catalog}.{m.group(2)}.{m.group(3)}", sql
         )
     return sql
+
+
+def _embedded_read(key: str, m_expression: str, fold_todos: dict[str, list]) -> str:
+    """An "enter data" table's rows as SQL (embedded_tables), with its M steps folded on."""
+    from .embedded_tables import embedded_table_sql
+    from .m_transform_folder import MTransformFolder
+
+    base = embedded_table_sql(m_expression)
+    if not base:
+        return ""
+    folder = MTransformFolder()
+    try:
+        folded = folder.fold_from_mquery(base, m_expression, None)
+    except Exception:  # the rows alone are still a valid read
+        logger.debug("[source_layer] fold failed for embedded %s", key, exc_info=True)
+        return base
+    # The Table.FromRows source step is the base itself, not a step left undone.
+    todos = [
+        t for t in getattr(folder, "transform_todos", []) if "Binary.FromText(" not in t
+    ]
+    if todos:
+        fold_todos[key] = todos
+    lines = (folded or base).splitlines()
+    return "\n".join(line for line in lines if "Binary.FromText(" not in line)
 
 
 def _fold_dimension_read(
@@ -227,6 +252,11 @@ def build_source_layer(
         src_tbl = (getattr(spec, "source_table", "") or "") or (
             info.source_table if info is not None else ""
         )
+        if not native:
+            # Rows embedded in the M are the table, whatever placeholder source it has.
+            native = _embedded_read(key, mq_exprs.get(key) or "", fold_todos)
+            if native:
+                src_tbl = ""
         if not native and not src_tbl:
             continue  # nothing resolvable to read from — skip (not a stub)
         if not native and src_tbl and mq_exprs.get(key):
@@ -313,7 +343,15 @@ def detect_pbi_only_tables(
             src = detect_pbi_only_source(mquery)
             if src is None:
                 continue
-            task = build_ingestion_task(table, src.kind, catalog, schema, source=src)
+            # Loaded where the joins expect the table (the join detector's placeholder).
+            task = build_ingestion_task(
+                table,
+                src.kind,
+                catalog,
+                schema,
+                source=src,
+                uc_table_suffix=to_snake_case(table),
+            )
             tasks.append(
                 {
                     "table": task.table_name,
