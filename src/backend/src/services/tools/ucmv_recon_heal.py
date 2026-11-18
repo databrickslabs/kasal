@@ -17,12 +17,15 @@ Pure YAML edits plus the deployer's ``_run``; no other I/O.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping
 
 import yaml
 
 from src.services.tools.metric_view_utils.raw_fields import RawMap, as_list, as_map
+
+logger = logging.getLogger(__name__)
 
 _MEASURE_AT = re.compile(r"\[measures\.`?([^`\]]+?)`?\.expr\]")
 _DIMENSION_AT = re.compile(r"\[dimensions\.`?([^`\]]+?)`?\.expr\]")
@@ -172,7 +175,7 @@ def heal_failed_views(
     healed: dict[str, list[str]] = {}
     deployed = [str(v) for v in as_list(verdict.get("deployed_views"))]
     failures = {str(k): str(v) for k, v in as_map(verdict.get("failures")).items()}
-    for _ in range(rounds):
+    for round_no in range(1, rounds + 1):
         batch: dict[str, str] = {}
         for key, reason in list(failures.items()):
             if key.startswith(("source_layer:", "mapping:")):
@@ -186,6 +189,9 @@ def heal_failed_views(
             healed_yaml[key] = batch[key] = text
         if not batch:
             break
+        logger.info(
+            "[UCMV] deploy heal round %d: redeploying %d view(s)", round_no, len(batch)
+        )
         outcome = redeploy(batch)
         for key in batch:
             failures.pop(key, None)

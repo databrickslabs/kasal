@@ -206,6 +206,7 @@ def run_iterative_ucmv_generation(
         layer_note = ""
         if read_mode:
             layer_note = _deploy_layer_once(deployer, source_layer, deploy_base)
+        logger.info("[UCMV] deploying %d metric view(s)", len(yaml_specs))
         out = _loads(
             deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_base)
         )
@@ -233,6 +234,11 @@ def run_iterative_ucmv_generation(
     def reconcile(yaml_specs: RawMap, mappings: RawMap) -> RawMap:
         if not mappings:
             return {"views": {}, "overall": {"cells_total": 0}}
+        logger.info(
+            "[UCMV] comparing %d view(s) with Power BI: %s",
+            len(mappings),
+            ", ".join(sorted(mappings)),
+        )
         return _loads(reconciler._run(mappings_json=json.dumps(mappings), **recon_base))
 
     result = run_reconciliation_loop(

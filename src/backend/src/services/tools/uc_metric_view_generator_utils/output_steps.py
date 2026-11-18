@@ -75,12 +75,10 @@ def llm_translation_warning_for(
     if raw_m_count and not raw_m_recovered:
         warning = (
             f"LLM source recovery produced nothing for all {raw_m_count} raw "
-            "Power Query table(s), so they yielded no views. This is almost "
-            "always the DAX/M LLM calls failing — provider routing, an FMAPI "
-            "rate-limit/throttle, or the subprocess timing out — NOT an empty "
-            "model. Check the run log for 'LLM Provider NOT provided' or "
-            "throttling and re-run; if it timed out, lower the DAX LLM batch "
-            "size/concurrency or raise the subprocess limit."
+            "Power Query table(s), so they yielded no views. Either the M has no "
+            "warehouse source to recover (a connection parameter, a query of other "
+            "queries), or the M LLM calls failed: check the run log for 'LLM "
+            "Provider NOT provided', throttling or timeouts."
         )
     elif view_count == 0:
         warning = (

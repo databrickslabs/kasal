@@ -108,7 +108,8 @@ def deploy_source_layer(
     MetricViewDeployerTool._ensure_schema(runner, catalog, schema)
 
     deployed: list[str] = []
-    for table in order:
+    for number, table in enumerate(order, 1):
+        logger.info("[UCMV] source layer %d/%d: %s", number, len(order), table)
         outcome = runner(views[table][1])
         if outcome.get("success"):
             deployed.append(table)
