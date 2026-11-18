@@ -127,6 +127,9 @@ class MetricViewSpec:
     implicit_measure_count: int = 0
     source_filter: str = ""  # MQuery WHERE → UC MV filter: key
     source_sql: str = ""  # Inline SQL for source: |-
+    # The fact's columns when fully known (its native SQL's select list), else empty:
+    # a join on a fact column outside this list cannot deploy (join_columns.py).
+    fact_columns: list[str] = field(default_factory=list)
 
 
 @dataclass

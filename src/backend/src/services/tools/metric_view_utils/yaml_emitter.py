@@ -17,6 +17,7 @@ import logging
 import re
 
 from .data_classes import MetricViewSpec
+from .join_columns import missing_join_columns
 from .metadata_generator import MetadataGenerator
 from .utils import spark_sql_compat
 from .yaml_annotations import _MAX_EXPLANATION as _MAX_EXPLANATION
@@ -40,7 +41,9 @@ from .yaml_scalars import (
     _yaml_val,
 )
 from .yaml_scalars import is_pbi_auto_date_table as _is_pbi_auto_date_table
-from .yaml_scalars import uc_yaml_name
+from .yaml_scalars import (
+    uc_yaml_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +229,16 @@ def _drop_unusable_joins(spec: MetricViewSpec, known_missing: set) -> None:
         if tbl_short in known_missing or _is_pbi_auto_date_table(tbl_short):
             dropped.add(j["name"])
             continue
+        missing = missing_join_columns(
+            str(j.get("join_on") or j.get("on") or ""), spec.fact_columns
+        )
+        if missing:
+            dropped.add(j["name"])
+            spec.comment += (
+                f"\nJoin {j['name']} dropped: the source has no column "
+                f"{', '.join(missing)} (in Power BI a computed column)."
+            )
+            continue
         # Drop duplicate join names (CORRECTNESS: a repeated join alias is
         # invalid YAML — e.g. dim_plant emitted twice from two detectors).
         # Keep the first; later same-name joins are the redundant repeats.
@@ -291,6 +304,8 @@ def emit_yaml(
         )
         spec.source_sql = ""
 
+    _drop_unusable_joins(spec, _KNOWN_MISSING_TABLES)
+
     lines: list[str] = []
     lines.append("version: '1.1'")
     lines.append("")
@@ -306,8 +321,6 @@ def emit_yaml(
     lines.append("comment: |-")
     for comment_line in _fit_comment(spec.comment).split("\n"):
         lines.append(f"  {comment_line}")
-
-    _drop_unusable_joins(spec, _KNOWN_MISSING_TABLES)
 
     # Build calculated-column expansion map: source.<calc_name> -> actual expression
     # e.g. source.plant_workcenter_key -> CONCAT(source.plant, '/', source.workcenter)
