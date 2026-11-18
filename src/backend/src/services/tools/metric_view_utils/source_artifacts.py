@@ -164,6 +164,13 @@ def build_source_layer(
     )
 
     read_mode = read_from_source_layer(config)
+    # source_layer_materialized: false keeps read mode but emits plain views, e.g.
+    # for a sandbox reconciliation that must not copy every fact table.
+    materialize = (config or {}).get("source_layer_materialized", True) not in (
+        False,
+        "false",
+        "False",
+    )
     planned = _planned_tables(all_specs, mquery_tables, read_mode)
     try:
         naming = source_layer_naming(config)
@@ -219,7 +226,7 @@ def build_source_layer(
                 source=source,
                 calc_columns=_calc_columns(key, calc_cfg, CalcColumn),
                 comment=f"Source layer for PBI table {key} — read the metric view off this.",
-                materialized=read_mode or row_filter is not None,
+                materialized=(read_mode and materialize) or row_filter is not None,
                 row_filter=row_filter,
             )
         )

@@ -127,6 +127,16 @@ class TestReadMode:
         default.emit_all_yaml(catalog=CAT, schema=SCH)
         assert "MATERIALIZED" not in default.source_layer_views["Fact_Sales"]["ddl"]
 
+    def test_read_mode_can_emit_plain_views_for_a_sandbox(self):
+        """A sandbox reconciliation must not copy every fact table into the target."""
+        pipeline = _run(
+            {"read_from_source_layer": True, "source_layer_materialized": False}
+        )
+        pipeline.emit_all_yaml(catalog=CAT, schema=SCH)
+        ddl = pipeline.source_layer_views
+        assert set(ddl) == {"Fact_Sales", "Dim_Plant", "Dim_Material"}
+        assert all("MATERIALIZED" not in v["ddl"] for v in ddl.values())
+
     def test_binding_is_recorded_and_reaches_the_migration_report(self):
         pipeline = _run({"read_from_source_layer": True})
         pipeline.emit_all_yaml(catalog=CAT, schema=SCH)

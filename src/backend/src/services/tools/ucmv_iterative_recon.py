@@ -142,6 +142,9 @@ def run_iterative_ucmv_generation(
     # the whole model.
     resolved_state: RawMap = {}
     specs_state: RawMap = {}
+    # Source layer (read mode): this cycle's DDL, and the fingerprint already deployed.
+    source_layer: dict[str, object] = {"ddl": {}, "deployed_fp": "", "report": {}}
+    read_mode = _read_mode(gen_base)
 
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
         nonlocal resolved_state, specs_state
@@ -171,6 +174,7 @@ def run_iterative_ucmv_generation(
         out = _loads(generator._run(**kw))
         resolved_state = as_map(out.get("resolved_measures_by_table"))
         specs_state = as_map(out.get("specs_summary"))
+        source_layer["ddl"] = as_map(out.get("source_layer_ddl"))
         return {
             "yaml": as_map(out.get("yaml")),
             "mappings": as_map(out.get("pbi_ucmv_mapping")),
@@ -179,10 +183,23 @@ def run_iterative_ucmv_generation(
     def deploy(yaml_specs: RawMap) -> RawMap:
         if not yaml_specs:
             return {"ok": False, "error": "generator produced no YAML"}
+        layer_note = ""
+        if read_mode:
+            layer_note = _deploy_layer_once(deployer, source_layer, deploy_base)
         out = _loads(
             deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_base)
         )
-        return deploy_outcome(out)
+        verdict = deploy_outcome(out)
+        if layer_note:
+            failures = dict(as_map(verdict.get("failures")))
+            for table, reason in as_map(
+                as_map(source_layer["report"]).get("failures")
+            ).items():
+                failures[f"source_layer:{table}"] = str(reason)
+            verdict = {**verdict, "failures": failures}
+            key = "note" if verdict.get("ok") else "error"
+            verdict[key] = f"{layer_note}; {verdict.get(key) or ''}".strip("; ")[:1000]
+        return verdict
 
     def reconcile(yaml_specs: RawMap, mappings: RawMap) -> RawMap:
         if not mappings:
@@ -225,6 +242,44 @@ _GEN_TO_RECON_PBI = {
 # reconciled: it would score a measureless view.
 _LIVE_STATUSES = frozenset({"deployed", "deployed_grants_incomplete"})
 _MAX_FAILURES_IN_NOTE = 3
+
+
+def _read_mode(gen_kwargs: Mapping[str, object]) -> bool:
+    """Whether the metric views read the source layer (``read_from_source_layer``
+    in the generator's config), so the loop must deploy it first."""
+    from src.services.tools.metric_view_utils.source_layer_binding import (
+        read_from_source_layer,
+    )
+
+    config = gen_kwargs.get("config_json")
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            return False
+    return read_from_source_layer(dict(as_map(config)))
+
+
+def _deploy_layer_once(
+    deployer: ToolRunner, state: dict[str, object], deploy_base: Mapping[str, object]
+) -> str:
+    """Deploy the source layer when its DDL changed since the last cycle; a note."""
+    from src.services.tools.ucmv_recon_source_layer import (
+        deploy_source_layer,
+        fingerprint,
+    )
+
+    ddl = as_map(state.get("ddl"))
+    if not ddl:
+        return "no source layer emitted"
+    fp = fingerprint(ddl)
+    if fp != state.get("deployed_fp"):
+        state["report"] = deploy_source_layer(deployer, ddl, deploy_base)
+        state["deployed_fp"] = fp
+    report = as_map(state.get("report"))
+    ok = len(as_list(report.get("deployed")))
+    failed = len(as_map(report.get("failures")))
+    return f"source layer: {ok} of {ok + failed} views created"
 
 
 def deploy_outcome(out: RawMap) -> RawMap:
