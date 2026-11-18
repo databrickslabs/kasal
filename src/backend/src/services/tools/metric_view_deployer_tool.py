@@ -41,6 +41,9 @@ from src.services.tools.metric_view_deployer_utils.sql_helpers import (
     SqlRunner,
     first_cell,
     sanitize_identifier,
+    sanitize_namespace,
+    sql_name,
+    view_fqn,
 )
 from src.services.tools.metric_view_deployer_utils.yaml_safety import yaml_is_safe
 from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
@@ -117,8 +120,8 @@ class _DeployState:
 def _view_parts(table_key: str, catalog: str, schema: str) -> tuple[str, str, str]:
     """Sanitised (catalog, schema, view) for a table key."""
     return (
-        sanitize_identifier(catalog),
-        sanitize_identifier(schema),
+        sanitize_namespace(catalog),
+        sanitize_namespace(schema),
         sanitize_identifier(table_key.lower()),
     )
 
@@ -521,10 +524,10 @@ class MetricViewDeployerTool(BaseTool):
         for table_key in sorted(yaml_specs):
             raw_yaml = yaml_specs.get(table_key)
             yaml_content = raw_yaml if isinstance(raw_yaml, str) else ""
-            safe_key = _re.sub(r"[^a-zA-Z0-9_]", "_", table_key.lower())
+            cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
             results[table_key] = {
                 "status": "validated",
-                "view_name": f"{opts.catalog}.{opts.schema}.{safe_key}",
+                "view_name": view_fqn(cat, sch, view),
                 "yaml_lines": len(yaml_content.split("\n")),
                 "dry_run": True,
             }
@@ -550,7 +553,7 @@ class MetricViewDeployerTool(BaseTool):
             return {"status": "skipped", "message": _EMPTY_YAML}
 
         cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
-        view_name = f"{cat}.{sch}.{view}"
+        view_name = view_fqn(cat, sch, view)
         try:
             ddl = self._yaml_to_ddl(yaml_content, view_name)
         except Exception as e:
@@ -580,7 +583,7 @@ class MetricViewDeployerTool(BaseTool):
     @staticmethod
     def _ensure_schema(runner: SqlRunner, cat: str, sch: str) -> None:
         """Create the target schema once per run (failure is logged, not fatal)."""
-        result = runner(f"CREATE SCHEMA IF NOT EXISTS {cat}.{sch}")
+        result = runner(f"CREATE SCHEMA IF NOT EXISTS {sql_name(cat)}.{sql_name(sch)}")
         if not result.get("success"):
             logger.warning(
                 "[MVDeployer] Could not ensure schema: %s", result.get("error")
@@ -680,7 +683,7 @@ class MetricViewDeployerTool(BaseTool):
             raw_yaml = yaml_specs.get(table_key)
             spec = parse_yaml_spec(raw_yaml) if isinstance(raw_yaml, str) else None
             cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
-            view_name = f"{cat}.{sch}.{view}"
+            view_name = view_fqn(cat, sch, view)
             if spec is None:
                 results[table_key] = {
                     "status": "error",

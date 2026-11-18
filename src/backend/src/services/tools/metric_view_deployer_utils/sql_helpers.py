@@ -21,6 +21,27 @@ def sanitize_identifier(value: str) -> str:
     return _UNSAFE_IDENTIFIER_CHARS.sub("_", value)
 
 
+_UNSAFE_NAMESPACE_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+_PLAIN_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def sanitize_namespace(value: str) -> str:
+    """A catalog or schema name: like ``sanitize_identifier`` but keeps hyphens, which Unity
+    Catalog allows in names (``acme-dev-catalog``). Such a name must be quoted in SQL.
+    """
+    return _UNSAFE_NAMESPACE_CHARS.sub("_", value)
+
+
+def sql_name(name: str) -> str:
+    """A name as SQL needs it: as is when it is a plain identifier, back-quoted otherwise."""
+    return name if _PLAIN_IDENTIFIER.match(name) else quote_name(name)
+
+
+def view_fqn(catalog: str, schema: str, view: str) -> str:
+    """``catalog.schema.view`` for SQL, each part quoted only where it has to be."""
+    return ".".join(sql_name(part) for part in (catalog, schema, view))
+
+
 def quote_name(name: str) -> str:
     """Backtick-quote an identifier, doubling embedded backticks."""
     return "`" + name.replace("`", "``") + "`"

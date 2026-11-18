@@ -180,7 +180,7 @@ class TestCatalogWithoutInformationSchema:
                 return NO_INFO_SCHEMA
             return {
                 "success": False,
-                "error": "[RequestId=e8acf1cc ErrorClass=TABLE_DOES_NOT_EXIST.RESOURCE_DOES_NOT_EXIST] "
+                "error": "[RequestId=00000000 ErrorClass=TABLE_DOES_NOT_EXIST.RESOURCE_DOES_NOT_EXIST] "
                 "Table 'cat.sch.v' does not exist.",
             }
 
@@ -222,3 +222,22 @@ class TestCatalogWithoutInformationSchema:
 
         with pytest.raises(GrantReadError):
             read_direct_grants(run_sql, "cat", "sch", "v")
+
+
+class TestHyphenatedCatalog:
+    """Unity Catalog allows hyphens (``acme-dev-catalog``); the deployer turned them into
+    underscores and deployed into a catalog that does not exist."""
+
+    def test_names_keep_their_hyphens_and_are_quoted_in_sql(self):
+        from src.services.tools.metric_view_deployer_tool import _view_parts
+        from src.services.tools.metric_view_deployer_utils.sql_helpers import view_fqn
+
+        cat, sch, view = _view_parts("Fact_Sales", "acme-dev-catalog", "team_sandbox")
+        assert (cat, sch, view) == ("acme-dev-catalog", "team_sandbox", "fact_sales")
+        assert view_fqn(cat, sch, view) == "`acme-dev-catalog`.team_sandbox.fact_sales"
+        assert view_fqn("main", "default", "fact_sales") == "main.default.fact_sales"
+
+    def test_other_characters_are_still_replaced(self):
+        from src.services.tools.metric_view_deployer_tool import _view_parts
+
+        assert _view_parts("x", "cat; DROP", "s`c")[:2] == ("cat__DROP", "s_c")
