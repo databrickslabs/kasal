@@ -147,6 +147,26 @@ def resolve_join_target(source: str, raw_by_key: Mapping[str, str]) -> str | Non
     return hits[0] if len(hits) == 1 else None
 
 
+def placeholder_join_target(source: str, views: Mapping[str, str]) -> str | None:
+    """The PBI table of a placeholder join source, or ``None``.
+
+    A dimension read by native SQL only (``Value.NativeQuery``) has no raw table, so
+    its join source is the placeholder ``<target catalog>.<target schema>.<snake of
+    the PBI table>``. It reads that table's source-layer view when the placeholder
+    sits in the view's own catalog and schema."""
+    want = normalized_name(source)
+    if want.count(".") != 2:
+        return None
+    namespace, leaf = want.rsplit(".", 1)
+    hits = [
+        key
+        for key, view in views.items()
+        if to_snake_case(key).lower() == leaf
+        and normalized_name(view).rsplit(".", 1)[0] == namespace
+    ]
+    return hits[0] if len(hits) == 1 else None
+
+
 def usable_source_layer_keys(
     source_layer: Mapping[str, Mapping[str, object]],
 ) -> set[str]:
@@ -262,6 +282,8 @@ def _rebind_joins(
         alias = str(join.get("name", ""))
         source = str(join.get("source", ""))
         target = resolve_join_target(source, raw_by_key)
+        if target is None or target not in views:
+            target = placeholder_join_target(source, views) or target
         if target is not None and target in views:
             joins.append({**join, "source": views[target]})
             bound_aliases[alias] = target

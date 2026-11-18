@@ -643,6 +643,21 @@ class MTransformFolder:
 
         remove_set = {k for k, v in col_exprs.items() if v is None}
         transform_exprs = {k: v for k, v in col_exprs.items() if v is not None}
+        if not base_cols:
+            # A SELECT * read whose columns are unknown. An explicit column list cannot
+            # be built (empty is invalid SQL, transforms alone drop every other column),
+            # so keep all columns and replace or remove only the ones the steps name.
+            # A step that names a column the source lacks then fails on deploy, by name.
+            replaced = sorted(set(remove_set) | set(transform_exprs))
+            star = f"* EXCEPT ({', '.join(replaced)})" if replaced else "*"
+            select_list = ",\n".join(
+                [f"  {star}"]
+                + [f"  {expr} AS {col}" for col, expr in transform_exprs.items()]
+            )
+            where_clause = (
+                "\nWHERE " + " AND ".join(where_conditions) if where_conditions else ""
+            )
+            return f"SELECT\n{select_list}\nFROM (\n{base_sql}\n) _src{where_clause}"  # composes built parts; deployed only via the metric-view deployer's SQL check — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
         select_parts = []
         used_transforms = set()
