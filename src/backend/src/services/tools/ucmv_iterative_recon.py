@@ -182,12 +182,7 @@ def run_iterative_ucmv_generation(
         out = _loads(
             deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_base)
         )
-        summary = as_map(out.get("summary"))
-        # A clean deploy: at least one view deployed and no hard errors. A
-        # deployed_incomplete view (truncated YAML) still counts as not-ok so the
-        # loop does not reconcile a measureless view.
-        ok = as_int(summary.get("deployed")) > 0 and as_int(summary.get("errors")) == 0
-        return {"ok": ok, "raw": out}
+        return deploy_outcome(out)
 
     def reconcile(yaml_specs: RawMap, mappings: RawMap) -> RawMap:
         if not mappings:
@@ -224,6 +219,63 @@ _GEN_TO_RECON_PBI = {
     "auth_method": "pbi_auth_method",
     "access_token": "pbi_access_token",
 }
+
+
+# A view that is live and complete. deployed_incomplete (truncated YAML) is not
+# reconciled: it would score a measureless view.
+_LIVE_STATUSES = frozenset({"deployed", "deployed_grants_incomplete"})
+_MAX_FAILURES_IN_NOTE = 3
+
+
+def deploy_outcome(out: RawMap) -> RawMap:
+    """The deployer's output -> the loop's deploy verdict.
+
+    ``ok`` when at least one view is live: the cycle reconciles those
+    (``deployed_views``) and keeps every other view's error in ``failures``. One
+    failing view in a large model must not stop the comparison of the rest, and
+    the reason must survive into the run output.
+    """
+    if out.get("error"):
+        return {
+            "ok": False,
+            "error": f"deploy failed: {out['error']}"[:500],
+            "failures": {},
+        }
+    results = as_map(out.get("deployment_results"))
+    if not results:  # summary only: all or nothing, as the counts are all there is
+        summary = as_map(out.get("summary"))
+        if as_int(summary.get("deployed")) > 0 and as_int(summary.get("errors")) == 0:
+            return {"ok": True, "failures": {}}
+        return {"ok": False, "error": "deploy failed", "failures": {}}
+    deployed: list[str] = []
+    failures: dict[str, str] = {}
+    for key, raw in results.items():
+        entry = as_map(raw)
+        status = str(entry.get("status") or "")
+        if status in _LIVE_STATUSES:
+            deployed.append(str(key))
+        else:
+            reason = entry.get("message") or entry.get("error") or status or "unknown"
+            failures[str(key)] = f"{status}: {reason}"[:300]
+    first = "; ".join(
+        f"{k} ({v})" for k, v in list(failures.items())[:_MAX_FAILURES_IN_NOTE]
+    )
+    if not deployed:
+        error = (
+            f"no view deployed; {len(failures)} failed: {first}"
+            if failures
+            else "no view deployed"
+        )
+        return {"ok": False, "error": error[:1000], "failures": failures}
+    note = f"{len(deployed)} of {len(results)} views deployed" + (
+        f"; not reconciled: {first}" if failures else ""
+    )
+    return {
+        "ok": True,
+        "deployed_views": deployed,
+        "failures": failures,
+        "note": note[:1000],
+    }
 
 
 def run_from_generator(
@@ -310,4 +362,6 @@ def _inherit_confidential_policy(parent: object, child: object) -> None:
         return
     object.__setattr__(child, CONFIDENTIAL_ATTR, dict(policy))
     if not install_confidential_guard(child):
-        logger.error("confidential_values is set but the reconciler could not be guarded")
+        logger.error(
+            "confidential_values is set but the reconciler could not be guarded"
+        )

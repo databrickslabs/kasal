@@ -46,6 +46,8 @@ class CycleResult:
     failing_measures: list[str] = field(default_factory=list)
     deploy_ok: bool = True
     note: str = ""
+    # {view: error} for the views that did not deploy; the cycle reconciled the others.
+    deploy_failures: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -154,7 +156,9 @@ def run_reconciliation_loop(
       (``feedback`` is None on the first cycle, else the list from
       ``build_refinement_feedback``).
     - ``deploy(yaml) -> {"ok": bool, ...}`` — deploys the views; the loop needs a
-      live view to reconcile. Return falsy/``ok=False`` to abort the loop.
+      live view to reconcile. Return falsy/``ok=False`` to abort the loop. With
+      ``deployed_views`` the cycle reconciles only those, and ``failures``
+      (``{view: error}``) is kept on the cycle.
     - ``reconcile(yaml, mappings) -> recon_report`` — the reconciliation report
       with an ``overall`` block.
 
@@ -173,6 +177,9 @@ def run_reconciliation_loop(
 
         deploy_out = as_map(deploy(yaml_specs))
         deploy_ok = bool(deploy_out.get("ok", True))
+        failures = {
+            str(k): str(v) for k, v in as_map(deploy_out.get("failures")).items()
+        }
         if not deploy_ok:
             result.cycles.append(
                 CycleResult(
@@ -182,10 +189,18 @@ def run_reconciliation_loop(
                     total_measures=0,
                     deploy_ok=False,
                     note=str_or(deploy_out.get("error"), "deploy failed"),
+                    deploy_failures=failures,
                 )
             )
             result.stop_reason = "deploy_failed"
+            if not result.final_yaml:
+                result.final_yaml = (
+                    yaml_specs  # the YAML stays available to fix and redeploy
+                )
             break
+        if "deployed_views" in deploy_out:
+            deployed = {str(v) for v in as_list(deploy_out.get("deployed_views"))}
+            mappings = {k: v for k, v in mappings.items() if k in deployed}
 
         report = as_map(reconcile(yaml_specs, mappings))
         pct = _overall_pct(report)
@@ -198,6 +213,8 @@ def run_reconciliation_loop(
             failing_measures=[
                 str(f["measure"]) for f in build_refinement_feedback(report, target_pct)
             ],
+            note=str_or(deploy_out.get("note"), ""),
+            deploy_failures=failures,
         )
         result.cycles.append(cr)
 
