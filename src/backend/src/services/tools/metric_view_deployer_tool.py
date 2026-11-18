@@ -56,6 +56,10 @@ logger = logging.getLogger(__name__)
 _MODES = ("deploy", "verify", "check")
 _DEFAULT_SLOW_S = 30.0
 _EMPTY_YAML = "no metric view: empty YAML (a table without measures)"
+# A view whose source is still a placeholder (e.g. the measures that span several
+# facts, emitted as ``source: TODO.<...>`` for a human to place) cannot deploy.
+_PLACEHOLDER_SOURCE = _re.compile(r"^source:\s*['\"]?TODO\b", _re.MULTILINE)
+_PLACEHOLDER_YAML = "no metric view: the source is still a TODO placeholder"
 
 
 class MetricViewDeployerSchema(BaseModel):
@@ -551,6 +555,8 @@ class MetricViewDeployerTool(BaseTool):
             return {"status": "error", "message": "warehouse_id is required"}
         if not yaml_content or not yaml_content.strip():
             return {"status": "skipped", "message": _EMPTY_YAML}
+        if _PLACEHOLDER_SOURCE.search(yaml_content):
+            return {"status": "skipped", "message": _PLACEHOLDER_YAML}
 
         cat, sch, view = _view_parts(table_key, opts.catalog, opts.schema)
         view_name = view_fqn(cat, sch, view)

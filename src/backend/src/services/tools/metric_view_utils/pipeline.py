@@ -872,12 +872,32 @@ class MetricViewPipeline:
         3-level, bare, placeholders, or unresolved ``{token}`` templates."""
         if not default_src_catalog:
             return
-        st = getattr(spec, "source_table", None)
-        if not isinstance(st, str) or not st:
-            return
-        low = st.lower()
-        if st.count(".") == 1 and not (low.startswith("todo") or st.startswith("{")):
-            spec.source_table = f"{default_src_catalog}.{st}"
+
+        def _qualified(st: str) -> str:
+            if not st or "(" in st or " " in st.strip():
+                return st
+            low = st.lower()
+            if st.count(".") == 1 and not (
+                low.startswith("todo") or st.startswith("{")
+            ):
+                return f"{default_src_catalog}.{st}"
+            return st
+
+        source_table = getattr(spec, "source_table", None)
+        if isinstance(source_table, str):
+            spec.source_table = _qualified(source_table)
+
+        # Join sources too: a 2-part ``schema.table`` (from native SQL with an
+        # implicit catalog) is resolved against the METRIC VIEW's catalog at
+        # deploy, which is the target, not the source.
+        def _walk(joins: object) -> None:
+            for j in joins if isinstance(joins, list) else []:
+                if isinstance(j, dict):
+                    if isinstance(j.get("source"), str):
+                        j["source"] = _qualified(j["source"])
+                    _walk(j.get("joins"))
+
+        _walk(getattr(spec, "joins", None))
 
     def _bind_source_layer(
         self, catalog: str, schema: str

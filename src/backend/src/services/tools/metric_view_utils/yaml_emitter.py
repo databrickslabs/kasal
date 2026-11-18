@@ -39,6 +39,8 @@ from .yaml_scalars import (
     _yaml_scalar,
     _yaml_val,
 )
+from .yaml_scalars import is_pbi_auto_date_table as _is_pbi_auto_date_table
+from .yaml_scalars import uc_yaml_name
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +211,40 @@ def _render_dimensions(lines: list[str], dimensions: list[dict]) -> None:
                 lines.append(f"      - {_yaml_val(syn)}")
 
 
+def _drop_unusable_joins(spec: MetricViewSpec, known_missing: set) -> None:
+    """Drop joins that cannot deploy (a known-missing table, a Power BI auto date
+    table) and repeated join names, then every dimension that reads a dropped
+    join. Measures on a dropped join are dropped later, with the other undeclared
+    aliases."""
+    if not spec.joins:
+        return
+    dropped: set[str] = set()
+    seen: set[str] = set()
+    valid_joins = []
+    for j in spec.joins:
+        tbl_short = j["source"].split(".")[-1] if "." in j["source"] else j["source"]
+        if tbl_short in known_missing or _is_pbi_auto_date_table(tbl_short):
+            dropped.add(j["name"])
+            continue
+        # Drop duplicate join names (CORRECTNESS: a repeated join alias is
+        # invalid YAML — e.g. dim_plant emitted twice from two detectors).
+        # Keep the first; later same-name joins are the redundant repeats.
+        if j["name"] in seen:
+            continue
+        seen.add(j["name"])
+        valid_joins.append(j)
+    spec.joins = valid_joins
+    if dropped:
+        dropped_ref = re.compile(
+            r"\b(" + "|".join(map(re.escape, sorted(dropped))) + r")\."
+        )
+        spec.dimensions = [
+            d
+            for d in spec.dimensions
+            if not dropped_ref.search(str(d.get("expr") or ""))
+        ]
+
+
 def emit_yaml(
     spec: MetricViewSpec,
     measure_metadata: dict | None = None,
@@ -263,7 +299,7 @@ def emit_yaml(
         for sql_line in spec.source_sql.split("\n"):
             lines.append(f"  {sql_line}")
     else:
-        lines.append(f"source: {_yaml_scalar(spec.source_table)}")
+        lines.append(f"source: {_yaml_scalar(uc_yaml_name(spec.source_table))}")
         if spec.source_filter:
             lines.append(f"filter: {_yaml_scalar(spec.source_filter, indent=0)}")
     lines.append("")
@@ -271,27 +307,7 @@ def emit_yaml(
     for comment_line in _fit_comment(spec.comment).split("\n"):
         lines.append(f"  {comment_line}")
 
-    # Validate join tables: drop joins referencing known-missing tables.
-    # Measures that reference dropped join aliases will be caught later.
-    if spec.joins:
-        _dropped_join_aliases: set[str] = set()
-        _seen_join_names: set[str] = set()
-        valid_joins = []
-        for j in spec.joins:
-            tbl_short = (
-                j["source"].split(".")[-1] if "." in j["source"] else j["source"]
-            )
-            if tbl_short in _KNOWN_MISSING_TABLES:
-                _dropped_join_aliases.add(j["name"])
-                continue
-            # Drop duplicate join names (CORRECTNESS: a repeated join alias is
-            # invalid YAML — e.g. dim_plant emitted twice from two detectors).
-            # Keep the first; later same-name joins are the redundant repeats.
-            if j["name"] in _seen_join_names:
-                continue
-            _seen_join_names.add(j["name"])
-            valid_joins.append(j)
-        spec.joins = valid_joins
+    _drop_unusable_joins(spec, _KNOWN_MISSING_TABLES)
 
     # Build calculated-column expansion map: source.<calc_name> -> actual expression
     # e.g. source.plant_workcenter_key -> CONCAT(source.plant, '/', source.workcenter)
@@ -309,7 +325,9 @@ def emit_yaml(
         lines.append("joins:")
         for j in spec.joins:
             lines.append(f'  - name: {j["name"]}')
-            lines.append(f'    source: {_yaml_scalar(j["source"], indent=4)}')
+            lines.append(
+                f'    source: {_yaml_scalar(uc_yaml_name(j["source"]), indent=4)}'
+            )
             on_clause = j.get("join_on") or j.get("on") or ""
             # Expand calculated column refs in ON clause (e.g. source.plant_workcenter_key
             # -> CONCAT(source.plant, '/', source.workcenter))

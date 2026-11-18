@@ -6,6 +6,37 @@ YAML (bare, quoted, or a block scalar) and never inspect a spec.
 
 from __future__ import annotations
 
+import re
+
+_PLAIN_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PBI_AUTO_DATE = re.compile(
+    r"^(local_?date_?table|date_?table_?template)_", re.IGNORECASE
+)
+
+
+def uc_yaml_name(name: str) -> str:
+    """A ``catalog.schema.table`` reference as metric-view YAML needs it: bare when
+    every part is a plain identifier, each other part back-quoted (a hyphenated
+    catalog such as ``acme-dev``). Anything that is not a plain dotted name (SQL,
+    an already quoted name, a placeholder) is returned unchanged."""
+    if not name or "`" in name or any(c in name for c in " ()\n{}"):
+        return name
+    parts = name.split(".")
+    if len(parts) < 2 or any(not p for p in parts):
+        return name
+    if all(_PLAIN_PART.match(p) for p in parts):
+        return name
+    if not all(re.match(r"^[A-Za-z0-9_-]+$", p) for p in parts):
+        return name
+    return ".".join(p if _PLAIN_PART.match(p) else f"`{p}`" for p in parts)
+
+
+def is_pbi_auto_date_table(name: str) -> bool:
+    """Power BI's internal auto date tables (``LocalDateTable_<guid>``,
+    ``DateTableTemplate_<guid>``, in any casing or snake form). They exist only
+    inside the model, so a join to one can never deploy."""
+    return bool(_PBI_AUTO_DATE.match(name or ""))
+
 
 def _yaml_scalar(value: str, indent: int = 0) -> str:
     """Format a string value for safe YAML emission.
