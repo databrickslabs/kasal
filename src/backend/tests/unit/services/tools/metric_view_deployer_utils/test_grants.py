@@ -146,3 +146,65 @@ class TestRestoreGrants:
         assert report["preserved"] is False
         assert report["after"] is None
         assert any("re-read" in f for f in report["failures"])
+
+
+NO_INFO_SCHEMA = {
+    "success": False,
+    "error": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `cat`.`information_schema`.`table_privileges` cannot be found.",
+}
+
+
+class TestCatalogWithoutInformationSchema:
+    """Seen in a customer catalog: every redeploy was refused because the grants could not be read."""
+
+    def test_a_view_that_does_not_exist_yet_has_nothing_to_keep(self):
+        sql_seen = []
+
+        def run_sql(sql):
+            sql_seen.append(sql)
+            if "information_schema" in sql:
+                return NO_INFO_SCHEMA
+            return {
+                "success": False,
+                "error": "[TABLE_OR_VIEW_NOT_FOUND] `cat`.`sch`.`v` cannot be found.",
+            }
+
+        assert read_direct_grants(run_sql, "cat", "sch", "v") == ([], 0)
+        assert sql_seen[1] == "SHOW GRANTS ON TABLE `cat`.`sch`.`v`"
+
+    def test_an_existing_view_keeps_its_own_grants_not_the_inherited_ones(self):
+        def run_sql(sql):
+            if "information_schema" in sql:
+                return NO_INFO_SCHEMA
+            return _rows(
+                ("analysts", "SELECT", "TABLE", "cat.sch.v"),
+                ("owners", "OWNERSHIP", "TABLE", "cat.sch.v"),
+                ("everyone", "USE SCHEMA", "SCHEMA", "cat.sch"),
+                ("readers", "SELECT", "CATALOG", "cat"),
+            )
+
+        grants, skipped = read_direct_grants(run_sql, "cat", "sch", "v")
+        assert grants == [DirectGrant("analysts", "SELECT")]
+        assert skipped == 1  # OWNERSHIP is never re-applied
+
+    def test_when_show_grants_fails_too_the_redeploy_is_still_refused(self):
+        def run_sql(sql):
+            if "information_schema" in sql:
+                return NO_INFO_SCHEMA
+            return {
+                "success": False,
+                "error": "PERMISSION_DENIED: no MANAGE on cat.sch.v",
+            }
+
+        with pytest.raises(GrantReadError, match="PERMISSION_DENIED"):
+            read_direct_grants(run_sql, "cat", "sch", "v")
+
+    def test_other_read_errors_still_refuse_the_redeploy(self):
+        def run_sql(sql):
+            return {
+                "success": False,
+                "error": "PERMISSION_DENIED on information_schema",
+            }
+
+        with pytest.raises(GrantReadError):
+            read_direct_grants(run_sql, "cat", "sch", "v")

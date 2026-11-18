@@ -6,6 +6,12 @@ after a successful one. ``information_schema.table_privileges`` exposes ``GRANTE
 ``PRIVILEGE_TYPE`` and ``INHERITED_FROM`` (checked against the Databricks docs). Direct grants
 are the rows with ``INHERITED_FROM = 'NONE'``; that literal is the brief's assumption and is
 not spelled out in the docs page, so a fresh workspace should be spot-checked once.
+
+Some catalogs have no ``information_schema`` (TABLE_OR_VIEW_NOT_FOUND on ``table_privileges``).
+Then the grants are read with ``SHOW GRANTS ON TABLE``: its rows are ``principal, action_type,
+object_type, object_key``, and the direct grants are the ones on the view itself (object type
+TABLE or VIEW; inherited ones name the schema or catalog). A view that does not exist yet has no
+grants to keep.
 """
 
 from __future__ import annotations
@@ -19,8 +25,11 @@ _DIRECT_GRANTS_SQL = (
     "SELECT grantee, privilege_type FROM {catalog}.information_schema.table_privileges "
     "WHERE table_schema = {schema} AND table_name = {view} AND inherited_from = 'NONE'"
 )
+_SHOW_GRANTS_SQL = "SHOW GRANTS ON TABLE {view_fqn}"
 _PRIVILEGE = re.compile(r"^[A-Z][A-Z_]*$")
 _OWNERSHIP = "OWNERSHIP"
+_NOT_FOUND = "TABLE_OR_VIEW_NOT_FOUND"
+_DIRECT_OBJECT_TYPES = frozenset({"TABLE", "VIEW"})
 
 
 class GrantReadError(RuntimeError):
@@ -52,11 +61,36 @@ def read_direct_grants(
             view=string_literal(view),
         )
     )
-    if not outcome.get("success"):
+    if outcome.get("success"):
+        return _grants(result_rows(outcome.get("data")))
+    if _NOT_FOUND not in error_text(outcome):
         raise GrantReadError(error_text(outcome), outcome.get("http_status"))
+    return _show_grants(run_sql, catalog, schema, view)
+
+
+def _show_grants(
+    run_sql: SqlRunner, catalog: str, schema: str, view: str
+) -> tuple[list[DirectGrant], int]:
+    """The catalog has no information_schema: read the view's own grants with SHOW GRANTS."""
+    view_fqn = ".".join(quote_name(part) for part in (catalog, schema, view))
+    outcome = run_sql(_SHOW_GRANTS_SQL.format(view_fqn=view_fqn))
+    if not outcome.get("success"):
+        if _NOT_FOUND in error_text(outcome):
+            return [], 0  # the view does not exist yet: nothing to keep
+        raise GrantReadError(error_text(outcome), outcome.get("http_status"))
+    direct = [
+        row[:2]
+        for row in result_rows(outcome.get("data"))
+        if len(row) >= 3 and str(row[2]).strip().upper() in _DIRECT_OBJECT_TYPES
+    ]
+    return _grants(direct)
+
+
+def _grants(rows: list[list[object]]) -> tuple[list[DirectGrant], int]:
+    """``(grantee, privilege)`` rows -> re-appliable grants and the count of rows that are not."""
     grants: list[DirectGrant] = []
     skipped = 0
-    for row in result_rows(outcome.get("data")):
+    for row in rows:
         if len(row) < 2 or not isinstance(row[0], str) or not isinstance(row[1], str):
             skipped += 1
             continue
