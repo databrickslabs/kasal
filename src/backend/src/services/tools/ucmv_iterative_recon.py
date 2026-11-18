@@ -145,6 +145,7 @@ def run_iterative_ucmv_generation(
     # Source layer (read mode): this cycle's DDL, and the fingerprint already deployed.
     source_layer: dict[str, object] = {"ddl": {}, "deployed_fp": "", "report": {}}
     read_mode = _read_mode(gen_base)
+    mapping_state: dict[str, dict[str, str]] = {"gaps": {}}
 
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
         nonlocal resolved_state, specs_state
@@ -175,10 +176,14 @@ def run_iterative_ucmv_generation(
         resolved_state = as_map(out.get("resolved_measures_by_table"))
         specs_state = as_map(out.get("specs_summary"))
         source_layer["ddl"] = as_map(out.get("source_layer_ddl"))
-        return {
-            "yaml": as_map(out.get("yaml")),
-            "mappings": as_map(out.get("pbi_ucmv_mapping")),
-        }
+        yaml_specs = as_map(out.get("yaml"))
+        assembled, gaps = _assembled_mappings(yaml_specs, out, gen_base, deploy_base)
+        # A mapping the generator was given under the view's own key (supplied or
+        # corrected by hand) still applies where none could be assembled.
+        given = as_map(out.get("pbi_ucmv_mapping"))
+        mappings = {**{k: v for k, v in given.items() if k in yaml_specs}, **assembled}
+        mapping_state["gaps"] = {k: r for k, r in gaps.items() if k not in mappings}
+        return {"yaml": yaml_specs, "mappings": mappings}
 
     def deploy(yaml_specs: RawMap) -> RawMap:
         if not yaml_specs:
@@ -189,7 +194,7 @@ def run_iterative_ucmv_generation(
         out = _loads(
             deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_base)
         )
-        verdict = deploy_outcome(out)
+        verdict = _with_mapping_gaps(deploy_outcome(out), mapping_state["gaps"])
         if layer_note:
             failures = dict(as_map(verdict.get("failures")))
             for table, reason in as_map(
@@ -244,6 +249,54 @@ _LIVE_STATUSES = frozenset({"deployed", "deployed_grants_incomplete"})
 _MAX_FAILURES_IN_NOTE = 3
 
 
+def _config(gen_kwargs: Mapping[str, object]) -> RawMap:
+    config = gen_kwargs.get("config_json")
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            return {}
+    return as_map(config)
+
+
+def _assembled_mappings(
+    yaml_specs: RawMap,
+    generated: RawMap,
+    gen_kwargs: Mapping[str, object],
+    deploy_kwargs: Mapping[str, object],
+) -> tuple[dict[str, RawMap], dict[str, str]]:
+    """Reconciliation mappings for this cycle's views, bound to the views the deployer
+    creates, and why the other views have none (see ``mapping_assembly``)."""
+    from src.services.tools.metric_view_deployer_tool import _view_parts
+    from src.services.tools.metric_view_utils.reconciliation.mapping_assembly import (
+        assemble_mappings,
+    )
+
+    catalog = str(deploy_kwargs.get("catalog") or "main")
+    schema = str(deploy_kwargs.get("schema_name") or "default")
+    fqns = {key: ".".join(_view_parts(key, catalog, schema)) for key in yaml_specs}
+    return assemble_mappings(
+        yaml_specs,
+        as_map(generated.get("resolved_measures_by_table")),
+        fqns,
+        as_map(_config(gen_kwargs).get("join_key_map")),
+        {
+            "dataset_id": gen_kwargs.get("dataset_id"),
+            "workspace_id": gen_kwargs.get("workspace_id"),
+        },
+    )
+
+
+def _with_mapping_gaps(verdict: RawMap, gaps: Mapping[str, str]) -> RawMap:
+    """Views deployed but not compared, with the reason, next to the deploy failures."""
+    if not gaps:
+        return verdict
+    failures = dict(as_map(verdict.get("failures")))
+    for key, reason in gaps.items():
+        failures.setdefault(f"mapping:{key}", reason)
+    return {**verdict, "failures": failures}
+
+
 def _read_mode(gen_kwargs: Mapping[str, object]) -> bool:
     """Whether the metric views read the source layer (``read_from_source_layer``
     in the generator's config), so the loop must deploy it first."""
@@ -251,13 +304,7 @@ def _read_mode(gen_kwargs: Mapping[str, object]) -> bool:
         read_from_source_layer,
     )
 
-    config = gen_kwargs.get("config_json")
-    if isinstance(config, str):
-        try:
-            config = json.loads(config)
-        except json.JSONDecodeError:
-            return False
-    return read_from_source_layer(dict(as_map(config)))
+    return read_from_source_layer(dict(_config(gen_kwargs)))
 
 
 def _deploy_layer_once(
