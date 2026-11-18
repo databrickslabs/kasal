@@ -28,7 +28,11 @@ _DIRECT_GRANTS_SQL = (
 _SHOW_GRANTS_SQL = "SHOW GRANTS ON TABLE {view_fqn}"
 _PRIVILEGE = re.compile(r"^[A-Z][A-Z_]*$")
 _OWNERSHIP = "OWNERSHIP"
-_NOT_FOUND = "TABLE_OR_VIEW_NOT_FOUND"
+# SQL error classes for "no such table/view". SHOW GRANTS on a missing view answers with
+# TABLE_DOES_NOT_EXIST.RESOURCE_DOES_NOT_EXIST, a SELECT with TABLE_OR_VIEW_NOT_FOUND.
+_NOT_FOUND = re.compile(
+    r"TABLE_OR_VIEW_NOT_FOUND|TABLE_DOES_NOT_EXIST|RESOURCE_DOES_NOT_EXIST"
+)
 _DIRECT_OBJECT_TYPES = frozenset({"TABLE", "VIEW"})
 
 
@@ -63,7 +67,7 @@ def read_direct_grants(
     )
     if outcome.get("success"):
         return _grants(result_rows(outcome.get("data")))
-    if _NOT_FOUND not in error_text(outcome):
+    if not _NOT_FOUND.search(error_text(outcome)):
         raise GrantReadError(error_text(outcome), outcome.get("http_status"))
     return _show_grants(run_sql, catalog, schema, view)
 
@@ -75,7 +79,7 @@ def _show_grants(
     view_fqn = ".".join(quote_name(part) for part in (catalog, schema, view))
     outcome = run_sql(_SHOW_GRANTS_SQL.format(view_fqn=view_fqn))
     if not outcome.get("success"):
-        if _NOT_FOUND in error_text(outcome):
+        if _NOT_FOUND.search(error_text(outcome)):
             return [], 0  # the view does not exist yet: nothing to keep
         raise GrantReadError(error_text(outcome), outcome.get("http_status"))
     direct = [

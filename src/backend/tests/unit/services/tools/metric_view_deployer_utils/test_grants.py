@@ -172,6 +172,20 @@ class TestCatalogWithoutInformationSchema:
         assert read_direct_grants(run_sql, "cat", "sch", "v") == ([], 0)
         assert sql_seen[1] == "SHOW GRANTS ON TABLE `cat`.`sch`.`v`"
 
+    def test_show_grants_on_a_missing_view_answers_with_another_error_class(self):
+        """The exact answer from the customer workspace."""
+
+        def run_sql(sql):
+            if "information_schema" in sql:
+                return NO_INFO_SCHEMA
+            return {
+                "success": False,
+                "error": "[RequestId=e8acf1cc ErrorClass=TABLE_DOES_NOT_EXIST.RESOURCE_DOES_NOT_EXIST] "
+                "Table 'cat.sch.v' does not exist.",
+            }
+
+        assert read_direct_grants(run_sql, "cat", "sch", "v") == ([], 0)
+
     def test_an_existing_view_keeps_its_own_grants_not_the_inherited_ones(self):
         def run_sql(sql):
             if "information_schema" in sql:
