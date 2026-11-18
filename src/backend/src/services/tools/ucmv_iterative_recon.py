@@ -123,8 +123,14 @@ def run_iterative_ucmv_generation(
     recon_kwargs: Optional[Mapping[str, object]] = None,
     max_cycles: int = 5,
     target_pct: float = 100.0,
+    settings: Optional[Mapping[str, object]] = None,
 ) -> dict[str, object]:
     """Run the generate→deploy→reconcile→refine loop and return a JSON-able report.
+
+    ``settings``: the generator's effective ``config_json``, ``dataset_id`` and
+    ``workspace_id``. In a crew they sit in the tool's configuration, not in the
+    call's kwargs; read mode and the mapping assembly need them (default: the
+    values in ``gen_kwargs``).
 
     - ``generator._run(**gen_kwargs[, refinement_feedback])`` → output with
       ``yaml`` (dict of view→YAML) and ``pbi_ucmv_mapping`` (view→mapping).
@@ -144,7 +150,8 @@ def run_iterative_ucmv_generation(
     specs_state: RawMap = {}
     # Source layer (read mode): this cycle's DDL, and the fingerprint already deployed.
     source_layer: dict[str, object] = {"ddl": {}, "deployed_fp": "", "report": {}}
-    read_mode = _read_mode(gen_base)
+    context: dict[str, object] = {**gen_base, **dict(settings or {})}
+    read_mode = _read_mode(context)
     mapping_state: dict[str, dict[str, str]] = {"gaps": {}}
 
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
@@ -177,7 +184,7 @@ def run_iterative_ucmv_generation(
         specs_state = as_map(out.get("specs_summary"))
         source_layer["ddl"] = as_map(out.get("source_layer_ddl"))
         yaml_specs = as_map(out.get("yaml"))
-        assembled, gaps = _assembled_mappings(yaml_specs, out, gen_base, deploy_base)
+        assembled, gaps = _assembled_mappings(yaml_specs, out, context, deploy_base)
         # A mapping the generator was given under the view's own key (supplied or
         # corrected by hand) still applies where none could be assembled.
         given = as_map(out.get("pbi_ucmv_mapping"))
@@ -450,6 +457,11 @@ def run_from_generator(
         },
         max_cycles=int(_positive_or(cfg("max_reconciliation_cycles"), 5)),
         target_pct=_positive_or(cfg("reconciliation_target_pct"), 100.0),
+        settings={
+            "config_json": cfg("config_json"),
+            "dataset_id": cfg("dataset_id"),
+            "workspace_id": cfg("workspace_id"),
+        },
     )
 
 

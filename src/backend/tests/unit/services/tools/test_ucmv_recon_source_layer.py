@@ -142,3 +142,31 @@ def test_without_read_mode_the_source_layer_is_left_alone():
             max_cycles=1,
         )
     assert statements == []
+
+
+def test_settings_from_the_generator_configuration_reach_the_loop():
+    """In a crew, config_json (read mode, join_key_map) and the model ids sit in the tool's
+    configuration, not in the call. The field run went without a source layer because of that.
+    """
+    from src.services.tools import ucmv_iterative_recon as mod
+
+    class _Gen:
+        _default_config = {
+            "warehouse_id": "wh",
+            "config_json": json.dumps({"read_from_source_layer": True}),
+            "dataset_id": "ds",
+            "workspace_id": "ws",
+        }
+
+        def _run(self, **kwargs):
+            return "{}"
+
+    with (
+        patch.object(mod, "run_iterative_ucmv_generation", return_value={}) as loop,
+        patch("src.services.tools.ucmv_reconciliation_tool.UCMVReconciliationTool"),
+    ):
+        mod.run_from_generator(_Gen(), {})
+    settings = loop.call_args.kwargs["settings"]
+    assert json.loads(settings["config_json"])["read_from_source_layer"] is True
+    assert (settings["dataset_id"], settings["workspace_id"]) == ("ds", "ws")
+    assert mod._read_mode(settings) is True
