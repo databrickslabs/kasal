@@ -251,6 +251,13 @@ def _drop_unusable_joins(spec: MetricViewSpec, known_missing: set) -> None:
         dropped_ref = re.compile(
             r"\b(" + "|".join(map(re.escape, sorted(dropped))) + r")\."
         )
+        own = {c.lower() for c in spec.fact_columns}
+        for d in spec.dimensions:
+            # A dimension of a dropped join whose column the fact itself has (a fiscper
+            # read through the calendar) reads the fact's column instead of vanishing.
+            m = re.fullmatch(r"\s*(\w+)\.`?(\w+)`?\s*", str(d.get("expr") or ""))
+            if m and m.group(1) in dropped and m.group(2).lower() in own:
+                d["expr"] = f"source.{m.group(2)}"
         spec.dimensions = [
             d
             for d in spec.dimensions

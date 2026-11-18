@@ -89,6 +89,37 @@ def test_the_emitter_drops_the_join_and_its_dimensions_and_says_why():
     out = yaml.safe_load(emit_yaml(spec))
     assert [j["name"] for j in out["joins"]] == ["dim_geo"]
     assert all("dim_calendar" not in d["expr"] for d in out.get("dimensions") or [])
+
     assert (
         "Join dim_calendar dropped: the source has no column date_key" in out["comment"]
     )
+
+
+def test_a_dimension_the_fact_has_itself_moves_to_the_fact():
+    from src.services.tools.metric_view_utils.yaml_emitter import _drop_unusable_joins
+
+    spec = MetricViewSpec(
+        fact_table_key="Fact",
+        source_table="prod.md.co012",
+        view_name="fact",
+        comment="c",
+        joins=[
+            {
+                "name": "dim_calendar",
+                "source": "prod.md.cal",
+                "join_on": "source.date_key = dim_calendar.date_id",
+            }
+        ],
+        dimensions=[
+            {"name": "fiscper", "expr": "dim_calendar.fiscper"},
+            {"name": "month", "expr": "dim_calendar.month"},
+        ],
+        measures=[],
+        untranslatable=[],
+        fact_columns=["fiscper", "volume"],
+    )
+    _drop_unusable_joins(spec, set())
+    assert spec.joins == []
+    assert spec.dimensions == [
+        {"name": "fiscper", "expr": "source.fiscper"}
+    ]  # the period survives

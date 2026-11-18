@@ -153,12 +153,19 @@ def run_iterative_ucmv_generation(
     context: dict[str, object] = {**gen_base, **dict(settings or {})}
     read_mode = _read_mode(context)
     mapping_state: dict[str, dict[str, str]] = {"gaps": {}}
+    # The last generator output (for mappings of healed views) and the measures a
+    # heal removed, which go back to the DAX LLM with their deploy error.
+    heal_state: dict[str, object] = {"generated": {}, "feedback": []}
 
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
         nonlocal resolved_state, specs_state
         kw = dict(gen_base)
         if feedback:
             # The generator normalises this into the DAX LLM's per-measure hints.
+            feedback = [
+                *feedback,
+                *(as_map(x) for x in as_list(heal_state["feedback"])),
+            ]
             kw["refinement_feedback"] = json.dumps(feedback)
             # Incremental refinement: reuse SQL for every measure NOT flagged as a
             # failure, so only the missed measures hit the LLM again this cycle.
@@ -183,6 +190,7 @@ def run_iterative_ucmv_generation(
         resolved_state = as_map(out.get("resolved_measures_by_table"))
         specs_state = as_map(out.get("specs_summary"))
         source_layer["ddl"] = as_map(out.get("source_layer_ddl"))
+        heal_state["generated"] = out
         yaml_specs = as_map(out.get("yaml"))
         assembled, gaps = _assembled_mappings(yaml_specs, out, context, deploy_base)
         # A mapping the generator was given under the view's own key (supplied or
@@ -201,7 +209,16 @@ def run_iterative_ucmv_generation(
         out = _loads(
             deployer._run(yaml_specs_json=json.dumps(yaml_specs), **deploy_base)
         )
-        verdict = _with_mapping_gaps(deploy_outcome(out), mapping_state["gaps"])
+        verdict = _healed(
+            deploy_outcome(out),
+            yaml_specs,
+            deployer,
+            deploy_base,
+            context,
+            mapping_state,
+            heal_state,
+        )
+        verdict = _with_mapping_gaps(verdict, mapping_state["gaps"])
         if layer_note:
             failures = dict(as_map(verdict.get("failures")))
             for table, reason in as_map(
@@ -292,6 +309,50 @@ def _assembled_mappings(
             "workspace_id": gen_kwargs.get("workspace_id"),
         },
     )
+
+
+def _healed(
+    verdict: RawMap,
+    yaml_specs: RawMap,
+    deployer: ToolRunner,
+    deploy_base: Mapping[str, object],
+    context: Mapping[str, object],
+    mapping_state: dict[str, dict[str, str]],
+    heal_state: dict[str, object],
+) -> RawMap:
+    """Heal the views that failed to deploy (``ucmv_recon_heal``) and redeploy them. The
+    verdict then carries the healed YAML and fresh mappings for them (the loop compares
+    those), what was removed per view, and the removed measures as LLM feedback."""
+    from src.services.tools.ucmv_recon_heal import heal_failed_views, redeployer
+
+    merged, healed_yaml, healed = heal_failed_views(
+        redeployer(deployer, deploy_base, deploy_outcome), yaml_specs, verdict
+    )
+    if not healed_yaml:
+        return merged
+    assembled, gaps = _assembled_mappings(
+        healed_yaml, as_map(heal_state["generated"]), context, deploy_base
+    )
+    mapping_state["gaps"] = {
+        **{k: r for k, r in mapping_state["gaps"].items() if k not in healed_yaml},
+        **gaps,
+    }
+    heal_state["feedback"] = [
+        {
+            "view": view,
+            "measure": item.split(" ", 1)[1].split(" (", 1)[0],
+            "deploy_error": item,
+        }
+        for view, items in healed.items()
+        for item in items
+        if item.startswith("measure ")
+    ]
+    return {
+        **merged,
+        "yaml_overrides": healed_yaml,
+        "mapping_overrides": assembled,
+        "healed": healed,
+    }
 
 
 def _with_mapping_gaps(verdict: RawMap, gaps: Mapping[str, str]) -> RawMap:

@@ -48,6 +48,8 @@ class CycleResult:
     note: str = ""
     # {view: error} for the views that did not deploy; the cycle reconciled the others.
     deploy_failures: dict[str, str] = field(default_factory=dict)
+    # {view: [removed item (error)]}: what a deploy heal took out so the view deployed.
+    deploy_healed: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -126,6 +128,10 @@ def feedback_to_prompt_map(feedback: object) -> dict[str, str]:
         if not item.get("measure"):
             continue
         parts: list[str] = []
+        if item.get("deploy_error"):
+            parts.append(
+                f"was removed because the view failed to deploy: {item['deploy_error']}"
+            )
         pct = opt_float(item.get("pct_aligned"))
         if pct is not None:
             parts.append(f"only {pct:.1f}% of cells matched Power BI")
@@ -198,6 +204,13 @@ def run_reconciliation_loop(
                     yaml_specs  # the YAML stays available to fix and redeploy
                 )
             break
+        healed = {
+            str(k): [str(x) for x in as_list(v)]
+            for k, v in as_map(deploy_out.get("healed")).items()
+        }
+        # A healed view is compared as deployed: its healed YAML, its fresh mapping.
+        yaml_specs = {**yaml_specs, **as_map(deploy_out.get("yaml_overrides"))}
+        mappings = {**mappings, **as_map(deploy_out.get("mapping_overrides"))}
         if "deployed_views" in deploy_out:
             deployed = {str(v) for v in as_list(deploy_out.get("deployed_views"))}
             mappings = {k: v for k, v in mappings.items() if k in deployed}
@@ -215,6 +228,7 @@ def run_reconciliation_loop(
             ],
             note=str_or(deploy_out.get("note"), ""),
             deploy_failures=failures,
+            deploy_healed=healed,
         )
         result.cycles.append(cr)
 
