@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -192,6 +193,48 @@ def _keep_switch(
     return True
 
 
+def _route_dax_measures(
+    dax_measures: list[dict],
+    table_key: str,
+    ctx: "TableProcessorContext",
+    trivial_only: bool,
+    llm_enabled: bool,
+    clean_unresolved_vars_fn: Callable[[str], str],
+    base_names: set,
+    translated: list,
+    untranslatable: list,
+) -> int:
+    """Rule-translate each measure (only trivial ones in llm_first mode); the rest goes to
+    ``untranslatable`` for the LLM. A measure the previous verify-numbers cycle flagged
+    (``refinement_feedback_by_measure``) always goes to the LLM with its hint: on the rule
+    path it would get the same SQL again, and the cycle could not improve it. Returns the
+    number of cross-table measures translated."""
+    feedback = (ctx.llm_config or {}).get("refinement_feedback_by_measure") or {}
+    cross_table_translated = 0
+    for dm in dax_measures:
+        result = ctx.translator.translate(dm, table_key, trivial_only=trivial_only)
+        flagged = llm_enabled and (
+            result.original_name in feedback or result.measure_name in feedback
+        )
+        if result.is_translatable and flagged and result.dax_expression:
+            result.is_translatable = False
+            result.skip_reason = (
+                "did not match Power BI: re-translate with the deviation"
+            )
+        if result.is_translatable:
+            result.sql_expr = clean_unresolved_vars_fn(result.sql_expr)
+            if result.measure_name not in base_names:
+                translated.append(result)
+                base_names.add(result.measure_name)
+                if result.category == "cross_table_translated":
+                    cross_table_translated += 1
+        else:
+            untranslatable.append(result)
+            if result.category == "cross_table":
+                ctx.cross_table_measures.append(result)
+    return cross_table_translated
+
+
 def process_table(
     table_key: str,
     table_info: TableInfo,
@@ -244,19 +287,17 @@ def process_table(
     _llm_enabled = bool(ctx.llm_config and ctx.llm_config.get("use_llm_fallback"))
     _trivial_only = _llm_enabled and _mode == "llm_first"
 
-    for dm in dax_measures:
-        result = ctx.translator.translate(dm, table_key, trivial_only=_trivial_only)
-        if result.is_translatable:
-            result.sql_expr = clean_unresolved_vars_fn(result.sql_expr)
-            if result.measure_name not in base_names:
-                translated.append(result)
-                base_names.add(result.measure_name)
-                if result.category == "cross_table_translated":
-                    cross_table_translated_count += 1
-        else:
-            untranslatable.append(result)
-            if result.category == "cross_table":
-                ctx.cross_table_measures.append(result)
+    cross_table_translated_count += _route_dax_measures(
+        dax_measures,
+        table_key,
+        ctx,
+        _trivial_only,
+        _llm_enabled,
+        clean_unresolved_vars_fn,
+        base_names,
+        translated,
+        untranslatable,
+    )
 
     # 5a-fix. window.order: hardcoded 'date_key' -> the table's GROUP BY period dim.
     _PERIOD_DIM_PRIORITY = ctx.config.get(
