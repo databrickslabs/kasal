@@ -235,3 +235,17 @@ def star_select_list(
             )
         parts.append(f"{expr} AS {sql_ident(col)}")
     return ",\n".join(f"  {part}" for part in parts)
+
+
+def quote_references(col_exprs: dict[str, str | None]) -> dict[str, str | None]:
+    """Back-quote each column name that is not a plain identifier where its own expression
+    reads it: the step builders write ``CAST(Color Formatting AS BIGINT)`` and
+    ``CAST(# AS BIGINT)``, which do not parse."""
+    out: dict[str, str | None] = {}
+    for col, expr in col_exprs.items():
+        if expr and not _COLUMN.match(col) and sql_ident(col) not in expr:
+            expr = re.sub(
+                rf"(?<![\w`]){re.escape(col)}(?![\w`])", lambda _m: sql_ident(col), expr
+            )
+        out[col] = expr
+    return out

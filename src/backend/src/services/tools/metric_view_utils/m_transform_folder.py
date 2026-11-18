@@ -6,7 +6,12 @@ import re
 
 from .data_classes import MStep
 from .dax_condition_sql import _sql_str_literal
-from .m_column_expressions import keep_one_row_per_key, sql_ident, star_select_list
+from .m_column_expressions import (
+    keep_one_row_per_key,
+    quote_references,
+    sql_ident,
+    star_select_list,
+)
 from .m_sql_formatter import (
     _compact_where,
     _reformat_arm,
@@ -134,8 +139,8 @@ class MTransformFolder:
                 # a buffer of another table's rows) — keep it as a TODO.
                 self.transform_todos.append(_todo_note(step))
 
-        col_exprs = self._build_column_transforms(
-            column_transforms, rename_map, remove_columns
+        col_exprs = quote_references(
+            self._build_column_transforms(column_transforms, rename_map, remove_columns)
         )
 
         self._renames = dict(rename_map)

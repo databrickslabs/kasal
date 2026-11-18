@@ -34,6 +34,9 @@ _FIELD = re.compile(r"No such struct field `([^`]+)` in ((?:`[^`]+`(?:,\s*)?)+)"
 _MISSING_TABLE = re.compile(r"The table or view ((?:`[^`]+`\.?)+) cannot be found")
 _SUBQUERY_SOURCE = "__auto_generated_subquery_name_source"
 MAX_ROUNDS = 8
+_PERIOD_COLUMNS = frozenset(
+    {"fiscper", "calmonth", "fiscal_period", "period", "yearmonth", "month_id"}
+)
 
 
 def _norm(name: str) -> str:
@@ -81,6 +84,7 @@ class _View:
         ]
         for name in dependents:
             self.drop_join(str(name))
+        self._period_to_source(alias)
         for key, what in (("dimensions", "dimension"), ("measures", "measure")):
             self.drop_items(
                 key,
@@ -113,6 +117,22 @@ class _View:
                     what,
                 )
         return removed or self.drop_column(None, missing)
+
+    def _period_to_source(self, alias: str) -> None:
+        """A period dimension read through the removed join (``dim_calendar.fiscper``) reads the
+        fact's own column instead: the comparison needs a period. If the fact lacks it, the next
+        round removes it like any other unresolved column."""
+        dims = self._items("dimensions")
+        for dim in dims:
+            m = re.fullmatch(
+                rf"\s*{re.escape(alias)}\.`?(\w+)`?\s*", str(dim.get("expr") or "")
+            )
+            if m and m.group(1).lower() in _PERIOD_COLUMNS:
+                dim["expr"] = f"source.{m.group(1)}"
+                self.removed.append(
+                    f"dimension {dim.get('name')} now reads source.{m.group(1)}"
+                )
+        self.spec["dimensions"] = dims
 
     def drop_column(self, alias: str | None, column: str) -> int:
         removed = 0

@@ -108,3 +108,24 @@ def test_a_duplicated_renamed_and_replaced_column_reads_its_origin():
         sql_ident("fis_code - Copy") == "`fis_code - Copy`"
         and sql_ident("a_b") == "a_b"
     )
+
+
+def test_references_to_non_plain_column_names_are_quoted():
+    from src.services.tools.metric_view_utils.m_column_expressions import (
+        quote_references,
+    )
+
+    out = quote_references(
+        {
+            "Color Formatting": "CAST(Color Formatting AS BIGINT)",
+            "#": "CAST(# AS BIGINT)",
+            "plain": "CAST(plain AS BIGINT)",
+            "gone": None,
+        }
+    )
+    assert out == {
+        "Color Formatting": "CAST(`Color Formatting` AS BIGINT)",
+        "#": "CAST(`#` AS BIGINT)",
+        "plain": "CAST(plain AS BIGINT)",
+        "gone": None,
+    }

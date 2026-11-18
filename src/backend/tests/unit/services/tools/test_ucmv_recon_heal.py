@@ -242,3 +242,17 @@ def test_a_healed_view_without_a_new_mapping_keeps_no_stale_one():
         max_cycles=1,
     )
     assert seen == [{"A": "new-a"}]
+
+
+def test_the_period_survives_a_dropped_calendar_join():
+    text = YAML.replace(
+        "  - name: fiscper\n    expr: source.fiscper\n",
+        "  - name: fiscper\n    expr: dim_calendar.fiscper\n",
+    )
+    healed, removed = heal_view(
+        text,
+        "with name `__auto_generated_subquery_name_source`.`date_key` cannot be resolved",
+    )
+    dims = {d["name"]: d["expr"] for d in yaml.safe_load(healed)["dimensions"]}
+    assert dims["fiscper"] == "source.fiscper" and "month" not in dims
+    assert "dimension fiscper now reads source.fiscper" in removed
