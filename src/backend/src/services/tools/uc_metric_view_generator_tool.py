@@ -24,6 +24,7 @@ from src.services.tools.uc_metric_view_generator_utils.llm_config import (
 )
 from src.services.tools.uc_metric_view_generator_utils.model_inputs import (
     parse_model_inputs,
+    restore_full_mquery,
 )
 from src.services.tools.uc_metric_view_generator_utils.output_steps import (
     audit_source_mquery,
@@ -682,8 +683,8 @@ class UCMetricViewGeneratorTool(BaseTool):
             manual_overrides_raw=_get("manual_overrides"),
         )
 
-        # Capture the ORIGINAL source per table BEFORE the raw-M → SQL recovery
-        # rewrites it, so the full M can be shown and audited.
+        # The whole M per table, captured before the M → SQL recovery rewrites it.
+        mquery_entries = restore_full_mquery(mquery_entries, config)
         raw_source_by_name = capture_raw_sources(mquery_entries)
         m_recovery = recover_raw_m_sources(
             mquery_entries,

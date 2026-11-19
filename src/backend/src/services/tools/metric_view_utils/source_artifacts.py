@@ -82,7 +82,7 @@ def _native_base(
     parameters (``'"& Filter &"'``) is cut off where the parameter starts. Two-part names
     get the source table's catalog, so the view does not depend on the session's catalog.
     """
-    from .m_native_sql import native_sql_with_parameters
+    from .m_native_sql import native_sql_with_parameters, without_outer_parentheses
     from .mquery_parser import extract_native_query_sql
 
     # SQL assembled from literals and parameters ("..." & FiscperFilter & "..."); a
@@ -91,7 +91,9 @@ def _native_base(
     if sql and assumed is not None:
         assumed.extend(unknown)
     sql = sql or (extract_native_query_sql(m_expression or "") or "").strip()
-    if not sql or not re.match(r"(?is)^\s*(SELECT|WITH)\b", sql):
+    sql = without_outer_parentheses(sql)
+    # "(WITH ...) UNION (SELECT ...)" is a query too: parenthesised terms of a set operation.
+    if not sql or not re.match(r"(?is)^[\s(]*(SELECT|WITH)\b", sql):
         return ""
     if (
         sql.count("(") != sql.count(")")

@@ -93,3 +93,52 @@ def test_steps_over_a_union_wrap_the_whole_union_and_resolve_the_split_chain():
     assert "CAST(comp_code AS BIGINT) AS comp_code" in outer
     assert "Year.1" not in sql and inner.count("UNION ALL") == 1
     assert "CAST(" not in inner  # the arms are untouched
+
+
+PARENTHESISED_UNION = """let
+    v = Value.NativeQuery(conn, "
+(With base as (SELECT comp_code, SUM(qty) AS qty FROM mart.orders GROUP BY all)
+SELECT * FROM base)
+union
+(SELECT comp_code, SUM(qty) AS qty FROM mart.orders_old GROUP BY all)
+", null, [EnableFolding=true])
+in v"""
+
+
+def test_a_union_of_parenthesised_queries_is_the_base():
+    """Was rejected for not starting with SELECT/WITH, so the view read SELECT * from the
+    last table of the query and every measure summed the wrong table."""
+    sql = _native_base(PARENTHESISED_UNION, "prod.mart.orders")
+    assert sql.startswith("(With base as") and "FROM prod.mart.orders_old" in sql
+
+
+def test_only_parentheses_around_the_whole_statement_are_removed():
+    from src.services.tools.metric_view_utils.m_native_sql import (
+        without_outer_parentheses,
+    )
+
+    assert without_outer_parentheses("((SELECT ')' AS x));") == "SELECT ')' AS x"
+    assert without_outer_parentheses("(SELECT 1) UNION (SELECT 2)") == (
+        "(SELECT 1) UNION (SELECT 2)"
+    )
+
+
+def test_power_query_cut_off_by_config_generation_is_restored_in_full():
+    """Config generation ships at most 2000 characters of a raw M; a long native query then
+    lost its FROM, the table got no view and its measures were summed on another table.
+    """
+    from src.services.tools.uc_metric_view_generator_utils.model_inputs import (
+        restore_full_mquery,
+    )
+
+    full = PARENTHESISED_UNION
+    entries = [
+        {"table_name": "Fact_Orders", "transpiled_sql": full[:40]},
+        {"table_name": "Fact_Other", "transpiled_sql": "SELECT a FROM t"},
+    ]
+    config = {
+        "table_mquery_expressions": {"Fact_Orders": full, "Fact_Other": "let x in x"}
+    }
+    restored = restore_full_mquery(entries, config)
+    assert restored[0]["transpiled_sql"] == full.strip()
+    assert restored[1]["transpiled_sql"] == "SELECT a FROM t"  # compiled SQL stays

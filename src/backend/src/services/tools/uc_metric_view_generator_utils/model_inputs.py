@@ -42,6 +42,26 @@ def _json_source(value: object) -> str | list | dict:
     return []
 
 
+def restore_full_mquery(entries: list[dict], config: dict) -> list[dict]:
+    """Put back the whole Power Query M of entries config generation shipped cut off.
+
+    Config generation caps the raw M of a table it could not compile to SQL, and carries
+    the full text in ``config["table_mquery_expressions"]``. A cut-off copy loses what
+    comes after the cap: the FROM of a long native query (the table then has no view and
+    its measures land on another table) and the later rename and unpivot steps. Only an
+    entry that is a prefix of the full text is replaced; compiled SQL is left as it is.
+    """
+    full_by_table = as_dict(config.get("table_mquery_expressions"))
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        shipped = as_str(entry.get("transpiled_sql"))
+        full = as_str(full_by_table.get(as_str(entry.get("table_name")))).strip()
+        if shipped and len(full) > len(shipped) and full.startswith(shipped):
+            entry["transpiled_sql"] = full
+    return entries
+
+
 def _fact_keys_from_allocations(
     measures: list[dict],
     mquery_tables: dict[str, TableInfo],

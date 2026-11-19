@@ -88,3 +88,29 @@ def native_sql_with_parameters(
             return "", []
     sql = "".join(parts).strip()
     return (sql, sorted(set(assumed))) if sql else ("", [])
+
+
+def without_outer_parentheses(sql: str) -> str:
+    """``sql`` without the parentheses that wrap the whole statement: ``(WITH ... )``.
+
+    Power Query accepts a native query written as one parenthesised expression; as the body
+    of a view it must start with SELECT or WITH. Only a pair that encloses everything is
+    removed (``(a) UNION (b)`` stays); parentheses inside string literals are not counted.
+    """
+    text = (sql or "").strip().rstrip(";").strip()
+    while text.startswith("("):
+        depth, in_str, close = 0, False, -1
+        for i, ch in enumerate(text):
+            if ch == "'":
+                in_str = not in_str
+            elif not in_str and ch == "(":
+                depth += 1
+            elif not in_str and ch == ")":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+        if close != len(text) - 1:
+            break
+        text = text[1:-1].strip()
+    return text
