@@ -6,8 +6,9 @@ not load them. This module builds a mapping per deployed view from what the run 
 
 - ``ucmv_table``: the view the deployer created.
 - ``measures``: every DAX-translated measure of the view (``resolved_measures_by_table``), compared
-  with the Power BI measure it came from (``original_name``, ``pbi_kind: direct``). Base measures
-  (a SUM over a column) have no Power BI measure and are not compared.
+  with the Power BI measure it came from (``original_name``, ``pbi_kind: direct``); every base
+  measure (one aggregate over one fact column) against Power BI aggregating the same column
+  (``pbi_kind: raw_column``).
 - ``time_dimension``: the first period dimension of the view (``fiscper``, ``calmonth``, ...). On a
   join (``dim_calendar.fiscper``) the Power BI table is the joined table (``join_key_map`` alias),
   which the reconciliation reaches through the model relationship.
@@ -79,6 +80,49 @@ def _period(dims: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
     return None
 
 
+# A base measure: one aggregate over one fact column, optionally COALESCE(col, 0).
+_BASE = re.compile(
+    r"^\s*(SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(DISTINCT\s+)?(COALESCE\s*\(\s*)?"
+    r"source\.`?([A-Za-z_]\w*)`?\s*(,\s*0(?:\.0+)?\s*\))?\s*\)\s*$",
+    re.IGNORECASE,
+)
+_PBI_AGGREGATION = {
+    "SUM": "Sum",
+    "AVG": "Average",
+    "MIN": "Min",
+    "MAX": "Max",
+    "COUNT": "Count",
+}
+
+
+def _base_measures(spec: RawMap, table_key: str, taken: set[str]) -> list[RawMap]:
+    """Measures that aggregate one fact column (``SUM(source.x)``) have no Power BI measure,
+    but Power BI can aggregate the same column itself: compared as ``raw_column``."""
+    out: list[RawMap] = []
+    for raw in as_list(spec.get("measures")):
+        m = as_map(raw)
+        name = str(m.get("name") or "")
+        match = _BASE.match(str(m.get("expr") or ""))
+        if not name or name in taken or not match:
+            continue
+        func, distinct, coalesce, column, _zero = match.groups()
+        aggregation = "DistinctCount" if distinct else _PBI_AGGREGATION[func.upper()]
+        entry: dict[str, object] = {
+            "ucmv_measure": name,
+            "pbi_kind": "raw_column",
+            "pbi_column": f"{table_key}[{column}]",
+            "pbi_aggregation": aggregation,
+            "value_format": "raw_number",
+            "tolerance": {"kind": "absolute", "value": 0.001},
+        }
+        if coalesce:
+            entry["null_equals_zero"] = (
+                True  # COALESCE(x, 0): 0 where Power BI shows blank
+            )
+        out.append(entry)
+    return out
+
+
 def _measures(spec: RawMap, resolved: object) -> list[RawMap]:
     in_view = {str(as_map(m).get("name")) for m in as_list(spec.get("measures"))}
     out: list[RawMap] = []
@@ -114,10 +158,13 @@ def assemble_mapping(
     except yaml.YAMLError:
         return None, "the YAML does not parse"
     measures = _measures(spec, resolved)
+    measures += _base_measures(
+        spec, table_key, {str(m["ucmv_measure"]) for m in measures}
+    )
     if not measures:
         return (
             None,
-            "no DAX-translated measure to compare (base measures have no Power BI measure)",
+            "no measure to compare (neither DAX-translated nor a plain column aggregate)",
         )
     dims = _dimensions(spec, table_key, aliases)
     period = _period(dims)

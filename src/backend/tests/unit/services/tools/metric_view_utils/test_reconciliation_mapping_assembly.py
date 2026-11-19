@@ -68,9 +68,15 @@ def test_a_deployed_view_gets_a_loadable_mapping_with_its_translated_measures():
     mapping = load_mapping_dict(mappings["Fact_CO012"])
     assert mapping.binding.ucmv_table == "acme-dev.sb.fact_co012"
     assert mapping.binding.pbi_fact_table == "Fact_CO012"
-    assert [(m.ucmv_measure, m.pbi_measure) for m in mapping.measures] == [
-        ("sc_people_cost", "SC People Cost")
+    assert [(m.ucmv_measure, m.pbi_kind) for m in mapping.measures] == [
+        ("sc_people_cost", "direct"),
+        ("volume", "raw_column"),  # SUM(source.volume): Power BI sums the same column
     ]
+    assert mapping.measures[0].pbi_measure == "SC People Cost"
+    assert (mapping.measures[1].pbi_column, mapping.measures[1].pbi_aggregation) == (
+        "Fact_CO012[volume]",
+        "Sum",
+    )
     td = mapping.binding.time_dimension
     assert (td.ucmv_column, td.pbi_column, td.pbi_table) == (
         "fiscper",
@@ -85,11 +91,6 @@ def test_a_deployed_view_gets_a_loadable_mapping_with_its_translated_measures():
 
 def test_views_that_cannot_be_compared_are_named_with_the_reason():
     no_period = YAML.replace("  - name: fiscper\n    expr: dim_calendar.fiscper\n", "")
-    only_base = {
-        "Fact_CO012": [
-            {"measure_name": "volume", "original_name": "volume", "dax_expression": ""}
-        ]
-    }
     _, gaps = assemble_mappings(
         {"Fact_CO012": no_period},
         RESOLVED,
@@ -98,10 +99,13 @@ def test_views_that_cannot_be_compared_are_named_with_the_reason():
         MODEL,
     )
     assert "no period dimension" in gaps["Fact_CO012"]
-    _, gaps = assemble_mappings(
-        {"Fact_CO012": YAML}, only_base, {"Fact_CO012": "c.s.v"}, JOIN_KEY_MAP, MODEL
+    complex_only = YAML.replace(
+        "SUM(source.volume)", "SUM(source.a) / NULLIF(SUM(source.b), 0)"
     )
-    assert "no DAX-translated measure" in gaps["Fact_CO012"]
+    _, gaps = assemble_mappings(
+        {"Fact_CO012": complex_only}, {}, {"Fact_CO012": "c.s.v"}, JOIN_KEY_MAP, MODEL
+    )
+    assert "no measure to compare" in gaps["Fact_CO012"]
 
 
 def test_the_loop_reconciles_with_the_assembled_mapping_bound_to_the_deployed_view():
@@ -156,12 +160,11 @@ def test_the_loop_reconciles_with_the_assembled_mapping_bound_to_the_deployed_vi
         max_cycles=1,
     )
     (mappings,) = recon.seen
-    assert list(mappings) == ["Fact_CO012"]
+    # Fact_Base has only a column aggregate: compared too now, as raw_column
+    assert sorted(mappings) == ["Fact_Base", "Fact_CO012"]
     assert mappings["Fact_CO012"]["binding"]["ucmv_table"] == "acme-dev.sb.fact_co012"
-    assert (
-        "no DAX-translated measure"
-        in out["cycles"][0]["deploy_failures"]["mapping:Fact_Base"]
-    )
+    assert [m["pbi_kind"] for m in mappings["Fact_Base"]["measures"]] == ["raw_column"]
+    assert "mapping:Fact_Base" not in out["cycles"][0]["deploy_failures"]
 
 
 def test_crew_2b_output_is_complete_for_crew_4():
@@ -242,3 +245,33 @@ def test_crew_2b_output_is_complete_for_crew_4():
         view.mapping["binding"]["pbi_fact_table"] == "Fact_CO012"
         and len(view.untranslatable) == 1
     )
+
+
+def test_base_measure_shapes_are_compared_as_power_bi_column_aggregates():
+    from src.services.tools.metric_view_utils.reconciliation.mapping_assembly import (
+        _base_measures,
+    )
+
+    spec = {
+        "measures": [
+            {"name": "a", "expr": "SUM(COALESCE(source.qty, 0))"},
+            {"name": "b", "expr": "COUNT(DISTINCT source.order_id)"},
+            {"name": "c", "expr": "AVG(source.price)"},
+            {
+                "name": "d",
+                "expr": "SUM(source.x) / SUM(source.y)",
+            },  # not one column: not a base measure
+            {"name": "e", "expr": "SUM(source.z)"},
+        ]
+    }
+    out = {m["ucmv_measure"]: m for m in _base_measures(spec, "Fact", taken={"e"})}
+    assert sorted(out) == ["a", "b", "c"]
+    assert (out["a"]["pbi_aggregation"], out["a"].get("null_equals_zero")) == (
+        "Sum",
+        True,
+    )
+    assert (
+        out["b"]["pbi_aggregation"] == "DistinctCount"
+        and out["c"]["pbi_aggregation"] == "Average"
+    )
+    assert out["a"]["pbi_column"] == "Fact[qty]"
