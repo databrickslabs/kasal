@@ -68,3 +68,28 @@ def test_select_distinct_columns_are_read_and_star_is_unknown():
         "select distinct a, b as c from t"
     ) == ["a", "c"]
     assert MTransformFolder._extract_select_columns("select distinct * from t") == []
+
+
+UNION_FACT = '''let
+    v = Value.NativeQuery(conn, "select fiscper, comp_code, sum(a) as value from md.t1 group by all
+UNION ALL
+select fiscper, comp_code, sum(b) as value from md.t2 group by all", null, [EnableFolding=true]),
+    #"Duplicated Column" = Table.DuplicateColumn(v, "fiscper", "fiscper - Copy"),
+    #"Renamed Columns" = Table.RenameColumns(#"Duplicated Column",{{"fiscper - Copy", "Year"}}),
+    #"Split Column by Position" = Table.SplitColumn(#"Renamed Columns", "Year", Splitter.SplitTextByPositions({0, 4}, false), {"Year.1", "Year.2"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Split Column by Position",{{"Year.1", Int64.Type}, {"Year.2", Int64.Type}, {"comp_code", Int64.Type}}),
+    #"Removed Columns" = Table.RemoveColumns(#"Changed Type",{"Year.2"}),
+    #"Renamed Columns1" = Table.RenameColumns(#"Removed Columns",{{"Year.1", "Year"}})
+in
+    #"Renamed Columns1"'''
+
+
+def test_steps_over_a_union_wrap_the_whole_union_and_resolve_the_split_chain():
+    """The steps were written into the first arm only (arms with different columns), and the
+    cast read the split part Year.1, which no arm has."""
+    sql = _fold_dimension_read("Fact", "prod.md.t1", None, UNION_FACT, {})
+    outer, inner = sql.split("FROM (", 1)
+    assert "CAST(SUBSTRING(fiscper, 1, 4) AS BIGINT) AS Year" in outer
+    assert "CAST(comp_code AS BIGINT) AS comp_code" in outer
+    assert "Year.1" not in sql and inner.count("UNION ALL") == 1
+    assert "CAST(" not in inner  # the arms are untouched

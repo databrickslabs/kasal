@@ -153,15 +153,12 @@ class MTransformFolder:
             )
         }
         if col_exprs or rename_map:
-            arms = self._split_union(base_sql)
-            if len(arms) > 1:
-                base_sql = self._apply_union_inline(
-                    arms, where_conditions, col_exprs, pbi_columns
-                )
-            else:
-                base_sql = self._apply_with_wrapper(
-                    base_sql, where_conditions, col_exprs, pbi_columns
-                )
+            # Power Query steps act on the query's RESULT: over a UNION they wrap the whole
+            # union. Writing them into the first arm only left the arms with different
+            # columns (and a split/renamed column read where it does not exist).
+            base_sql = self._apply_with_wrapper(
+                base_sql, where_conditions, col_exprs, pbi_columns
+            )
         elif where_conditions:
             base_sql = self._apply_where_only(base_sql, where_conditions)
 
@@ -324,23 +321,6 @@ class MTransformFolder:
         if current:
             arms.append("".join(current).strip())
         return [a for a in arms if a]
-
-    def _apply_union_inline(
-        self,
-        arms: list[str],
-        where_conditions: list,
-        col_exprs: dict,
-        pbi_columns: list,
-    ) -> str:
-        """Inline M transforms into each UNION arm's SELECT list."""
-        transformed_arms = []
-        for arm in arms:
-            arm = self._inline_transforms_into_arm(arm, col_exprs)
-            if where_conditions:
-                arm = self._inject_where_into_arm(arm, where_conditions)
-            arm = self._clean_where_clause(arm)
-            transformed_arms.append(arm)
-        return "\nUNION ALL\n".join(transformed_arms)
 
     @staticmethod
     def _inject_where_into_arm(arm_sql: str, where_conditions: list[str]) -> str:
@@ -599,7 +579,7 @@ class MTransformFolder:
 
             elif step.step_type == "SplitColumn" and dup_source:
                 positions_match = re.search(
-                    r"SplitTextByPositions\(\{([\d,\s]+)\}\)",
+                    r"SplitTextByPositions\(\{([\d,\s]+)\}",  # optional ", false" follows
                     step.raw_expression,
                 )
                 names_match = re.search(
@@ -640,6 +620,9 @@ class MTransformFolder:
                     r'\{"([^"]+)",\s*([\w.]+)\.Type\}', step.raw_expression
                 ):
                     col = m.group(1)
+                    # A split part renamed later (Year.1 -> Year) is cast under its final name.
+                    if active_renames.get(col) in col_exprs:
+                        col = active_renames[col]
                     type_name = m.group(2)
                     sql_type = "BIGINT" if type_name == "Int64" else "STRING"
                     if col in col_exprs and col_exprs[col] is not None:
