@@ -175,3 +175,14 @@ def test_source_layer_tool_specs_and_grants_are_checked():
         parse_view_entries(
             json.dumps([{"table": "T", "native_sql": "SELECT 1; DROP TABLE x"}])
         )
+
+
+def test_a_multi_line_expression_is_a_block_scalar():
+    """An LLM translation over three lines, with no quote or colon in it, was written after
+    ``expr:`` as it was: its END sat at column 0 and the whole view no longer parsed."""
+    from src.services.tools.metric_view_utils.yaml_scalars import expr_value
+
+    expr = "CASE WHEN MEASURE(a) = 0 THEN NULL\n     ELSE MEASURE(b) / MEASURE(a)\nEND"
+    text = f"measures:\n  - name: m\n    expr: {expr_value(expr)}\n    comment: c\n"
+    assert yaml.safe_load(text)["measures"][0]["expr"] == expr
+    assert expr_value("SUM(source.a)") == "SUM(source.a)"

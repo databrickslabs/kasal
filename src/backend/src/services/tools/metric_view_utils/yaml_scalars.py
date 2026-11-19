@@ -53,6 +53,13 @@ def one_line(text: str) -> str:
     return _LINE_BREAKS.sub(" ", text or "")
 
 
+def expr_value(expr: str, indent: int = 4) -> str:
+    """An expression as the value of an ``expr:`` key. One that spans several lines is a
+    block scalar: written as it is, its continuation lines keep their own indentation (an
+    ``END`` at column 0), and the YAML no longer parses."""
+    return _yaml_scalar(expr, indent) if _LINE_BREAKS.search(expr) else expr
+
+
 def _yaml_scalar(value: str, indent: int = 0) -> str:
     """Format a string value for safe YAML emission.
 

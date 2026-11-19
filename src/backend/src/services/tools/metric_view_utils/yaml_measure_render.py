@@ -22,7 +22,13 @@ from .yaml_annotations import (
     _usage_suffix,
     _visual_usage_suffix,
 )
-from .yaml_scalars import _yaml_scalar, _yaml_val, one_line, yaml_lines
+from .yaml_scalars import (
+    _yaml_scalar,
+    _yaml_val,
+    expr_value,
+    one_line,
+    yaml_lines,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +83,7 @@ def render_base_measures(
         expr = m.sql_expr
         if expr is None:
             continue
-        lines.append(f"    expr: {expr}")
+        lines.append(f"    expr: {expr_value(expr)}")
         # Use per-table metadata override, fall back to generated
         m_override = measure_overrides.get(m.measure_name, {})
         if m_override.get("comment"):
@@ -146,7 +152,7 @@ def render_dax_measures(
             else:
                 lines.append(f'    expr: "{expr}"')
         else:
-            lines.append(f"    expr: {expr}")
+            lines.append(f"    expr: {expr_value(expr)}")
         if m.window_spec:
             lines.append("    window:")
             lines.append(f"      - order: {m.window_spec['order']}")
@@ -233,7 +239,7 @@ def render_switch_measures(
             # scalar (|-); avoids the unindented-continuation YAML parse error.
             lines.append(f"    expr: {_yaml_scalar(expr, indent=4)}")
         else:
-            lines.append(f"    expr: {expr}")
+            lines.append(f"    expr: {expr_value(expr)}")
         if m.window_spec:
             lines.append("    window:")
             lines.append(f"      - order: {m.window_spec['order']}")
@@ -271,7 +277,7 @@ def render_implicit_measures(
         expr = m.sql_expr
         if expr is None:
             continue
-        lines.append(f"    expr: {expr}")
+        lines.append(f"    expr: {expr_value(expr)}")
         lines.append(
             f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
         )

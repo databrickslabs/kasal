@@ -277,6 +277,7 @@ class MetricViewDeployerTool(BaseTool):
         return {
             "success": False,
             "state": state,
+            "statement_id": statement_id,
             "error": err.get("message", f"State: {state}"),
         }
 

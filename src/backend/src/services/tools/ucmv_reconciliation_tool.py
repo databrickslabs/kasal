@@ -59,6 +59,7 @@ import concurrent.futures
 import contextvars
 import json
 import logging
+import time
 from collections.abc import Coroutine, Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Optional, Type, TypeVar
@@ -225,6 +226,59 @@ def _sql_result_to_df(payload: RawMap) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+_UNFINISHED = ("RUNNING", "PENDING")
+SQL_WAIT_SECONDS = 900
+_SQL_POLL_SECONDS = 5
+
+
+def wait_for_statement(
+    workspace_url: str, statement_id: str, headers: dict
+) -> dict[str, object]:
+    """Poll a SQL statement that is still running until it ends, for up to
+    ``SQL_WAIT_SECONDS``. A statement that does not finish is cancelled, so it does not go
+    on using the warehouse, and reported as not finished (never as "no rows")."""
+    import requests
+
+    from src.services.tools.metric_view_deployer_utils.connection import (
+        retry_connection_reset,
+    )
+
+    url = f"{workspace_url}/api/2.0/sql/statements/{statement_id}"
+    deadline = time.monotonic() + SQL_WAIT_SECONDS
+    state = "RUNNING"
+    data: dict[str, object] = {}
+    while state in _UNFINISHED and time.monotonic() < deadline:
+        time.sleep(_SQL_POLL_SECONDS)
+        data = retry_connection_reset(
+            lambda: requests.get(
+                url, headers=headers, timeout=30
+            )  # host checked by is_trusted_databricks_host in _build_sql_executor — nosemgrep: tmp.databricks.ssrf.requests-user-url
+        ).json()
+        state = str(as_map(data.get("status")).get("state") or "")
+    if state == "SUCCEEDED":
+        return {"success": True, "state": state, "data": data}
+    if state in _UNFINISHED:
+        try:
+            requests.post(
+                f"{url}/cancel", headers=headers, timeout=30
+            )  # same trusted host — nosemgrep: tmp.databricks.ssrf.requests-user-url
+        except requests.RequestException:
+            logger.warning(
+                "[UCMVReconciliation] could not cancel statement %s", statement_id
+            )
+        return {
+            "success": False,
+            "state": state,
+            "error": f"the query did not finish within {SQL_WAIT_SECONDS} s and was cancelled",
+        }
+    error = as_map(as_map(data.get("status")).get("error"))
+    return {
+        "success": False,
+        "state": state,
+        "error": error.get("message", f"State: {state}"),
+    }
+
+
 class _SQLExecutor:
     """``execute(sql) -> (DataFrame, err)`` over the reused
     ``MetricViewDeployerTool._execute_sql_sync``."""
@@ -241,6 +295,12 @@ class _SQLExecutor:
         result = as_map(
             self._exec(sql, self.workspace_url, self.warehouse_id, self.headers)
         )
+        if result.get("state") in _UNFINISHED and result.get("statement_id"):
+            # A wide view over a heavy source takes longer than the deployer waits for a
+            # DDL. Giving up there reported "no rows" for a query that was still running.
+            result = wait_for_statement(
+                self.workspace_url, str(result["statement_id"]), self.headers
+            )
         if not result.get("success"):
             return pd.DataFrame(), result.get("error")
         return _sql_result_to_df(as_map(result.get("data"))), None
