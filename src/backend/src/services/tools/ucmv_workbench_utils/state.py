@@ -33,7 +33,11 @@ def _text(value: object) -> str:
 def _pct(entry: dict[str, object]) -> float:
     value = entry.get("pct_aligned")
     try:
-        return float(value) if isinstance(value, (int, float, str)) and not isinstance(value, bool) else 0.0
+        return (
+            float(value)
+            if isinstance(value, (int, float, str)) and not isinstance(value, bool)
+            else 0.0
+        )
     except ValueError:
         return 0.0
 
@@ -53,7 +57,9 @@ class ViewState:
     yaml: str
     mapping: dict[str, object]
     untranslatable: list[dict[str, object]] = field(default_factory=list)
-    reconciliation: dict[str, dict[str, object]] = field(default_factory=dict)  # measure -> entry
+    reconciliation: dict[str, dict[str, object]] = field(
+        default_factory=dict
+    )  # measure -> entry
     reconciled: bool = False
     deployed: str = ""  # "" | "ok" | error text
     edited: set[str] = field(default_factory=set)
@@ -78,7 +84,16 @@ class Workbench:
         for item in items if isinstance(items, list) else []:
             if isinstance(item, dict) and str(item.get("table_key")) in views:
                 views[str(item.get("table_key"))].untranslatable.append(item)
-        return cls(views)
+        bench = cls(views)
+        # Crew 2b already compared the views with Power BI: start from its result, so the
+        # gaps below 100 % are known without reconciling every view again.
+        recon = output.get("reconciliation")
+        recon_views = recon.get("views") if isinstance(recon, dict) else None
+        for key, data in (recon_views.items() if isinstance(recon_views, dict) else []):
+            measures = data.get("measures") if isinstance(data, dict) else None
+            if str(key) in views and isinstance(measures, dict) and measures:
+                bench.record_reconciliation(str(key), measures)
+        return bench
 
     # ── reads ──────────────────────────────────────────────────────────────
 
@@ -88,7 +103,9 @@ class Workbench:
         match = [k for k in self.views if _norm(k) == _norm(key)]
         if len(match) == 1:
             return self.views[match[0]]
-        raise edits.EditError(f"no view {key!r}; views: {', '.join(sorted(self.views))}")
+        raise edits.EditError(
+            f"no view {key!r}; views: {', '.join(sorted(self.views))}"
+        )
 
     def _is_closed(self, key: str, measure: str) -> bool:
         if (key, measure) in self.classified:
@@ -103,7 +120,11 @@ class Workbench:
         covered = {_norm(n) for n in names}
         entries = v.mapping.get("measures")
         for m in entries if isinstance(entries, list) else []:
-            if isinstance(m, dict) and m.get("ucmv_measure") in names and m.get("pbi_kind") != "unresolved":
+            if (
+                isinstance(m, dict)
+                and m.get("ucmv_measure") in names
+                and m.get("pbi_kind") != "unresolved"
+            ):
                 covered.add(_norm(_text(m.get("pbi_measure"))))
         return covered
 
@@ -118,7 +139,9 @@ class Workbench:
         return out
 
     def _below_100(self, v: ViewState) -> list[tuple[str, dict[str, object]]]:
-        return [(m, e) for m, e in v.reconciliation.items() if not self._is_closed(v.key, m)]
+        return [
+            (m, e) for m, e in v.reconciliation.items() if not self._is_closed(v.key, m)
+        ]
 
     def overview(self) -> list[dict[str, object]]:
         rows = []
@@ -153,7 +176,11 @@ class Workbench:
             for i in self._open_untranslated(v)
         ]
         below = [
-            {"measure": m, "pct_aligned": e.get("pct_aligned"), "classification": e.get("classification")}
+            {
+                "measure": m,
+                "pct_aligned": e.get("pct_aligned"),
+                "classification": e.get("classification"),
+            }
             for m, e in self._below_100(v)
         ]
         return {
@@ -168,14 +195,27 @@ class Workbench:
     def show(self, key: str, measure: Optional[str] = None) -> dict[str, object]:
         v = self.view(key)
         if not measure:
-            return {"view": v.key, "yaml": v.yaml, "measures": edits.measure_names(v.yaml)}
+            return {
+                "view": v.key,
+                "yaml": v.yaml,
+                "measures": edits.measure_names(v.yaml),
+            }
         entry = edits.measure_entry(v.yaml, measure)
         dax = next(
-            (_text(i.get("dax_expression")) for i in v.untranslatable if _norm(_text(i.get("original_name"))) == _norm(measure)),
+            (
+                _text(i.get("dax_expression"))
+                for i in v.untranslatable
+                if _norm(_text(i.get("original_name"))) == _norm(measure)
+            ),
             "",
         )
-        return {"view": v.key, "measure": measure, "entry": entry, "dax": dax[:_MAX_DAX],
-                "reconciliation": v.reconciliation.get(measure)}
+        return {
+            "view": v.key,
+            "measure": measure,
+            "entry": entry,
+            "dax": dax[:_MAX_DAX],
+            "reconciliation": v.reconciliation.get(measure),
+        }
 
     # ── writes ─────────────────────────────────────────────────────────────
 
@@ -192,7 +232,12 @@ class Workbench:
     ) -> str:
         v = self.view(key)
         v.yaml, replaced = edits.set_measure(
-            v.yaml, name, expr, display_name=display_name or None, fmt=fmt, comment=comment or None
+            v.yaml,
+            name,
+            expr,
+            display_name=display_name or None,
+            fmt=fmt,
+            comment=comment or None,
         )
         if pbi_measure:
             v.mapping = edits.upsert_mapping_measure(v.mapping, name, pbi_measure)
@@ -212,22 +257,36 @@ class Workbench:
     def classify(self, key: str, measure: str, classification: str, note: str) -> None:
         v = self.view(key)
         if classification not in CLASSIFICATIONS:
-            raise edits.EditError(f"classification must be one of {', '.join(CLASSIFICATIONS)}")
+            raise edits.EditError(
+                f"classification must be one of {', '.join(CLASSIFICATIONS)}"
+            )
         if not note.strip():
-            raise edits.EditError("a classification needs a note (what was checked, why it is not a translation error)")
-        self.classified[(v.key, measure)] = {"classification": classification, "note": note.strip()}
+            raise edits.EditError(
+                "a classification needs a note (what was checked, why it is not a translation error)"
+            )
+        self.classified[(v.key, measure)] = {
+            "classification": classification,
+            "note": note.strip(),
+        }
         self.log.append(f"classified {v.key}.{measure} as {classification}")
 
-    def record_reconciliation(self, key: str, measures: dict[str, dict[str, object]]) -> None:
+    def record_reconciliation(
+        self, key: str, measures: dict[str, dict[str, object]]
+    ) -> None:
         v = self.view(key)
-        v.reconciliation = {str(m): dict(e) for m, e in measures.items() if isinstance(e, dict)}
+        v.reconciliation = {
+            str(m): dict(e) for m, e in measures.items() if isinstance(e, dict)
+        }
         v.reconciled = True
 
     # ── report ─────────────────────────────────────────────────────────────
 
     def report(self) -> dict[str, object]:
         views = self.overview()
-        open_total = sum(_count(r.get("untranslated_open")) + _count(r.get("below_100_open")) for r in views)
+        open_total = sum(
+            _count(r.get("untranslated_open")) + _count(r.get("below_100_open"))
+            for r in views
+        )
         unreconciled = [r["view"] for r in views if not r["reconciled"]]
         return {
             "done": open_total == 0 and not unreconciled,
@@ -235,7 +294,8 @@ class Workbench:
             "views_not_reconciled": unreconciled,
             "views": views,
             "classified": [
-                {"view": k, "measure": m, **c} for (k, m), c in sorted(self.classified.items())
+                {"view": k, "measure": m, **c}
+                for (k, m), c in sorted(self.classified.items())
             ],
             "changes": list(self.log),
         }
