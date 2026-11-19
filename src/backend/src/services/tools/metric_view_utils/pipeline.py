@@ -933,6 +933,7 @@ class MetricViewPipeline:
             naming=naming,
             raw_by_key=raw_source_by_key(self.all_specs, self.mquery_tables),
             calc_columns=calc_columns_by_key(self.config),
+            join_key_map=self.config.get("join_key_map"),
         )
         self._limitations["source_layer_binding"] = self.source_layer_binding.to_dict()
         return bound

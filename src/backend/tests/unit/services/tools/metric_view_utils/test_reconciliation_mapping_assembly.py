@@ -299,3 +299,44 @@ def test_a_joined_period_is_compared_on_the_facts_own_join_key():
         MODEL,
     )
     assert mappings["Fact_CO012"]["time_dimension"]["pbi_column"] == "period_key"
+
+
+def test_a_view_is_not_compared_by_a_fact_column_its_measures_filter_on():
+    """A DAX measure that sets Fact[version] = "0000" returns its value on every version row;
+    the metric view's FILTER returns it on that row only. Compared by version, every such
+    measure differed on the other rows although it was translated correctly."""
+    text = """version: '1.1'
+source: prod.fm.pl
+joins:
+  - name: dim_scenario
+    source: prod.md.scenario
+    "on": source.version = dim_scenario.key
+dimensions:
+  - name: version
+    expr: source.version
+  - name: scenario
+    expr: dim_scenario.label
+  - name: fiscper
+    expr: source.fiscper
+measures:
+  - name: cost_actuals
+    expr: SUM(source.value) FILTER (WHERE source.version = '0000' AND kind IN ('a'))
+"""
+    resolved = {
+        "Fact_PL": [
+            {
+                "measure_name": "cost_actuals",
+                "original_name": "Cost",
+                "dax_expression": "x",
+            }
+        ]
+    }
+    mappings, _ = assemble_mappings(
+        {"Fact_PL": text},
+        resolved,
+        {"Fact_PL": "c.s.v"},
+        {"Scenario": {"alias": "dim_scenario"}},
+        MODEL,
+    )
+    assert mappings["Fact_PL"]["binding"]["default_dimension"] == "scenario"
+    assert mappings["Fact_PL"]["dimensions"]["scenario"]["pbi_dim_table"] == "Scenario"

@@ -168,15 +168,22 @@ def _fold_dimension_read(
             for name in assumed
         )
     base = native or f"SELECT * FROM {_bq(src_tbl)}"
-    cols = getattr(info, "group_by_columns", None) if info is not None else None
     try:
-        folded = folder.fold_from_mquery(base, m_expression, cols)
+        # No column list: the parser's group-by names are not the table's columns, and
+        # the folder keeps every column of a read whose columns it does not know.
+        folded = folder.fold_from_mquery(base, m_expression, None)
     except Exception as exc:
-        logger.debug(
-            "[source_layer] transform fold failed for %s: %s",
+        # Never silent: without its Power Query steps the view holds other values
+        # (codes not replaced, versions not renamed) and its numbers differ.
+        logger.warning(
+            "[source_layer] Power Query steps of %s were not applied: %s",
             key,
             exc,
             exc_info=True,
+        )
+        fold_todos.setdefault(key, []).append(
+            f"Power Query steps not applied ({type(exc).__name__}); "
+            "the view reads the native query as it is"
         )
         return native
     if getattr(folder, "transform_todos", None):

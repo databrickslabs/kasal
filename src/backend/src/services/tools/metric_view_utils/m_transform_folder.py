@@ -641,18 +641,24 @@ class MTransformFolder:
                         col_exprs[col] = f"CAST({col} AS {sql_type})"
 
             elif step.step_type == "TransformColumns":
+                # The entry may carry a type after the function: {"c", each ..., type text}.
                 m = re.search(
-                    r'\{"([^"]+)",\s*each\s+if\s+Text\.StartsWith\(_,\s*"([^"]+)"\)\s+then\s+"([^"]+)"\s+else\s+_\}',
+                    r'\{"([^"]+)",\s*each\s+if\s+Text\.StartsWith\(_,\s*"([^"]+)"\)\s+then\s+"([^"]+)"\s+else\s+_\s*(?:,\s*[\w. ]+)?\}',
                     step.raw_expression,
                 )
                 if m:
                     col = m.group(1)
                     prefix = m.group(2)
                     replacement = m.group(3)
+                    base = col_exprs.get(col) or col
                     # M text inside SQL quotes: escaped literals, never raw '{v}'.
                     col_exprs[col] = (
-                        f"CASE WHEN {col} LIKE {_sql_str_literal(prefix + '%')} "  # literals escaped — nosemgrep: tmp.databricks.sql-injection.fstring-like
-                        f"THEN {_sql_str_literal(replacement)} ELSE {col} END"
+                        f"CASE WHEN {base} LIKE {_sql_str_literal(prefix + '%')} "  # literals escaped — nosemgrep: tmp.databricks.sql-injection.fstring-like
+                        f"THEN {_sql_str_literal(replacement)} ELSE {base} END"
+                    )
+                else:  # a value transform not reproduced: named, never dropped silently
+                    self.__dict__.setdefault("transform_todos", []).append(
+                        _todo_note(step)
                     )
 
         for col in remove_set:
@@ -686,7 +692,9 @@ class MTransformFolder:
         base_cols = self._extract_select_columns(base_sql)
         if not base_cols:
             base_cols = [
-                c["name"] for c in pbi_columns if c.get("columnType") != "Calculated"
+                c["name"]
+                for c in pbi_columns
+                if isinstance(c, dict) and c.get("columnType") != "Calculated"
             ]
 
         remove_set = {k for k, v in col_exprs.items() if v is None}

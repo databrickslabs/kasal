@@ -163,6 +163,47 @@ def _measures(spec: RawMap, resolved: object) -> list[RawMap]:
     return out
 
 
+_FILTER_CLAUSE = re.compile(r"FILTER\s*\(\s*WHERE\b(.*)\)", re.IGNORECASE | re.DOTALL)
+_FILTERED_COLUMN = re.compile(
+    r"(?:\bsource\.)?`?\b([A-Za-z_]\w*)`?\s*(?:=|<>|!=|<|>|\b(?:NOT\s+)?IN\b|\bLIKE\b|\bIS\b)",
+    re.IGNORECASE,
+)
+
+
+def _filtered_fact_columns(spec: RawMap) -> set[str]:
+    """Fact columns the view's measures filter on (``FILTER (WHERE version = '0000')``)."""
+    columns: set[str] = set()
+    for raw in as_list(spec.get("measures")):
+        clause = _FILTER_CLAUSE.search(str(as_map(raw).get("expr") or ""))
+        if clause:
+            columns.update(c.lower() for c in _FILTERED_COLUMN.findall(clause.group(1)))
+    return columns
+
+
+def _default_dimension(
+    spec: RawMap, table_key: str, others: list[tuple[str, str, str]]
+) -> tuple[str, str, str]:
+    """The dimension to compare by: company / country / plant / region when the view has
+    one, and never a fact column its measures filter on while another dimension exists.
+
+    A DAX measure that sets ``Fact[version] = "0000"`` returns its value on every version
+    row; the metric view's FILTER returns it on the "0000" row only. Compared by that column
+    such a measure differs on every other row although it is translated correctly."""
+    filtered = _filtered_fact_columns(spec)
+
+    def on_filtered_column(dim: tuple[str, str, str]) -> bool:
+        return dim[1] == table_key and dim[2].lower() in filtered
+
+    def preference(dim: tuple[str, str, str]) -> int:
+        name = dim[0].lower()
+        return next(
+            (i for i, want in enumerate(_PREFERRED_DIMENSIONS) if want in name),
+            len(_PREFERRED_DIMENSIONS),
+        )
+
+    return min(others, key=lambda dim: (on_filtered_column(dim), preference(dim)))
+
+
 def _alias_of(spec: RawMap, period: tuple[str, str, str]) -> str:
     """The join alias the period dimension reads (``cal`` in ``cal.fiscper``), "" for source."""
     for raw in as_list(spec.get("dimensions")):
@@ -206,10 +247,7 @@ def assemble_mapping(
     others = [d for d in dims if d[0] != period[0]]
     if not others:
         return None, "no second dimension to compare by"
-    default = next(
-        (d for want in _PREFERRED_DIMENSIONS for d in others if want in d[0].lower()),
-        others[0],
-    )
+    default = _default_dimension(spec, table_key, others)
     time_dimension: dict[str, object] = {
         "grain": "month",
         "ucmv": {"mode": "column", "name": period[0]},

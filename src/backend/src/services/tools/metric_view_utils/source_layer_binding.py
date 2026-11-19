@@ -128,12 +128,22 @@ def raw_source_by_key(
     return out
 
 
-def resolve_join_target(source: str, raw_by_key: Mapping[str, str]) -> str | None:
+def _same_table(a: str, b: str) -> bool:
+    """Two names of one table: equal, or one the dotted tail of the other
+    (``schema.table`` and ``catalog.schema.table``)."""
+    return a == b or a.endswith("." + b) or ("." in a and b.endswith("." + a))
+
+
+def resolve_join_target(
+    source: str, raw_by_key: Mapping[str, str], alias_table: str | None = None
+) -> str | None:
     """The PBI table a join's ``source`` reads, or ``None``.
 
     A join source that is inline SQL (a dedup subquery, a native query) is not a
     table reference and resolves to nothing. A plain name resolves when exactly
-    one PBI table's raw source equals it, or ends with it (a shorter, dotted form).
+    one PBI table's raw source is that table. When several PBI tables read it (two
+    calendars over one calendar table), ``alias_table`` decides: the PBI table the
+    join's alias belongs to.
     """
     text = (source or "").strip()
     if not text or "(" in text or any(ch.isspace() for ch in text):
@@ -142,9 +152,21 @@ def resolve_join_target(source: str, raw_by_key: Mapping[str, str]) -> str | Non
     hits = [
         key
         for key, raw in raw_by_key.items()
-        if (name := normalized_name(raw)) == want or name.endswith("." + want)
+        if _same_table(normalized_name(raw), want)
     ]
-    return hits[0] if len(hits) == 1 else None
+    if len(hits) == 1:
+        return hits[0]
+    return alias_table if alias_table in hits else None
+
+
+def unique_alias_tables(join_key_map: Mapping[str, object]) -> dict[str, str]:
+    """``{join alias: PBI table}`` for the aliases exactly one PBI table uses."""
+    by_alias: dict[str, list[str]] = {}
+    for table, raw in join_key_map.items():
+        alias = str(raw.get("alias") or "") if isinstance(raw, Mapping) else ""
+        if alias:
+            by_alias.setdefault(alias, []).append(str(table))
+    return {alias: tables[0] for alias, tables in by_alias.items() if len(tables) == 1}
 
 
 def placeholder_join_target(source: str, views: Mapping[str, str]) -> str | None:
@@ -271,6 +293,7 @@ def _rebind_joins(
     views: Mapping[str, str],
     raw_by_key: Mapping[str, str],
     report: SourceLayerBinding,
+    alias_tables: Mapping[str, str] | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """Point each join at its dimension's view. Returns the joins and an
     alias -> PBI-table map for the joins that were rebound."""
@@ -281,7 +304,9 @@ def _rebind_joins(
     for join in spec.joins:
         alias = str(join.get("name", ""))
         source = str(join.get("source", ""))
-        target = resolve_join_target(source, raw_by_key)
+        target = resolve_join_target(
+            source, raw_by_key, (alias_tables or {}).get(alias)
+        )
         if target is None or target not in views:
             target = placeholder_join_target(source, views) or target
         if target is not None and target in views:
@@ -328,8 +353,9 @@ def _bind_spec(
     raw_by_key: Mapping[str, str],
     calc_columns: Mapping[str, frozenset[str]],
     report: SourceLayerBinding,
+    alias_tables: Mapping[str, str] | None = None,
 ) -> MetricViewSpec:
-    joins, alias_to_key = _rebind_joins(spec, views, raw_by_key, report)
+    joins, alias_to_key = _rebind_joins(spec, views, raw_by_key, report, alias_tables)
     if key not in views:
         report.fallback_facts[key] = _fallback_reason(key, source_layer)
         bound = replace(spec, joins=joins)
@@ -359,6 +385,7 @@ def bind_metric_views(
     naming: str,
     raw_by_key: Mapping[str, str],
     calc_columns: Mapping[str, frozenset[str]],
+    join_key_map: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, MetricViewSpec], SourceLayerBinding]:
     """Rebind every metric view onto the source-layer views.
 
@@ -374,6 +401,7 @@ def bind_metric_views(
         for key in sorted(usable)
     }
     report = SourceLayerBinding(naming=naming, views=dict(views))
+    alias_tables = unique_alias_tables(join_key_map or {})
     bound: dict[str, MetricViewSpec] = {}
     for key, spec in all_specs.items():
         bound[key] = _bind_spec(
@@ -384,5 +412,6 @@ def bind_metric_views(
             raw_by_key=raw_by_key,
             calc_columns=calc_columns,
             report=report,
+            alias_tables=alias_tables,
         )
     return bound, report
