@@ -313,3 +313,72 @@ def test_the_result_keeps_each_views_best_cycle():
         "B": {"pct": 100.0, "cycle": 1},
     }
     assert result.final_reconciliation["overall"]["overall_cell_pct"] == 97.5
+
+
+def _deployer_failing_on(*bad):
+    calls = []
+
+    def redeploy(batch):
+        calls.append(batch)
+        failures, deployed = {}, []
+        for key, text in batch.items():
+            names = _names(text, "measures")
+            if any(b in names for b in bad):
+                failures[key] = (
+                    "[NESTED_AGGREGATE_FUNCTION] It is not allowed to use an aggregate function in the argument of another aggregate function."
+                )
+            else:
+                deployed.append(key)
+        return {"deployed_views": deployed, "failures": failures}
+
+    return redeploy, calls
+
+
+def test_an_unnamed_failure_is_traced_to_its_measure_by_bisection():
+    from src.services.tools.ucmv_recon_heal import bisect_measure
+
+    redeploy, calls = _deployer_failing_on("fte")
+    text, removed = bisect_measure(
+        redeploy, "Fact", YAML, "[NESTED_AGGREGATE_FUNCTION] ..."
+    )
+    assert removed == ["measure fte (found by bisection)"]
+    assert _names(text, "measures") == ["volume", "dif_actual"]
+    assert len(calls) <= 4  # a few sandbox deploys, not one per measure
+
+
+def test_two_broken_measures_are_found_one_per_round():
+    redeploy, _ = _deployer_failing_on("fte", "dif_actual")
+    verdict = {
+        "ok": False,
+        "error": "no view deployed",
+        "failures": {"Fact": "[NESTED_AGGREGATE_FUNCTION] It is not allowed ..."},
+    }
+    merged, healed_yaml, healed = heal_failed_views(redeploy, {"Fact": YAML}, verdict)
+    assert merged["deployed_views"] == ["Fact"]
+    assert _names(healed_yaml["Fact"], "measures") == ["volume"]
+    assert sorted(i.split(" (")[0] for i in healed["Fact"]) == [
+        "measure dif_actual",
+        "measure fte",
+    ]
+
+
+def test_bisection_does_not_guess_on_source_errors_or_non_measure_failures():
+    from src.services.tools.ucmv_recon_heal import bisect_measure
+
+    redeploy, calls = _deployer_failing_on("fte")
+    assert bisect_measure(redeploy, "Fact", YAML, "[TABLE_OR_VIEW_NOT_FOUND] x") == (
+        None,
+        [],
+    )
+    assert calls == []
+
+    def always_fails(batch):
+        return {
+            "deployed_views": [],
+            "failures": {k: "[MISSING_AGGREGATION] x" for k in batch},
+        }
+
+    assert bisect_measure(always_fails, "Fact", YAML, "[MISSING_AGGREGATION] x") == (
+        None,
+        [],
+    )

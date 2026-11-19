@@ -185,6 +185,68 @@ def heal_view(yaml_text: str, error: str) -> tuple[str | None, list[str]]:
     return yaml.safe_dump(view.spec, sort_keys=False, allow_unicode=True), view.removed
 
 
+_SOURCE_ERRORS = (
+    "TABLE_OR_VIEW_NOT_FOUND",
+    "NO_SUCH_CATALOG",
+    "SCHEMA_NOT_FOUND",
+    "PERMISSION_DENIED",
+)
+MAX_BISECT_DEPLOYS = 8
+
+
+def bisect_measure(
+    redeploy: Callable[[Mapping[str, str]], RawMap],
+    key: str,
+    yaml_text: str,
+    error: str,
+) -> tuple[str | None, list[str]]:
+    """The YAML without the one measure that makes the view fail, found by deploying halves.
+
+    For errors that name no measure (``NESTED_AGGREGATE_FUNCTION``, ``MISSING_AGGREGATION``):
+    the view is deployed with half its measures; the half that fails holds the culprit, down
+    to one measure, which is removed. Costs about log2(measures) deploys of this view into the
+    sandbox, capped at MAX_BISECT_DEPLOYS. ``(None, [])`` when the error is about the source,
+    the view has a single measure, or no single measure explains the failure.
+    """
+    if any(code in error for code in _SOURCE_ERRORS):
+        return None, []
+    try:
+        spec = dict(as_map(yaml.safe_load(yaml_text)))
+    except yaml.YAMLError:
+        return None, []
+    measures = [dict(as_map(m)) for m in as_list(spec.get("measures"))]
+    if len(measures) < 2:
+        return None, []
+
+    def deploys(subset: list[dict[str, object]]) -> bool:
+        trial = yaml.safe_dump(
+            {**spec, "measures": subset}, sort_keys=False, allow_unicode=True
+        )
+        outcome = redeploy({key: trial})
+        return key in {str(v) for v in as_list(outcome.get("deployed_views"))}
+
+    candidates, budget = measures, MAX_BISECT_DEPLOYS
+    while len(candidates) > 1 and budget > 1:
+        half = candidates[: len(candidates) // 2]
+        budget -= 1
+        candidates = candidates[len(half) :] if deploys(half) else half
+    if len(candidates) != 1 or budget < 1:
+        return None, []
+    culprit = candidates[0]
+    rest = [m for m in measures if m is not culprit]
+    if not deploys(rest):
+        # Another culprit, or the failure is not a measure's: remove this one only if it is
+        # broken on its own while another measure alone deploys; the next round goes on.
+        other = next((m for m in rest), None)
+        if other is None or deploys([culprit]) or not deploys([other]):
+            return None, []
+    logger.info("[UCMV] bisect: %s fails on measure %s", key, culprit.get("name"))
+    healed = yaml.safe_dump(
+        {**spec, "measures": rest}, sort_keys=False, allow_unicode=True
+    )
+    return healed, [f"measure {culprit.get('name')} (found by bisection)"]
+
+
 def heal_failed_views(
     redeploy: Callable[[Mapping[str, str]], RawMap],
     yaml_specs: Mapping[str, object],
@@ -204,6 +266,9 @@ def heal_failed_views(
                 continue
             current = healed_yaml.get(key) or str(yaml_specs.get(key) or "")
             text, removed = heal_view(current, reason)
+            if text is None:
+                # The error names nothing removable: find the measure by bisection.
+                text, removed = bisect_measure(redeploy, key, current, reason)
             if text is None:
                 continue
             short = reason.split("SQLSTATE")[0].strip()[:160]
