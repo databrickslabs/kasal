@@ -251,7 +251,7 @@ class TestExtractSourceTable:
         Regression for OTC Fact_NPS (resolved to the commented `datalake…v2`)."""
         m = (
             "let\n"
-            '   // Source = Sql.Database("sql-datamesh...azuresynapse.net", "datalake"),\n'
+            '   // Source = Sql.Database("sql-example...azuresynapse.net", "datalake"),\n'
             '   // udm_x = Source{[Schema="acme_datamart_cust_exp",Item="cust_exp_fact_data_v2"]}[Data],\n'
             '     Source = Value.NativeQuery(Databricks.Catalogs("h","p",'
             '[Catalog="acme_datamart_cust_exp", Database=null]){[Name="acme_datamart_cust_exp",Kind="Database"]}[Data], '

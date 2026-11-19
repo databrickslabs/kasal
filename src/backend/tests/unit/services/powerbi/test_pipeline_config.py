@@ -444,7 +444,7 @@ class TestReportIdAutoDiscovery:
         rid = self._discover(
             [
                 {"id": "u", "name": "Usage Metrics Report", "datasetId": "ds1"},
-                {"id": "real", "name": "SC - Total Supply Chain", "datasetId": "ds1"},
+                {"id": "real", "name": "Sales Overview", "datasetId": "ds1"},
             ]
         )
         assert rid == "real"

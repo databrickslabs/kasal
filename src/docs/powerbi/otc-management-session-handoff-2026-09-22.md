@@ -1,5 +1,7 @@
 # PBI→UCMV: otc_management session handoff (2026-09-22)
 
+**Status: internal.** A developer handoff for one debugging session; not published with the app docs.
+
 Handoff for whoever picks up this branch next. Covers a single continuous
 debugging + feature session on `feat/pbi-migration-visual-referance-and-improved-translation-and-mapping`,
 building on work already on the branch before this session started (visual

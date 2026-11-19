@@ -19,7 +19,7 @@
   "src/backend/src/services/agent_builder/crew_preparation.py": 1301,
   "src/backend/src/services/agent_builder/process_executor.py": 2387,
   "src/backend/src/services/chat/dispatcher.py": 1808,
-  "src/backend/src/services/chat/service.py": 1728,
+  "src/backend/src/services/chat/service.py": 1723,
   "src/backend/src/services/converters/formats/powerbi/dax_parser.py": 881,
   "src/backend/src/services/converters/formats/sql/helpers/sql_structures.py": 1052,
   "src/backend/src/services/databricks/lakebase/management.py": 875,

@@ -29,6 +29,7 @@ from src.services.execution.runtime import (
     register_tool_hooks,
     unregister_tool_hooks,
 )
+from src.services.trace.tool_args import observable_tool_args
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,9 @@ async def _prior_decision(
 
 def _safe_args(kwargs: Dict[str, Any], max_len: int = 500) -> Dict[str, str]:
     safe = {}
-    for key, value in (kwargs or {}).items():
+    # The record is stored and shown to approvers: credentials in the call are masked.
+    masked = observable_tool_args(dict(kwargs or {}))
+    for key, value in masked.items() if isinstance(masked, dict) else ():
         try:
             text = str(value)
         except Exception:

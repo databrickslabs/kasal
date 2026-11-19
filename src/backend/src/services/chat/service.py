@@ -30,6 +30,7 @@ from src.services.execution.finalization import (
     persist_execution_outcome,
 )
 from src.services.settings.engine_settings import setting as engine_setting
+from src.services.trace.tool_args import tool_args_text
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -520,23 +521,12 @@ class LightAgentService:
                     )
                     return False
 
-                def _args_str(event: Any) -> str:
-                    ta = getattr(event, "tool_args", None)
-                    if ta is None:
-                        return ""
-                    if isinstance(ta, str):
-                        return ta
-                    try:
-                        return json.dumps(ta, default=str)
-                    except Exception:  # noqa: BLE001
-                        return str(ta)
-
                 def _on_tool_started(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
-                        args = _args_str(event)
+                        args = tool_args_text(getattr(event, "tool_args", None))
                         _log(f"Using tool: {tool_name}({args[:200]})")
                         _schedule_trace(
                             _base_trace(
@@ -565,7 +555,10 @@ class LightAgentService:
                             from src.services.decks.finish_slide import capture_evidence
 
                             capture_evidence(
-                                _slide_evidence, tool_name, _args_str(event), content
+                                _slide_evidence,
+                                tool_name,
+                                tool_args_text(getattr(event, "tool_args", None)),
+                                content,
                             )
                         # Cap the stored/streamed trace so a large tool dump (e.g. a
                         # full web-search payload) doesn't bloat the run record. The
@@ -577,7 +570,7 @@ class LightAgentService:
                             content = content[:max_len] + "…[truncated]"
                         output: Dict[str, Any] = {
                             "tool_name": tool_name,
-                            "input": _args_str(event),
+                            "input": tool_args_text(getattr(event, "tool_args", None)),
                             "content": content,
                             # Whether this answer came from an earlier run's
                             # recording. The crew path gets it for free via the
@@ -625,7 +618,9 @@ class LightAgentService:
                                 f"{norm}_error",
                                 {
                                     "tool_name": tool_name,
-                                    "input": _args_str(event),
+                                    "input": tool_args_text(
+                                        getattr(event, "tool_args", None)
+                                    ),
                                     "content": err,
                                     "error": err,
                                 },

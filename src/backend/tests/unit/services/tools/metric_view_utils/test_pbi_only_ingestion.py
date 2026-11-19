@@ -27,8 +27,8 @@ from src.services.tools.metric_view_utils.pbi_only_ingestion import (
 MQUERY_EXCEL_SHAREPOINT = """
 let
     Source = SharePoint.Files("https://acme.sharepoint.example.com/sites/Supply", [ApiVersion = 15]),
-    #"OTC inactiveness" = Source{[Name="OTC inactiveness.xlsx", Kind="File"]}[Content],
-    #"Imported Excel" = Excel.Workbook(#"OTC inactiveness", null, true),
+    #"Inactive accounts" = Source{[Name="Inactive accounts.xlsx", Kind="File"]}[Content],
+    #"Imported Excel" = Excel.Workbook(#"Inactive accounts", null, true),
     Data = #"Imported Excel"{[Item="Sheet1",Kind="Sheet"]}[Data]
 in
     Data
@@ -192,9 +192,9 @@ def test_excel_source_has_description():
 
 
 def test_sharepoint_url_extracted():
-    mq = 'let Source = SharePoint.Files("https://mycompany.sharepoint.com/sites/OTC") in Source'
+    mq = 'let Source = SharePoint.Files("https://example.sharepoint.com/sites/Data") in Source'
     result = detect_pbi_only_source(mq)
-    assert result.url == "https://mycompany.sharepoint.com/sites/OTC"
+    assert result.url == "https://example.sharepoint.com/sites/Data"
 
 
 def test_web_url_extracted():
@@ -213,7 +213,7 @@ def test_build_ingestion_task_excel():
     source = PBIOnlySource(
         kind=PBIOnlyKind.EXCEL_WORKBOOK,
         url="https://acme.sharepoint.example.com/sites/Supply",
-        description="Excel on SharePoint: OTC inactiveness.xlsx",
+        description="Excel on SharePoint: Inactive accounts.xlsx",
     )
     task = build_ingestion_task(
         "SKU Active Or NotActive",

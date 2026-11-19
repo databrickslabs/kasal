@@ -139,9 +139,9 @@ def _measure_rows(
                 in_kasal=kasal_status.get(name, "no") if kasal_status else "",
                 drawn=_pages(seeds.drawn, key),
                 filter_use=_pages(seeds.filters, key),
-                load_bearing_for=_pages(closure.used_by, key)
-                if reach == "indirect"
-                else "",
+                load_bearing_for=(
+                    _pages(closure.used_by, key) if reach == "indirect" else ""
+                ),
             )
         )
     return rows
@@ -248,7 +248,9 @@ def _role_rows(model: Model) -> list[dict]:
         reason = f"row-level security in {len(roles[table])} role(s): decide the Unity Catalog row filter that replaces it"
         if reads[table]:
             reason += f"; reads {', '.join(sorted(reads[table]))}"
-        row = _row("rls_filter", table, "; ".join(sorted(roles[table])), "review", reason)
+        row = _row(
+            "rls_filter", table, "; ".join(sorted(roles[table])), "review", reason
+        )
         # Not a CSV column: the role filters' DAX, for the Source Layer Manager's value_access suggestions.
         row["dax"] = "\n".join(sorted(set(dax_by_table[table])))
         rows.append(row)
@@ -329,13 +331,23 @@ def _live_columns(seeds: Seeds, closure: Closure, kept: set[str]) -> set[str]:
     return live
 
 
+def _csv_cell(value: object) -> object:
+    """A cell a spreadsheet opens as text: a model name starting with = + - @ (or a tab or
+    carriage return) would otherwise run as a formula on the reader's machine."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def scope_csv(rows: Iterable[Mapping[str, str]]) -> str:
     buffer = io.StringIO()
     writer = csv.DictWriter(
         buffer, fieldnames=SCOPE_FIELDS, lineterminator="\n", extrasaction="ignore"
     )
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(
+        {key: _csv_cell(value) for key, value in row.items()} for row in rows
+    )
     return buffer.getvalue()
 
 
@@ -422,7 +434,14 @@ def build_report_scope(
     )
     rows = build_scope(model, seeds, closure, kasal_status)
     context = report_context(
-        model, seeds, closure, report, rows, scan_result=scan_result, dataset_id=dataset_id, report_id=report_id
+        model,
+        seeds,
+        closure,
+        report,
+        rows,
+        scan_result=scan_result,
+        dataset_id=dataset_id,
+        report_id=report_id,
     )
     return {
         "rows": rows,

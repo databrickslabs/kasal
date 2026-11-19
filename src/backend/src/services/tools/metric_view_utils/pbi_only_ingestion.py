@@ -23,7 +23,7 @@ Neither function makes network calls or imports pipeline state.
 
 Detection patterns (with OTC examples)
 ---------------------------------------
-* ``Excel.Workbook`` — ``"OTC inactiveness.xlsx"`` on SharePoint →
+* ``Excel.Workbook`` — ``"Inactive accounts.xlsx"`` on SharePoint →
   ``SKU Active Or NotActive`` table; real data, needs SharePoint download or
   ``EVALUATE '<table>'`` via the PBI executeQueries API.
 * ``SharePoint.Files`` / ``SharePoint.Tables`` — general SharePoint connector.
