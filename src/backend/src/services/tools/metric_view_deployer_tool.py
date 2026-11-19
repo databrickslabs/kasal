@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, Optional, Type
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_deployer_utils.connection import (
+    retry_connection_reset as _retry_connection_reset,
+)
 from src.services.tools.metric_view_deployer_utils.definition import (
     definition_report,
     parse_yaml_spec,
@@ -232,8 +235,10 @@ class MetricViewDeployerTool(BaseTool):
             "on_wait_timeout": "CONTINUE",
         }
 
-        resp = _requests.post(  # host checked by is_trusted_databricks_host in _run — nosemgrep: tmp.databricks.ssrf.requests-user-url
-            url, json=payload, headers=headers, timeout=60
+        resp = _retry_connection_reset(
+            lambda: _requests.post(  # host checked by is_trusted_databricks_host in _run — nosemgrep: tmp.databricks.ssrf.requests-user-url
+                url, json=payload, headers=headers, timeout=60
+            )
         )
         if resp.status_code not in (200, 201):
             return {
@@ -250,8 +255,10 @@ class MetricViewDeployerTool(BaseTool):
         polls = 0
         while state in ("RUNNING", "PENDING") and polls < 60:
             time.sleep(2)
-            pr = _requests.get(  # same trusted host; statement_id from the API — nosemgrep: tmp.databricks.ssrf.requests-user-url
-                f"{url}/{statement_id}", headers=headers, timeout=30
+            pr = _retry_connection_reset(
+                lambda: _requests.get(  # same trusted host; statement_id from the API — nosemgrep: tmp.databricks.ssrf.requests-user-url
+                    f"{url}/{statement_id}", headers=headers, timeout=30
+                )
             )
             data = pr.json()
             state = data.get("status", {}).get("state", "")
