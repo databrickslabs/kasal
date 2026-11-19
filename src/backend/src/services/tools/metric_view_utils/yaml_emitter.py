@@ -28,6 +28,7 @@ from .yaml_annotations import (
 from .yaml_annotations import _provenance_suffix as _provenance_suffix
 from .yaml_annotations import _usage_suffix as _usage_suffix
 from .yaml_annotations import _visual_usage_suffix as _visual_usage_suffix
+from .yaml_known_columns import known_source_columns as _known_source_columns
 from .yaml_measure_render import (
     render_base_measures,
     render_dax_measures,
@@ -516,27 +517,9 @@ def emit_yaml(
 
     # Validate source.column refs against known columns — drop measures with
     # unresolvable references (dimension-table columns, MQuery computed columns).
-    _known_source_cols: set[str] = set()
-    for m in base_measures:
-        if m.sql_expr:
-            _known_source_cols.update(re.findall(r"\bsource\.(\w+)", m.sql_expr))
-    # Implicit visual-column measures are, like base measures, a literal
-    # physical column (not derived DAX) — confirmed to exist on this table by
-    # the DMV query that produced them (column_metadata.py), so they count as
-    # a KNOWN column exactly like a base measure's, not something to validate
-    # away for lack of independent corroboration.
-    for m in implicit_measures:
-        if m.sql_expr:
-            _known_source_cols.update(re.findall(r"\bsource\.(\w+)", m.sql_expr))
-    for d in spec.dimensions:
-        _known_source_cols.update(re.findall(r"\bsource\.(\w+)", d["expr"]))
-    # Also pull columns from FILTER clauses in switch measures
-    for m in switch_measures:
-        if m.sql_expr:
-            for fc_m in re.finditer(r"FILTER\s*\(WHERE\s+([^)]+)\)", m.sql_expr):
-                _known_source_cols.update(
-                    re.findall(r"\b(\w+)\s*(?:=|<>|!=|IN\b)", fc_m.group(1))
-                )
+    _known_source_cols = _known_source_columns(
+        spec, base_measures, implicit_measures, switch_measures
+    )
     if _known_source_cols:
         for measure_list in (dax_measures, switch_measures, implicit_measures):
             drop_idx = []

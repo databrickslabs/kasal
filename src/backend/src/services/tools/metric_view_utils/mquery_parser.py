@@ -667,6 +667,23 @@ def resolve_mquery_with_context(
     return None
 
 
+def _keep_output_aggregates(info: TableInfo, native_sql: str) -> None:
+    """Drop aggregate columns a native query computes only inside a CTE.
+
+    ``WITH a AS (SELECT SUM(kbi_value) AS value ...) SELECT ... AS result FROM a`` has no
+    ``value`` column: a base measure ``SUM(source.value)`` on it cannot deploy.
+    """
+    from .join_columns import native_output_columns
+
+    columns = native_output_columns(native_sql) if native_sql else None
+    if columns:
+        info.aggregate_columns = [
+            a
+            for a in info.aggregate_columns
+            if str(a.get("name", "")).lower() in columns
+        ]
+
+
 class MQueryParser:
     """Parse MQuery conversion report (JSON or Excel) and extract table structure per table."""
 
@@ -710,6 +727,7 @@ class MQueryParser:
                     dropped_validation += 1
                     continue
             info = self._parse_sql(table_name, sql)
+            _keep_output_aggregates(info, extract_native_query_sql(sql) or "")
             info.raw_transpiled_sql = sql
             info.type_changes = [str(n) for n in entry.get("type_changes") or []]
             if mquery_expressions:

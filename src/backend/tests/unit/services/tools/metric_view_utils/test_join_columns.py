@@ -123,3 +123,58 @@ def test_a_dimension_the_fact_has_itself_moves_to_the_fact():
     assert spec.dimensions == [
         {"name": "fiscper", "expr": "source.fiscper"}
     ]  # the period survives
+
+
+CTE_NATIVE = """WITH aggregated AS (
+    SELECT fiscper, unit, SUM(kbi_value) AS value FROM mart.pl GROUP BY fiscper, unit
+),
+cy AS (SELECT fiscper, unit, value AS lc_cy FROM aggregated WHERE kind = 'select')
+SELECT cy.unit, cy.fiscper AS fiscper, cy.lc_cy AS result FROM cy"""
+
+
+def _m(sql: str, steps: str = "") -> str:
+    return (
+        'let\n    v = Value.NativeQuery(conn, "'
+        + sql
+        + '", null, [EnableFolding=true])'
+        + steps
+        + "\nin\n    v"
+    )
+
+
+def test_the_output_of_a_cte_query_is_its_final_select():
+    from src.services.tools.metric_view_utils.join_columns import native_output_columns
+
+    assert native_output_columns(CTE_NATIVE) == {"unit", "fiscper", "result"}
+    assert native_output_columns("(SELECT a FROM t) UNION (SELECT a FROM u)") is None
+
+
+def test_an_aggregate_computed_only_inside_a_cte_is_not_a_base_measure():
+    """SUM(kbi_value) AS value lives in a CTE; the query returns result. A base measure
+    SUM(source.value) failed on deploy with UNRESOLVED_COLUMN."""
+    from src.services.tools.metric_view_utils.mquery_parser import MQueryParser
+
+    tables = MQueryParser().parse_json(
+        [
+            {
+                "table_name": "FT",
+                "transpiled_sql": _m(CTE_NATIVE),
+                "validation_passed": "Yes",
+            }
+        ]
+    )
+    assert [a["name"] for a in tables["FT"].aggregate_columns] == []
+
+
+def test_the_fact_columns_are_unknown_when_power_query_reshapes_them():
+    from src.services.tools.metric_view_utils.data_classes import TableInfo
+    from src.services.tools.metric_view_utils.join_columns import known_fact_columns
+
+    def info(m: str) -> TableInfo:
+        t = TableInfo("FT", "mart.pl", [], [], [], True, "")
+        t.raw_transpiled_sql = m
+        return t
+
+    assert known_fact_columns(info(_m(CTE_NATIVE))) == ["fiscper", "result", "unit"]
+    renamed = ',\n    r = Table.RenameColumns(v, {{"result", "value"}})'
+    assert known_fact_columns(info(_m(CTE_NATIVE, renamed))) == []
