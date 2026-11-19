@@ -48,6 +48,10 @@ logger = logging.getLogger(__name__)
 _FABRIC_TRUSTED_SUFFIX = ".fabric.microsoft.com"
 _FABRIC_OPERATIONS = "https://api.fabric.microsoft.com/v1/operations/"
 _OPERATION_ID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
+_DEFINITION_URL = re.compile(
+    r"https://api\.fabric\.microsoft\.com/v1/workspaces/[A-Za-z0-9-]{1,64}"
+    r"/(?:reports|semanticModels)/[A-Za-z0-9-]{1,64}/getDefinition(?:\?format=[A-Za-z]+)?"
+)
 _OPERATION_POLLS = 60
 _POLL_INTERVAL_S = 2
 _ERROR_TEXT_CHARS = 400
@@ -173,6 +177,10 @@ def post_definition(
     url: str, token: str, label: str, poll_timeout: int = 30
 ) -> requests.Response:
     """POST a getDefinition call and return its 200 response, following the 202 operation when there is one."""
+    if not _DEFINITION_URL.fullmatch(url):
+        # The ids in the path come from tool arguments: one with "/", "?" or ".." would send
+        # the token's POST to another Fabric endpoint.
+        raise ValueError(f"{label}: not a getDefinition URL of one workspace item")
     headers = _headers(token)
     response = _send_with_retry(lambda: requests.post(url, headers=headers, timeout=120), label)  # fixed Fabric host, ids validated by the caller — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
     if response.status_code == 202:

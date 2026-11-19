@@ -16,6 +16,7 @@ import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.powerbi.http_retry import send_with_throttle_retry_async
+from src.services.powerbi.ids import execute_queries_url
 from src.services.tools.base import BaseTool
 from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
@@ -172,7 +173,7 @@ class PowerBIDaxExecutorTool(BaseTool):
         self, workspace_id: str, dataset_id: str, access_token: str, dax_query: str
     ) -> Dict[str, Any]:
         """Execute DAX query via Power BI Execute Queries API."""
-        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+        url = execute_queries_url(dataset_id, workspace_id)
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
@@ -210,7 +211,9 @@ class PowerBIDaxExecutorTool(BaseTool):
                         result["columns"] = list(rows[0].keys())
                 return result
             except httpx.HTTPStatusError as e:
-                result["error"] = f"HTTP {e.response.status_code}: {e.response.text}"
+                result["error"] = (
+                    f"HTTP {e.response.status_code}: {e.response.text[:500]}"
+                )
                 return result
             except Exception as e:
                 result["error"] = str(e)

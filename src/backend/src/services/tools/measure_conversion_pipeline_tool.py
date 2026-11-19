@@ -440,7 +440,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_client_id value: {kwargs.get('powerbi_client_id')}"
             )
             logger.info(
-                f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_client_secret length: {len(kwargs.get('powerbi_client_secret') or '')}"
+                f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_client_secret set: {bool(kwargs.get('powerbi_client_secret'))}"
             )
             logger.info(
                 f"[MeasureConversionPipelineTool] DEBUG AGENT - powerbi_username value: {kwargs.get('powerbi_username')}"
@@ -513,13 +513,13 @@ class MeasureConversionPipelineTool(BaseTool):
                 f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_client_id: {merged_kwargs.get('powerbi_client_id')}"
             )
             logger.info(
-                f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_client_secret length: {len(merged_kwargs.get('powerbi_client_secret') or '')}"
+                f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_client_secret set: {bool(merged_kwargs.get('powerbi_client_secret'))}"
             )
             logger.info(
                 f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_username: {merged_kwargs.get('powerbi_username')}"
             )
             logger.info(
-                f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_password length: {len(merged_kwargs.get('powerbi_password') or '')}"
+                f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_password set: {bool(merged_kwargs.get('powerbi_password'))}"
             )
             logger.info(
                 f"[MeasureConversionPipelineTool] DEBUG MERGED - powerbi_auth_method: {merged_kwargs.get('powerbi_auth_method')}"
@@ -595,11 +595,10 @@ class MeasureConversionPipelineTool(BaseTool):
                     f"[TOOL DEBUG]   client_id: '{auth_config.get('client_id')}'"
                 )
                 logger.info(
-                    f"[TOOL DEBUG]   client_secret length: {len(auth_config.get('client_secret') or '')}"
+                    f"[TOOL DEBUG]   client_secret set: {bool(auth_config.get('client_secret'))}"
                 )
-                logger.info(f"[TOOL DEBUG]   username: '{auth_config.get('username')}'")
                 logger.info(
-                    f"[TOOL DEBUG]   password length: {len(auth_config.get('password') or '')}"
+                    f"[TOOL DEBUG]   password set: {bool(auth_config.get('password'))}"
                 )
                 logger.info(
                     f"[TOOL DEBUG]   auth_method (explicit): '{auth_config.get('auth_method')}'"

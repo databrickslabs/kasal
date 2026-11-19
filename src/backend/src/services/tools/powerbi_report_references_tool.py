@@ -273,11 +273,11 @@ class PowerBIReportReferencesTool(BaseTool):
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
             logger.info(
-                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+                f"  client_secret: {'set' if auth_config.get('client_secret') else 'None'}"
             )
-            logger.info(f"  username: {auth_config.get('username')}")
+            logger.info(f"  username set: {bool(auth_config.get('username'))}")
             logger.info(
-                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+                f"  password: {'set' if auth_config.get('password') else 'None'}"
             )
             logger.info(
                 f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"

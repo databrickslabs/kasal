@@ -27,6 +27,7 @@ import logging
 import requests
 
 from src.services.powerbi.http_retry import send_with_throttle_retry
+from src.services.powerbi.ids import execute_queries_url
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,13 @@ def extract_column_summarize_by(
     any error, since this only enables an ADDITIONAL measure-coverage feature
     and must never block the rest of extraction.
     """
-    url = (
-        f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
-        f"/datasets/{dataset_id}/executeQueries"
-    )
+    try:
+        url = execute_queries_url(dataset_id, workspace_id)
+    except ValueError:  # an id that is not one path segment: no request at all
+        logger.warning(
+            "Column SummarizeBy lookup skipped: invalid workspace or dataset id"
+        )
+        return {}
     query = (
         "EVALUATE SELECTCOLUMNS(INFO.VIEW.COLUMNS(), "
         '"Table", [Table], "Column", [Name], "SummarizeBy", [SummarizeBy])'

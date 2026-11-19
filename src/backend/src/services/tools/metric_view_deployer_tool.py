@@ -238,7 +238,8 @@ class MetricViewDeployerTool(BaseTool):
         resp = _retry_connection_reset(
             lambda: _requests.post(  # host checked by is_trusted_databricks_host in _run — nosemgrep: tmp.databricks.ssrf.requests-user-url
                 url, json=payload, headers=headers, timeout=60
-            )
+            ),
+            sql,
         )
         if resp.status_code not in (200, 201):
             return {

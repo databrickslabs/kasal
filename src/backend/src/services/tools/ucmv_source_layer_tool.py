@@ -32,6 +32,7 @@ import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.powerbi.fabric_definition import operation_location
+from src.services.powerbi.ids import semantic_model_definition_url
 from src.services.tools.async_bridge import run_async_with_context
 from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils.raw_fields import as_map, opt_str
@@ -406,7 +407,7 @@ class UCMVSourceLayerTool(BaseTool):
         )
         workspace = str(get("workspace_id") or "")
         model = str(get("dataset_id") or "")
-        url = f"{FABRIC_API}/workspaces/{workspace}/semanticModels/{model}/getDefinition?format=TMDL"
+        url = semantic_model_definition_url(workspace, model)
         headers = {"Authorization": f"Bearer {token}"}
         with httpx.Client(timeout=_TIMEOUT) as client:
             response = client.post(url, headers=headers, json={})

@@ -8,6 +8,8 @@ capable agent often passes its own empty placeholder for a field it lacks.
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from src.services.powerbi.ids import path_id
+
 _REDEPLOY_HINT = (
     " If these worked before a redeploy, the stored value may have been "
     "cleared because the encryption key changed — please re-enter it."
@@ -99,6 +101,11 @@ def input_error(inputs: ConfigGenInputs) -> str | None:
     """
     if not inputs.workspace_id or not inputs.dataset_id:
         return "workspace_id and dataset_id are required."
+    try:  # each becomes a URL path segment of a request that carries the token
+        path_id(inputs.workspace_id, "workspace_id")
+        path_id(inputs.dataset_id, "dataset_id")
+    except ValueError as error:
+        return str(error)
     if not inputs.access_token and not inputs.tenant_id:
         return "tenant_id is required (unless a pre-obtained access_token is supplied)."
     if not inputs.access_token and not _creds_ok(

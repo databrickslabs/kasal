@@ -65,9 +65,8 @@ def filter_expression(f: RawMap) -> str:
     argument. ``operator`` ∈ in (default, TREATAS) / not_in / prefix; an ``in``
     filter may set ``legacy_blank_through`` + ``date_column`` to retain verified
     historical blank-flagged rows without accepting newer blanks."""
-    table = str(f["table"]).replace("'", "''")
-    column = str(f["column"]).replace("]", "]]")
-    ref = f"'{table}'[{column}]"
+    table = str(f["table"])
+    ref = _column_ref(table, str(f["column"]))
     values = as_list(f["values"])
     operator = str_or(f.get("operator"), "in")
     if not values:
@@ -79,8 +78,7 @@ def filter_expression(f: RawMap) -> str:
             )
         cutoff = normalize_snapshot_date(f["legacy_blank_through"])
         parts = ", ".join(str(int(part)) for part in cutoff.split("-"))
-        date_column = str(f["date_column"]).replace("]", "]]")
-        date_ref = f"'{table}'[{date_column}]"
+        date_ref = _column_ref(table, str(f["date_column"]))
         return (
             f"KEEPFILTERS(FILTER(ALL({ref}, {date_ref}), {ref} IN {{{_dax_set_literal(values)}}} "
             f"|| (ISBLANK({ref}) && {date_ref} <= DATE({parts}))))"
@@ -99,6 +97,20 @@ def _extra_filter_key(m: Measure) -> tuple[str, ...]:
     return tuple(filter_expression(f) for f in m.pbi_extra_filter or [])
 
 
+# Names in a mapping come from the model and from tool arguments. Written into DAX without
+# escaping, a name holding a quote or bracket would end its reference and run as DAX.
+def _in_brackets(name: object) -> str:
+    return str(name).replace("]", "]]")
+
+
+def _column_ref(table: object, column: object) -> str:
+    return "'" + str(table).replace("'", "''") + f"'[{_in_brackets(column)}]"
+
+
+def _dax_string(text: object) -> str:
+    return '"' + str(text).replace('"', '""') + '"'
+
+
 def _extra_filter_lines(measures: Sequence[Measure]) -> list[str]:
     return [filter_expression(f) for f in measures[0].pbi_extra_filter or []]
 
@@ -106,7 +118,7 @@ def _extra_filter_lines(measures: Sequence[Measure]) -> list[str]:
 def _raw_column_expr(pbi_column: str, pbi_aggregation: str = "Sum") -> str:
     dax_func = _PBI_AGGREGATION_TO_DAX_FUNC[pbi_aggregation]
     table, _, column = pbi_column.partition("[")  # column carries trailing ']'
-    return f"{dax_func}('{table}'[{column})"
+    return f"{dax_func}({_column_ref(table, column.removesuffix(']'))})"
 
 
 def _composite_operand_expr(operand: RawMap) -> str:
@@ -138,15 +150,14 @@ def measure_dax_expr(m: Measure) -> str:
         expr_b = _composite_operand_expr(m.composite_b)
         op = _COMPOSITE_OPERATORS[m.composite_operator]
         return f"({expr_a} {op} {expr_b})"
-    return f"[{m.pbi_measure}]"
+    return f"[{_in_brackets(m.pbi_measure)}]"
 
 
 def build_dimension_scope_query(mapping: UCMVMapping, dimension_name: str) -> str:
     dim = mapping.binding.dimensions[dimension_name]
-    table = dim.pbi_dim_table.replace("'", "''")
-    column = dim.pbi_dim_column.replace("]", "]]")
     fact = mapping.binding.pbi_fact_table.replace("'", "''")
-    return f"EVALUATE CALCULATETABLE(DISTINCT('{table}'[{column}]), '{fact}')"
+    dim_ref = _column_ref(dim.pbi_dim_table, dim.pbi_dim_column)
+    return f"EVALUATE CALCULATETABLE(DISTINCT({dim_ref}), '{fact}')"
 
 
 def _time_table(binding: Binding) -> str:
@@ -160,10 +171,10 @@ def _time_group_refs(binding: Binding) -> list[str]:
     table = _time_table(binding)
     if td.pbi_year_month:
         return [
-            f"'{table}'[{td.pbi_year_column}]",
-            f"'{table}'[{td.pbi_month_column}]",
+            f"{_column_ref(table, td.pbi_year_column)}",
+            f"{_column_ref(table, td.pbi_month_column)}",
         ]
-    return [f"'{table}'[{td.pbi_column}]"]
+    return [f"{_column_ref(table, td.pbi_column)}"]
 
 
 def _time_filter_lines(binding: Binding, period: str) -> list[str]:
@@ -173,10 +184,10 @@ def _time_filter_lines(binding: Binding, period: str) -> list[str]:
     table = _time_table(binding)
     if td.pbi_year_month:
         return [
-            f"TREATAS({{{int(str(period)[:4])}}}, '{table}'[{td.pbi_year_column}])",
-            f"TREATAS({{{int(str(period)[4:])}}}, '{table}'[{td.pbi_month_column}])",
+            f"TREATAS({{{int(str(period)[:4])}}}, {_column_ref(table, td.pbi_year_column)})",
+            f"TREATAS({{{int(str(period)[4:])}}}, {_column_ref(table, td.pbi_month_column)})",
         ]
-    return [f"TREATAS({{\"{period}\"}}, '{table}'[{td.pbi_column}])"]
+    return [f'TREATAS({{"{period}"}}, {_column_ref(table, td.pbi_column)})']
 
 
 def build_direct_query(
@@ -195,19 +206,15 @@ def build_direct_query(
     dim = binding.dimensions[dimension_name]
     dim_values_sql = _dax_set_literal(dimension_values) if dimension_values else None
 
-    lines = [
-        f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]",
-        *_time_group_refs(binding),
-    ]
+    dim_ref = _column_ref(dim.pbi_dim_table, dim.pbi_dim_column)
+    lines = [dim_ref, *_time_group_refs(binding)]
     if dim_values_sql:
-        lines.append(
-            f"TREATAS({{{dim_values_sql}}}, '{dim.pbi_dim_table}'[{dim.pbi_dim_column}])"
-        )
+        lines.append(f"TREATAS({{{dim_values_sql}}}, {dim_ref})")
     if period is not None:
         lines.extend(_time_filter_lines(binding, period))
     lines.extend(_extra_filter_lines(measures))
     for m in measures:
-        lines.append(f'"{m.ucmv_measure}", {measure_dax_expr(m)}')
+        lines.append(f"{_dax_string(m.ucmv_measure)}, {measure_dax_expr(m)}")
 
     body = _JOIN_SEP.join(lines)
     return f"EVALUATE\nSUMMARIZECOLUMNS(\n    {body}\n)"
@@ -286,21 +293,20 @@ def build_direct_context_queries(
             ref not in (context_labels or {}).get(str(period), {}) for ref in label_refs
         ):
             continue  # no calendar label in the metric view for this period
-        lines = [f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]"]
+        dim_ref = _column_ref(dim.pbi_dim_table, dim.pbi_dim_column)
+        lines = [dim_ref]
         if dim_values_sql:
-            lines.append(
-                f"TREATAS({{{dim_values_sql}}}, '{dim.pbi_dim_table}'[{dim.pbi_dim_column}])"
-            )
+            lines.append(f"TREATAS({{{dim_values_sql}}}, {dim_ref})")
         lines.extend(_time_filter_lines(binding, period))
         for ref in extra_refs:
             table, _, column = ref.partition("[")
             column = column.rstrip("]")
             lines.append(
-                f"TREATAS({{{_context_value(ref, period, context_labels)}}}, '{table}'[{column}])"
+                f"TREATAS({{{_context_value(ref, period, context_labels)}}}, {_column_ref(table, column)})"
             )
         lines.extend(_extra_filter_lines(measures))
         for m in measures:
-            lines.append(f'"{m.ucmv_measure}", {measure_dax_expr(m)}')
+            lines.append(f"{_dax_string(m.ucmv_measure)}, {measure_dax_expr(m)}")
 
         body = _JOIN_SEP.join(lines)
         queries.append((f"EVALUATE\nSUMMARIZECOLUMNS(\n    {body}\n)", period))
@@ -349,30 +355,30 @@ def build_switch_queries(
     ), group_measures in groups.items():
         selector_values = sorted({str(m.switch_selector_value) for m in group_measures})
         lines = [
-            f"'{dim.pbi_dim_table}'[{dim.pbi_dim_column}]",
+            f"{_column_ref(dim.pbi_dim_table, dim.pbi_dim_column)}",
             *_time_group_refs(binding),
-            f"'{sel_table}'[{sel_col}]",
+            f"{_column_ref(sel_table, sel_col)}",
         ]
         if sel2_table:
-            lines.append(f"'{sel2_table}'[{sel2_col}]")
+            lines.append(f"{_column_ref(sel2_table, sel2_col)}")
         if dim_values_sql:
             lines.append(
-                f"TREATAS({{{dim_values_sql}}}, '{dim.pbi_dim_table}'[{dim.pbi_dim_column}])"
+                f"TREATAS({{{dim_values_sql}}}, {_column_ref(dim.pbi_dim_table, dim.pbi_dim_column)})"
             )
         if period is not None:
             lines.extend(_time_filter_lines(binding, period))
         lines.append(
-            f"TREATAS({{{_dax_set_literal(selector_values)}}}, '{sel_table}'[{sel_col}])"
+            f"TREATAS({{{_dax_set_literal(selector_values)}}}, {_column_ref(sel_table, sel_col)})"
         )
         if sel2_table:
             selector2_values = sorted(
                 {str(m.switch_selector2_value) for m in group_measures}
             )
             lines.append(
-                f"TREATAS({{{_dax_set_literal(selector2_values)}}}, '{sel2_table}'[{sel2_col}])"
+                f"TREATAS({{{_dax_set_literal(selector2_values)}}}, {_column_ref(sel2_table, sel2_col)})"
             )
         lines.extend(_extra_filter_lines(group_measures))
-        lines.append(f'"value", [{pbi_measure}]')
+        lines.append(f'"value", [{_in_brackets(pbi_measure)}]')
 
         body = _JOIN_SEP.join(lines)
         queries.append(

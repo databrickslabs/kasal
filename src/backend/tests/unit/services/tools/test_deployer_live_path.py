@@ -428,3 +428,18 @@ class TestConnectionReset:
                 "SELECT 1", "https://example.com", "wh", {}
             )
         assert mock_post.call_count == 3
+
+    @patch("src.services.tools.metric_view_deployer_utils.connection.time.sleep")
+    @patch("requests.post")
+    def test_a_statement_that_writes_rows_is_sent_once(self, mock_post, _sleep):
+        """The connection can break after the server accepted an INSERT; a second send
+        would load the snapshot rows twice."""
+        import pytest
+        import requests
+
+        mock_post.side_effect = requests.ConnectionError("reset by peer")
+        with pytest.raises(requests.ConnectionError):
+            MetricViewDeployerTool._execute_sql_sync(
+                "INSERT INTO c.s.t VALUES (1)", "https://example.com", "wh", {}
+            )
+        assert mock_post.call_count == 1

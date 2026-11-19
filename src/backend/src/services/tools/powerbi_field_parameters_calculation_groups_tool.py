@@ -24,6 +24,8 @@ from typing import Any, Coroutine, Dict, List, Optional, Type
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi.fabric_definition import operation_location
+from src.services.powerbi.ids import semantic_model_definition_url
 from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -320,11 +322,11 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
             logger.info(
-                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+                f"  client_secret: {'set' if auth_config.get('client_secret') else 'None'}"
             )
-            logger.info(f"  username: {auth_config.get('username')}")
+            logger.info(f"  username set: {bool(auth_config.get('username'))}")
             logger.info(
-                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+                f"  password: {'set' if auth_config.get('password') else 'None'}"
             )
             logger.info(
                 f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"
@@ -564,7 +566,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         access_token: str,
     ) -> List[Dict[str, Any]]:
         """Fetch TMDL definition from Fabric API."""
-        url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+        url = semantic_model_definition_url(workspace_id, dataset_id)
 
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -577,10 +579,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 response = await client.post(url, headers=headers)
 
                 if response.status_code == 202:
-                    # Long-running operation
-                    location = response.headers.get("Location")
+                    location = operation_location(response.headers)  # Fabric hosts only
                     if not location:
-                        logger.error("No Location header in 202 response")
+                        logger.error("No trusted Location in 202 response")
                         return []
 
                     # Poll until complete
@@ -594,9 +595,8 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                             logger.info(
                                 f"Definition fetch succeeded after {attempt + 1} poll(s)"
                             )
-                            result_url = location + "/result"
                             result_response = await client.get(
-                                result_url, headers=headers
+                                location + "/result", headers=headers
                             )
                             result_response.raise_for_status()
                             definition = result_response.json()
@@ -623,7 +623,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
             except httpx.HTTPStatusError as e:
                 logger.error(
-                    f"HTTP error: {e.response.status_code} - {e.response.text}"
+                    f"HTTP error: {e.response.status_code} - {e.response.text[:500]}"
                 )
                 return []
             except Exception as e:
