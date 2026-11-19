@@ -80,6 +80,8 @@ JSON mode is preferred for the full pipeline (each extraction tool runs separate
 | `report_scope` | No | - | Scope table from Tool 90 (injected in a flow); completed with `in_kasal`, `mirrored_as` and the review buckets |
 | `enable_reconciliation` | No | `false` | Deploy and reconcile against Power BI each cycle (needs `warehouse_id`) |
 
+With `enable_reconciliation`, the output also carries the review list: `review_csv` (one row per measure: `reconciled`, `below_bar`, `not_compared`, `removed_on_deploy`, `not_deployed` or `not_translated`, with the share of matching cells and the reason; statistics only, no measure values) and `review_summary` (the same per view). The bar is the pipeline config key `review_bar_pct` (default 90). A view is compared by a joined table only when the model has an active relationship between that table and the fact; otherwise the fact's own join key is used.
+
 Pipeline config keys added for production readiness: `read_from_source_layer` and `source_layer_naming` (metric views read from the `src_<table>` views). Each measure now carries a `format` derived from its Power BI format string. See [Step 2: convert](./ucmv-production-readiness.md#step-2-convert).
 
 ---

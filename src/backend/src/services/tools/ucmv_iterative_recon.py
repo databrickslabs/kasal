@@ -30,6 +30,7 @@ from src.services.tools.metric_view_utils.raw_fields import (
 from src.services.tools.metric_view_utils.reconciliation import (
     run_reconciliation_loop,
 )
+from src.services.tools.metric_view_utils.reconciliation.review_list import with_review
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,7 @@ def run_iterative_ucmv_generation(
         max_cycles=max_cycles,
         target_pct=target_pct,
     )
-    return {
+    output = {
         # Everything the generator produced (untranslatable_items, source_layer_ddl,
         # the migration report, ...), so the next crew gets a complete UCMV output.
         **{k: v for k, v in as_map(heal_state["generated"]).items() if k != "yaml"},
@@ -274,6 +275,8 @@ def run_iterative_ucmv_generation(
         "yaml": result.final_yaml,
         "reconciliation": result.final_reconciliation,
     }
+    # What a person has to check, per measure: statistics only, no values.
+    return with_review(output, _loads(context.get("config_json")))
 
 
 # Power BI credential/id fields on the generator → the reconciliation tool's
@@ -325,6 +328,16 @@ def _config(gen_kwargs: Mapping[str, object]) -> RawMap:
     return as_map(config)
 
 
+def _json_list(raw: object) -> list[object]:
+    """A JSON list argument (text or already parsed); [] on anything else."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    return list(raw) if isinstance(raw, list) else []
+
+
 def _assembled_mappings(
     yaml_specs: RawMap,
     generated: RawMap,
@@ -350,6 +363,10 @@ def _assembled_mappings(
             "dataset_id": gen_kwargs.get("dataset_id"),
             "workspace_id": gen_kwargs.get("workspace_id"),
         },
+        relationships=_json_list(gen_kwargs.get("relationships_json")),
+        inactive_relationships=as_map(generated.get("limitations")).get(
+            "inactive_relationships"
+        ),
     )
 
 
@@ -564,6 +581,7 @@ def run_from_generator(
             "config_json": cfg("config_json"),
             "dataset_id": cfg("dataset_id"),
             "workspace_id": cfg("workspace_id"),
+            "relationships_json": cfg("relationships_json"),
         },
     )
 

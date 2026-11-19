@@ -340,3 +340,81 @@ measures:
     )
     assert mappings["Fact_PL"]["binding"]["default_dimension"] == "scenario"
     assert mappings["Fact_PL"]["dimensions"]["scenario"]["pbi_dim_table"] == "Scenario"
+
+
+RELATIONSHIPS = [
+    # the fact's own relationship to the geography is inactive; the plant one is active
+    {
+        "from_table": "Fact_CO012",
+        "from_column": "comp_code",
+        "to_table": "C_Dim_Geography",
+        "to_column": "comp_code",
+        "is_active": False,
+    },
+    {
+        "from_table": "Fact_CO012",
+        "from_column": "plant",
+        "to_table": "Dim_Plant",
+        "to_column": "plant",
+        "is_active": True,
+    },
+    {
+        "from_table": "Dim_Plant",
+        "from_column": "region",
+        "to_table": "Dim_Region",
+        "to_column": "region",
+        "is_active": True,
+    },
+]
+
+
+def test_a_table_that_does_not_filter_the_fact_in_power_bi_is_not_grouped_by():
+    """A join built from an inactive relationship (or from none: a selector table) gave a
+    comparison by a table Power BI does not filter the fact with: the same total on every
+    member, and a view at 25 % although its numbers were right."""
+    from src.services.tools.metric_view_utils.reconciliation.mapping_assembly import (
+        fact_filters,
+    )
+
+    filters = fact_filters("Fact_CO012", RELATIONSHIPS)
+    assert filters is not None
+    assert filters.reach("Dim_Plant") and filters.reach("Dim_Region")  # across two hops
+    assert not filters.reach("C_Dim_Geography") and not filters.reach("C_Dim_calendar")
+
+    mappings, _ = assemble_mappings(
+        {"Fact_CO012": YAML},
+        RESOLVED,
+        {"Fact_CO012": "c.s.v"},
+        JOIN_KEY_MAP,
+        MODEL,
+        relationships=RELATIONSHIPS,
+    )
+    mapping = mappings["Fact_CO012"]
+    # comp_code is the join key: compared on the fact's own column, not on the geography
+    assert mapping["dimensions"]["comp_code"] == {
+        "ucmv_column": "comp_code",
+        "pbi_dim_table": "Fact_CO012",
+        "pbi_dim_column": "comp_code",
+    }
+    assert "pbi_table" not in mapping["time_dimension"]
+
+
+def test_without_the_full_list_an_inactive_relationship_still_counts():
+    mappings, _ = assemble_mappings(
+        {"Fact_CO012": YAML},
+        RESOLVED,
+        {"Fact_CO012": "c.s.v"},
+        JOIN_KEY_MAP,
+        MODEL,
+        inactive_relationships=[RELATIONSHIPS[0]],
+    )
+    assert (
+        mappings["Fact_CO012"]["dimensions"]["comp_code"]["pbi_dim_table"]
+        == "Fact_CO012"
+    )
+    untouched, _ = assemble_mappings(
+        {"Fact_CO012": YAML}, RESOLVED, {"Fact_CO012": "c.s.v"}, JOIN_KEY_MAP, MODEL
+    )
+    assert untouched["Fact_CO012"]["dimensions"]["comp_code"]["pbi_dim_table"] == (
+        "C_Dim_Geography"
+    )

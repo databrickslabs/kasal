@@ -40,6 +40,7 @@ from src.services.tools.metric_view_deployer_utils.inspection import (
     deploy_summary,
     inspection_summary,
 )
+from src.services.tools.metric_view_deployer_utils.reconciliation_gate import gate
 from src.services.tools.metric_view_deployer_utils.sql_helpers import (
     SqlRunner,
     first_cell,
@@ -183,6 +184,8 @@ class MetricViewDeployerTool(BaseTool):
             "group_by",
             "timing",
             "slow_threshold_s",
+            "min_reconciled_pct",
+            "flag_unreconciled_measures",
         )
         # Always seed ucmv_output so flow_methods.py injection check fires
         default_config: dict = {"ucmv_output": None}
@@ -773,10 +776,14 @@ class MetricViewDeployerTool(BaseTool):
 
         if mode != "deploy":
             return self._inspect_views(mode, yaml_specs, opts)
+        # Opt-in: flag measures that did not reconcile; hold back views below the bar.
+        yaml_specs, held = gate(yaml_specs, _get)
+        wanted = {k: v for k, v in yaml_specs.items() if k not in held}
         if dry_run:
-            results = self._validate_views(yaml_specs, opts)
+            results = self._validate_views(wanted, opts)
         else:
-            results = self._deploy_views(yaml_specs, opts)
+            results = self._deploy_views(wanted, opts)
+        results.update(held)
         return json.dumps(
             {
                 "deployment_results": results,

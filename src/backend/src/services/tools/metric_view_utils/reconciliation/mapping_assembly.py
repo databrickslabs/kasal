@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 import yaml
 
@@ -204,6 +205,76 @@ def _default_dimension(
     return min(others, key=lambda dim: (on_filtered_column(dim), preference(dim)))
 
 
+@dataclass(frozen=True)
+class FactFilters:
+    """Which tables filter a fact in Power BI. ``reachable`` (from the full relationship
+    list): the tables whose filter reaches it over active relationships. Without that list,
+    ``blocked``: the tables its relationship to is inactive."""
+
+    reachable: frozenset[str] | None = None
+    blocked: frozenset[str] = frozenset()
+
+    def reach(self, table: str) -> bool:
+        if self.reachable is not None:
+            return table in self.reachable
+        return table not in self.blocked
+
+
+def fact_filters(
+    fact: str, relationships: object, inactive_relationships: object = None
+) -> FactFilters | None:
+    """The tables that filter ``fact`` in Power BI, None when no relationship is known.
+
+    A filter travels from the one side to the many side of an active relationship, across
+    several of them (geography -> plant -> fact). A table related to the fact only by an
+    inactive relationship, or by none (a selector table, a "dummy" calendar), does not
+    filter it: grouped by such a table, Power BI returns the same total on every row."""
+    rels = [as_map(r) for r in as_list(relationships)]
+    if rels:
+        reachable = {fact}
+        frontier = [fact]
+        while frontier:
+            current = frontier.pop()
+            for rel in rels:
+                target = str(rel.get("to_table") or "")
+                if (
+                    rel.get("is_active") is not False
+                    and str(rel.get("from_table") or "") == current
+                    and target not in reachable
+                ):
+                    reachable.add(target)
+                    frontier.append(target)
+        return FactFilters(reachable=frozenset(reachable))
+    blocked = {
+        str(as_map(r).get("to_table") or "")
+        for r in as_list(inactive_relationships)
+        if str(as_map(r).get("from_table") or "") == fact
+    }
+    return FactFilters(blocked=frozenset(blocked)) if blocked else None
+
+
+def _comparable(
+    spec: RawMap,
+    fact: str,
+    dims: list[tuple[str, str, str]],
+    filters: FactFilters | None,
+) -> list[tuple[str, str, str]]:
+    """The dimensions Power BI can be grouped by for this fact. One on a table that does
+    not filter the fact is compared on the fact's own join key when it is that key
+    (``source.comp_code = geo.comp_code``), and left out otherwise."""
+    if filters is None:
+        return dims
+    usable: list[tuple[str, str, str]] = []
+    for dim in dims:
+        if dim[1] == fact or filters.reach(dim[1]):
+            usable.append(dim)
+            continue
+        fact_key = _fact_key(spec, _alias_of(spec, dim), dim[2])
+        if fact_key:
+            usable.append((dim[0], fact, fact_key))
+    return usable
+
+
 def _alias_of(spec: RawMap, period: tuple[str, str, str]) -> str:
     """The join alias the period dimension reads (``cal`` in ``cal.fiscper``), "" for source."""
     for raw in as_list(spec.get("dimensions")):
@@ -222,6 +293,7 @@ def assemble_mapping(
     view_fqn: str,
     aliases: Mapping[str, str],
     model: Mapping[str, object],
+    filters: FactFilters | None = None,
 ) -> tuple[RawMap | None, str]:
     """One mapping for a deployed view, or ``(None, reason)``."""
     try:
@@ -237,7 +309,7 @@ def assemble_mapping(
             None,
             "no measure to compare (neither DAX-translated nor a plain column aggregate)",
         )
-    dims = _dimensions(spec, table_key, aliases)
+    dims = _comparable(spec, table_key, _dimensions(spec, table_key, aliases), filters)
     period = _period(dims)
     if period is None:
         return (
@@ -287,9 +359,13 @@ def assemble_mappings(
     view_fqns: Mapping[str, str],
     join_key_map: Mapping[str, object],
     model: Mapping[str, object],
+    relationships: object = None,
+    inactive_relationships: object = None,
 ) -> tuple[dict[str, RawMap], dict[str, str]]:
     """Mappings for every view in ``view_fqns`` (``{table key: deployed view}``), and why the
-    others have none."""
+    others have none. ``relationships`` is the model's relationship list (with ``is_active``);
+    without it ``inactive_relationships`` (the generator's limitations) is the next best.
+    """
     aliases = alias_tables(join_key_map)
     mappings: dict[str, RawMap] = {}
     gaps: dict[str, str] = {}
@@ -301,6 +377,7 @@ def assemble_mappings(
             fqn,
             aliases,
             model,
+            fact_filters(key, relationships, inactive_relationships),
         )
         if mapping is None:
             gaps[key] = reason
