@@ -252,6 +252,7 @@ def run_iterative_ucmv_generation(
         "stop_reason": result.stop_reason,
         "best_cycle": result.best_cycle,
         "best_pct": result.best_pct,
+        "best_by_view": result.best_by_view,
         "cycles": [dataclasses.asdict(c) for c in result.cycles],
         "yaml": result.final_yaml,
         "reconciliation": result.final_reconciliation,

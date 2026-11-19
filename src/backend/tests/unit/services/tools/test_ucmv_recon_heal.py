@@ -256,3 +256,60 @@ def test_the_period_survives_a_dropped_calendar_join():
     dims = {d["name"]: d["expr"] for d in yaml.safe_load(healed)["dimensions"]}
     assert dims["fiscper"] == "source.fiscper" and "month" not in dims
     assert "dimension fiscper now reads source.fiscper" in removed
+
+
+def test_a_measure_referencing_another_by_bare_name_is_removed():
+    text = YAML.replace(
+        "    expr: SUM(source.a) = 1\n", "    expr: kbi_volume_pct * 100\n"
+    )
+    healed, removed = heal_view(
+        text,
+        "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `kbi_volume_pct` cannot be resolved.",
+    )
+    assert removed == ["measure dif_actual"] and "volume" in _names(healed, "measures")
+
+
+def test_the_result_keeps_each_views_best_cycle():
+    """A refine cycle broke one view (no longer deployed) while it improved another; the cycle
+    total of the remaining views read as an improvement and its YAML would have been kept.
+    """
+    from src.services.tools.metric_view_utils.reconciliation.loop import (
+        run_reconciliation_loop,
+    )
+
+    def view(pct, cells=100):
+        return {
+            "summary": {
+                "cells_total": cells,
+                "cells_aligned": int(cells * pct / 100),
+                "overall_cell_pct": pct,
+                "measures_at_100": int(pct == 100),
+                "total_measures": 1,
+            }
+        }
+
+    reports = iter(
+        [
+            {
+                "views": {"A": view(80.0), "B": view(100.0)},
+                "overall": {"cells_total": 200, "overall_cell_pct": 90.0},
+            },
+            {
+                "views": {"A": view(95.0)},
+                "overall": {"cells_total": 100, "overall_cell_pct": 95.0},
+            },  # B broke
+        ]
+    )
+    yamls = iter([{"A": "a1", "B": "b1"}, {"A": "a2", "B": "b2-broken"}])
+    result = run_reconciliation_loop(
+        generate=lambda fb: {"yaml": next(yamls), "mappings": {"A": "m", "B": "m"}},
+        deploy=lambda y: {"ok": True},
+        reconcile=lambda y, m: next(reports),
+        max_cycles=2,
+    )
+    assert result.final_yaml == {"A": "a2", "B": "b1"}
+    assert result.best_by_view == {
+        "A": {"pct": 95.0, "cycle": 2},
+        "B": {"pct": 100.0, "cycle": 1},
+    }
+    assert result.final_reconciliation["overall"]["overall_cell_pct"] == 97.5

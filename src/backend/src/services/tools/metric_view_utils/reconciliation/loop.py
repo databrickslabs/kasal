@@ -59,6 +59,8 @@ class LoopResult:
     cycles: list[CycleResult] = field(default_factory=list)
     final_yaml: RawMap = field(default_factory=dict)
     final_reconciliation: RawMap = field(default_factory=dict)
+    # {view: {pct, cycle}}: the cycle each view's final YAML and result come from.
+    best_by_view: dict[str, dict[str, object]] = field(default_factory=dict)
     stop_reason: str = (
         ""  # target_reached | converged | max_cycles | deploy_failed | no_recon
     )
@@ -173,6 +175,7 @@ def run_reconciliation_loop(
     """
     max_cycles = max(1, int(max_cycles))
     result = LoopResult()
+    best_views: dict[str, tuple[float, int, object, RawMap]] = {}
     feedback: Optional[list[RawMap]] = None
     prev_pct: Optional[float] = None
 
@@ -244,6 +247,7 @@ def run_reconciliation_loop(
                 result.final_yaml, result.final_reconciliation = yaml_specs, report
             break
 
+        _keep_best_views(best_views, cycle, report, yaml_specs)
         # Track the best cycle so a later, worse cycle never overwrites a good one.
         if pct > result.best_pct or not result.final_yaml:
             result.best_pct = pct
@@ -262,4 +266,70 @@ def run_reconciliation_loop(
     else:
         result.stop_reason = "max_cycles"
 
+    _merge_best_views(result, best_views)
     return result
+
+
+def _view_pct(data: object) -> Optional[float]:
+    summary = as_map(as_map(data).get("summary"))
+    if not as_int(summary.get("cells_total")):
+        return None
+    return opt_float(summary.get("overall_cell_pct"))
+
+
+def _keep_best_views(
+    best: dict[str, tuple[float, int, object, RawMap]],
+    cycle: int,
+    report: RawMap,
+    yaml_specs: RawMap,
+) -> None:
+    """Per view, the cycle where it matched Power BI best (its YAML and its result). A refine
+    cycle can break one view while it improves another; the cycle total cannot tell."""
+    for view, data in as_map(report.get("views")).items():
+        pct = _view_pct(data)
+        if pct is not None and (view not in best or pct > best[view][0]):
+            best[view] = (pct, cycle, yaml_specs.get(view), as_map(data))
+
+
+def _merge_best_views(
+    result: "LoopResult", best: dict[str, tuple[float, int, object, RawMap]]
+) -> None:
+    """The result carries every view's best version and an overall from exactly those."""
+    if not best:
+        return
+    result.final_yaml = {
+        **result.final_yaml,
+        **{v: y for v, (_p, _c, y, _d) in best.items() if y is not None},
+    }
+    views = {v: d for v, (_p, _c, _y, d) in best.items()}
+    total = sum(
+        as_int(as_map(as_map(d).get("summary")).get("cells_total"))
+        for d in views.values()
+    )
+    aligned = sum(
+        as_int(as_map(as_map(d).get("summary")).get("cells_aligned"))
+        for d in views.values()
+    )
+    at_100 = sum(
+        as_int(as_map(as_map(d).get("summary")).get("measures_at_100"))
+        for d in views.values()
+    )
+    measures = sum(
+        as_int(as_map(as_map(d).get("summary")).get("total_measures"))
+        for d in views.values()
+    )
+    result.final_reconciliation = {
+        **result.final_reconciliation,
+        "views": views,
+        "overall": {
+            "views": len(views),
+            "cells_total": total,
+            "cells_aligned": aligned,
+            "overall_cell_pct": round(100.0 * aligned / total, 2) if total else 0.0,
+            "measures_at_100": at_100,
+            "total_measures": measures,
+        },
+    }
+    result.best_by_view = {
+        v: {"pct": p, "cycle": c} for v, (p, c, _y, _d) in best.items()
+    }

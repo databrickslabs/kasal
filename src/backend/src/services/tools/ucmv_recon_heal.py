@@ -44,7 +44,9 @@ def _norm(name: str) -> str:
 
 
 def _refs(expr: object, alias: str | None, column: str) -> bool:
-    prefix = rf"\b{re.escape(alias)}\." if alias else r"\."
+    # Without an alias Databricks names a bare identifier (a measure referenced by name),
+    # so match it bare as well as after any alias.
+    prefix = rf"\b{re.escape(alias)}\." if alias else r"(?:\.|(?<![\w`.]))"
     return bool(
         re.search(prefix + rf"`?{re.escape(column)}`?\b", str(expr or ""), re.I)
     )
