@@ -164,6 +164,22 @@ class TestRunReconciliationLoop:
         assert res.stop_reason == "deploy_failed"
         assert res.cycles[0].deploy_ok is False
 
+    def test_a_view_the_comparison_failed_on_is_named_with_its_error(self):
+        """A deployed view whose comparison raised was dropped from the report silently."""
+        gen, dep, rec, _ = self._fakes([80])
+
+        def reconcile(yaml, mappings):
+            report = rec(yaml, mappings)
+            report["views"]["v_broken"] = {"error": "UCMV query returned no rows"}
+            return report
+
+        res = run_reconciliation_loop(
+            generate=gen, deploy=dep, reconcile=reconcile, max_cycles=1
+        )
+        assert res.cycles[0].reconcile_errors == {
+            "v_broken": "UCMV query returned no rows"
+        }
+
     def test_no_recon_when_nothing_scored(self):
         def gen(feedback):
             return {"yaml": {"v": "y"}, "mappings": {}}

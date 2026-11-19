@@ -78,11 +78,8 @@ def test_a_deployed_view_gets_a_loadable_mapping_with_its_translated_measures():
         "Sum",
     )
     td = mapping.binding.time_dimension
-    assert (td.ucmv_column, td.pbi_column, td.pbi_table) == (
-        "fiscper",
-        "fiscper",
-        "C_Dim_calendar",
-    )
+    # the fact's own join key: it filters the fact whatever the model's relationships
+    assert (td.ucmv_column, td.pbi_column) == ("fiscper", "fiscper")
     assert (
         mapping.binding.default_dimension == "comp_code"
     )  # preferred over market_segment
@@ -275,3 +272,30 @@ def test_base_measure_shapes_are_compared_as_power_bi_column_aggregates():
         and out["c"]["pbi_aggregation"] == "Average"
     )
     assert out["a"]["pbi_column"] == "Fact[qty]"
+
+
+def test_a_joined_period_is_compared_on_the_facts_own_join_key():
+    """A period read from a joined calendar (dim_calendar.fiscper) was compared on that table in
+    Power BI. A calendar with no active relationship to the fact does not filter it: Power BI
+    returned the same total for every period and almost every cell differed."""
+    mappings, _ = assemble_mappings(
+        {"Fact_CO012": YAML},
+        RESOLVED,
+        {"Fact_CO012": "c.s.v"},
+        JOIN_KEY_MAP,
+        MODEL,
+    )
+    td = mappings["Fact_CO012"]["time_dimension"]
+    assert td["pbi_column"] == "fiscper" and "pbi_table" not in td
+    other_key = YAML.replace(
+        "source.fiscper = dim_calendar.fiscper",
+        "source.period_key = dim_calendar.fiscper",
+    )
+    mappings, _ = assemble_mappings(
+        {"Fact_CO012": other_key},
+        RESOLVED,
+        {"Fact_CO012": "c.s.v"},
+        JOIN_KEY_MAP,
+        MODEL,
+    )
+    assert mappings["Fact_CO012"]["time_dimension"]["pbi_column"] == "period_key"

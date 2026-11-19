@@ -72,6 +72,25 @@ def _dimensions(
     return out
 
 
+def _fact_key(spec: RawMap, alias: str, column: str) -> str:
+    """The fact column a join matches ``alias.column`` with (``source.fiscper = cal.fiscper``),
+    "" when the join is not that one equality."""
+    for raw in as_list(spec.get("joins")):
+        join = as_map(raw)
+        if str(join.get("name") or "") != alias:
+            continue
+        on = str(join.get("on") or "")  # the emitter quotes "on"
+        match = re.fullmatch(
+            rf"\s*source\.`?(\w+)`?\s*=\s*`?{re.escape(alias)}`?\.`?{re.escape(column)}`?\s*"
+            rf"|\s*`?{re.escape(alias)}`?\.`?{re.escape(column)}`?\s*=\s*source\.`?(\w+)`?\s*",
+            on,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1) or match.group(2)
+    return ""
+
+
 def _period(dims: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
     for candidate in _PERIOD_NAMES:
         for dim in dims:
@@ -144,6 +163,17 @@ def _measures(spec: RawMap, resolved: object) -> list[RawMap]:
     return out
 
 
+def _alias_of(spec: RawMap, period: tuple[str, str, str]) -> str:
+    """The join alias the period dimension reads (``cal`` in ``cal.fiscper``), "" for source."""
+    for raw in as_list(spec.get("dimensions")):
+        dim = as_map(raw)
+        if str(dim.get("name") or "") == period[0]:
+            match = _COLUMN_REF.match(str(dim.get("expr") or ""))
+            if match and match.group(1) != "source":
+                return match.group(1)
+    return ""
+
+
 def assemble_mapping(
     table_key: str,
     yaml_text: str,
@@ -185,7 +215,13 @@ def assemble_mapping(
         "ucmv": {"mode": "column", "name": period[0]},
         "pbi_column": period[2],
     }
-    if period[1] != table_key:
+    alias = _alias_of(spec, period)
+    # The fact's own join key filters the fact in Power BI whatever the relationships; the
+    # joined table filters it only through an active relationship (a "dummy" calendar does not).
+    fact_key = _fact_key(spec, alias, period[2]) if alias else ""
+    if fact_key:
+        time_dimension["pbi_column"] = fact_key
+    elif period[1] != table_key:
         time_dimension["pbi_table"] = period[1]
     return {
         "binding": {

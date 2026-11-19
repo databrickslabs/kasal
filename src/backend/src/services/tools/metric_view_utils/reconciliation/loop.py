@@ -50,6 +50,8 @@ class CycleResult:
     deploy_failures: dict[str, str] = field(default_factory=dict)
     # {view: [removed item (error)]}: what a deploy heal took out so the view deployed.
     deploy_healed: dict[str, list[str]] = field(default_factory=dict)
+    # {view: error} for the deployed views the comparison with Power BI failed on.
+    reconcile_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -237,6 +239,11 @@ def run_reconciliation_loop(
             note=str_or(deploy_out.get("note"), ""),
             deploy_failures=failures,
             deploy_healed=healed,
+            reconcile_errors={
+                str(view): str(as_map(out).get("error"))
+                for view, out in as_map(report.get("views")).items()
+                if as_map(out).get("error")
+            },
         )
         result.cycles.append(cr)
 
