@@ -13,6 +13,7 @@ from typing import Any, Optional, Type
 import requests
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi.dataset_parameters import with_live_parameters
 from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils.mquery_handoff import (
     build_ucmv_mquery,
@@ -21,12 +22,6 @@ from src.services.tools.metric_view_utils.mquery_handoff import (
 from src.services.tools.metric_view_utils.utils import run_async as _run_async
 from src.services.tools.pipeline_config_generator_utils.dax_enrichment import (
     enrich_config_from_dax,
-)
-from src.services.tools.pipeline_config_generator_utils.scope_outputs import (
-    parse_tracked_tables,
-    report_scope,
-    semantic_snapshot,
-    tracked_rows,
 )
 from src.services.tools.pipeline_config_generator_utils.inputs import (
     ConfigGenInputs,
@@ -41,6 +36,12 @@ from src.services.tools.pipeline_config_generator_utils.measure_quality import (
 from src.services.tools.pipeline_config_generator_utils.persistence import (
     save_conversion_history,
     save_powerbi_extraction,
+)
+from src.services.tools.pipeline_config_generator_utils.scope_outputs import (
+    parse_tracked_tables,
+    report_scope,
+    semantic_snapshot,
+    tracked_rows,
 )
 from src.services.tools.pipeline_config_generator_utils.ucmv_handoff import (
     DAX_TABLE_REF,
@@ -734,7 +735,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 len(config.get("switch_decompositions", {})),
                 len(config.get("measure_resolutions", {})),
             )
-        return config
+        return with_live_parameters(config, run.token, run.workspace_id, run.dataset_id)
 
     def _enrich_config(self, run: _ConfigGenRun, config: dict) -> list[dict]:
         """Additive enrichment post-pass. Returns the audit trail.
@@ -1034,7 +1035,9 @@ class PipelineConfigGeneratorTool(BaseTool):
             run.tmdl_parts, run.report_def, run.relationships, config,
             scan_result=run.scan_result, dataset_id=run.dataset_id, report_id=run.report_id or "",
         )  # fmt: skip
-        snapshot = semantic_snapshot(run.tmdl_parts, run.report_def, run.relationships, tracked=tracked)
+        snapshot = semantic_snapshot(
+            run.tmdl_parts, run.report_def, run.relationships, tracked=tracked
+        )
         return {"report_scope": scope, "semantic_snapshot": snapshot}
 
     def _implicit_column_measures(
