@@ -162,3 +162,83 @@ def test_the_loop_reconciles_with_the_assembled_mapping_bound_to_the_deployed_vi
         "no DAX-translated measure"
         in out["cycles"][0]["deploy_failures"]["mapping:Fact_Base"]
     )
+
+
+def test_crew_2b_output_is_complete_for_crew_4():
+    """Crew 2b returned only yaml and the reconciliation; the workbench (crew 4) also needs the
+    mappings to compare and the untranslated measures to list the gaps."""
+    from src.services.tools.ucmv_workbench_utils.state import Workbench
+
+    class _Generator:
+        def _run(self, **kwargs):
+            return json.dumps(
+                {
+                    "yaml": {"Fact_CO012": YAML},
+                    "resolved_measures_by_table": RESOLVED,
+                    "untranslatable_items": [
+                        {
+                            "table_key": "Fact_CO012",
+                            "original_name": "Margin %",
+                            "dax_expression": "DIVIDE(1, 2)",
+                            "skip_reason": "x",
+                        }
+                    ],
+                    "source_layer_ddl": {
+                        "Fact_CO012": {"ddl": "CREATE VIEW x AS SELECT 1"}
+                    },
+                }
+            )
+
+    out = run_iterative_ucmv_generation(
+        generator=_Generator(),
+        deployer=type(
+            "D",
+            (),
+            {
+                "_run": lambda self, **k: json.dumps(
+                    {"deployment_results": {"Fact_CO012": {"status": "deployed"}}}
+                )
+            },
+        )(),
+        reconciler=type(
+            "R",
+            (),
+            {
+                "_run": lambda self, **k: json.dumps(
+                    {
+                        "views": {
+                            "Fact_CO012": {
+                                "summary": {
+                                    "cells_total": 4,
+                                    "cells_aligned": 4,
+                                    "overall_cell_pct": 100.0,
+                                }
+                            }
+                        },
+                        "overall": {"cells_total": 4, "overall_cell_pct": 100.0},
+                    }
+                )
+            },
+        )(),
+        gen_kwargs={"config_json": json.dumps({"join_key_map": JOIN_KEY_MAP}), **MODEL},
+        deploy_kwargs={
+            "catalog": "acme-dev",
+            "schema_name": "sb",
+            "warehouse_id": "wh",
+        },
+        max_cycles=1,
+    )
+    assert (
+        out["pbi_ucmv_mapping"]["Fact_CO012"]["binding"]["ucmv_table"]
+        == "acme-dev.sb.fact_co012"
+    )
+    assert (
+        out["untranslatable_items"][0]["original_name"] == "Margin %"
+        and "source_layer_ddl" in out
+    )
+    bench = Workbench.from_generator_output(out)
+    view = bench.view("Fact_CO012")
+    assert (
+        view.mapping["binding"]["pbi_fact_table"] == "Fact_CO012"
+        and len(view.untranslatable) == 1
+    )

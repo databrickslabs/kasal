@@ -156,6 +156,9 @@ def run_iterative_ucmv_generation(
     # The last generator output (for mappings of healed views) and the measures a
     # heal removed, which go back to the DAX LLM with their deploy error.
     heal_state: dict[str, object] = {"generated": {}, "feedback": []}
+    # Each cycle's mappings (as compared, heals included): the result carries every
+    # view's mapping from the cycle its YAML comes from, so crew 4 can reconcile it.
+    cycle_mappings: list[dict[str, object]] = []
 
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
         nonlocal resolved_state, specs_state
@@ -198,6 +201,7 @@ def run_iterative_ucmv_generation(
         given = as_map(out.get("pbi_ucmv_mapping"))
         mappings = {**{k: v for k, v in given.items() if k in yaml_specs}, **assembled}
         mapping_state["gaps"] = {k: r for k, r in gaps.items() if k not in mappings}
+        cycle_mappings.append(dict(mappings))
         return {"yaml": yaml_specs, "mappings": mappings}
 
     def deploy(yaml_specs: RawMap) -> RawMap:
@@ -241,14 +245,27 @@ def run_iterative_ucmv_generation(
         )
         return _loads(reconciler._run(mappings_json=json.dumps(mappings), **recon_base))
 
+    def deploy_and_track(yaml_specs: RawMap) -> RawMap:
+        verdict = deploy(yaml_specs)
+        if cycle_mappings:
+            current = cycle_mappings[-1]
+            for key in as_map(verdict.get("yaml_overrides")):
+                current.pop(key, None)  # a healed view keeps only a fresh mapping
+            current.update(as_map(verdict.get("mapping_overrides")))
+        return verdict
+
     result = run_reconciliation_loop(
         generate=generate,
-        deploy=deploy,
+        deploy=deploy_and_track,
         reconcile=reconcile,
         max_cycles=max_cycles,
         target_pct=target_pct,
     )
     return {
+        # Everything the generator produced (untranslatable_items, source_layer_ddl,
+        # the migration report, ...), so the next crew gets a complete UCMV output.
+        **{k: v for k, v in as_map(heal_state["generated"]).items() if k != "yaml"},
+        "pbi_ucmv_mapping": _final_mappings(result, cycle_mappings),
         "stop_reason": result.stop_reason,
         "best_cycle": result.best_cycle,
         "best_pct": result.best_pct,
@@ -278,6 +295,24 @@ _GEN_TO_RECON_PBI = {
 # reconciled: it would score a measureless view.
 _LIVE_STATUSES = frozenset({"deployed", "deployed_grants_incomplete"})
 _MAX_FAILURES_IN_NOTE = 3
+
+
+def _final_mappings(
+    result: object, cycle_mappings: list[dict[str, object]]
+) -> dict[str, object]:
+    """Per view, the mapping of the cycle its final YAML comes from (best_by_view), else the
+    last cycle's."""
+    if not cycle_mappings:
+        return {}
+    best = getattr(result, "best_by_view", {}) or {}
+    final_yaml = getattr(result, "final_yaml", {}) or {}
+    out: dict[str, object] = {}
+    for view in final_yaml:
+        cycle = as_int(as_map(best.get(view)).get("cycle")) or len(cycle_mappings)
+        chosen = cycle_mappings[min(max(cycle, 1), len(cycle_mappings)) - 1]
+        if view in chosen:
+            out[view] = chosen[view]
+    return out
 
 
 def _config(gen_kwargs: Mapping[str, object]) -> RawMap:
