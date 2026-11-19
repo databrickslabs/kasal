@@ -32,6 +32,21 @@ _PAYLOAD = re.compile(
 _TYPE_TABLE = re.compile(r"type\s+table\s*\[(.*?)\]\s*\)", re.DOTALL)
 _COLUMN = re.compile(r'(?:#"((?:[^"]|"")+)"|([A-Za-z_][\w ]*?))\s*=\s*_t')
 MAX_ROWS = 5000
+# Deflate expands about 1000:1: bound what a model's payload may inflate to.
+MAX_DECODED_BYTES = 8 * 1024 * 1024
+MAX_DECLARATION_CHARS = 50_000
+
+
+def _inflate(payload: str) -> bytes | None:
+    """The raw-deflate payload, None when it is not one or inflates past the bound."""
+    try:
+        inflater = zlib.decompressobj(-15)
+        data = inflater.decompress(base64.b64decode(payload), MAX_DECODED_BYTES + 1)
+    except (ValueError, zlib.error, binascii.Error):
+        return None
+    if len(data) > MAX_DECODED_BYTES or inflater.unconsumed_tail:
+        return None
+    return data
 
 
 def decode_embedded_table(
@@ -44,13 +59,18 @@ def decode_embedded_table(
     )
     if not payload or not declared:
         return None
+    if len(declared.group(1)) > MAX_DECLARATION_CHARS:
+        return None
     columns = [
         (q or b).replace('""', '"').strip()
         for q, b in _COLUMN.findall(declared.group(1))
     ]
+    data = _inflate(payload.group(1))
+    if data is None:
+        return None
     try:
-        rows = json.loads(zlib.decompress(base64.b64decode(payload.group(1)), -15))
-    except (ValueError, zlib.error, binascii.Error):
+        rows = json.loads(data)
+    except ValueError:
         return None
     if not columns or not isinstance(rows, list) or len(rows) > MAX_ROWS:
         return None

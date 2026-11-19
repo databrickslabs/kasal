@@ -40,7 +40,9 @@ def _bq(fqn: str) -> str:
     target/source name is quoted part-by-part.
     """
     parts = [p for p in str(fqn).split(".") if p]
-    return ".".join(f"`{p.strip('`')}`" for p in parts)
+    # A back-quote inside a part is doubled: the name comes from the model's M
+    # (Item="..."), and an undoubled one would end the identifier and continue as SQL.
+    return ".".join("`" + p.strip("`").replace("`", "``") + "`" for p in parts)
 
 
 def _planned_tables(
@@ -84,6 +86,7 @@ def _native_base(
     """
     from .m_native_sql import native_sql_with_parameters, without_outer_parentheses
     from .mquery_parser import extract_native_query_sql
+    from .sql_guard import is_read_only_view_body
 
     # SQL assembled from literals and parameters ("..." & FiscperFilter & "..."); a
     # parameter with no known value is assumed '' and reported by the caller.
@@ -101,6 +104,12 @@ def _native_base(
         or '"&' in sql
         or '&"' in sql
     ):
+        return ""
+    if not is_read_only_view_body(sql):
+        logger.warning(
+            "[source_layer] a native query is not one read-only SELECT; reading %s instead",
+            src_tbl or "the raw table",
+        )
         return ""
     parts = [p.strip("`") for p in (src_tbl or "").split(".")]
     if len(parts) == 3 and parts[0]:

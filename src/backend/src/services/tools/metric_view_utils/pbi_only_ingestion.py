@@ -38,6 +38,7 @@ Detection patterns (with OTC examples)
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import textwrap
 from dataclasses import dataclass
@@ -475,6 +476,12 @@ _STUB_BUILDERS = {
 # ---------------------------------------------------------------------------
 
 
+# Text written into a generated loader script (see build_ingestion_task).
+_NOT_IN_NAME = re.compile(r"[^\w\-]")
+_NOT_IN_SCRIPT_TEXT = re.compile(r"[^\w .\-()&%+#/,:]")
+_SCRIPT_SAFE_URL = re.compile(r"[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=% ]+")
+
+
 def build_ingestion_task(
     table_name: str,
     kind: PBIOnlyKind,
@@ -506,11 +513,19 @@ def build_ingestion_task(
     # Build UC target name
     safe_name = re.sub(r"[^a-z0-9]+", "_", table_name.lower()).strip("_")
     table_suffix = uc_table_suffix or f"snap_{safe_name}"
-    uc_target = f"`{uc_catalog}`.`{uc_schema}`.`{table_suffix}`"
+    uc_target = (
+        f"`{_NOT_IN_NAME.sub('_', uc_catalog)}`."
+        f"`{_NOT_IN_NAME.sub('_', uc_schema)}`."
+        f"`{_NOT_IN_NAME.sub('_', table_suffix)}`"
+    )
 
     approach = _APPROACH.get(kind, "dax_evaluate")
     stub_builder = _STUB_BUILDERS.get(approach, _STUB_BUILDERS["dax_evaluate"])
-    stub = stub_builder(table_name, uc_target, source)
+    # The stub is Python source: the model's table name and URL are written into string
+    # literals, a docstring and a SQL comment, so neither may end any of them.
+    if source is not None and source.url and not _SCRIPT_SAFE_URL.fullmatch(source.url):
+        source = dataclasses.replace(source, url=None)
+    stub = stub_builder(_NOT_IN_SCRIPT_TEXT.sub("_", table_name), uc_target, source)
 
     source_desc = (
         source.description if source else f"PBI-only source of kind {kind.value}"

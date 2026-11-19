@@ -17,6 +17,7 @@ from src.services.tools.metric_view_utils.source_layer_emitter import (
     ViewSpec,
     emit_views,
 )
+from src.services.tools.metric_view_utils.sql_guard import is_read_only_view_body
 from src.services.tools.ucmv_source_layer_utils.inputs import (
     parse_json_list,
     parse_row_filters,
@@ -75,6 +76,10 @@ def parse_view_entries(raw: object) -> list[ViewEntry]:
         if bool(source_table) == bool(native_sql):
             raise ValueError(
                 f"view_specs_json: {label} needs exactly one of source_table or native_sql"
+            )
+        if native_sql and not is_read_only_view_body(native_sql):
+            raise ValueError(
+                f"view_specs_json: {label} native_sql must be one read-only SELECT"
             )
         if source_table and not is_uc_fqn(source_table):
             raise ValueError(

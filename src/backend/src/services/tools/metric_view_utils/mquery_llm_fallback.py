@@ -25,6 +25,8 @@ import logging
 import re
 from collections import OrderedDict
 
+from .sql_guard import has_no_side_effects
+
 logger = logging.getLogger(__name__)
 
 _RUN_CACHE_MAX = 128
@@ -116,8 +118,10 @@ _M_LEFTOVER = re.compile(
 
 
 def _validate_source_sql(sql: str) -> bool:
-    """Reject output that still contains M constructs or has no FROM."""
-    if not sql or _M_LEFTOVER.search(sql):
+    """Reject output that still contains M constructs, has no FROM, or does more than read
+    (the model's M is in the prompt, so the answer is untrusted text that becomes a view).
+    """
+    if not sql or _M_LEFTOVER.search(sql) or not has_no_side_effects(sql):
         return False
     return bool(re.search(r"\bFROM\b", sql, re.IGNORECASE))
 

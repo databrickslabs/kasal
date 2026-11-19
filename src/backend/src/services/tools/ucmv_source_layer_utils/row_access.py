@@ -66,7 +66,7 @@ def parse_access_rows(raw: object) -> list[AccessRow]:
 
 
 def _grant_group(group: str) -> str:
-    return "`" + group + "`"
+    return "`" + group.replace("`", "``") + "`"  # a back-quote cannot end the name
 
 
 def _merge_sql(table: str, rows: list[AccessRow]) -> str:

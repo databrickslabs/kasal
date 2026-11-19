@@ -40,6 +40,24 @@ def _skip_first_argument(text: str, i: int) -> int:
     return -1
 
 
+# A parameter value outside a string literal: a number, one bare name, or quoted literals.
+_BARE_VALUE = re.compile(
+    r"\s*(?:-?\d+(?:\.\d+)?|[A-Za-z_][\w.]*|'[^'\\]*'(?:\s*,\s*'[^'\\]*')*)?\s*"
+)
+
+
+def _splice_is_safe(value: str, in_literal: bool) -> bool:
+    """Whether a parameter value can be spliced into the SQL without changing its structure.
+
+    Power Query splices the raw text. A value that ends the literal it sits in, or that brings
+    SQL of its own where a number or a name is expected, would be run as SQL: such a value is
+    not used (the parameter is then assumed '' and reported, like an unknown one).
+    """
+    if in_literal:
+        return not re.search(r"['\\]", value)
+    return bool(_BARE_VALUE.fullmatch(value))
+
+
 def native_sql_with_parameters(
     m_expression: str, parameters: Mapping[str, str]
 ) -> tuple[str, list[str]]:
@@ -75,7 +93,12 @@ def native_sql_with_parameters(
         elif expect_operand and (m := _IDENT.match(text, i)):
             name = (m.group(1) or m.group(2)).replace('""', '"')
             value = parameters.get(name)
-            if value is None or str(value).startswith("TODO"):
+            in_literal = "".join(parts).count("'") % 2 == 1
+            if (
+                value is None
+                or str(value).startswith("TODO")
+                or not _splice_is_safe(str(value), in_literal)
+            ):
                 assumed.append(name)
                 value = ""
             parts.append(str(value))

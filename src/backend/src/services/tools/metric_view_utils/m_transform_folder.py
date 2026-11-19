@@ -531,9 +531,13 @@ class MTransformFolder:
                     col = m.group(4)
                     if old_val == "null" and replacer_type == "ReplaceValue":
                         if col in col_exprs and col_exprs[col] is not None:
-                            col_exprs[col] = f"COALESCE({col_exprs[col]}, '{new_val}')"
+                            col_exprs[col] = (
+                                f"COALESCE({col_exprs[col]}, {_sql_str_literal(new_val)})"
+                            )
                         else:
-                            col_exprs[col] = f"COALESCE({col}, '{new_val}')"
+                            col_exprs[col] = (
+                                f"COALESCE({col}, {_sql_str_literal(new_val)})"
+                            )
                     elif replacer_type == "ReplaceText":
                         old_str = old_val.strip('"')
                         # Nest onto any prior expression for this column so chained
@@ -544,7 +548,10 @@ class MTransformFolder:
                             if col in col_exprs and col_exprs[col] is not None
                             else col
                         )
-                        col_exprs[col] = f"REPLACE({base}, '{old_str}', '{new_val}')"
+                        col_exprs[col] = (
+                            f"REPLACE({base}, {_sql_str_literal(old_str)}, "
+                            f"{_sql_str_literal(new_val)})"
+                        )
 
             elif step.step_type == "ReplaceValueAccumulate":
                 # List.Accumulate({{"ROI","IE"},{"CR","HR"},…}, state,
@@ -566,7 +573,10 @@ class MTransformFolder:
                         else col
                     )
                     for old_code, new_code in pairs:
-                        expr = f"REPLACE({expr}, '{old_code}', '{new_code}')"
+                        expr = (
+                            f"REPLACE({expr}, {_sql_str_literal(old_code)}, "
+                            f"{_sql_str_literal(new_code)})"
+                        )
                     col_exprs[col] = expr
 
             elif step.step_type == "DuplicateColumn":

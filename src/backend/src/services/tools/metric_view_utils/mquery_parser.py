@@ -329,6 +329,9 @@ def native_query_as_subquery(mquery: str, alias: str = "_src") -> str | None:
 
 # 3-level UC name: catalog.schema.table (identifiers, optionally back-quoted).
 _FQN_RE = re.compile(
+    # Only at the start of a name: without it a search rescans a long name from every
+    # character (quadratic on model text).
+    r"(?<![\w`])"
     r"([A-Za-z_][\w]*|`[^`]+`)\."
     r"([A-Za-z_][\w]*|`[^`]+`)\."
     r"([A-Za-z_][\w]*|`[^`]+`)"

@@ -22,7 +22,7 @@ from .yaml_annotations import (
     _usage_suffix,
     _visual_usage_suffix,
 )
-from .yaml_scalars import _yaml_scalar, _yaml_val
+from .yaml_scalars import _yaml_scalar, _yaml_val, one_line, yaml_lines
 
 logger = logging.getLogger(__name__)
 
@@ -315,10 +315,16 @@ def render_untranslatable_comments(lines: list[str], spec: MetricViewSpec) -> No
         if not ms:
             continue
         lines.append("  #")
-        lines.append(f"  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}")
+        lines.append(
+            f"  # [{one_line(cat)}] ({len(ms)}) \u2014 {one_line(_cat_why[cat])}"
+        )
         for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
             lines.append(
-                f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}{_visual_usage_suffix(m)}{_indirect_visual_usage_suffix(m)}"
+                "  #   - "
+                + one_line(
+                    f"{m.original_name}{_usage_suffix(m.referenced_by)}"
+                    f"{_visual_usage_suffix(m)}{_indirect_visual_usage_suffix(m)}"
+                )
             )
             # Preserve the full original DAX so a reviewer can hand-translate
             # without re-opening the PBIX. Each DAX line is emitted as its own
@@ -327,7 +333,7 @@ def render_untranslatable_comments(lines: list[str], spec: MetricViewSpec) -> No
             dax = (getattr(m, "dax_expression", "") or "").strip()
             if dax:
                 lines.append("  #       DAX:")
-                for dax_line in dax.split("\n"):
+                for dax_line in yaml_lines(dax):
                     lines.append(f"  #         {dax_line}")
             # Best-effort, UNVERIFIED source-view SQL scaffold for the cross-fact /
             # multi-stage cases — a starting point to build a new view + UCMV on it.
@@ -347,5 +353,5 @@ def render_untranslatable_comments(lines: list[str], spec: MetricViewSpec) -> No
                 lines.append(
                     "  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):"
                 )
-                for _dl in _draft.split("\n"):
+                for _dl in yaml_lines(_draft):
                     lines.append(f"  #         {_dl}")

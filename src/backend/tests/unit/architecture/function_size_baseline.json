@@ -90,7 +90,7 @@
   "src/backend/src/services/tools/metric_view_utils/table_processor.py::process_table": 1201,
   "src/backend/src/services/tools/metric_view_utils/yaml_emitter.py::emit_yaml": 503,
   "src/backend/src/services/tools/metric_view_validation_utils/expression_validator.py::ExpressionValidator._compare_aggregations": 210,
-  "src/backend/src/services/tools/metric_view_validator_tool.py::MetricViewValidatorTool._run": 391,
+  "src/backend/src/services/tools/metric_view_validator_tool.py::MetricViewValidatorTool._run": 379,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._format_markdown_output": 256,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._format_sql_output": 548,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._run": 226,

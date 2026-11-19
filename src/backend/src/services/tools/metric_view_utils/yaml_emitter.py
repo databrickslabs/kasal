@@ -19,6 +19,7 @@ import re
 from .data_classes import MetricViewSpec
 from .join_columns import missing_join_columns
 from .metadata_generator import MetadataGenerator
+from .sql_guard import SIDE_EFFECT_FUNCTIONS
 from .utils import spark_sql_compat
 from .yaml_annotations import _MAX_EXPLANATION as _MAX_EXPLANATION
 from .yaml_annotations import _categorize_untranslatable as _categorize_untranslatable
@@ -71,7 +72,9 @@ def _check_dangerous_sql(expr: str) -> bool:
         r"|\bEXEC\s*\(|\bEXECUTE\s*\("
         r"|;\s*(?:DROP|DELETE|INSERT|UPDATE|CREATE|ALTER|GRANT|REVOKE)\b"
         # Dollar-quote delimiter — would break out of a $$...$$ quoted DDL body.
-        r"|\$\$" r"|\bUNION\s+SELECT\s+.*\bFROM\s+information_schema\b" r")",
+        r"|\$\$" r"|\bUNION\s+SELECT\s+.*\bFROM\s+information_schema\b"
+        # A measure never calls a model, the network, files or the JVM.
+        r"|" + SIDE_EFFECT_FUNCTIONS + r")",
         re.IGNORECASE,
     )
     return not _DANGEROUS_PATTERNS.search(expr)

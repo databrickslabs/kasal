@@ -8,6 +8,7 @@ report with VALID/EQUIVALENT/REVIEW/INVALID status.
 import json
 import logging
 import os
+import re
 import tempfile
 from typing import Any, Optional, Type
 
@@ -33,6 +34,26 @@ class MetricViewValidatorSchema(BaseModel):
         None,
         description="JSON string of measure_table_mapping (same input as UCMV Generator)",
     )
+
+
+def _temp_file(kind: str, table_key: object, suffix: str, text: str) -> str:
+    """A private temp file holding ``text``; its name carries the table key as plain
+    characters only (a key with ``/`` or ``..`` is never a path)."""
+    file_key = re.sub(r"\W", "_", str(table_key))[:40]
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=suffix, delete=False, prefix=f"{kind}_{file_key}_"
+    ) as handle:
+        handle.write(text)
+        return handle.name
+
+
+def _remove_files(*paths: str) -> None:
+    for path in paths:
+        try:
+            if path:
+                os.unlink(path)
+        except OSError:
+            pass
 
 
 class MetricViewValidatorTool(BaseTool):
@@ -240,26 +261,19 @@ class MetricViewValidatorTool(BaseTool):
             if not yaml_str or not yaml_str.strip():
                 continue
 
+            yaml_path = mapping_path = ""
             try:
-                # Write YAML to temp file (validator expects file paths)
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".yml", delete=False, prefix=f"mv_{table_key}_"
-                ) as yf:
-                    yf.write(yaml_str)
-                    yaml_path = yf.name
-
-                # Write measures for this table to temp JSON
+                # The validator expects file paths: the YAML, and this table's measures.
+                yaml_path = _temp_file("mv", table_key, ".yml", yaml_str)
                 table_measures = [
                     m
                     for m in measures
                     if m.get("proposed_allocation") == table_key
                     or m.get("table_name") == table_key
                 ]
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".json", delete=False, prefix=f"map_{table_key}_"
-                ) as mf:
-                    json.dump(table_measures, mf)
-                    mapping_path = mf.name
+                mapping_path = _temp_file(
+                    "map", table_key, ".json", json.dumps(table_measures)
+                )
 
                 if not table_measures:
                     results[table_key] = {"skipped": "No measures found for this table"}
@@ -343,12 +357,7 @@ class MetricViewValidatorTool(BaseTool):
                 logger.warning(f"[Validator] {table_key}: {e}")
                 results[table_key] = {"error": str(e)}
             finally:
-                # Cleanup temp files
-                for p in [yaml_path, mapping_path]:
-                    try:
-                        os.unlink(p)
-                    except OSError:
-                        pass
+                _remove_files(yaml_path, mapping_path)
 
         # ── Build a COMPACT agent-facing return ──────────────────────────────
         # The crew agent ingests this tool result into its LLM context. Returning

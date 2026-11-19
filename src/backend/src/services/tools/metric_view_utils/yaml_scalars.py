@@ -38,6 +38,21 @@ def is_pbi_auto_date_table(name: str) -> bool:
     return bool(_PBI_AUTO_DATE.match(name or ""))
 
 
+# Every character YAML reads as a line break. Model text (a measure name, DAX) holding one
+# outside "\n" would end the comment or block scalar it is written in and start a new key.
+_LINE_BREAKS = re.compile("\r\n|[\n\r\x0b\x0c\x85\u2028\u2029]")
+
+
+def yaml_lines(text: str) -> list[str]:
+    """``text`` split at every line break YAML knows, for one comment or block line each."""
+    return _LINE_BREAKS.split(text or "")
+
+
+def one_line(text: str) -> str:
+    """``text`` on one line: its line breaks become spaces."""
+    return _LINE_BREAKS.sub(" ", text or "")
+
+
 def _yaml_scalar(value: str, indent: int = 0) -> str:
     """Format a string value for safe YAML emission.
 
@@ -47,6 +62,7 @@ def _yaml_scalar(value: str, indent: int = 0) -> str:
     """
     if not value:
         return "''"
+    value = _LINE_BREAKS.sub("\n", value)
     if "\n" in value:
         prefix = " " * indent
         block_lines = value.split("\n")

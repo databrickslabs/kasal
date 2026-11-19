@@ -35,9 +35,12 @@ class ParsedModelInputs:
     scan_parser: ScanDataParser
 
 
-def _json_source(value: object) -> str | list | dict:
-    """A value the parsers accept as a source; anything else is an empty model."""
-    if isinstance(value, (str, list, dict)):
+def _json_source(value: object) -> list | dict:
+    """A value the parsers accept as a source; anything else is an empty model.
+
+    Never a string: the parsers open a string as a file path, and these values come from
+    tool arguments an agent fills in (a JSON-quoted path would read a local file)."""
+    if isinstance(value, (list, dict)):
         return value
     return []
 
@@ -144,7 +147,7 @@ def parse_model_inputs(
     if scan_raw:
         try:
             scan_obj = json.loads(scan_raw) if isinstance(scan_raw, str) else scan_raw
-            scan_source = scan_obj if isinstance(scan_obj, (str, dict)) else {}
+            scan_source = scan_obj if isinstance(scan_obj, dict) else {}
             scan_data = scan_parser.parse(scan_source)
         except Exception as e:
             logger.warning("Failed to parse scan data: %s", e, exc_info=True)

@@ -152,17 +152,18 @@ def run_expression_validation(
                 else measures_raw
             )
             for table_key, yml in yaml_output.items():
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".yml", delete=False
-                ) as yf:
-                    yf.write(yml)
-                    yf_path = yf.name
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".json", delete=False
-                ) as mf:
-                    json.dump(mapping_for_val, mf)
-                    mf_path = mf.name
+                yf_path = mf_path = ""
                 try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".yml", delete=False
+                    ) as yf:
+                        yf_path = yf.name
+                        yf.write(yml)
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".json", delete=False
+                    ) as mf:
+                        mf_path = mf.name
+                        json.dump(mapping_for_val, mf)
                     validator = MetricExpressionValidatorPipeline(
                         table_mappings={table_key: "source"}
                     )
@@ -182,8 +183,9 @@ def run_expression_validation(
                             "valid": n_valid,
                         }
                 finally:
-                    os.unlink(yf_path)
-                    os.unlink(mf_path)
+                    for path in (yf_path, mf_path):
+                        if path:
+                            os.unlink(path)
     except ImportError:
         pass  # Validation package not available
     except Exception as e:
