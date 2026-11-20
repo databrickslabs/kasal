@@ -280,6 +280,10 @@ class Measure:
     # snapshot-only null/zero equivalence
     null_equals_zero: bool = False
 
+    # Reads another period than the one it is shown at (prior year): compared by the
+    # binding's shifted_time_dimension (time_shift.py).
+    time_shifted: bool = False
+
     @property
     def pbi_visibility_field_name(self) -> Optional[str]:
         return self.pbi_visual_field or self.pbi_field_name
@@ -427,6 +431,8 @@ class Binding:
     pbi_workspace_id: Optional[str] = None
     pbi_report_id: Optional[str] = None
     report: Optional[str] = None
+    # The time dimension of the measures marked time_shifted (time_shift.py).
+    shifted_time_dimension: Optional[TimeDimension] = None
 
     def __post_init__(self) -> None:
         if self.default_dimension not in self.dimensions:
@@ -553,6 +559,7 @@ def _build_measure(m: RawMap) -> Measure:
         composite_b=_optional_map(m.get("composite_b")),
         pbi_visual_field=opt_str(m.get("visual_field")),
         null_equals_zero=null_equals_zero,
+        time_shifted=m.get("time_shifted") is True,
     )
     # The Kasal emitter puts a bare column in pbi_column + a sibling pbi_table;
     # combine them here (Measure.__post_init__ can't see the sibling key).
@@ -599,9 +606,20 @@ def load_mapping_dict(raw: RawMap) -> UCMVMapping:
         pbi_workspace_id=_first_opt(raw, binding_src, "pbi_workspace_id"),
         pbi_report_id=_first_opt(raw, binding_src, "pbi_report_id"),
         report=_first_opt(raw, binding_src, "report"),
+        shifted_time_dimension=(
+            _build_time_dimension(as_map(raw["shifted_time_dimension"]))
+            if raw.get("shifted_time_dimension")
+            else None
+        ),
     )
 
     measures = [_build_measure(as_map(m)) for m in as_list(raw.get("measures"))]
+    if binding.shifted_time_dimension is None:
+        marked = [m.ucmv_measure for m in measures if m.time_shifted]
+        if marked:
+            raise ValueError(
+                f"time_shifted measures need a shifted_time_dimension: {marked}"
+            )
     return UCMVMapping(binding=binding, measures=measures)
 
 

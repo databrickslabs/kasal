@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import yaml
 
 from ..raw_fields import RawMap, as_list, as_map
+from . import time_shift
 
 _COLUMN_REF = re.compile(r"^\s*`?([A-Za-z_]\w*)`?\.`?([A-Za-z_]\w*)`?\s*$")
 # Period columns whose values are period keys (YYYYNNN / YYYYMM), month grain.
@@ -211,6 +212,39 @@ def _default_dimension(
     return min(others, key=lambda dim: (on_filtered_column(dim), preference(dim)))
 
 
+def _time_shifted(
+    spec: RawMap,
+    measures: list[RawMap],
+    resolved: object,
+    filters: FactFilters | None,
+    relationships: object,
+    joined: object,
+) -> RawMap:
+    """Mark the prior-year measures of a view and give them their time dimension
+    (``time_shift.py``). Where Power BI cannot be grouped by the measure's calendar they
+    are taken out of ``measures`` and listed under ``not_compared``."""
+    names, order = time_shift.shifted_measures(spec)
+    marked = [m for m in measures if str(m.get("ucmv_measure")) in names]
+    if not marked:
+        return {}
+    dimension = time_shift.shifted_time_dimension(
+        spec, order, resolved, names, relationships, joined
+    )
+    if dimension is not None and (
+        filters is None or filters.reach(str(dimension["pbi_table"]))
+    ):
+        for measure in marked:
+            if isinstance(measure, dict):
+                measure["time_shifted"] = True
+        return {"shifted_time_dimension": dimension}
+    measures[:] = [m for m in measures if m not in marked]
+    return {
+        "not_compared": {
+            str(m["ucmv_measure"]): time_shift.NOT_COMPARABLE for m in marked
+        }
+    }
+
+
 @dataclass(frozen=True)
 class FactFilters:
     """Which tables filter a fact in Power BI. ``reachable`` (from the full relationship
@@ -343,8 +377,10 @@ def assemble_mapping(
     model: Mapping[str, object],
     filters: FactFilters | None = None,
     relationships: object = None,
+    joined: object = None,
 ) -> tuple[RawMap | None, str]:
-    """One mapping for a deployed view, or ``(None, reason)``."""
+    """One mapping for a deployed view, or ``(None, reason)``. ``joined`` is the pipeline
+    config's ``join_key_map`` (the columns of each joined table)."""
     try:
         spec = as_map(yaml.safe_load(yaml_text))
     except yaml.YAMLError:
@@ -395,7 +431,11 @@ def assemble_mapping(
         time_dimension["pbi_column"] = fact_key
     elif period[1] != table_key:
         time_dimension["pbi_table"] = period[1]
+    shifted = _time_shifted(spec, measures, resolved, filters, relationships, joined)
+    if not measures:
+        return None, time_shift.NOT_COMPARABLE
     return {
+        **shifted,
         "binding": {
             "ucmv_table": view_fqn,
             "pbi_semantic_model_id": model.get("dataset_id"),
@@ -441,6 +481,7 @@ def assemble_mappings(
             model,
             fact_filters(key, relationships, inactive_relationships),
             relationships,
+            join_key_map,
         )
         if mapping is None:
             gaps[key] = reason

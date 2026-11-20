@@ -78,6 +78,8 @@ from .scale_check import (
     scale_verdict,
 )
 from .statistics import statistics_by_measure
+from .time_shift import merge_frames
+from .time_shift import split as split_time_shifted
 from .ucmv_query import build_ucmv_query
 from .values import parse_value, strip_percent
 from .view_report import ViewOptions, ViewRunInfo, build_view_report
@@ -141,6 +143,9 @@ __all__ = [
     "PbiRunReport",
     "run_ucmv_query",
     "UcmvExecutor",
+    # prior-year measures (their own time dimension)
+    "split_time_shifted",
+    "merge_frames",
     # timeouts
     "TimeoutLadder",
     "is_timeout",

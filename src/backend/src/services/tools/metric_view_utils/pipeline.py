@@ -19,6 +19,7 @@ import re
 from dataclasses import replace
 from typing import Any
 
+from . import prior_year
 from .artifact_cascade import (
     collect_unassigned,
     count_artifacts,
@@ -241,7 +242,11 @@ class MetricViewPipeline:
         Returns:
             Dict mapping fact_table_key -> MetricViewSpec
         """
+        # Prior-year measures are translated without their year shift and get it back
+        # as a window at the end (prior_year.py).
+        prior_year.take_out_shifts(self.mapping, self.config)
         self._allocate_by_columns()
+        prior_year.follow_base_measures(self.mapping)
         measure_groups = self._group_by_table()
 
         # Phase 1: Process all tables and collect specs
@@ -270,6 +275,9 @@ class MetricViewPipeline:
             self._collect_unassigned(unassigned)
 
         self._plan_cross_table_specs()
+        windowed = prior_year.add_windows(self.all_specs, self.mapping, self.config)
+        if windowed:
+            self._limitations["prior_year_windows"] = windowed
         return self.all_specs
 
     # ── Run phases (each step of run(), in execution order) ───────────

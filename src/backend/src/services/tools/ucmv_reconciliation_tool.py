@@ -536,9 +536,59 @@ class UCMVReconciliationTool(BaseTool):
                 pbi_executor, model_id, mapping, dimension_name
             )
 
-        # UCMV side
-        scale = self._scale_check(kwargs, mapping, dimension_name, sql_executor)
+        # Prior-year measures are compared in a second pass with their own time
+        # dimension (reconciliation/time_shift.py); the others as before.
+        plain, shifted = recon.split_time_shifted(mapping)
+        scale = self._scale_check(kwargs, plain, dimension_name, sql_executor)
+        sides = (sql_executor, pbi_executor, model_id)
+        ucmv_df, pbi_df, report = self._frames(
+            plain, dimension_name, dimension_values, reference_years, periods, sides
+        )
+        compared, not_compared = mapping, {}
+        if shifted is not None:
+            try:
+                # No year filter: a prior-year value needs the year before in the query.
+                second = self._frames(
+                    shifted, dimension_name, dimension_values, [], periods, sides
+                )
+            except Exception as e:
+                logger.exception(
+                    "[UCMVReconciliation] %s: prior-year measures not compared",
+                    view_name,
+                )
+                compared = plain
+                not_compared = {
+                    m.ucmv_measure: f"the prior-year comparison failed: {e}"[:300]
+                    for m in shifted.measures
+                }
+            else:
+                ucmv_df = recon.merge_frames(ucmv_df, second[0], dimension_name)
+                pbi_df = recon.merge_frames(pbi_df, second[1], dimension_name)
+                report.timed_out.update(second[2].timed_out)
+                report.skipped_periods.update(second[2].skipped_periods)
 
+        result = self._compare_view(
+            compared, dimension_name, reference_years, ucmv_df, pbi_df, report, kwargs
+        )
+        if not_compared:
+            result["not_compared"] = not_compared
+        if scale is not None:
+            result["scale_check"] = scale
+        return result
+
+    def _frames(
+        self,
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        dimension_values: list[DimensionValue],
+        reference_years: list[object],
+        periods: Optional[list[str]],
+        sides: tuple[recon.UcmvExecutor, _PBIExecutor, str],
+    ) -> tuple[pd.DataFrame, pd.DataFrame, recon.PbiRunReport]:
+        """Both sides of one mapping: the metric view's frame, Power BI's, and what the
+        Power BI run left out. ``sides``: the SQL executor, the Power BI executor and
+        the semantic model."""
+        sql_executor, pbi_executor, model_id = sides
         ucmv_sql = recon.build_ucmv_query(
             mapping, dimension_name, dimension_values, reference_years
         )
@@ -563,13 +613,7 @@ class UCMVReconciliationTool(BaseTool):
             context_periods=context_periods,
             context_labels=labels,
         )
-
-        result = self._compare_view(
-            mapping, dimension_name, reference_years, ucmv_df, pbi_df, report, kwargs
-        )
-        if scale is not None:
-            result["scale_check"] = scale
-        return result
+        return ucmv_df, pbi_df, report
 
     def _scale_check(
         self,

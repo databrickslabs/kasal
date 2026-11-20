@@ -52,6 +52,35 @@ def _refs(expr: object, alias: str | None, column: str) -> bool:
     )
 
 
+def _split_dependents(
+    measures: list[dict[str, object]], gone: set[str]
+) -> tuple[list[dict[str, object]], list[str]]:
+    """``measures`` without those that read a removed measure (``MEASURE(x)``), directly or
+    through another one, and the names taken out. Each would fail the next deploy with its
+    own error and cost a healing round."""
+    gone = {name.lower() for name in gone}
+    dropped: list[str] = []
+    kept = list(measures)
+    while True:
+        reading = [
+            m
+            for m in kept
+            if gone
+            & {
+                n.lower()
+                for n in re.findall(
+                    r"\bMEASURE\(\s*`?(\w+)`?\s*\)", str(m.get("expr") or ""), re.I
+                )
+            }
+        ]
+        if not reading:
+            return kept, dropped
+        for measure in reading:
+            kept.remove(measure)
+            dropped.append(str(measure.get("name")))
+            gone.add(str(measure.get("name")).lower())
+
+
 class _View:
     def __init__(self, spec: dict[str, object]) -> None:
         self.spec = spec
@@ -125,16 +154,48 @@ class _View:
         fact's own column instead: the comparison needs a period. If the fact lacks it, the next
         round removes it like any other unresolved column."""
         dims = self._items("dimensions")
+        # The period itself, or its number (the key prior-year windows order by).
+        read = rf"{re.escape(alias)}\.`?(\w+)`?"
         for dim in dims:
-            m = re.fullmatch(
-                rf"\s*{re.escape(alias)}\.`?(\w+)`?\s*", str(dim.get("expr") or "")
+            expr = str(dim.get("expr") or "")
+            m = re.fullmatch(rf"\s*{read}\s*", expr) or re.fullmatch(
+                rf"\s*TRY_CAST\(\s*{read}\s+AS\s+INT\s*\)\s*", expr, re.I
             )
             if m and m.group(1).lower() in _PERIOD_COLUMNS:
-                dim["expr"] = f"source.{m.group(1)}"
+                dim["expr"] = re.sub(read, f"source.{m.group(1)}", expr)
                 self.removed.append(
                     f"dimension {dim.get('name')} now reads source.{m.group(1)}"
                 )
         self.spec["dimensions"] = dims
+
+    def window_orders(self, name: str) -> set[str]:
+        """The dimensions the windows of measure ``name`` order by."""
+        return {
+            str(as_map(w).get("order"))
+            for item in self._items("measures")
+            if item.get("name") == name
+            for w in as_list(item.get("window"))
+        }
+
+    def drop_windows(self, orders: set[str] | None = None) -> int:
+        """Remove the measures with a window (on ``orders``, or on a dimension the view
+        does not have): a window the warehouse rejects, or one whose dimension is gone,
+        fails for every measure that has it."""
+        present = {str(d.get("name")) for d in self._items("dimensions")}
+
+        def keep(item: dict[str, object]) -> bool:
+            on = {str(as_map(w).get("order")) for w in as_list(item.get("window"))}
+            return not (on & orders if orders is not None else on - present)
+
+        return self.drop_items("measures", keep, "measure")
+
+    def drop_dependents(self) -> None:
+        """Remove the measures that read a measure removed in this round."""
+        gone = {r.split(" ", 2)[1] for r in self.removed if r.startswith("measure ")}
+        kept, dropped = _split_dependents(self._items("measures"), gone)
+        if dropped:
+            self.spec["measures"] = kept
+            self.removed += [f"measure {n} (reads a removed measure)" for n in dropped]
 
     def drop_column(self, alias: str | None, column: str) -> int:
         removed = 0
@@ -161,7 +222,12 @@ def heal_view(yaml_text: str, error: str) -> tuple[str | None, list[str]]:
     dimension = _DIMENSION_AT.search(error)
     if measure:
         name = measure.group(1)
+        # A rejected window is rejected for every measure with a window on the same
+        # dimension: they go in one round, not one per round.
+        orders = view.window_orders(name) if "WINDOW" in error.upper() else set()
         view.drop_items("measures", lambda i: i.get("name") != name, "measure")
+        if orders:
+            view.drop_windows(orders)
     elif dimension:
         name = dimension.group(1)
         view.drop_items("dimensions", lambda i: i.get("name") != name, "dimension")
@@ -180,6 +246,9 @@ def heal_view(yaml_text: str, error: str) -> tuple[str | None, list[str]]:
         for join in view._items("joins"):
             if _norm(str(join.get("source") or "")) == missing:
                 view.drop_join(str(join.get("name")))
+    if view.removed:
+        view.drop_windows()  # windows on a dimension that was just removed
+        view.drop_dependents()
     if not view.removed or not as_list(view.spec.get("measures")):
         return None, []
     return yaml.safe_dump(view.spec, sort_keys=False, allow_unicode=True), view.removed
@@ -241,10 +310,14 @@ def bisect_measure(
         if other is None or deploys([culprit]) or not deploys([other]):
             return None, []
     logger.info("[UCMV] bisect: %s fails on measure %s", key, culprit.get("name"))
+    rest, dependents = _split_dependents(rest, {str(culprit.get("name"))})
     healed = yaml.safe_dump(
         {**spec, "measures": rest}, sort_keys=False, allow_unicode=True
     )
-    return healed, [f"measure {culprit.get('name')} (found by bisection)"]
+    return healed, [
+        f"measure {culprit.get('name')} (found by bisection)",
+        *(f"measure {n} (reads a removed measure)" for n in dependents),
+    ]
 
 
 def heal_failed_views(

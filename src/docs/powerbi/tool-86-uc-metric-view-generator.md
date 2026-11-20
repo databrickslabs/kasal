@@ -55,6 +55,50 @@ Provide `measures_json` from Tool 73, `mquery_json` from Tool 74, `relationships
 
 JSON mode is preferred for the full pipeline (each extraction tool runs separately and their outputs chain into Tool 86).
 
+### Prior-year measures
+
+A measure that is another calculation one year earlier is emitted as that calculation with a window:
+
+```yaml
+- name: sales_py
+  expr: MEASURE(sales)
+  window:
+    - order: fiscper_key
+      range: current
+      offset: -1000
+      semiadditive: last
+```
+
+Recognised in the DAX, when the whole result is shifted:
+
+| DAX | Example |
+|-----|---------|
+| `SAMEPERIODLASTYEAR` | `CALCULATE([Sales], SAMEPERIODLASTYEAR(Calendar[Date]))` |
+| `DATEADD` by one year (`-1 YEAR`, `-12 MONTH`, `-4 QUARTER`) | `CALCULATE([Sales], DATEADD(Calendar[Date], -1, YEAR))` |
+| `PARALLELPERIOD` by `-12 MONTH` | `CALCULATE([Sales], PARALLELPERIOD(Calendar[Date], -12, MONTH))` |
+| A prior-year column on the calendar | `CALCULATE([Sales], ALL(Calendar), Calendar[Date] IN VALUES(Calendar[Date_PY]))` |
+
+The calculation without the shift is homed and translated like any other measure (rules or LLM). A measure built on prior-year measures (`[Sales PY] / [Volume PY]`) needs nothing extra.
+
+The window orders by a dimension the generator adds to the view:
+
+| The view has | Dimension added | One year back |
+|--------------|-----------------|---------------|
+| A period column with year-first keys: `fiscper` (YYYYPPP), `calmonth` / `yearmonth` (YYYYMM) | `<period>_key`: the period as a number | 1000 keys (YYYYPPP) or 100 keys (YYYYMM) |
+| The calendar the DAX shifts on, joined | `<date>_month`: the month of the calendar date | `-1 year` |
+
+A view with neither does not emit the measure; the reason is in the review list.
+
+Limits:
+
+- A prior-year measure returns a value when the query groups by that dimension and by no other time dimension (not by `fiscper` or `year` next to `fiscper_key`). Other dimensions are fine.
+- A filter on another time dimension (`WHERE year = 2026`) removes the earlier year's rows, so the measure is empty. Filter on the window's dimension instead.
+- A measure that mixes this year and last year in one expression (`[Sales] - CALCULATE([Sales], SAMEPERIODLASTYEAR(...))`) is not handled here. It goes to the LLM as before.
+
+Pipeline config: `prior_year_period_steps` (for example `{"fy_period": 100}`) names further period columns and how many keys one year is. `prior_year_measures: false` turns the handling off.
+
+With `enable_reconciliation`, prior-year measures are compared in a second pass: the metric view grouped by the window's dimension, Power BI by the period column of the measure's calendar (`shifted_time_dimension` in the mapping, `time_shifted: true` on the measure). Power BI returns the earlier value only when grouped by that calendar. If the second pass fails, the other measures are still compared and these are listed as not compared.
+
 ---
 
 ## Configuration

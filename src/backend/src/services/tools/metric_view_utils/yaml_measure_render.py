@@ -112,6 +112,43 @@ def render_base_measures(
         lines.append("")
 
 
+def _window_lines(window: dict | None) -> list[str]:
+    """The ``window:`` block of a measure (nothing when it has none). ``offset`` is the
+    shift of a prior-year measure (``prior_year.py``)."""
+    if not window:
+        return []
+    lines = [
+        "    window:",
+        f"      - order: {window['order']}",
+        f"        range: {window['range']}",
+    ]
+    if window.get("offset") is not None:
+        lines.append(f"        offset: {window['offset']}")
+    lines.append(f"        semiadditive: {window.get('semiadditive', 'last')}")
+    return lines
+
+
+def _window_caveat(window: dict | None) -> str:
+    """What a reader has to know about a window measure, for its comment."""
+    if not window or not window.get("semiadditive"):
+        return ""
+    if window.get("offset") is not None:
+        # A prior-year measure: the window moves along its order dimension only.
+        return (
+            f" · prior year: the value one year before each "
+            f"{window.get('order', 'period')}. Group by {window.get('order', 'period')} "
+            f"and by no other time dimension"
+        )
+    # M11: a semi-additive (latest-period) measure is NOT additive over its order
+    # column — flag it so a reviewer/Genie doesn't sum it across periods.
+    return (
+        f" · CAVEAT: non-additive — value taken at the "
+        f"{window.get('semiadditive', 'last')} "
+        f"{window.get('order', 'period')} of the selected "
+        f"period (semi-additive snapshot; do not sum across periods)"
+    )
+
+
 def render_dax_measures(
     lines: list[str],
     dax_measures: list[TranslationResult],
@@ -153,13 +190,7 @@ def render_dax_measures(
                 lines.append(f'    expr: "{expr}"')
         else:
             lines.append(f"    expr: {expr_value(expr)}")
-        if m.window_spec:
-            lines.append("    window:")
-            lines.append(f"      - order: {m.window_spec['order']}")
-            lines.append(f"        range: {m.window_spec['range']}")
-            lines.append(
-                f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
-            )
+        lines.extend(_window_lines(m.window_spec))
         # Comment and metadata from per-table overrides or auto-generated
         m_override = measure_overrides.get(m.measure_name, {})
         dax_comment = m_override.get("comment", "")
@@ -173,17 +204,7 @@ def render_dax_measures(
             if _fp:
                 dax_comment = f"{dax_comment} · {_fp}" if dax_comment else _fp
             dax_comment += _provenance_suffix(m)
-            # M11: a semi-additive (latest-period) measure is NOT additive over
-            # its order column — flag it so a reviewer/Genie doesn't sum it
-            # across periods. The `window: semiadditive: last` below enforces it;
-            # the caveat explains why the value is a point-in-time snapshot.
-            if m.window_spec and m.window_spec.get("semiadditive"):
-                dax_comment += (
-                    f" · CAVEAT: non-additive — value taken at the "
-                    f"{m.window_spec.get('semiadditive', 'last')} "
-                    f"{m.window_spec.get('order', 'period')} of the selected "
-                    f"period (semi-additive snapshot; do not sum across periods)"
-                )
+            dax_comment += _window_caveat(m.window_spec)
         dax_comment += _usage_suffix(m.referenced_by)
         dax_comment += _visual_usage_suffix(m)
         dax_comment += _indirect_visual_usage_suffix(m)
@@ -240,13 +261,7 @@ def render_switch_measures(
             lines.append(f"    expr: {_yaml_scalar(expr, indent=4)}")
         else:
             lines.append(f"    expr: {expr_value(expr)}")
-        if m.window_spec:
-            lines.append("    window:")
-            lines.append(f"      - order: {m.window_spec['order']}")
-            lines.append(f"        range: {m.window_spec['range']}")
-            lines.append(
-                f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
-            )
+        lines.extend(_window_lines(m.window_spec))
         lines.append(
             f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
         )

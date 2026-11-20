@@ -332,6 +332,18 @@ def _set_home(m: dict, fact: str | None) -> None:
     m["proposed_allocation"] = fact
 
 
+def measure_home(m: dict) -> str | None:
+    """The table a measure is homed on (its primary allocation), None when it has none."""
+    return _current_home(m)
+
+
+def move_measure_home(m: dict, fact: str) -> None:
+    """Home a measure on ``fact`` (and nowhere else), recording where it came from."""
+    home = _current_home(m)
+    _set_home(m, fact)
+    m[REHOMED_KEY] = {"from": home, "to": fact}
+
+
 def _clear_home(m: dict) -> None:
     m["all_allocations"] = []
     m["proposed_allocation"] = UNASSIGNED

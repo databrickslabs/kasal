@@ -382,3 +382,119 @@ def test_bisection_does_not_guess_on_source_errors_or_non_measure_failures():
         None,
         [],
     )
+
+
+WINDOWED = """version: '1.1'
+source: prod.md.fact
+joins:
+  - name: dim_calendar
+    source: prod.md.cal
+    "on": source.fiscper = dim_calendar.fiscper
+dimensions:
+  - name: fiscper
+    expr: dim_calendar.fiscper
+  - name: fiscper_key
+    expr: TRY_CAST(dim_calendar.fiscper AS INT)
+  - name: month_name
+    expr: dim_calendar.month_name
+measures:
+  - name: sales
+    expr: SUM(source.amount)
+  - name: sales_py
+    expr: MEASURE(sales)
+    window:
+      - order: fiscper_key
+        range: current
+        offset: -1000
+        semiadditive: last
+  - name: cost_py
+    expr: SUM(source.cost)
+    window:
+      - order: fiscper_key
+        range: current
+        offset: -1000
+        semiadditive: last
+  - name: growth
+    expr: MEASURE(sales) - MEASURE(sales_py)
+  - name: growth_pct
+    expr: MEASURE(growth) / MEASURE(sales)
+"""
+
+
+def test_a_rejected_window_removes_every_measure_on_that_window_and_what_reads_them():
+    text, removed = heal_view(
+        WINDOWED,
+        "[METRIC_VIEW_INVALID_WINDOW_MEASURE] The metric view window measure is invalid "
+        "[measures.`sales_py`.expr]",
+    )
+    assert _names(text, "measures") == ["sales"]
+    assert removed == [
+        "measure sales_py",
+        "measure cost_py",
+        "measure growth (reads a removed measure)",
+        "measure growth_pct (reads a removed measure)",
+    ]
+
+
+def test_another_error_on_a_window_measure_removes_only_that_measure_and_its_readers():
+    text, removed = heal_view(
+        WINDOWED, "[PARSE_SYNTAX_ERROR] Syntax error [measures.`sales_py`.expr]"
+    )
+    assert _names(text, "measures") == ["sales", "cost_py"]
+    assert removed[0] == "measure sales_py" and len(removed) == 3
+
+
+def test_a_removed_calendar_join_keeps_the_period_key_on_the_fact():
+    text, removed = heal_view(
+        WINDOWED, "The table or view `prod`.`md`.`cal` cannot be found"
+    )
+    spec = yaml.safe_load(text)
+    exprs = {d["name"]: d["expr"] for d in spec["dimensions"]}
+    assert exprs == {
+        "fiscper": "source.fiscper",
+        "fiscper_key": "TRY_CAST(source.fiscper AS INT)",
+    }
+    # the windows still have their dimension: no measure is lost
+    assert len(spec["measures"]) == 5 and "dimension month_name" in removed
+
+
+def test_a_window_whose_dimension_is_removed_goes_with_it():
+    text, removed = heal_view(
+        WINDOWED,
+        "[UNRESOLVED_COLUMN] with name `x` cannot be resolved [dimensions.`fiscper_key`.expr]",
+    )
+    assert _names(text, "measures") == ["sales"]
+    assert "measure sales_py" in removed and "dimension fiscper_key" in removed
+
+
+def test_bisection_takes_the_readers_of_the_culprit_with_it():
+    from src.services.tools.ucmv_recon_heal import bisect_measure
+
+    spec = """version: '1.1'
+source: prod.md.fact
+dimensions:
+  - name: country
+    expr: source.country
+measures:
+  - name: a
+    expr: SUM(source.a)
+  - name: bad
+    expr: SUM(SUM(source.b))
+  - name: uses_bad
+    expr: MEASURE(bad) / MEASURE(a)
+  - name: c
+    expr: SUM(source.c)
+"""
+
+    def redeploy(specs):
+        names = _names(specs["Fact"], "measures")
+        return {"deployed_views": [] if "bad" in names else ["Fact"]}
+
+    text, removed = bisect_measure(
+        redeploy, "Fact", spec, "[NESTED_AGGREGATE_FUNCTION] not allowed"
+    )
+    assert _names(text, "measures") == ["a", "c"]
+    assert removed == [
+        "measure bad (found by bisection)",
+        "measure uses_bad (reads a removed measure)",
+    ]

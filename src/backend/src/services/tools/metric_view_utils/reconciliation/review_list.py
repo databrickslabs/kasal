@@ -137,8 +137,10 @@ def _compared_rows(
     report: RawMap,
     mapped: Mapping[str, RawMap],
     bar: float,
+    left_out: Mapping[str, object],
 ) -> list[dict[str, object]]:
-    """Rows for the measures of a view that was compared with Power BI."""
+    """Rows for the measures of a view that was compared with Power BI. ``left_out``:
+    why a measure was not part of the comparison, where the mapping or the run says."""
     results = as_map(report.get("measures"))
     timed_out = {str(m) for m in as_list(report.get("timed_out_measures"))}
     rows: list[dict[str, object]] = []
@@ -175,9 +177,9 @@ def _compared_rows(
         reason = (
             "the Power BI query timed out"
             if name in timed_out
-            else "no Power BI counterpart in the mapping"
+            else left_out.get(name) or "no Power BI counterpart in the mapping"
         )
-        rows.append(_row(view, name, "not_compared", reason=reason, **common))
+        rows.append(_row(view, name, "not_compared", reason=_short(reason), **common))
     return rows
 
 
@@ -214,7 +216,11 @@ def build_review_list(
                 str(as_map(m).get("ucmv_measure")): as_map(m)
                 for m in as_list(as_map(mappings.get(view)).get("measures"))
             }
-            rows += _compared_rows(view, yaml_text, report, mapped, bar)
+            left_out = {
+                **as_map(as_map(mappings.get(view)).get("not_compared")),
+                **as_map(report.get("not_compared")),
+            }
+            rows += _compared_rows(view, yaml_text, report, mapped, bar, left_out)
             continue
         deploy_error = str(failures.get(view) or "")
         if deploy_error.startswith("error"):

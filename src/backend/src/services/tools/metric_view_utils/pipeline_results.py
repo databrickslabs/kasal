@@ -65,6 +65,8 @@ def build_results(pipeline: MetricViewPipeline) -> dict:
                     "dax_expression": m.dax_expression,
                     "confidence": m.confidence,
                     "category": m.category,
+                    # A prior-year measure is its expression plus this window.
+                    "window": m.window_spec,
                     # Business-usage signal (PROP-8): which report page(s)/
                     # visual(s) draw or filter on this measure — see
                     # `visual_usage_annotator.annotate_visual_usage`.
