@@ -112,10 +112,16 @@ def _period_dimension(
     spec: MetricViewSpec, steps: Mapping[str, int]
 ) -> tuple[dict, int] | None:
     by_name = {str(d.get("name") or "").lower(): d for d in spec.dimensions}
+    known = {str(c).lower() for c in spec.fact_columns}
     for name, step in steps.items():
         dimension = by_name.get(name.lower())
-        if dimension is not None and dimension.get("expr"):
-            return dimension, step
+        if dimension is None or not dimension.get("expr"):
+            continue
+        # A period the fact is known not to have is not emitted (a phantom dimension).
+        read = re.findall(r"\bsource\.`?(\w+)`?", str(dimension["expr"]))
+        if known and any(column.lower() not in known for column in read):
+            continue
+        return dimension, step
     return None
 
 

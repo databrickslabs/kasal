@@ -117,3 +117,45 @@ def drop_phantom_dimensions(
                     continue
             valid_dims.append(d)
         spec.dimensions = valid_dims
+    _drop_orphan_windows(
+        spec, [base_measures, implicit_measures, dax_measures, switch_measures]
+    )
+
+
+_MEASURE_REF = re.compile(r"\bMEASURE\(\s*`?(\w+)`?\s*\)", re.IGNORECASE)
+
+
+def _drop_orphan_windows(spec: MetricViewSpec, measure_lists: list[list]) -> None:
+    """Take out the prior-year measures (a window with an ``offset``) whose order
+    dimension is not among the view's dimensions, and the measures that read them: a
+    view with such a window does not deploy at all. They are listed with the reason."""
+    dimensions = {str(d.get("name")) for d in spec.dimensions}
+    gone: dict[str, str] = {}
+    changed = True
+    while changed:
+        changed = False
+        for measures in measure_lists:
+            for measure in list(measures):
+                window = getattr(measure, "window_spec", None) or {}
+                reads = {
+                    n.lower() for n in _MEASURE_REF.findall(str(measure.sql_expr or ""))
+                }
+                if window.get("offset") is not None and (
+                    str(window.get("order")) not in dimensions
+                ):
+                    reason = (
+                        f"prior year: the view has no dimension {window.get('order')} "
+                        "for the window to order by"
+                    )
+                elif reads & set(gone):
+                    reason = "uses a prior-year measure that is not in this view"
+                else:
+                    continue
+                measures.remove(measure)
+                gone[measure.measure_name.lower()] = reason
+                measure.is_translatable = False
+                measure.sql_expr = None
+                measure.window_spec = None
+                measure.skip_reason = reason
+                spec.untranslatable.append(measure)
+                changed = True

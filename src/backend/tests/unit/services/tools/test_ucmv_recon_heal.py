@@ -498,3 +498,20 @@ measures:
         "measure bad (found by bisection)",
         "measure uses_bad (reads a removed measure)",
     ]
+
+
+def test_a_window_on_a_dimension_the_view_never_had_is_removed_with_its_readers():
+    spec = yaml.safe_load(WINDOWED)
+    spec["dimensions"] = [d for d in spec["dimensions"] if d["name"] != "fiscper_key"]
+    text, removed = heal_view(
+        yaml.safe_dump(spec, sort_keys=False),
+        "[METRIC_VIEW_INVALID_VIEW_DEFINITION] The metric view definition is invalid. Reason: "
+        "window.order field must reference existing dimension columns. Invalid: fiscper_key.",
+    )
+    assert _names(text, "measures") == ["sales"]
+    assert removed == [
+        "measure sales_py",
+        "measure cost_py",
+        "measure growth (reads a removed measure)",
+        "measure growth_pct (reads a removed measure)",
+    ]

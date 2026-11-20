@@ -246,8 +246,10 @@ def heal_view(yaml_text: str, error: str) -> tuple[str | None, list[str]]:
         for join in view._items("joins"):
             if _norm(str(join.get("source") or "")) == missing:
                 view.drop_join(str(join.get("name")))
-    if view.removed:
-        view.drop_windows()  # windows on a dimension that was just removed
+    if view.removed or "window.order" in error:
+        # Windows on a dimension that was just removed, or that the view never had
+        # ("window.order field must reference existing dimension columns").
+        view.drop_windows()
         view.drop_dependents()
     if not view.removed or not as_list(view.spec.get("measures")):
         return None, []

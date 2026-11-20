@@ -193,3 +193,61 @@ def test_the_window_is_written_with_its_offset():
         "        semiadditive: last",
     ]
     assert _window_lines(None) == []
+
+
+def test_a_period_the_fact_does_not_have_is_not_used_for_the_window():
+    # The emitter drops a source.<column> dimension the fact is known not to have; a
+    # window ordered by its key would stop the whole view from deploying.
+    mapping = [_entry("Sales PY", PY, "Fact")]
+    prior_year.take_out_shifts(mapping, {})
+    spec = _spec(
+        [
+            {"name": "fiscper", "expr": "source.fiscper"},
+            {"name": "order_date", "expr": "source.order_date"},
+        ],
+        [
+            _measure("sales", "SUM(source.amount)", original="Sales"),
+            _measure("sales_py", "MEASURE(sales)", "[Sales]", "Sales PY"),
+        ],
+    )
+    spec.fact_columns = ["order_date", "amount"]
+    assert prior_year.add_windows({"Fact": spec}, mapping, {}) == {}
+    assert [m.measure_name for m in spec.measures] == ["sales"]
+    assert [d["name"] for d in spec.dimensions] == ["fiscper", "order_date"]
+    assert "no period" in spec.untranslatable[0].skip_reason
+
+
+def test_the_emitter_does_not_write_a_window_without_its_dimension():
+    from src.services.tools.metric_view_utils.yaml_known_columns import (
+        drop_phantom_dimensions,
+    )
+
+    window = {"order": "fiscper_key", "range": "current", "offset": -1000}
+    sales_py = _measure("sales_py", "MEASURE(sales)")
+    sales_py.window_spec = dict(window)
+    growth = _measure("growth", "MEASURE(sales) - MEASURE(sales_py)")
+    latest = _measure("latest_stock", "SUM(source.stock)")
+    latest.window_spec = {"order": "week", "range": "current", "semiadditive": "last"}
+    base = [_measure("sales", "SUM(source.amount)")]
+    dax = [sales_py, growth, latest]
+    spec = _spec([{"name": "country", "expr": "source.country"}], base + dax)
+    spec.fact_columns = ["country", "amount", "stock"]
+    drop_phantom_dimensions(spec, base, [], dax, [])
+    # the prior-year measure and its reader go; a window without an offset is not touched
+    assert [m.measure_name for m in dax] == ["latest_stock"]
+    gone = {m.measure_name: m.skip_reason for m in spec.untranslatable}
+    assert "fiscper_key" in gone["sales_py"] and "prior-year" in gone["growth"]
+
+    kept = _measure("sales_py", "MEASURE(sales)")
+    kept.window_spec = dict(window)
+    spec = _spec(
+        [
+            {"name": "country", "expr": "source.country"},
+            {"name": "fiscper_key", "expr": "TRY_CAST(cal.fiscper AS INT)"},
+        ],
+        base + [kept],
+    )
+    spec.fact_columns = ["country", "amount"]
+    dax = [kept]
+    drop_phantom_dimensions(spec, base, [], dax, [])
+    assert dax == [kept] and not spec.untranslatable
