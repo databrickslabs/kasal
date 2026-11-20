@@ -64,6 +64,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import { safeImageComponents } from '../../../shared/a2ui/lib/markdown';
 import type { MetricViewDef, UCMVStats, UCMVResult, FallbackExtractRow, UCMVResultViewerProps } from './ucmvResultTypes';
 import { SQLBlock, StatsChips, Section, CopyButton } from './UCMVResultPrimitives';
+import UCMVReviewOverview from './UCMVReviewOverview';
 import { FieldTable, JoinsTable } from './UCMVFieldTables';
 export type { UCMVResult, FallbackExtractRow } from './ucmvResultTypes';
 
@@ -694,6 +695,22 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
             </Box>
           )}
         </Box>
+      )}
+
+      {/* Review overview of a verify-numbers run: where every view stands */}
+      {result.review_overview && Object.keys(result.review_overview).length > 0 && (
+        <Section
+          title="Review: measures per view"
+          icon={<FunctionsIcon fontSize="small" color="action" />}
+          defaultExpanded
+        >
+          <UCMVReviewOverview
+            overview={result.review_overview}
+            summary={result.review_summary}
+            barPct={result.review_bar_pct}
+            csv={result.review_csv}
+          />
+        </Section>
       )}
 
       {/* Migration Report (collapsible) */}

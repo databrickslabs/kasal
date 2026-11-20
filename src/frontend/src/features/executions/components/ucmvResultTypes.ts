@@ -25,6 +25,27 @@ export interface UCMVStats {
   [key: string]: unknown;
 }
 
+/** Counts of one view (or of all views, under "total") in a verify-numbers run. */
+export interface UCMVReviewCounts {
+  in_scope: number;
+  translated: number;
+  match: number;
+  below_bar: number;
+  not_compared: number;
+  lost_on_deploy: number;
+  not_translated: number;
+  column_sums: number;
+  column_sums_match: number;
+  display: number;
+}
+
+/** Where a view stands against the review bar. */
+export interface UCMVReviewViewStatus {
+  status: string;
+  pct_aligned?: number | null;
+  measures?: Record<string, number>;
+}
+
 export interface UCMVResult {
   yaml: Record<string, string>;
   sql: Record<string, string>;
@@ -36,6 +57,14 @@ export interface UCMVResult {
   llm_translation_warning?: string | null;
   stats: Record<string, UCMVStats> | UCMVStats;
   migration_report?: string;
+  /** Verify numbers: per-view counts of in-scope measures (keyed by view, plus "total"). */
+  review_overview?: Record<string, UCMVReviewCounts>;
+  /** Verify numbers: per-view status against the bar. */
+  review_summary?: Record<string, UCMVReviewViewStatus>;
+  /** Verify numbers: the bar (share of matching cells, in percent) a measure has to reach. */
+  review_bar_pct?: number;
+  /** Verify numbers: one row per measure with status and reason (statistics only). */
+  review_csv?: string;
   /** Raw source measures with their original DAX expressions (echoed from the generator). */
   measures_with_dax?: unknown[];
   /** Raw source M-Query entries (echoed from the generator). */
