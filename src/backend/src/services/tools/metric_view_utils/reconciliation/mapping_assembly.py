@@ -115,6 +115,12 @@ _PBI_AGGREGATION = {
 }
 
 
+def is_column_aggregate(expr: object) -> bool:
+    """Whether a measure is one aggregate over one fact column (``SUM(source.x)``): a column
+    sum the model has no measure for, as opposed to a translated Power BI measure."""
+    return bool(_BASE.match(str(expr or "")))
+
+
 def _base_measures(spec: RawMap, table_key: str, taken: set[str]) -> list[RawMap]:
     """Measures that aggregate one fact column (``SUM(source.x)``) have no Power BI measure,
     but Power BI can aggregate the same column itself: compared as ``raw_column``."""
@@ -275,6 +281,48 @@ def _comparable(
     return usable
 
 
+@dataclass(frozen=True)
+class DatePeriod:
+    """A period taken from a date column of the fact: the view's dimension, and the
+    calendar table and period column Power BI is grouped by."""
+
+    dimension: tuple[str, str, str]
+    pbi_table: str
+    pbi_column: str
+
+
+def _loose(name: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+
+
+def _date_period(
+    fact: str, dims: list[tuple[str, str, str]], relationships: object
+) -> DatePeriod | None:
+    """A period for a view that has no period column but a date the model relates to a
+    calendar. The calendar must have a period column (one another relationship ends on:
+    ``Fact[fiscper] -> Calendar[fiscper]``), and the view a dimension on the fact's date.
+    """
+    rels = [as_map(r) for r in as_list(relationships)]
+    period_columns: dict[str, str] = {}
+    for rel in rels:
+        column = str(rel.get("to_column") or "")
+        if column.lower() in _PERIOD_NAMES:
+            period_columns.setdefault(str(rel.get("to_table") or ""), column)
+    for rel in rels:
+        calendar = str(rel.get("to_table") or "")
+        if (
+            rel.get("is_active") is False
+            or str(rel.get("from_table") or "") != fact
+            or calendar not in period_columns
+        ):
+            continue
+        key = _loose(rel.get("from_column"))
+        for dim in dims:
+            if dim[1] == fact and _loose(dim[2]) == key:
+                return DatePeriod(dim, calendar, period_columns[calendar])
+    return None
+
+
 def _alias_of(spec: RawMap, period: tuple[str, str, str]) -> str:
     """The join alias the period dimension reads (``cal`` in ``cal.fiscper``), "" for source."""
     for raw in as_list(spec.get("dimensions")):
@@ -294,6 +342,7 @@ def assemble_mapping(
     aliases: Mapping[str, str],
     model: Mapping[str, object],
     filters: FactFilters | None = None,
+    relationships: object = None,
 ) -> tuple[RawMap | None, str]:
     """One mapping for a deployed view, or ``(None, reason)``."""
     try:
@@ -311,6 +360,9 @@ def assemble_mapping(
         )
     dims = _comparable(spec, table_key, _dimensions(spec, table_key, aliases), filters)
     period = _period(dims)
+    by_date = None if period else _date_period(table_key, dims, relationships)
+    if by_date is not None:
+        period = by_date.dimension
     if period is None:
         return (
             None,
@@ -329,7 +381,17 @@ def assemble_mapping(
     # The fact's own join key filters the fact in Power BI whatever the relationships; the
     # joined table filters it only through an active relationship (a "dummy" calendar does not).
     fact_key = _fact_key(spec, alias, period[2]) if alias else ""
-    if fact_key:
+    if by_date is not None:
+        # The view has a date, the model a calendar it is related to: the metric view's
+        # date becomes the period key, Power BI is grouped by the calendar's period.
+        time_dimension["ucmv"] = {
+            "mode": "column",
+            "name": period[0],
+            "period_format": "date_to_fiscper",
+        }
+        time_dimension["pbi_column"] = by_date.pbi_column
+        time_dimension["pbi_table"] = by_date.pbi_table
+    elif fact_key:
         time_dimension["pbi_column"] = fact_key
     elif period[1] != table_key:
         time_dimension["pbi_table"] = period[1]
@@ -378,6 +440,7 @@ def assemble_mappings(
             aliases,
             model,
             fact_filters(key, relationships, inactive_relationships),
+            relationships,
         )
         if mapping is None:
             gaps[key] = reason

@@ -11,6 +11,13 @@ the run. A measure is one of:
 - ``not_deployed``: its view did not deploy;
 - ``not_translated``: the DAX has no metric-view expression (with the reason).
 
+Each row also says what the measure is: ``kind`` is ``measure`` (a Power BI measure) or
+``column_sum`` (a plain aggregate of one table column, which the model has no measure for),
+and ``scope`` is ``in_scope``, ``display`` (formatting or slicer logic: not a data measure) or
+``counted_elsewhere`` (the same measure is listed on its primary table). ``review_overview``
+counts, per view, the in-scope measures that are translated, match Power BI, are below the
+bar, were lost on deploy or are not translated.
+
 The list carries statistics only (share of cells aligned, cell counts), never a measure value,
 so it can leave the workspace. ``review_summary`` gives the same per view.
 
@@ -27,11 +34,14 @@ from collections.abc import Mapping
 import yaml
 
 from ..raw_fields import RawMap, as_list, as_map
+from .mapping_assembly import is_column_aggregate
 
 DEFAULT_BAR_PCT = 90.0
 REVIEW_FIELDS = (
     "view",
     "measure",
+    "kind",
+    "scope",
     "power_bi",
     "status",
     "pct_aligned",
@@ -84,8 +94,41 @@ def _power_bi_name(mapped: RawMap) -> str:
     return ""
 
 
+def _kind(spec: RawMap) -> str:
+    """``column_sum`` for one aggregate over one fact column, else ``measure``."""
+    return "column_sum" if is_column_aggregate(spec.get("expr")) else "measure"
+
+
 def _row(view: str, measure: str, status: str, **fields: object) -> dict[str, object]:
     return {"view": view, "measure": measure, "status": status, **fields}
+
+
+_DISPLAY_REASON = re.compile(
+    r"display-only|ISFILTERED|BLANK\(\) placeholder", re.IGNORECASE
+)
+
+
+def _untranslated_scope(item: RawMap) -> str:
+    """Whether an untranslated measure is a data measure of this view at all."""
+    reason = str(item.get("skip_reason") or "")
+    if item.get("dax_class") == "display_layer" or _DISPLAY_REASON.search(reason):
+        return "display"
+    if "Covered on primary table" in reason:
+        return "counted_elsewhere"
+    return "in_scope"
+
+
+def _power_bi_measures(output: Mapping[str, object]) -> dict[str, set[str]]:
+    """``{view: metric-view measures that come from a Power BI measure}`` (the others are
+    column sums)."""
+    return {
+        str(view): {
+            str(as_map(m).get("measure_name"))
+            for m in as_list(measures)
+            if as_map(m).get("dax_expression")
+        }
+        for view, measures in as_map(output.get("resolved_measures_by_table")).items()
+    }
 
 
 def _compared_rows(
@@ -103,6 +146,7 @@ def _compared_rows(
         name = str(spec.get("name") or "")
         used = _USED_ON.search(str(spec.get("comment") or ""))
         common: dict[str, object] = {
+            "kind": _kind(spec),
             "power_bi": _power_bi_name(as_map(mapped.get(name))),
             "used_on_visuals": int(used.group(1)) if used else 0,
         }
@@ -141,7 +185,7 @@ def _uncompared_rows(
     view: str, yaml_text: object, status: str, reason: str
 ) -> list[dict[str, object]]:
     return [
-        _row(view, str(spec.get("name") or ""), status, reason=reason)
+        _row(view, str(spec.get("name") or ""), status, reason=reason, kind=_kind(spec))
         for spec in _view_measures(yaml_text)
     ]
 
@@ -206,11 +250,21 @@ def build_review_list(
                 str(item.get("original_name") or ""),
                 "not_translated",
                 power_bi=str(item.get("original_name") or ""),
+                kind="measure",
+                scope=_untranslated_scope(item),
                 used_on_visuals=len(as_list(item.get("used_in_visuals")))
                 + len(as_list(item.get("indirect_visual_usage"))),
                 reason=_short(item.get("skip_reason")),
             )
         )
+    from_measures = _power_bi_measures(output)
+    for row in rows:
+        # A Power BI measure that is itself one column aggregate (Total = SUM(T[x])) is a
+        # measure; a measure healing removed has no expression left to judge by.
+        if str(row["measure"]) in from_measures.get(str(row["view"]), set()):
+            row["kind"] = "measure"
+        row.setdefault("kind", "column_sum")
+        row.setdefault("scope", "in_scope")
     rows.sort(
         key=lambda r: (
             str(r["view"]),
@@ -250,6 +304,47 @@ def review_summary(
     return summary
 
 
+_OVERVIEW_KEYS = (
+    "in_scope",
+    "translated",
+    "match",
+    "below_bar",
+    "not_compared",
+    "lost_on_deploy",
+    "not_translated",
+    "column_sums",
+    "column_sums_match",
+    "display",
+)
+_IN_VIEW = ("reconciled", "below_bar", "not_compared")
+
+
+def review_overview(rows: list[dict[str, object]]) -> dict[str, dict[str, int]]:
+    """Per view, and under ``"total"``: how many in-scope Power BI measures there are, how
+    many are translated (in the deployed view), match Power BI, are below the bar, are not
+    compared, were lost on deploy or are not translated; the column sums and how many of
+    them match; and the display measures left out of the scope."""
+    overview: dict[str, dict[str, int]] = {}
+    for row in rows:
+        for key in (str(row["view"]), "total"):
+            counts = overview.setdefault(key, dict.fromkeys(_OVERVIEW_KEYS, 0))
+            status = str(row["status"])
+            if row.get("kind") == "column_sum":
+                counts["column_sums"] += 1
+                counts["column_sums_match"] += status == "reconciled"
+            elif row.get("scope") == "display":
+                counts["display"] += 1
+            elif row.get("scope") == "in_scope":
+                counts["in_scope"] += 1
+                counts["translated"] += status in _IN_VIEW
+                counts["match"] += status == "reconciled"
+                counts["below_bar"] += status == "below_bar"
+                counts["not_compared"] += status in ("not_compared", "not_deployed")
+                counts["lost_on_deploy"] += status == "removed_on_deploy"
+                counts["not_translated"] += status == "not_translated"
+    return overview
+
+
 def with_review(
     output: Mapping[str, object], config: object = None
 ) -> dict[str, object]:
@@ -264,6 +359,7 @@ def with_review(
         **output,
         "review_bar_pct": bar,
         "review_summary": review_summary(output, rows, bar),
+        "review_overview": review_overview(rows),
         "review_csv": review_csv(rows),
     }
 

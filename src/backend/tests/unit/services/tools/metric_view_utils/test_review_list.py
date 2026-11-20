@@ -136,7 +136,7 @@ def test_the_csv_holds_statistics_only_and_no_formula():
     text = review_csv(build_review_list(OUTPUT))
     assert "4307155594" not in text and "987654" not in text  # never a measure value
     assert "'=cmd" in text  # a name cannot run as a spreadsheet formula
-    assert text.splitlines()[0].startswith("view,measure,power_bi,status,pct_aligned")
+    assert text.splitlines()[0].startswith("view,measure,kind,scope,power_bi,status")
 
 
 def test_the_bar_comes_from_the_pipeline_config_and_defaults_to_90():
@@ -225,3 +225,55 @@ def test_a_healed_view_without_comment_lines_is_flagged_too():
         measures["margin_pct"]["comment"] == "Margin share [Not compared with Power BI]"
     )
     assert yaml.safe_load(flagged)["dimensions"] == yaml.safe_load(VIEW)["dimensions"]
+
+
+def test_the_overview_counts_in_scope_measures_apart_from_column_sums_and_display():
+    from src.services.tools.metric_view_utils.reconciliation.review_list import (
+        review_overview,
+    )
+
+    output = {
+        **OUTPUT,
+        # margin_pct is a translated Power BI measure; revenue and volume are column sums
+        "resolved_measures_by_table": {
+            "Fact_Sales": [
+                {"measure_name": "margin_pct", "dax_expression": "DIVIDE([M], [R])"},
+                {"measure_name": "revenue", "dax_expression": ""},
+                {"measure_name": "old_kpi", "dax_expression": "[A] - [B]"},
+            ]
+        },
+        "untranslatable_items": [
+            *OUTPUT["untranslatable_items"],
+            {
+                "table_key": "Fact_Sales",
+                "original_name": "Colour",
+                "dax_class": "display_layer",
+                "skip_reason": "LLM declined [display_layer]",
+            },
+            {
+                "table_key": "Fact_Sales",
+                "original_name": "Dup",
+                "skip_reason": "Covered on primary table (secondary allocation)",
+            },
+        ],
+    }
+    rows = build_review_list(output)
+    kinds = {
+        (r["measure"], r["kind"], r["scope"]) for r in rows if r["view"] == "Fact_Sales"
+    }
+    assert ("revenue", "column_sum", "in_scope") in kinds
+    assert ("margin_pct", "measure", "in_scope") in kinds
+    assert ("Colour", "measure", "display") in kinds
+    assert ("Dup", "measure", "counted_elsewhere") in kinds
+    sales = review_overview(rows)["Fact_Sales"]
+    # in scope: margin_pct (below the bar), old_kpi (lost on deploy), Rank % (not translated)
+    assert (sales["in_scope"], sales["translated"], sales["match"]) == (3, 1, 0)
+    assert (sales["below_bar"], sales["lost_on_deploy"], sales["not_translated"]) == (
+        1,
+        1,
+        1,
+    )
+    assert sales["display"] == 1
+    # revenue (matches), volume and =cmd are plain column sums
+    assert (sales["column_sums"], sales["column_sums_match"]) == (3, 1)
+    assert with_review(output)["review_overview"]["total"]["in_scope"] >= 3

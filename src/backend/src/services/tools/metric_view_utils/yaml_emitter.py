@@ -29,6 +29,7 @@ from .yaml_annotations import (
 from .yaml_annotations import _provenance_suffix as _provenance_suffix
 from .yaml_annotations import _usage_suffix as _usage_suffix
 from .yaml_annotations import _visual_usage_suffix as _visual_usage_suffix
+from .yaml_known_columns import drop_phantom_dimensions
 from .yaml_known_columns import known_source_columns as _known_source_columns
 from .yaml_measure_render import (
     render_base_measures,
@@ -628,52 +629,9 @@ def emit_yaml(
     ):
         return ""
 
-    # Early dimension validation: drop phantom source.column dimensions.
-    # Build column set from base measures and FILTER clauses only (not from dimensions
-    # themselves — that would be circular self-validation).
-    _base_only_cols_early: set[str] = set()
-    for m in base_measures + implicit_measures:
-        if m.sql_expr:
-            _base_only_cols_early.update(re.findall(r"\bsource\.(\w+)", m.sql_expr))
-    for m in dax_measures + switch_measures:
-        if m.sql_expr:
-            for fc_m in re.finditer(r"FILTER\s*\(WHERE\s+([^)]+)\)", m.sql_expr):
-                _base_only_cols_early.update(
-                    re.findall(r"\b(\w+)\s*(?:=|<>|!=|IN\b)", fc_m.group(1))
-                )
-    if spec.source_filter:
-        _base_only_cols_early.update(
-            re.findall(r"\b(\w+)\s*(?:=|<>|!=|IN\b|NOT\s+IN\b)", spec.source_filter)
-        )
-    # When source_sql is present (inline SQL), ALL columns in the SELECT list are valid
-    if spec.source_sql:
-        # Extract AS aliases
-        for col_m in re.finditer(r"\bAS\s+(\w+)", spec.source_sql, re.IGNORECASE):
-            _base_only_cols_early.add(col_m.group(1))
-            _base_only_cols_early.add(col_m.group(1).lower())
-        # Extract bare column refs from first SELECT (before FROM)
-        first_arm = re.split(
-            r"\bUNION\b", spec.source_sql, maxsplit=1, flags=re.IGNORECASE
-        )[0]
-        sel_m = re.match(
-            r"\s*SELECT\s+(.*?)\s+FROM\s+", first_arm, re.IGNORECASE | re.DOTALL
-        )
-        if sel_m:
-            for col_part in sel_m.group(1).split(","):
-                bare = re.match(r"^\s*(\w+)\s*$", col_part.strip())
-                if bare:
-                    _base_only_cols_early.add(bare.group(1))
-                    _base_only_cols_early.add(bare.group(1).lower())
-    if _base_only_cols_early and spec.dimensions:
-        valid_dims = []
-        for d in spec.dimensions:
-            src_refs = set(re.findall(r"\bsource\.(\w+)", d["expr"]))
-            if src_refs:
-                unknown_dim_cols = src_refs - _base_only_cols_early
-                if unknown_dim_cols:
-                    continue  # phantom dimension — skip
-            valid_dims.append(d)
-        spec.dimensions = valid_dims
+    drop_phantom_dimensions(
+        spec, base_measures, implicit_measures, dax_measures, switch_measures
+    )
 
     # Enrich dimensions and measures with metadata (display_name, synonyms, format)
     _meta_gen = MetadataGenerator(pbi_format_strings=pbi_format_strings)

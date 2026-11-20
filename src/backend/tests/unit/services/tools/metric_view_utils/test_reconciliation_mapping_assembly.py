@@ -418,3 +418,75 @@ def test_without_the_full_list_an_inactive_relationship_still_counts():
     assert untouched["Fact_CO012"]["dimensions"]["comp_code"]["pbi_dim_table"] == (
         "C_Dim_Geography"
     )
+
+
+DATE_ONLY = """version: '1.1'
+source: prod.q.kbis
+joins:
+  - name: dim_geography
+    source: prod.md.ca_dim_company
+    "on": source.comp_code = dim_geography.comp_code
+dimensions:
+  - name: comp_code
+    expr: dim_geography.comp_code
+  - name: formateddate
+    expr: source.formateddate
+measures:
+  - name: kbi_value
+    expr: SUM(source.kbi_value)
+"""
+
+
+def test_a_view_with_only_a_date_is_compared_through_its_calendar():
+    """No period column, only a date the model relates to the calendar: the view was not
+    compared at all (61 measures in one case)."""
+    relationships = [
+        {
+            "from_table": "Fact_Q",
+            "from_column": "FormatedDate",
+            "to_table": "C_Dim_calendar",
+            "to_column": "date_id",
+            "is_active": True,
+        },
+        {
+            "from_table": "Fact_Q",
+            "from_column": "comp_code",
+            "to_table": "C_Dim_Geography",
+            "to_column": "comp_code",
+            "is_active": True,
+        },
+        # another fact shows that the calendar has a period column
+        {
+            "from_table": "Fact_Other",
+            "from_column": "fiscper",
+            "to_table": "C_Dim_calendar",
+            "to_column": "fiscper",
+            "is_active": True,
+        },
+    ]
+    mappings, gaps = assemble_mappings(
+        {"Fact_Q": DATE_ONLY},
+        {},
+        {"Fact_Q": "c.s.fact_q"},
+        JOIN_KEY_MAP,
+        MODEL,
+        relationships=relationships,
+    )
+    assert gaps == {}
+    assert mappings["Fact_Q"]["time_dimension"] == {
+        "grain": "month",
+        "ucmv": {
+            "mode": "column",
+            "name": "formateddate",
+            "period_format": "date_to_fiscper",
+        },
+        "pbi_column": "fiscper",
+        "pbi_table": "C_Dim_calendar",
+    }
+    loaded = load_mapping_dict(mappings["Fact_Q"])
+    assert loaded.binding.time_dimension.ucmv_period_format == "date_to_fiscper"
+    # without the relationships there is still no period
+    _, gaps = assemble_mappings(
+        {"Fact_Q": DATE_ONLY}, {}, {"Fact_Q": "c.s.fact_q"}, JOIN_KEY_MAP, MODEL
+    )
+    assert "no period dimension" in gaps["Fact_Q"]

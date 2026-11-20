@@ -178,3 +178,91 @@ def test_the_fact_columns_are_unknown_when_power_query_reshapes_them():
     assert known_fact_columns(info(_m(CTE_NATIVE))) == ["fiscper", "result", "unit"]
     renamed = ',\n    r = Table.RenameColumns(v, {{"result", "value"}})'
     assert known_fact_columns(info(_m(CTE_NATIVE, renamed))) == []
+
+
+def _spec(**fields):
+    base = dict(
+        fact_table_key="Fact_Q",
+        source_table="prod.q.kbis",
+        view_name="fact_q",
+        comment="",
+        joins=[],
+        dimensions=[],
+        measures=[],
+        untranslatable=[],
+    )
+    return MetricViewSpec(**{**base, **fields})
+
+
+def test_the_facts_own_key_of_a_join_becomes_a_dimension():
+    """The model relates Fact[FormatedDate] to the calendar; the join was built on
+    formated_date, which the source does not have, and dropped. The view was left without any
+    date: nothing to slice by, and no period to compare with Power BI by."""
+    from src.services.tools.metric_view_utils.join_columns import (
+        add_join_key_dimensions,
+    )
+
+    spec = _spec(
+        joins=[
+            {
+                "name": "dim_calendar",
+                "source": "c.s.cal",
+                "join_on": "source.formated_date = dim_calendar.date_id",
+            },
+            {
+                "name": "dim_geo",
+                "source": "c.s.geo",
+                "join_on": "source.comp_code = dim_geo.comp_code",
+            },
+            {
+                "name": "dim_x",
+                "source": "c.s.x",
+                "join_on": "source.date_key = dim_x.id",
+            },
+        ],
+        dimensions=[{"name": "comp_code", "expr": "dim_geo.comp_code"}],
+        fact_columns=["formateddate", "comp_code", "kbi_value"],
+    )
+    assert add_join_key_dimensions(spec) == ["formateddate"]
+    assert spec.dimensions[-1]["expr"] == "source.formateddate"
+    assert add_join_key_dimensions(spec) == []  # once
+    assert (
+        add_join_key_dimensions(_spec(joins=spec.joins)) == []
+    )  # columns unknown: nothing
+
+
+def test_a_step_that_removes_columns_makes_the_fact_columns_unknown():
+    from src.services.tools.metric_view_utils.data_classes import TableInfo
+    from src.services.tools.metric_view_utils.join_columns import known_fact_columns
+
+    info = TableInfo("FT", "mart.pl", [], [], [], True, "")
+    info.raw_transpiled_sql = _m(
+        CTE_NATIVE, ',\n    r = Table.RemoveColumns(v, {"unit"})'
+    )
+    assert known_fact_columns(info) == []
+
+
+def test_a_dimension_on_a_column_the_native_query_returns_is_not_a_phantom():
+    """With the view reading its source-layer view there is no inline SQL to take the columns
+    from: every dimension on a column no measure touches was dropped."""
+    from types import SimpleNamespace
+
+    from src.services.tools.metric_view_utils.yaml_known_columns import (
+        drop_phantom_dimensions,
+    )
+
+    measure = SimpleNamespace(measure_name="qty", sql_expr="SUM(source.qty)")
+    spec = _spec(
+        dimensions=[
+            {"name": "salesorg", "expr": "source.salesorg"},
+            {"name": "ghost", "expr": "source.not_there"},
+            {"name": "comp_code", "expr": "source.comp_code"},
+            {"name": "comp_code", "expr": "dim_geo.comp_code"},
+        ],
+        fact_columns=["salesorg", "comp_code", "qty"],
+    )
+    drop_phantom_dimensions(spec, [measure], [], [], [])
+    assert [(d["name"], d["expr"]) for d in spec.dimensions] == [
+        ("salesorg", "source.salesorg"),
+        ("comp_code", "dim_geo.comp_code"),  # the join's dimension keeps its name
+    ]

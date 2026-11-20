@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from .data_classes import TableInfo
+from .data_classes import MetricViewSpec, TableInfo
 
 _SOURCE_COLUMN = re.compile(r"\bsource\.`?([A-Za-z_]\w*)`?")
 _SELECT = re.compile(
@@ -26,7 +26,8 @@ _SELECT = re.compile(
 _RESHAPING_M_STEP = re.compile(
     r"\bTable\.(?:AddColumn|AddIndexColumn|DuplicateColumn|RenameColumns|"
     r"TransformColumnNames|Expand\w*Column|Unpivot\w*|Pivot|SplitColumn|CombineColumns|"
-    r"PromoteHeaders|Group|Join|NestedJoin|Combine|FromRows|ReorderColumns)\s*\("
+    r"PromoteHeaders|Group|Join|NestedJoin|Combine|FromRows|ReorderColumns|"
+    r"RemoveColumns|SelectColumns)\s*\("
 )
 _ALIAS = re.compile(r"\bAS\s+`?([A-Za-z_]\w*)`?\s*$", re.IGNORECASE)
 _PLAIN = re.compile(r"^(?:`?[A-Za-z_]\w*`?\.)?`?([A-Za-z_]\w*)`?$")
@@ -131,3 +132,53 @@ def missing_join_columns(join_on: str, fact_columns: Iterable[str]) -> list[str]
         return []
     used = {m.group(1) for m in _SOURCE_COLUMN.finditer(join_on or "")}
     return sorted(c for c in used if c.lower() not in known)
+
+
+def _loose(name: str) -> str:
+    """A column name without case, underscores or spaces: ``FormatedDate`` and
+    ``formated_date`` are one column."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def add_join_key_dimensions(
+    spec: MetricViewSpec, excluded: Iterable[str] = ()
+) -> list[str]:
+    """Make the fact's own key of every join a dimension of the view.
+
+    A relationship column such as ``FormatedDate`` reaches the join snake-cased
+    (``formated_date``); the source has no such column, the join is dropped, and with it the
+    only date the view has: nothing to slice by, and no period to compare with Power BI by.
+    The fact's column itself is added (under the name the source gives it) unless a dimension
+    or a measure already reads it or has its name, or the pipeline config excludes it. Only
+    when the fact's columns are fully known. Returns the names it added."""
+    if not spec.fact_columns:
+        return []
+    by_loose: dict[str, list[str]] = {}
+    for column in spec.fact_columns:
+        by_loose.setdefault(_loose(column), []).append(column)
+    exprs = [str(d.get("expr") or "") for d in spec.dimensions]
+    exprs += [str(m.sql_expr or "") for m in spec.measures]
+    read = {c.lower() for expr in exprs for c in _SOURCE_COLUMN.findall(expr)}
+    taken = {str(d.get("name") or "").lower() for d in spec.dimensions}
+    taken |= {str(m.measure_name or "").lower() for m in spec.measures}
+    taken |= {str(name).lower() for name in excluded}
+    added: list[str] = []
+    for join in spec.joins:
+        on = str(join.get("join_on") or join.get("on") or "")
+        for key in _SOURCE_COLUMN.findall(on):
+            matches = by_loose.get(_loose(key), [])
+            if len(matches) != 1:
+                continue
+            name = matches[0].lower()
+            if name in read or name in taken:
+                continue
+            spec.dimensions.append(
+                {
+                    "name": name,
+                    "expr": f"source.{matches[0]}",
+                    "comment": f"{name.replace('_', ' ').capitalize()} (key to {join.get('name')})",
+                }
+            )
+            taken.add(name)
+            added.append(name)
+    return added

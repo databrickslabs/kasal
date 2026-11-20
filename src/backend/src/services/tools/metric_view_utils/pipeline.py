@@ -585,9 +585,10 @@ class MetricViewPipeline:
             validate_filter_consistency_fn=MetricViewPipeline._validate_filter_consistency,
         )
         self._sanitize_spec_measures(spec)
-        from .join_columns import known_fact_columns
+        from .join_columns import add_join_key_dimensions, known_fact_columns
 
         spec.fact_columns = known_fact_columns(table_info)
+        add_join_key_dimensions(spec, self._dimension_exclusions.get(table_key, ()))
         return spec
 
     def _sanitize_spec_measures(self, spec: MetricViewSpec) -> None:
