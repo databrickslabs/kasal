@@ -71,3 +71,87 @@ def test_a_value_transform_that_is_not_reproduced_is_named():
     )
     folder.fold_from_mquery("SELECT a FROM md.t", m, None)
     assert folder.transform_todos
+
+
+def test_a_shared_alias_binds_to_the_table_that_has_the_columns_the_measures_read():
+    """Two plant tables share one alias and one warehouse table. The join stayed on the raw
+    table, which lacks the column Power Query renames, and every measure filtering on it was
+    removed on deploy."""
+    from types import SimpleNamespace
+
+    from src.services.tools.metric_view_utils.source_layer_binding import (
+        _table_with_measure_columns,
+        shared_alias_columns,
+    )
+
+    shared = shared_alias_columns(
+        {
+            "C_Dim_Plant": {
+                "alias": "dim_plant",
+                "dim_columns": ["plant", "plant_desc"],
+            },
+            "Dim_Plant": {
+                "alias": "dim_plant",
+                "dim_columns": ["plant", "Plant_Txtmd_Ref"],
+            },
+            "C_Dim_Geography": {"alias": "dim_geography", "dim_columns": ["comp_code"]},
+        }
+    )
+    assert sorted(shared) == ["dim_plant"]  # only aliases more than one table uses
+    views = {"C_Dim_Plant": "c.s.src_c_dim_plant", "Dim_Plant": "c.s.src_dim_plant"}
+
+    def spec(*exprs: str) -> SimpleNamespace:
+        return SimpleNamespace(measures=[SimpleNamespace(sql_expr=e) for e in exprs])
+
+    filtered = spec(
+        "SUM(source.qty) FILTER (WHERE dim_plant.plant_txtmd_ref NOT IN ('A'))"
+    )
+    assert (
+        _table_with_measure_columns(filtered, "dim_plant", shared, views) == "Dim_Plant"
+    )
+    # both tables have the column, or no measure reads the alias: not guessed
+    assert (
+        _table_with_measure_columns(
+            spec("SUM(source.qty) FILTER (WHERE dim_plant.plant = 'A')"),
+            "dim_plant",
+            shared,
+            views,
+        )
+        is None
+    )
+    assert (
+        _table_with_measure_columns(spec("SUM(source.qty)"), "dim_plant", shared, views)
+        is None
+    )
+    assert _table_with_measure_columns(filtered, "dim_geography", shared, views) is None
+
+
+def test_a_placeholder_override_does_not_stand_in_for_a_translation():
+    """Config generation writes a note per complex measure (expr: "TODO: complex measure
+    ..."). Taken as an override it replaced the measure with that text and kept it away from
+    the DAX translation: 27 measures of one view were never translated."""
+    from src.services.tools.uc_metric_view_generator_utils.pipeline_config_assembly import (
+        apply_config_overlays,
+    )
+
+    config: dict[str, object] = {
+        "manual_overrides": {
+            "Fact_Orders": [
+                {
+                    "name": "ordered_py",
+                    "expr": "TODO: complex measure 'Ordered PY' — DAX: CALCULATE(...)",
+                },
+                {"name": "ordered_fixed", "expr": "SUM(source.ordered)"},
+            ]
+        }
+    }
+    apply_config_overlays(
+        config,
+        in_recon_loop=False,
+        naming_raw=None,
+        implicit_column_measures_raw=None,
+        manual_overrides_raw='{"Fact_Orders": [{"name": "kept", "expr": "SUM(source.kept)"}]}',
+    )
+    overrides = config["manual_overrides"]
+    assert isinstance(overrides, dict)
+    assert [o["name"] for o in overrides["Fact_Orders"]] == ["ordered_fixed", "kept"]

@@ -169,6 +169,50 @@ def unique_alias_tables(join_key_map: Mapping[str, object]) -> dict[str, str]:
     return {alias: tables[0] for alias, tables in by_alias.items() if len(tables) == 1}
 
 
+def shared_alias_columns(
+    join_key_map: Mapping[str, object],
+) -> dict[str, dict[str, frozenset[str]]]:
+    """``{join alias: {PBI table: its columns}}`` for the aliases several PBI tables use."""
+    by_alias: dict[str, dict[str, frozenset[str]]] = {}
+    for table, raw in join_key_map.items():
+        if not isinstance(raw, Mapping) or not raw.get("alias"):
+            continue
+        columns = raw.get("dim_columns")
+        names = (
+            frozenset(str(c).lower() for c in columns)
+            if isinstance(columns, list)
+            else frozenset()
+        )
+        by_alias.setdefault(str(raw["alias"]), {})[str(table)] = names
+    return {alias: tables for alias, tables in by_alias.items() if len(tables) > 1}
+
+
+def _table_with_measure_columns(
+    spec: MetricViewSpec,
+    alias: str,
+    shared: Mapping[str, Mapping[str, frozenset[str]]] | None,
+    views: Mapping[str, str],
+) -> str | None:
+    """The PBI table behind a join alias that several tables share (two plant tables over one
+    warehouse table): the one table that has every column the view's measures read through
+    the alias. The join then reads that table's view, with the columns Power Query adds or
+    renames; left on the raw table, a measure that filters on such a column cannot deploy.
+    """
+    candidates = (shared or {}).get(alias)
+    if not candidates:
+        return None
+    reads = re.compile(rf"\b{re.escape(alias)}\.`?(\w+)`?")
+    needed = {
+        column.lower()
+        for measure in spec.measures
+        for column in reads.findall(str(measure.sql_expr or ""))
+    }
+    if not needed:
+        return None
+    fits = [t for t, columns in candidates.items() if t in views and needed <= columns]
+    return fits[0] if len(fits) == 1 else None
+
+
 def placeholder_join_target(source: str, views: Mapping[str, str]) -> str | None:
     """The PBI table of a placeholder join source, or ``None``.
 
@@ -294,6 +338,7 @@ def _rebind_joins(
     raw_by_key: Mapping[str, str],
     report: SourceLayerBinding,
     alias_tables: Mapping[str, str] | None = None,
+    shared: Mapping[str, Mapping[str, frozenset[str]]] | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
     """Point each join at its dimension's view. Returns the joins and an
     alias -> PBI-table map for the joins that were rebound."""
@@ -309,6 +354,8 @@ def _rebind_joins(
         )
         if target is None or target not in views:
             target = placeholder_join_target(source, views) or target
+        if target is None or target not in views:
+            target = _table_with_measure_columns(spec, alias, shared, views) or target
         if target is not None and target in views:
             joins.append({**join, "source": views[target]})
             bound_aliases[alias] = target
@@ -354,8 +401,11 @@ def _bind_spec(
     calc_columns: Mapping[str, frozenset[str]],
     report: SourceLayerBinding,
     alias_tables: Mapping[str, str] | None = None,
+    shared: Mapping[str, Mapping[str, frozenset[str]]] | None = None,
 ) -> MetricViewSpec:
-    joins, alias_to_key = _rebind_joins(spec, views, raw_by_key, report, alias_tables)
+    joins, alias_to_key = _rebind_joins(
+        spec, views, raw_by_key, report, alias_tables, shared
+    )
     if key not in views:
         report.fallback_facts[key] = _fallback_reason(key, source_layer)
         bound = replace(spec, joins=joins)
@@ -402,6 +452,7 @@ def bind_metric_views(
     }
     report = SourceLayerBinding(naming=naming, views=dict(views))
     alias_tables = unique_alias_tables(join_key_map or {})
+    shared = shared_alias_columns(join_key_map or {})
     bound: dict[str, MetricViewSpec] = {}
     for key, spec in all_specs.items():
         bound[key] = _bind_spec(
@@ -413,5 +464,6 @@ def bind_metric_views(
             calc_columns=calc_columns,
             report=report,
             alias_tables=alias_tables,
+            shared=shared,
         )
     return bound, report

@@ -105,7 +105,31 @@ def apply_config_overlays(
         config["reconciliation_active"] = True
     _apply_naming_config(config, naming_raw)
     _merge_implicit_column_measures(config, implicit_column_measures_raw)
+    _drop_placeholder_overrides(config)
     _merge_manual_overrides(config, manual_overrides_raw)
+
+
+def _drop_placeholder_overrides(config: dict[str, object]) -> None:
+    """Remove the override skeleton config generation writes for complex measures.
+
+    Each entry is a note for a person (``expr: "TODO: complex measure 'X' — DAX: ..."``), not
+    SQL. Taken as an override it replaced the measure with that text, which is then rejected,
+    and it took the measure out of the list the DAX translation (rules and LLM) works on: the
+    measure was never translated at all. Without the placeholder it is translated like any
+    other. A filled-in override (real SQL) is kept."""
+    overrides = config.get("manual_overrides")
+    if not isinstance(overrides, dict):
+        return
+    for table, entries in list(overrides.items()):
+        if isinstance(entries, list):
+            overrides[table] = [
+                entry
+                for entry in entries
+                if not (
+                    isinstance(entry, dict)
+                    and str(entry.get("expr") or "").lstrip().upper().startswith("TODO")
+                )
+            ]
 
 
 def capture_raw_sources(mquery_entries: list[dict]) -> dict[str, str]:
