@@ -99,6 +99,8 @@ Pipeline config: `prior_year_period_steps` (for example `{"fy_period": 100}`) na
 
 With `enable_reconciliation`, prior-year measures are compared in a second pass: the metric view grouped by the window's dimension, Power BI by the period column of the measure's calendar (`shifted_time_dimension` in the mapping, `time_shifted: true` on the measure). Power BI returns the earlier value only when grouped by that calendar. If the second pass fails, the other measures are still compared and these are listed as not compared.
 
+Periods the metric view has and Power BI returns no row for (history before the model's calendar starts, rows the refresh does not load) are not compared: there is nothing to compare them with. Each view's report counts them under `periods_not_in_power_bi` (`periods`, `first`, `last`), and `review_summary` carries the same. When the two sides share no period at all, nothing is left out, so a period format that does not match stays visible.
+
 ---
 
 ## Configuration

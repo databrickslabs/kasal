@@ -278,3 +278,69 @@ def test_a_failing_second_pass_keeps_the_first(monkeypatch):
     assert set(view["measures"]) == {"sales", "latest_stock"}
     assert set(view["not_compared"]) == {"sales_py", "growth"}
     assert "prior-year comparison failed" in view["not_compared"]["sales_py"]
+
+
+# ── periods Power BI returns nothing for ───────────────────────────────────
+
+
+def test_periods_power_bi_lacks_are_the_view_periods_it_returns_no_row_for():
+    lacks = recon.periods_power_bi_lacks(
+        ["2015001", "2015002", "2026001"], ["2026001", "2026002", "nan"]
+    )
+    assert lacks == ["2015001", "2015002"]
+    # no period in common is a format that does not match: nothing is left out
+    assert recon.periods_power_bi_lacks(["2026001"], ["202601"]) == []
+    assert recon.periods_power_bi_lacks(["2026001"], []) == []
+
+
+class _HistorySQL:
+    def execute(self, sql):
+        rows = [
+            {"country": "AT", "period": p, "sales": 10.0}
+            for p in ("2015001", "2015002", "2025001")
+        ]
+        return pd.DataFrame(rows), None
+
+
+class _RecentPBI:
+    def execute(self, model_id, dax):
+        return (
+            pd.DataFrame(
+                [{"Fact[country]": "AT", "Calendar[fiscper]": "2025001", "sales": 10.0}]
+            ),
+            None,
+        )
+
+
+def test_history_power_bi_does_not_show_is_left_out_and_counted(monkeypatch):
+    mapping = {
+        k: v for k, v in _assemble()[0]["Fact"].items() if k != "shifted_time_dimension"
+    }
+    mapping["measures"] = [
+        m for m in mapping["measures"] if m["ucmv_measure"] == "sales"
+    ]
+    tool = UCMVReconciliationTool()
+    monkeypatch.setattr(tool, "_build_sql_executor", lambda *a, **k: _HistorySQL())
+    monkeypatch.setattr(tool, "_build_pbi_executor", lambda *a, **k: _RecentPBI())
+    out = json.loads(
+        tool._run(
+            mappings_json=json.dumps({"Fact": mapping}),
+            warehouse_id="wh",
+            dimension_values=["AT"],
+        )
+    )
+    view = out["views"]["Fact"]
+    assert view["measures"]["sales"]["pct_aligned"] == 100.0
+    assert view["measures"]["sales"]["cells_total"] == 1
+    assert view["periods_not_in_power_bi"] == {
+        "periods": 2,
+        "first": "2015001",
+        "last": "2015002",
+    }
+    rows = build_review_list({"yaml": {"Fact": YAML}, "reconciliation": out})
+    from src.services.tools.metric_view_utils.reconciliation.review_list import (
+        review_summary,
+    )
+
+    summary = review_summary({"yaml": {"Fact": YAML}, "reconciliation": out}, rows)
+    assert summary["Fact"]["periods_not_in_power_bi"]["periods"] == 2

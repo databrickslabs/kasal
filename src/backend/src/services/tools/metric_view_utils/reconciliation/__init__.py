@@ -61,6 +61,7 @@ from .periods import (
     is_closed_period,
     matches_reference_years,
     normalize_snapshot_date,
+    periods_power_bi_lacks,
 )
 from .pbi_retry import TimeoutLadder, is_timeout
 from .run_lock import RunLockHeldError, lock_path_for, warehouse_run_lock
@@ -143,6 +144,7 @@ __all__ = [
     "PbiRunReport",
     "run_ucmv_query",
     "UcmvExecutor",
+    "periods_power_bi_lacks",
     # prior-year measures (their own time dimension)
     "split_time_shifted",
     "merge_frames",

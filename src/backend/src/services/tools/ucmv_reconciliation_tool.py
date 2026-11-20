@@ -659,6 +659,20 @@ class UCMVReconciliationTool(BaseTool):
             if m.ucmv_measure not in report.timed_out
         ]
         scoped = replace(mapping, measures=compared)
+        grain = mapping.binding.time_dimension.grain
+        lacking: list[str] = []
+        if grain not in ("snapshot", "week") and "period" in pbi_df.columns:
+            # Periods the run itself did not query (no calendar label) are counted
+            # per measure below; these are the ones Power BI has no row for at all.
+            skipped = {str(p) for ps in report.skipped_periods.values() for p in ps}
+            lacking = [
+                p
+                for p in recon.periods_power_bi_lacks(
+                    ucmv_df["period"], pbi_df["period"]
+                )
+                if p not in skipped
+            ]
+            ucmv_df = ucmv_df[~ucmv_df["period"].astype(str).isin(lacking)]
         wide = recon.compare(ucmv_df, pbi_df, scoped, dimension_name, reference_years)
         long_df = recon.to_long_format(wide, scoped, dimension_name)
         long_df, cells_left_out = recon.drop_skipped_cells(
@@ -677,9 +691,17 @@ class UCMVReconciliationTool(BaseTool):
             pbi_refresh_period=opt_str(self._cfg(kwargs, "pbi_refresh_period")),
             mv_refresh_period=opt_str(self._cfg(kwargs, "mv_refresh_period")),
         )
-        return recon.build_view_report(
+        view = recon.build_view_report(
             long_df, scoped, dimension_name, options, run_info
         )
+        if lacking:
+            # Not compared: Power BI returned no row for these periods at all.
+            view["periods_not_in_power_bi"] = {
+                "periods": len(lacking),
+                "first": lacking[0],
+                "last": lacking[-1],
+            }
+        return view
 
     # ── entry point ───────────────────────────────────────────────────────────
 

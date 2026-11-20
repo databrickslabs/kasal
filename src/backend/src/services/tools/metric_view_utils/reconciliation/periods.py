@@ -8,7 +8,7 @@ quarter-/year-grain UCMV enters scope rather than guessing the shape now.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -60,3 +60,22 @@ def normalize_snapshot_date(value: object) -> str:
             f"Expected an unzoned snapshot date at midnight, got {value!r}"
         )
     return parsed.date().isoformat()
+
+
+def periods_power_bi_lacks(
+    ucmv_periods: Iterable[object], pbi_periods: Iterable[object]
+) -> list[str]:
+    """The metric view's periods Power BI returned no row for, sorted.
+
+    Power BI returns a row where at least one measure has a value. A period it returns
+    nothing for, for any member and any measure, is one the model does not show: history
+    before its calendar starts, or rows its refresh does not load. The metric view's values
+    there are not wrong, there is nothing to compare them with, so they are left out and
+    counted. When the two sides share no period at all, nothing is left out: that is a
+    period format that does not match, and it has to stay visible.
+    """
+    ucmv = {str(p) for p in ucmv_periods}
+    pbi = {str(p) for p in pbi_periods}
+    if not ucmv & pbi:
+        return []
+    return sorted(ucmv - pbi)

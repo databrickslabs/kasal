@@ -307,6 +307,10 @@ def review_summary(
         else:
             status = "no_view"  # no measure was translated: no metric view to deploy
         summary[view] = {"status": status, "pct_aligned": pct, "measures": by_status}
+        left_out = as_map(as_map(compared.get(view)).get("periods_not_in_power_bi"))
+        if left_out:
+            # Periods the metric view has and Power BI returned nothing for: not compared.
+            summary[view]["periods_not_in_power_bi"] = dict(left_out)
     return summary
 
 
