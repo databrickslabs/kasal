@@ -41,6 +41,7 @@ _ACTIONS = (
 _CONFIG_KEYS = (
     "ucmv_output", "catalog", "schema_name", "warehouse_id", "databricks_host",
     "workspace_id", "dataset_id", "tenant_id", "client_id", "client_secret",
+    "username", "password", "auth_method", "access_token",
     "reference_years", "statistics_only", "confidential_values",
 )
 _PBI_KEYS = {
@@ -49,6 +50,12 @@ _PBI_KEYS = {
     "tenant_id": "pbi_tenant_id",
     "client_id": "pbi_client_id",
     "client_secret": "pbi_client_secret",
+    # The same logins crew 2b passes on: a service account or a ready token, not only a
+    # service principal.
+    "username": "pbi_username",
+    "password": "pbi_password",
+    "auth_method": "pbi_auth_method",
+    "access_token": "pbi_access_token",
 }
 
 
@@ -241,6 +248,10 @@ class UCMVWorkbenchTool(BaseTool):
             return {"view": v.key, "error": out["error"]}
         views = _map(out.get("views"))
         report = _map(next(iter(views.values()), None))
+        if report.get("error"):
+            # The comparison of this view failed (login, query, mapping): say why, and do
+            # not record an empty result as a reconciliation.
+            return {"view": v.key, "error": str(report["error"])}
         compact: dict[str, dict[str, object]] = {}
         for m, e in _map(report.get("measures")).items():
             entry = _map(e)

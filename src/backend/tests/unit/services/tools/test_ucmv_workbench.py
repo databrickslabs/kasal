@@ -271,3 +271,76 @@ def test_the_working_copy_starts_from_crew_2b_reconciliation():
     # an edited measure must be compared again: its old result no longer counts
     bench.set_measure("Fact_Sales", "revenue", "SUM(source.net_amount)")
     assert bench.gaps("Fact_Sales")["below_100"] == []
+
+
+def test_a_view_whose_comparison_fails_reports_the_error_and_is_not_marked_reconciled():
+    tool = _tool()
+
+    def fake_deploy(self, **kwargs):
+        return json.dumps(
+            {"deployment_results": {"Fact_Sales": {"status": "deployed"}}}
+        )
+
+    def failing_reconcile(self, **kwargs):
+        return json.dumps(
+            {"views": {"sandbox.work.fact_sales": {"error": "login failed"}}}
+        )
+
+    with (
+        patch(
+            "src.services.tools.metric_view_deployer_tool.MetricViewDeployerTool._run",
+            fake_deploy,
+        ),
+        patch(
+            "src.services.tools.ucmv_reconciliation_tool.UCMVReconciliationTool._run",
+            failing_reconcile,
+        ),
+    ):
+        _call(tool, action="deploy", view="Fact_Sales")
+        out = _call(tool, action="reconcile", view="Fact_Sales")
+        overview = _call(tool, action="overview")["views"][0]
+    assert out["error"] == "login failed" and "measures" not in out
+    assert overview["reconciled"] is False
+
+
+def test_a_service_account_login_reaches_the_comparison():
+    tool = UCMVWorkbenchTool(
+        ucmv_output=json.dumps(GENERATOR_OUTPUT),
+        catalog="sandbox",
+        schema_name="work",
+        warehouse_id="wh",
+        workspace_id="ws",
+        dataset_id="ds",
+        tenant_id="t",
+        client_id="c",
+        username="svc@example.com",
+        password="pw",
+        auth_method="service_account",
+    )
+    seen = []
+
+    def fake_deploy(self, **kwargs):
+        return json.dumps(
+            {"deployment_results": {"Fact_Sales": {"status": "deployed"}}}
+        )
+
+    def fake_reconcile(self, **kwargs):
+        seen.append(dict(self._default_config))
+        return json.dumps({"views": {"sandbox.work.fact_sales": {"measures": {}}}})
+
+    with (
+        patch(
+            "src.services.tools.metric_view_deployer_tool.MetricViewDeployerTool._run",
+            fake_deploy,
+        ),
+        patch(
+            "src.services.tools.ucmv_reconciliation_tool.UCMVReconciliationTool._run",
+            fake_reconcile,
+        ),
+    ):
+        _call(tool, action="deploy", view="Fact_Sales")
+        _call(tool, action="reconcile", view="Fact_Sales")
+    assert seen[0]["pbi_username"] == "svc@example.com"
+    assert seen[0]["pbi_password"] == "pw"
+    assert seen[0]["pbi_auth_method"] == "service_account"
+    assert "pbi_client_secret" not in seen[0]
