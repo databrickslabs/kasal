@@ -124,6 +124,32 @@ class TestShapeReader:
         assert same is None
         assert "not readable" in why
 
+    @pytest.mark.parametrize(
+        "sql, dax",
+        [
+            (
+                "CASE WHEN MEASURE(a) * 100 = 0 THEN 0 "
+                "ELSE MEASURE(b) * MEASURE(c) / (MEASURE(a) * 100) END",
+                "DIVIDE([B] * [C], [A] * 100, 0)",
+            ),
+            (
+                "CASE WHEN NULLIF(MEASURE(a), 0) IS NULL THEN NULL "
+                "ELSE MEASURE(b) / MEASURE(a) END",
+                "DIVIDE([B], [A])",
+            ),
+        ],
+    )
+    def test_a_case_guard_on_the_divisor_is_the_same_division(self, sql, dax):
+        same, _ = compare_shapes(sql, dax)
+        assert same is True
+
+    def test_a_case_guard_on_another_expression_is_not_read_as_a_division(self):
+        same, _ = compare_shapes(
+            "CASE WHEN MEASURE(a) = 0 THEN 0 ELSE MEASURE(b) / MEASURE(c) END",
+            "DIVIDE([B], [C])",
+        )
+        assert same is None
+
     def test_division_guard_forms_are_the_same_division(self):
         assert canonical_shape("[A] / NULLIF([B], 0)") == canonical_shape(
             "DIVIDE([A], [B])"

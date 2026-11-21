@@ -110,6 +110,45 @@ def _read(tokens: List[Token]) -> Node:
     return _Reader(tokens).expression_all()
 
 
+def _case_division(body: List[Token]) -> Node:
+    """``CASE WHEN d = 0 THEN alt ELSE n / d END`` (or ``WHEN NULLIF(d, 0) IS NULL``) is
+    the division ``DIVIDE(n, d, alt)``: the guard only spells out the zero-divisor case, and
+    the ELSE branch must divide by the same expression the guard tests."""
+    if not body or body[0] != ("name", "WHEN"):
+        raise _Unreadable("CASE without WHEN")
+    try:
+        then_at = body.index(("name", "THEN"))
+        else_at = body.index(("name", "ELSE"))
+    except ValueError as exc:
+        raise _Unreadable("CASE without THEN/ELSE") from exc
+    cond, alt_tokens, rest = (
+        body[1:then_at],
+        body[then_at + 1 : else_at],
+        body[else_at + 1 :],
+    )
+    if len(cond) >= 2 and cond[-2:] == [("op", "="), ("num", "0")]:
+        guarded = _read(cond[:-2])
+    elif cond[-2:] == [("name", "IS"), ("name", "NULL")]:
+        guarded = _read(
+            cond[:-2]
+        )  # NULLIF(d, 0): the divisor is the NULLIF's first argument
+    else:
+        guarded = None
+    if guarded is None:
+        raise _Unreadable("CASE guard is not a zero-divisor test")
+    if guarded[0] == "nullif":
+        guarded = guarded[1]
+    else_node = _read(rest)
+    if else_node[0] != "div" or _canon(_unwrap_nullif(else_node[2])) != _canon(
+        _unwrap_nullif(guarded)
+    ):
+        raise _Unreadable("CASE ELSE does not divide by the guarded expression")
+    alt = None if alt_tokens == [("name", "NULL")] else _read(alt_tokens)
+    if alt in (("n", 0.0), ("blank",)):
+        alt = None
+    return ("div", else_node[1], else_node[2], alt)
+
+
 def _unwrap_nullif(node: Node) -> Node:
     return node[1] if node and node[0] == "nullif" else node
 
@@ -201,9 +240,22 @@ class _Reader:
         if (kind, text) == ("op", "("):
             self.i -= 1
             return _read(self.skip_group())
+        if kind == "name" and text.upper() == "CASE":
+            return _case_division(self.until_end())
         if kind == "name":
             return self.call(text.upper())
         raise _Unreadable(f"unexpected token {text}")
+
+    def until_end(self) -> List[Token]:
+        """The tokens of a CASE expression up to its END (a flat CASE only)."""
+        body: List[Token] = []
+        while True:
+            tok = self.take()
+            if tok == ("name", "END"):
+                return body
+            if tok == ("name", "CASE"):
+                raise _Unreadable("nested CASE")
+            body.append(tok)
 
     def call(self, name: str) -> Node:
         if self.peek() != ("op", "("):
