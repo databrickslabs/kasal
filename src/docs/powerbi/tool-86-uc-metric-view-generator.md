@@ -226,6 +226,67 @@ Pass the output directly to:
 - Each re-run with the same inputs produces identical output (without LLM fallback), safe to iterate
 - SWITCH decompositions that need `switch_join_alias` / `switch_join_col` are reported as untranslatable while those config keys are still TODO markers; the rest of the run continues
 
+## Opt-in snapshot of Power BI-only tables
+
+Some tables have no warehouse source: an Excel, SharePoint or Web import, or a
+`#table(...)` literal. Their measures cannot be put on a metric view, so the generator
+lists them as `pbi_only_ingestion_tasks`. The snapshot step (package
+`services/tools/pbi_snapshot_utils/`) can copy their rows out of Power BI into the
+workspace.
+
+**It copies data out of Power BI.** It is OFF by default.
+
+| Config key | Default | Meaning |
+|---|---|---|
+| `pbi_snapshot_tables` | `false` | OPT-IN. When true, the rows of each listed PBI-only table are copied from Power BI into a Delta table in the run's source-layer schema. The copy is a snapshot: it is not refreshed. |
+| `pbi_snapshot_max_rows` | `200000` | A table with more rows is skipped with the reason and stays an ingestion task. It is never partially loaded. Allowed: 1 to 5,000,000. |
+
+**What is written.** Table `snap_<snake_table_name>` in the schema the run writes its
+source layer to. Its table comment says it is a snapshot of the named Power BI table
+taken at a given time (UTC) and not refreshed. Table properties: `kasal.pbi_snapshot = 'true'`
+and `kasal.pbi_snapshot.taken_at`. Per table, the run output reports `rows`, `taken_at`
+and `note: "snapshot, not refreshed"`. Nothing is created outside that schema; the schema
+must exist.
+
+**Reading Power BI (verified against Microsoft Learn, executeQueries page updated 2026-09-15).**
+- At most 100,000 rows or 1,000,000 values per query, whichever is hit first; at most 15 MB
+  per query; one table per query; 120 query requests per minute per user; DAX only (no
+  INFO or DMV functions).
+- A limit breach returns HTTP 200 with an error on the table and only the rows up to the
+  limit. So the runner never trusts a row count: it compares the rows read with a
+  `COUNTROWS` probe and refuses the table on any difference.
+- Order and window: a table with a unique whole-number column is read by keyset pages
+  (`TOPN(n, FILTER(T, key > last), key, ASC)`, 10,000 rows per page, bounded by the values
+  limit). The next page starts after the largest key read, so a page cut short by the 15 MB
+  limit loses nothing. A table without such a column is read in one query, and only when it
+  fits one query. Otherwise it is refused.
+
+**Refused, and written nothing** (the reason is in the output):
+- row-level security applies to the table (a snapshot would show one identity's rows to everyone);
+- its rows are embedded in the model (the source layer already emits them as SQL);
+- over `pbi_snapshot_max_rows`, or more rows than the read can verify;
+- a column type with no Databricks mapping (binary, variant, unknown); a value that does not match its type;
+- the target name is taken by a table this tool did not create, or by a view.
+
+**Types.** string to STRING; int64 to BIGINT; double and decimal to DOUBLE (the JSON
+number's precision); boolean to BOOLEAN; dateTime to TIMESTAMP_NTZ (a value with a time
+zone is refused). Values are typed literals: strings go through the shared SQL string
+escaper, numbers are cast from quoted text, identifiers are backtick-quoted.
+
+**Write order.** Check the target. Create a marked staging table. Insert in batches of 500
+rows. Check the staged count equals the rows read. `CREATE OR REPLACE TABLE` the target from
+the staging table, then drop the staging table. A failed drop is logged and does not hide the error.
+
+**Not wired.** The module and its tests exist, but no generator run calls it yet. Wiring needs a
+pre-pipeline step that has the Power BI token, the warehouse, and the model's column types,
+and a change so the source-layer view of a snapshotted table reads the snapshot. Metric
+views read the source layer only in read mode (`read_from_source_layer`).
+
+**Known detection issue.** `detect_pbi_only_source` labels any `Binary.FromText` expression as
+`tmdl_expression`, so "enter data" tables whose rows the source layer already emits are
+listed as ingestion tasks. On one real model this was 23 of 27 listed tasks. The
+snapshot step excludes them by decoding their rows, but the task list itself is unchanged.
+
 ## See also
 
 - [Power BI integration hub](./README.md)
