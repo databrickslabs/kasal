@@ -135,6 +135,17 @@ def _measure_pbi_kind(m: TranslationResult) -> dict:
         hint = (m.dax_expression or m.skip_reason or "").strip()
         return {"kind": "unresolved", "raw_hint": hint[:300]}
 
+    if m.pbi_kind == "unresolved":
+        # A SWITCH option that no single selector literal chooses: never compared with the
+        # parent measure, which would be right for one option only (switch_decomposition).
+        return {
+            "kind": "unresolved",
+            "raw_hint": (
+                f"SWITCH option of {m.original_name!r} has no single selector literal; "
+                "not compared"
+            )[:300],
+        }
+
     if m.pbi_kind and m.pbi_kind in _VALID_PBI_KINDS:
         if m.pbi_kind == "raw_column":
             # No named PBI measure exists at all — implicit_column_measures.py

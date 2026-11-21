@@ -219,6 +219,8 @@ def build_resolved_measures_by_table(
                     "dax_expression": m.get("dax_expression", ""),
                     "proposed_allocation": table_key,  # fact-table key, matches YAML
                     "table_name": table_key,
+                    "pbi_kind": m.get("pbi_kind"),
+                    "pbi_sources": m.get("pbi_sources"),
                 }
             )
         if rows:

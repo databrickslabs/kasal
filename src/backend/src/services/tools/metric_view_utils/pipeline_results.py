@@ -79,6 +79,10 @@ def build_results(pipeline: MetricViewPipeline) -> dict:
                     # Backtraced (indirect) usage: a visual-placed KPI
                     # references this measure — see annotate_indirect_visual_usage.
                     "indirect_visual_usage": getattr(m, "indirect_visual_usage", []),
+                    # Power BI provenance of a switch/fx-resolved measure (see
+                    # TranslationResult.pbi_kind); None for an ordinary translation.
+                    "pbi_kind": m.pbi_kind,
+                    "pbi_sources": m.pbi_sources,
                 }
                 for m in spec.measures
             ],

@@ -421,6 +421,69 @@ def _switch_result_candidates(dax: str) -> list[str]:
     return results
 
 
+_EQUALS_LITERAL = re.compile(r'^\s*(.+?)\s*=\s*"([^"]*)"\s*$', re.DOTALL)
+_SELECTEDVALUE_REF = re.compile(
+    r"^\s*SELECTEDVALUE\s*\(\s*'?([A-Za-z_][\w ]*)'?\[(\w+)\]\s*\)\s*$", re.IGNORECASE
+)
+
+
+def _selector_of(condition: str, variables: dict[str, str]) -> dict | None:
+    """``{"table", "column", "value"}`` when a branch condition is exactly one comparison of
+    a ``SELECTEDVALUE(T[c])`` (directly, or through a VAR bound to it) with one string
+    literal; None for anything else (two selectors, a numeric or a compound test)."""
+    match = _EQUALS_LITERAL.match(condition)
+    if not match:
+        return None
+    left = match.group(1).strip()
+    # DAX names are case-insensitive: ``X = "..."`` reads the variable declared as ``x``.
+    bound = next((v for k, v in variables.items() if k.lower() == left.lower()), left)
+    ref = _SELECTEDVALUE_REF.match(bound)
+    if not ref:
+        return None
+    return {"table": ref.group(1), "column": ref.group(2), "value": match.group(2)}
+
+
+def _switch_branch_selectors(dax: str) -> list[dict | None]:
+    """One selector per entry of ``_switch_result_candidates`` (same order): the selector a
+    ``SWITCH(TRUE(), cond, result, ...)`` branch is chosen by, or None when it cannot be read.
+    """
+    switch_match = re.search(
+        r"SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,\s*(.+)\)\s*$",
+        dax.strip(),
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not switch_match:
+        return []
+    args = _split_balanced_args(switch_match.group(1))
+    variables = _parse_dax_vars(dax)
+    selectors = [_selector_of(args[i], variables) for i in range(0, len(args) - 1, 2)]
+    if len(args) % 2 == 1:
+        selectors.append(None)  # the default result is chosen by no condition
+    return selectors
+
+
+def _selector_provenance(parent: str, resolved: dict) -> dict:
+    """The provenance a decomposed SWITCH option is compared by. An option chosen by one
+    selector literal is ``switch`` against the parent (the PBI measure) with that selector;
+    any other option is ``unresolved`` (not compared), never the parent without a selector.
+    """
+    selector = resolved.get("selector")
+    if not selector:
+        return {"pbi_kind": "unresolved", "pbi_sources": [], "pbi_operator": None}
+    return {
+        "pbi_kind": "switch",
+        "pbi_sources": [
+            {
+                "pbi_measure": parent,
+                "switch_selector_table": selector["table"],
+                "switch_selector_column": selector["column"],
+                "switch_selector_value": selector["value"],
+            }
+        ],
+        "pbi_operator": resolved["operator"],
+    }
+
+
 def _resolve_switch_branch(
     expanded_expr: str,
     measure_by_name: dict[str, dict],
@@ -552,11 +615,15 @@ def derive_switch_decompositions(
         # at the first — see docstring for why one vs. many matters.
         distinct: list[dict] = []
         seen_sql: set[str] = set()
-        for candidate in _switch_result_candidates(dax):
+        selectors = _switch_branch_selectors(dax)
+        for index, candidate in enumerate(_switch_result_candidates(dax)):
             expanded = _substitute_vars(candidate, vars_map)
             resolved = _resolve_switch_branch(expanded, measure_by_name, fact_tables)
             if resolved and resolved["sql"] not in seen_sql:
                 seen_sql.add(resolved["sql"])
+                resolved["selector"] = (
+                    selectors[index] if index < len(selectors) else None
+                )
                 distinct.append(resolved)
 
         # `derive_filter_sets` (in `pipeline_config.py`) reads `_detected_branches`
@@ -586,9 +653,7 @@ def derive_switch_decompositions(
                 entry["comment"] = (
                     f"SWITCH measure [{name}] — resolved from {resolved['sources']}"
                 )
-                entry["pbi_kind"] = resolved["kind"]
-                entry["pbi_sources"] = resolved["sources"]
-                entry["pbi_operator"] = resolved["operator"]
+                entry.update(_selector_provenance(name, resolved))
                 target_table = resolved["table"] or selector_table
             else:
                 entry["raw_expr"] = (
@@ -616,9 +681,7 @@ def derive_switch_decompositions(
                 "comment": (
                     f"SWITCH branch of [{name}] — resolved from {resolved['sources']}"
                 ),
-                "pbi_kind": resolved["kind"],
-                "pbi_sources": resolved["sources"],
-                "pbi_operator": resolved["operator"],
+                **_selector_provenance(name, resolved),
             }
             if i == 0 and named_branches:
                 entry["_detected_branches"] = named_branches
