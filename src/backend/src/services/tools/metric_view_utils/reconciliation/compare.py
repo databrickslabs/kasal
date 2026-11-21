@@ -135,9 +135,23 @@ def compare(
     return merged[cols].sort_values([dimension_name, "period"]).reset_index(drop=True)
 
 
+_FLOAT_NOISE = 1e-9  # relative: what double arithmetic alone can differ by
+
+
 def _within_tolerance(sub: pd.DataFrame, m: Measure) -> pd.Series:
     if m.tolerance_kind == "absolute":
-        absolute: pd.Series = sub["delta"].abs() <= m.tolerance_value
+        # Floating-point noise grows with the value: at 7e12 two equal sums differ by
+        # a few thousandths. A difference below one part in a billion of the larger
+        # value is not a difference; a real one stays far above it.
+        size = pd.concat(
+            [
+                pd.to_numeric(sub["ucmv_value"], errors="coerce").abs(),
+                pd.to_numeric(sub["pbi_value"], errors="coerce").abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        allowed = (size.fillna(0) * _FLOAT_NOISE).clip(lower=m.tolerance_value)
+        absolute: pd.Series = sub["delta"].abs() <= allowed
         return absolute
     denom: pd.Series = pd.to_numeric(sub["ucmv_value"], errors="coerce").abs()
     rel_ratio: pd.Series = sub["delta"].abs() / denom.replace(0, pd.NA)

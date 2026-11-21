@@ -58,3 +58,79 @@ def test_a_resolved_variable_block_is_its_return_expression():
 def test_a_variable_block_left_in_the_sql_is_rejected():
     assert detect_silent_wrong("var ret= MEASURE(x) ret")
     assert not detect_silent_wrong("MEASURE(x) / NULLIF(MEASURE(y), 0)")
+
+
+# ── DAX arithmetic over measures, as SQL ───────────────────────────────────
+
+
+def test_a_sum_or_difference_of_measures_counts_a_blank_operand_as_zero():
+    from src.services.tools.metric_view_utils.measure_arithmetic import _blank_as_zero
+
+    assert _blank_as_zero("MEASURE(a) - MEASURE(b) - MEASURE(c)") == (
+        "CASE WHEN COALESCE(MEASURE(a), MEASURE(b), MEASURE(c)) IS NOT NULL "
+        "THEN (COALESCE(MEASURE(a), 0) - COALESCE(MEASURE(b), 0) - COALESCE(MEASURE(c), 0)) END"
+    )
+    assert _blank_as_zero("(MEASURE(b) - MEASURE(a)) * 100") == (
+        "CASE WHEN COALESCE(MEASURE(b), MEASURE(a)) IS NOT NULL "
+        "THEN (COALESCE(MEASURE(b), 0) - COALESCE(MEASURE(a), 0)) * 100 END"
+    )
+    # products, quotients and single measures are left alone
+    for expr in (
+        "MEASURE(a) / NULLIF(MEASURE(b), 0)",
+        "MEASURE(a) * MEASURE(b)",
+        "MEASURE(a)",
+        "MEASURE(a) - 1",
+    ):
+        assert _blank_as_zero(expr) == expr
+
+
+def test_a_division_keeps_its_operands_together_and_its_alternate_result():
+    from src.services.tools.metric_view_utils.measure_arithmetic import _division
+
+    assert (
+        _division("DIVIDE(a, b)", "MEASURE(a)", "MEASURE(b)")
+        == "MEASURE(a) / NULLIF(MEASURE(b), 0)"
+    )
+    # a + b + c / d would divide only c
+    assert (
+        _division("DIVIDE(x, y)", "MEASURE(a) + MEASURE(b) + MEASURE(c)", "MEASURE(d)")
+        == "(MEASURE(a) + MEASURE(b) + MEASURE(c)) / NULLIF(MEASURE(d), 0)"
+    )
+    assert (
+        _division("DIVIDE(x, y)", "MEASURE(a)", "MEASURE(b) - MEASURE(c)")
+        == "MEASURE(a) / NULLIF(MEASURE(b) - MEASURE(c), 0)"
+    )
+    # the alternate applies to a zero or blank denominator, not to a blank numerator
+    assert (
+        _division("DIVIDE(MEASURE(a), MEASURE(b), 0)", "MEASURE(a)", "MEASURE(b)")
+        == "CASE WHEN NULLIF(MEASURE(b), 0) IS NULL THEN 0 ELSE MEASURE(a) / MEASURE(b) END"
+    )
+    # a blank alternate is the default
+    assert (
+        _division("DIVIDE(MEASURE(a), MEASURE(b), NULL)", "MEASURE(a)", "MEASURE(b)")
+        == "MEASURE(a) / NULLIF(MEASURE(b), 0)"
+    )
+
+
+def test_float_noise_on_a_large_value_is_not_a_mismatch_but_a_real_difference_is():
+    import pandas as pd
+
+    from src.services.tools.metric_view_utils.reconciliation.compare import (
+        _within_tolerance,
+    )
+
+    measure = SimpleNamespace(tolerance_kind="absolute", tolerance_value=0.001)
+    cells = pd.DataFrame(
+        {
+            "ucmv_value": [7.0e12, 7.0e12, 10.0, 10.0, None],
+            "pbi_value": [7.0e12 + 0.004, 7.0e12 + 10000.0, 10.0005, 10.01, 0.0],
+        }
+    )
+    cells["delta"] = cells["ucmv_value"].fillna(0) - cells["pbi_value"].fillna(0)
+    assert _within_tolerance(cells, measure).tolist() == [
+        True,
+        False,
+        True,
+        False,
+        True,
+    ]

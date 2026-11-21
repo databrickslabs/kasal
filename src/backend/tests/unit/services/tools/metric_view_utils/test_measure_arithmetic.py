@@ -53,7 +53,11 @@ def test_ratio_over_measure_translated_later_is_resolved():
     assert out_u == []
     resolved = out_t[-1]
     assert resolved.measure_name == "kbi_pct"
-    assert resolved.sql_expr == "MEASURE(kbi_phc) / NULLIF(MEASURE(kbi_ordered), 0)"
+    # DIVIDE(a, b, 0): the alternate result where the denominator is 0 or blank
+    assert resolved.sql_expr == (
+        "CASE WHEN NULLIF(MEASURE(kbi_ordered), 0) IS NULL THEN 0 "
+        "ELSE MEASURE(kbi_phc) / MEASURE(kbi_ordered) END"
+    )
     assert resolved.category == "measure_arithmetic"
     assert "kbi_pct" in base_names
 

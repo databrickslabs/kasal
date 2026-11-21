@@ -18,6 +18,7 @@ import re
 from collections.abc import Callable
 
 from .data_classes import TranslationResult
+from .prior_year_dax import _arguments
 from .utils import to_snake_case
 
 # (start, end, numerator, denominator) of a DIVIDE(...) call, as dax_var_chain reports it.
@@ -148,6 +149,66 @@ def _if_blank_to_case(expr: str) -> str:
     return _if_blank_to_case(expr[: match.start()] + head + expr[index:])
 
 
+_OPERATOR_OUTSIDE = re.compile(r"[-+*/]")
+_NUMBER = re.compile(r"^\s*-?\d+(?:\.\d+)?\s*$")
+_TERM = r"MEASURE\(\s*\w+\s*\)"
+_CHAIN = rf"{_TERM}(?:\s*[-+]\s*{_TERM})+"
+_SUM_OF_MEASURES = re.compile(
+    rf"^\s*(?:(?P<bare>{_CHAIN})|\(\s*(?P<group>{_CHAIN})\s*\)"
+    rf"\s*(?P<scale>[*/]\s*\d+(?:\.\d+)?)?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _operand(text: str) -> str:
+    """``text`` as one operand of a division: in parentheses when it is itself a sum,
+    difference, product or quotient (``a + b + c / d`` would divide only ``c``)."""
+    text = text.strip()
+    flat = text
+    while True:  # what is inside parentheses does not decide
+        inner = re.sub(r"\([^()]*\)", "", flat)
+        if inner == flat:
+            break
+        flat = inner
+    return f"({text})" if _OPERATOR_OUTSIDE.search(flat) else text
+
+
+def _division(call: str, num: str, den: str) -> str:
+    """SQL for ``DIVIDE(num, den[, alternate])``.
+
+    The alternate result applies when the denominator is 0 or blank; a blank numerator
+    still gives blank. Without it ``1 - DIVIDE(a, b, 0)`` is NULL where Power BI shows 1.
+    Only a numeric alternate is reproduced; any other is left as before."""
+    numerator, denominator = _operand(num), _operand(den)
+    arguments = _arguments(call[call.find("(") + 1 : call.rfind(")")])
+    if len(arguments) == 3 and _NUMBER.match(arguments[2]):
+        return (
+            f"CASE WHEN NULLIF({den.strip()}, 0) IS NULL THEN {arguments[2].strip()} "
+            f"ELSE {numerator} / {denominator} END"
+        )
+    return f"{numerator} / NULLIF({den.strip()}, 0)"
+
+
+def _blank_as_zero(expr: str) -> str:
+    """A sum or difference of measures the way DAX adds: a blank operand counts as 0, and
+    the result is blank only when every operand is.
+
+    In SQL one NULL operand makes the whole result NULL: ``MEASURE(a) - MEASURE(b)`` gave
+    nothing wherever ``a`` had no rows, while Power BI shows ``-b`` (checked on a
+    warehouse)."""
+    match = _SUM_OF_MEASURES.match(expr)
+    if not match:
+        return expr
+    chain = match.group("bare") or match.group("group")
+    terms = re.findall(_TERM, chain, re.IGNORECASE)
+    total = re.sub(_TERM, lambda m: f"COALESCE({m.group(0)}, 0)", chain, flags=re.I)
+    scale = f" {match.group('scale')}" if match.group("scale") else ""
+    return (
+        f"CASE WHEN COALESCE({', '.join(terms)}) IS NOT NULL "
+        f"THEN ({total}){scale} END"
+    )
+
+
 def _to_sql(
     expr: str,
     measure_refs: set[str],
@@ -169,9 +230,7 @@ def _to_sql(
         if not div_args:
             break
         d_start, d_end, num, den = div_args
-        expr = (
-            expr[:d_start] + f"{num.strip()} / NULLIF({den.strip()}, 0)" + expr[d_end:]
-        )
+        expr = expr[:d_start] + _division(expr[d_start:d_end], num, den) + expr[d_end:]
     expr = re.sub(r"\bBLANK\(\)", "NULL", expr, flags=re.IGNORECASE)
     expr = _ISBLANK_GUARD.sub(r"\1", expr)
     expr = _if_blank_to_case(expr)
@@ -182,7 +241,7 @@ def _to_sql(
     expr = _TABLE_COLUMN.sub(r"source.\1", expr)
     if _DAX_ONLY.search(re.sub(r"MEASURE\s*\([^)]*\)", "", expr)):
         return None
-    return expr
+    return _blank_as_zero(expr)
 
 
 def _calc_sum_replacement(match: re.Match[str]) -> str:
