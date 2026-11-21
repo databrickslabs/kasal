@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Optional
 
 from .source_layer_binding import (
@@ -26,6 +26,7 @@ from .source_layer_binding import (
 from .utils import to_snake_case
 
 if TYPE_CHECKING:
+    from .cross_table_source_planner import CombinedSource
     from .data_classes import MetricViewSpec, TableInfo
     from .pbi_validation import EvaluateFn, Rows
 
@@ -218,6 +219,40 @@ def _would_overwrite_source(target_fqn: str, src_tbl: str, native_sql: str) -> b
     return re.search(rf"(?<![\w.]){re.escape(target)}(?!\w)", text) is not None
 
 
+def _combined_view_spec(
+    key: str,
+    combined: "CombinedSource",
+    catalog: str,
+    schema: str,
+    naming: str,
+    read_mode: bool,
+    materialize: bool,
+) -> object:
+    """ViewSpec of a combined cross-fact source: the facts' source views, unioned."""
+    from .cross_table_source_planner import union_sql
+    from .source_layer_emitter import TableSource, ViewSpec
+
+    def view_of(fact: str) -> str:
+        return source_layer_ddl_name(
+            catalog, schema, source_layer_leaf_name(fact, naming)
+        )
+
+    return ViewSpec(
+        table_name=key,
+        target_view=source_layer_ddl_name(
+            catalog, schema, source_layer_leaf_name(key, naming)
+        ),
+        source=TableSource(native_sql=union_sql(combined, view_of)),
+        calc_columns=[],
+        comment=(
+            f"Combined source for {key}: the source views of "
+            f"{', '.join(getattr(combined, 'facts', ()))} unioned at the shared grain."
+        ),
+        materialized=read_mode and materialize,
+        row_filter=None,
+    )
+
+
 def build_source_layer(
     all_specs: dict,
     mquery_tables: dict,
@@ -225,8 +260,12 @@ def build_source_layer(
     catalog: str,
     schema: str,
     mquery_expressions: dict | None = None,
+    combined_sources: Mapping[str, "CombinedSource"] | None = None,
 ) -> dict:
     """One source-layer UC view per PBI table (rec #3).
+
+    ``combined_sources`` (cross_table_source_planner) maps a synthetic combined key
+    to its two-fact union; that view is a UNION ALL of the facts' own source views.
 
     Reproduces the physical read each metric view sits on:
     - a ``Value.NativeQuery`` table keeps its verbatim SQL
@@ -284,7 +323,15 @@ def build_source_layer(
     fold_todos: dict[str, list] = {}
     specs: list = []
     errors: dict[str, str] = {}
+    combined = dict(combined_sources or {})
     for key, spec, info in planned:
+        if key in combined:
+            specs.append(
+                _combined_view_spec(
+                    key, combined[key], catalog, schema, naming, read_mode, materialize
+                )
+            )
+            continue
         native = (info.native_query_sql or "") if info is not None else ""
         src_tbl = (getattr(spec, "source_table", "") or "") or (
             info.source_table if info is not None else ""

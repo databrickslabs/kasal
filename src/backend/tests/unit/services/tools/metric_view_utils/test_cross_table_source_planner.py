@@ -1,21 +1,21 @@
-"""Phase 1 cross-table planner: same-grain UNION, strict gating, fail-open."""
+"""Cross-fact measures on a combined source at the shared grain (cross_table_source_planner)."""
+
+import pytest
 
 from src.services.tools.metric_view_utils.cross_table_source_planner import (
-    _build_union_source,
-    _is_same_grain,
-    plan_cross_table_sources,
+    CombinedSource,
+    _unsafe_reason,
+    union_sql,
 )
-from src.services.tools.metric_view_utils.data_classes import (
-    MetricViewSpec,
-    TableInfo,
-)
+from src.services.tools.metric_view_utils.data_classes import TableInfo
+from src.services.tools.metric_view_utils.pipeline import MetricViewPipeline
 
 
 def _fact(name, source_table, grain, aggs):
     return TableInfo(
         table_name=name,
         source_table=source_table,
-        aggregate_columns=[{"name": n, "source_col": s} for n, s in aggs],
+        aggregate_columns=[{"name": n, "source_col": n} for n in aggs],
         group_by_columns=list(grain),
         calculated_columns=[],
         is_fact=True,
@@ -23,134 +23,182 @@ def _fact(name, source_table, grain, aggs):
     )
 
 
-class _FakePipeline:
-    """Minimal stand-in: records _process_table calls, returns a real spec."""
-
-    def __init__(self, report, mquery_tables, mapping):
-        self._allocation_report = report
-        self.mquery_tables = mquery_tables
-        self.mapping = mapping
-        self.calls = []
-
-    def _process_table(self, key, info, dax_measures):
-        self.calls.append((key, info, dax_measures))
-        return MetricViewSpec(
-            fact_table_key=key,
-            source_table=info.source_table,
-            view_name=key,
-            comment="",
-            joins=[],
-            dimensions=[],
-            measures=[],
-            untranslatable=[],
-        )
+def _facts(
+    sales_grain=("CalMonth", "Region", "Channel"),
+    target_grain=("CalMonth", "Region", "Product"),
+):
+    return {
+        "FactSales": _fact("FactSales", "cat.sch.fact_sales", sales_grain, ["Amount"]),
+        "FactTarget": _fact(
+            "FactTarget", "cat.sch.fact_target", target_grain, ["Budget"]
+        ),
+    }
 
 
-def _report(*entries):
-    return {"cross_fact": list(entries)}
+CROSS_RATIO = {
+    "measure_name": "Attainment",
+    "original_name": "Attainment",
+    "dax_expression": "DIVIDE(SUM(FactSales[Amount]), SUM(FactTarget[Budget]))",
+    "proposed_allocation": "FactSales",
+}
+SALES_TOTAL = {
+    "measure_name": "Sales Total",
+    "original_name": "Sales Total",
+    "dax_expression": "SUM(FactSales[Amount])",
+    "proposed_allocation": "FactSales",
+}
 
 
-def test_same_grain_bucket_builds_combined_union_spec():
-    mq = {
+def _pipeline(mapping, mquery, **config):
+    cfg = {
+        "read_from_source_layer": True,
+        "reconciliation_active": True,
+        "source_layer_materialized": False,
+        **config,
+    }
+    return MetricViewPipeline(mapping=mapping, mquery_tables=mquery, config=cfg)
+
+
+def test_union_is_null_aligned_on_measure_columns():
+    cs = CombinedSource(
+        facts=("FactSales", "FactTarget"),
+        grain=["CalMonth", "Region"],
+        grain_by_fact={
+            "FactSales": ["CalMonth", "Region"],
+            "FactTarget": ["CalMonth", "Region"],
+        },
+        out_names=["Amount", "Budget"],
+        columns_by_fact={
+            "FactSales": {"Amount": "Amount"},
+            "FactTarget": {"Budget": "Budget"},
+        },
+    )
+    sql = union_sql(cs, lambda f: f"`cat`.`sch`.`src_{f.lower()}`")
+    assert sql.count("UNION ALL") == 1
+    assert "Amount AS Amount" in sql and "NULL AS Budget" in sql
+    assert "Budget AS Budget" in sql and "NULL AS Amount" in sql
+    assert "FROM `cat`.`sch`.`src_factsales`" in sql
+    assert "FROM `cat`.`sch`.`src_facttarget`" in sql
+
+
+@pytest.mark.parametrize(
+    "dax",
+    [
+        'CALCULATE(SUM(FactSales[Amount]), FactSales[Region] = "X") / SUM(FactTarget[Budget])',
+        "COUNTROWS(FactSales) / SUM(FactTarget[Budget])",
+        "SUMX(FactSales, FactSales[Amount]) / SUM(FactTarget[Budget])",
+        "DIVIDE(SUM(FactSales[Amount]), SUM(FactTarget[Budget]) + COUNT(*))",
+    ],
+)
+def test_filter_context_and_row_counts_are_not_accepted(dax):
+    assert _unsafe_reason(dax) is not None
+
+
+def test_plain_sums_and_ratios_are_accepted():
+    assert (
+        _unsafe_reason("DIVIDE(SUM(FactSales[Amount]), SUM(FactTarget[Budget]))")
+        is None
+    )
+    assert (
+        _unsafe_reason("DISTINCTCOUNT(FactSales[Amount]) / AVERAGE(FactTarget[Budget])")
+        is None
+    )
+
+
+def test_cross_measure_becomes_combined_view_with_union_source_and_shared_grain_dims():
+    p = _pipeline([CROSS_RATIO, SALES_TOTAL], _facts())
+    specs = p.run()
+    key = "combined_factsales_facttarget"
+    assert key in specs and key in p.combined_sources
+    assert p.combined_sources[key].grain == ["CalMonth", "Region"]
+
+    yaml_by_view = p.emit_all_yaml("cat", "sch")
+    combined_yaml = yaml_by_view[key]
+    assert "src_combined_factsales_facttarget" in combined_yaml
+    assert "name: attainment" in combined_yaml
+    assert "SUM(source.Amount) / NULLIF(SUM(source.Budget), 0)" in combined_yaml
+    # the shared grain is the view's dimensions: a period and a second dimension
+    assert "name: calmonth" in combined_yaml and "name: region" in combined_yaml
+    # the plain fact measure stays on its own fact view
+    assert (
+        "Sales Total" in yaml_by_view["FactSales"]
+        or "sales_total" in yaml_by_view["FactSales"]
+    )
+
+    ddl = p.source_layer_views[key]["ddl"]
+    assert "UNION ALL" in ddl and "NULL AS Budget" in ddl and "NULL AS Amount" in ddl
+    assert "src_factsales" in ddl and "src_facttarget" in ddl
+    assert p.source_layer_views[key]["error"] is None
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"reconciliation_active": False},
+        {"read_from_source_layer": False},
+        {"cross_table_union_sources": False},
+    ],
+)
+def test_no_combined_view_when_gated_off(config):
+    p = _pipeline([CROSS_RATIO], _facts(), **config)
+    p.run()
+    assert p.combined_sources == {}
+    assert not any(k.startswith("combined_") for k in p.all_specs)
+
+
+def test_shared_grain_without_period_is_deferred_with_reason():
+    facts = _facts(
+        sales_grain=("Region", "Channel", "CalMonth"),
+        target_grain=("Region", "Product", "Channel"),
+    )
+    # shared grain Region+Channel: no period column
+    p = _pipeline([CROSS_RATIO], facts)
+    p.run()
+    assert p.combined_sources == {}
+    reasons = [d["reason"] for d in p._limitations.get("cross_table_deferred", [])]
+    assert any("cannot be compared" in r for r in reasons)
+
+
+def test_three_fact_measure_is_deferred_not_emitted():
+    facts = {
+        "FactA": _fact("FactA", "c.s.a", ["CalMonth", "Region"], ["X"]),
+        "FactB": _fact("FactB", "c.s.b", ["CalMonth", "Region"], ["Y"]),
+        "FactC": _fact("FactC", "c.s.c", ["CalMonth", "Region"], ["Z"]),
+    }
+    mapping = [
+        {
+            "measure_name": "Three",
+            "original_name": "Three",
+            "dax_expression": "SUM(FactA[X]) + SUM(FactB[Y]) + SUM(FactC[Z])",
+            "proposed_allocation": "FactA",
+        }
+    ]
+    p = _pipeline(mapping, facts)
+    p.run()
+    assert p.combined_sources == {}
+    reasons = [d["reason"] for d in p._limitations.get("cross_table_deferred", [])]
+    assert any("no two-fact cover" in r for r in reasons)
+
+
+def test_column_on_both_facts_outside_shared_grain_is_deferred():
+    facts = {
         "FactSales": _fact(
-            "FactSales", "cat.sch.sales", ["date", "region"], [("sales", "amt")]
+            "FactSales", "c.s.sales", ["CalMonth", "Region"], ["Sales", "Amount"]
         ),
         "FactTarget": _fact(
-            "FactTarget", "cat.sch.target", ["date", "region"], [("target", "tgt")]
+            "FactTarget", "c.s.target", ["CalMonth", "Region"], ["Budget", "Amount"]
         ),
     }
-    report = _report(
+    mapping = [
         {
-            "measure": "attainment",
-            "facts": ["FactSales", "FactTarget"],
-            "shared_grain": ["date", "region"],
+            "measure_name": "Mixed",
+            "original_name": "Mixed",
+            "dax_expression": "SUM(FactSales[Sales]) / SUM(FactTarget[Budget]) + SUM(FactSales[Amount])",
+            "proposed_allocation": "FactSales",
         }
-    )
-    pipe = _FakePipeline(
-        report, mq, [{"measure_name": "attainment", "dax": "DIVIDE([sales],[target])"}]
-    )
-
-    specs, lims = plan_cross_table_sources(pipe)
-
-    assert lims == []
-    assert len(specs) == 1
-    spec = next(iter(specs.values()))
-    # routed through the real translator path
-    assert pipe.calls, "should call _process_table"
-    _k, info, dicts = pipe.calls[0]
-    assert {a["name"] for a in info.aggregate_columns} == {"sales", "target"}
-    assert [d["measure_name"] for d in dicts] == ["attainment"]
-    # inline UNION source with NULL-alignment + discriminator
-    sql = spec.source_sql
-    assert "UNION ALL" in sql
-    assert "amt AS sales" in sql and "NULL AS target" in sql  # FactSales arm
-    assert "tgt AS target" in sql and "NULL AS sales" in sql  # FactTarget arm
-    assert "'FactSales' AS _source_fact" in sql
-
-
-def test_grain_mismatch_is_deferred_not_emitted():
-    mq = {
-        "FactA": _fact("FactA", "c.s.a", ["date", "region"], [("a", "a")]),
-        "FactB": _fact("FactB", "c.s.b", ["date"], [("b", "b")]),  # coarser grain
-    }
-    report = _report(
-        {"measure": "r", "facts": ["FactA", "FactB"], "shared_grain": ["date"]}
-    )
-    pipe = _FakePipeline(report, mq, [{"measure_name": "r", "dax": "x"}])
-    specs, lims = plan_cross_table_sources(pipe)
-    assert specs == {}
-    assert lims and "grain mismatch" in lims[0]["reason"]
-
-
-def test_three_fact_span_is_deferred():
-    mq = {
-        f: _fact(f, f"c.s.{f}", ["d"], [(f.lower(), f.lower())])
-        for f in ("FactA", "FactB", "FactC")
-    }
-    report = _report(
-        {"measure": "r", "facts": ["FactA", "FactB", "FactC"], "shared_grain": ["d"]}
-    )
-    pipe = _FakePipeline(report, mq, [{"measure_name": "r", "dax": "x"}])
-    specs, lims = plan_cross_table_sources(pipe)
-    assert specs == {}
-    assert lims and "3+" in lims[0]["reason"]
-
-
-def test_name_collision_across_facts_is_deferred():
-    mq = {
-        "FactA": _fact("FactA", "c.s.a", ["d"], [("amount", "a")]),
-        "FactB": _fact("FactB", "c.s.b", ["d"], [("amount", "b")]),  # same output name
-    }
-    report = _report(
-        {"measure": "r", "facts": ["FactA", "FactB"], "shared_grain": ["d"]}
-    )
-    pipe = _FakePipeline(report, mq, [{"measure_name": "r", "dax": "x"}])
-    specs, lims = plan_cross_table_sources(pipe)
-    assert specs == {}
-    assert lims
-
-
-def test_no_cross_fact_entries_is_noop():
-    pipe = _FakePipeline({"cross_fact": []}, {}, [])
-    assert plan_cross_table_sources(pipe) == ({}, [])
-
-
-def test_is_same_grain_strictness():
-    mq = {
-        "A": _fact("A", "c.s.a", ["date", "region"], []),
-        "B": _fact("B", "c.s.b", ["date", "region"], []),
-    }
-    assert _is_same_grain(["A", "B"], ["date", "region"], mq) is True
-    assert _is_same_grain(["A", "B"], ["date"], mq) is False  # partial grain
-    assert _is_same_grain(["A", "B"], [], mq) is False  # empty grain never same
-
-
-def test_build_union_source_null_alignment():
-    mq = {
-        "A": _fact("A", "c.s.a", ["d"], [("sa", "x")]),
-        "B": _fact("B", "c.s.b", ["d"], [("sb", "y")]),
-    }
-    sql, aggs = _build_union_source(["A", "B"], ["d"], mq)
-    assert {a["name"] for a in aggs} == {"sa", "sb"}
-    assert "x AS sa" in sql and "NULL AS sb" in sql
-    assert "y AS sb" in sql and "NULL AS sa" in sql
+    ]
+    p = _pipeline(mapping, facts)
+    p.run()
+    assert p.combined_sources == {}
+    reasons = [d["reason"] for d in p._limitations.get("cross_table_deferred", [])]
+    assert any("exists on both facts" in r for r in reasons)

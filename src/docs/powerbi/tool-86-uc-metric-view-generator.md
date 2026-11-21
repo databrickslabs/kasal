@@ -101,6 +101,30 @@ With `enable_reconciliation`, prior-year measures are compared in a second pass:
 
 Periods the metric view has and Power BI returns no row for (history before the model's calendar starts, rows the refresh does not load) are not compared: there is nothing to compare them with. Each view's report counts them under `periods_not_in_power_bi` (`periods`, `first`, `last`), and `review_summary` carries the same. When the two sides share no period at all, nothing is left out, so a period format that does not match stays visible.
 
+### Cross-fact measures (combined source)
+
+A measure whose DAX reads columns of two fact tables cannot sit on one metric view. Inside the reconciliation loop, the generator builds one **combined source** per pair of facts those measures need: a `UNION ALL` of the two facts' source views, each projected to the shared grain (the group-by columns both facts have), with each fact's measure columns `NULL` in the other arm. The measures are translated on it like any other measure, and the view is a normal entry in the output (YAML, resolved measures, source-layer DDL, comparison).
+
+```sql
+CREATE OR REPLACE VIEW cat.sch.src_combined_fact_a_fact_b AS
+SELECT CalMonth, Region, Amount, NULL AS Budget FROM cat.sch.src_fact_a
+UNION ALL
+SELECT CalMonth, Region, NULL AS Amount, Budget FROM cat.sch.src_fact_b
+```
+
+Why the union is exact for the measures it accepts: it adds rows and never joins, so no row is multiplied; a column is filled only by its own fact, and every SQL aggregate ignores `NULL`, so `SUM`, `AVG`, `COUNT`, `MIN`, `MAX` and `DISTINCTCOUNT` of a fact column equal the same aggregate over that fact alone. A ratio of such aggregates is exact too.
+
+Not accepted (the reason is in the review list): row counts (`COUNTROWS`, `COUNT(*)`) and row iterators (`SUMX` and similar), filter context (`CALCULATE`, `FILTER`, `ALL`, time intelligence), related lookups, measures that read dimension columns, three or more facts, two facts that share no grain column, a shared grain without a period column and a second column (the view could not be compared), and a column present on both facts that is not a shared grain column.
+
+The shared grain becomes the view's dimensions. Each fact's source view already carries its Power Query filters and transformations, so the other fact's filters apply to its arm.
+
+Requires `read_from_source_layer`. Pipeline config: `cross_table_union_sources: false` turns it off (default on). Only the reconciliation loop runs it, so it has no effect offline.
+
+Limits:
+
+- A measure that is also translated on its own fact view stays there, so it appears on both views. Each view is compared on its own.
+- Columns of unparsed tables are unknown to the generator, so a measure that reads one is not accepted. On a model with unparsed tables this is the usual reason nothing is combined.
+
 ---
 
 ## Configuration

@@ -214,6 +214,8 @@ class MetricViewPipeline:
         self.source_layer_views: dict | None = None
         self.source_layer_binding: SourceLayerBinding | None = None
         self._allocation_report: dict | None = None
+        # Cross-fact combined sources (cross_table_source_planner), keyed by view key.
+        self.combined_sources: dict = {}
 
         # Pipeline helper instances
         self.metadata_gen = MetadataGenerator(
@@ -545,7 +547,9 @@ class MetricViewPipeline:
         # sources and translate them via the normal path — but ONLY when
         # reconciliation is active to validate the numbers (see
         # cross_table_source_planner). Off → leave them collected, as before.
-        if self.config.get("reconciliation_active"):
+        if self.config.get("reconciliation_active") and self.config.get(
+            "cross_table_union_sources", True
+        ):
             try:
                 from .cross_table_source_planner import plan_cross_table_sources
 
@@ -925,6 +929,7 @@ class MetricViewPipeline:
             catalog,
             schema,
             mquery_expressions=self._mquery_expressions,
+            combined_sources=self.combined_sources,
         )
         if not read_from_source_layer(self.config):
             return {}
