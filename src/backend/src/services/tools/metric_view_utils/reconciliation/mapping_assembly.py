@@ -162,7 +162,12 @@ def _measures(spec: RawMap, resolved: object) -> list[RawMap]:
         # A prior-year helper has no Power BI measure of its own (prior_year_mixed.py).
         if m.get("helper_of"):
             continue
-        if m.get("dax_expression") and name in in_view and original:
+        if name not in in_view:
+            continue
+        option = _switch_option(name, m)
+        if option is not None:
+            out.append(option)
+        elif m.get("dax_expression") and original:
             out.append(
                 {
                     "ucmv_measure": name,
@@ -173,6 +178,43 @@ def _measures(spec: RawMap, resolved: object) -> list[RawMap]:
                 }
             )
     return out
+
+
+def _switch_option(name: str, row: RawMap) -> RawMap | None:
+    """The mapping entry of a measure that is one option of a Power BI SWITCH measure, None
+    for any other measure.
+
+    Such a measure has no Power BI measure of its own: it is the parent measure with the
+    selector set to its option. Compared against the parent without the selector, Power BI
+    answers blank or another option. Where the option is not known (several selectors, a
+    measure that depends on which dimension is filtered) the measure is not compared."""
+    kind = str(row.get("pbi_kind") or "")
+    source = as_map(next(iter(as_list(row.get("pbi_sources"))), None))
+    selector = (
+        "switch_selector_table",
+        "switch_selector_column",
+        "switch_selector_value",
+    )
+    if (
+        kind == "switch"
+        and source.get("pbi_measure")
+        and all(source.get(key) not in (None, "") for key in selector)
+    ):
+        return {
+            "ucmv_measure": name,
+            "pbi_kind": "switch",
+            "pbi_measure": source["pbi_measure"],
+            **{key: source[key] for key in selector},
+            "value_format": "raw_number",
+            "tolerance": {"kind": "absolute", "value": 0.001},
+        }
+    if kind in ("switch", "unresolved", "dimension_conditional"):
+        return {
+            "ucmv_measure": name,
+            "pbi_kind": "unresolved",
+            "raw_hint": "one option of a Power BI SWITCH measure; its selector is not known",
+        }
+    return None
 
 
 _FILTER_CLAUSE = re.compile(r"FILTER\s*\(\s*WHERE\b(.*)\)", re.IGNORECASE | re.DOTALL)
@@ -380,7 +422,7 @@ def assemble_mapping(
     measures += _base_measures(
         spec, table_key, {str(m["ucmv_measure"]) for m in measures}
     )
-    if not measures:
+    if not any(m.get("pbi_kind") != "unresolved" for m in measures):
         return (
             None,
             "no measure to compare (neither DAX-translated nor a plain column aggregate)",
@@ -423,7 +465,7 @@ def assemble_mapping(
     elif period[1] != table_key:
         time_dimension["pbi_table"] = period[1]
     shifted = _time_shifted(spec, measures, resolved, filters, relationships, joined)
-    if not measures:
+    if not any(m.get("pbi_kind") != "unresolved" for m in measures):
         return None, time_shift.NOT_COMPARABLE
     return {
         **shifted,

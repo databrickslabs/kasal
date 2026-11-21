@@ -344,3 +344,77 @@ def test_history_power_bi_does_not_show_is_left_out_and_counted(monkeypatch):
 
     summary = review_summary({"yaml": {"Fact": YAML}, "reconciliation": out}, rows)
     assert summary["Fact"]["periods_not_in_power_bi"]["periods"] == 2
+
+
+# ── one option of a Power BI SWITCH measure ────────────────────────────────
+
+
+def test_a_switch_option_is_compared_with_its_selector_or_not_at_all():
+    view = """version: '1.1'
+source: prod.sales.fact
+dimensions:
+  - name: country
+    expr: source.country
+  - name: fiscper
+    expr: source.fiscper
+measures:
+  - name: kpi_volume
+    expr: SUM(source.volume)
+  - name: kpi_margin
+    expr: SUM(source.margin)
+  - name: kpi_other
+    expr: SUM(source.other)
+  - name: sales
+    expr: SUM(source.amount) FILTER (WHERE source.kind = 'a')
+"""
+    resolved = {
+        "Fact": [
+            {
+                "measure_name": "kpi_volume",
+                "original_name": "KPI",
+                "dax_expression": "",
+                "pbi_kind": "switch",
+                "pbi_sources": [
+                    {
+                        "pbi_measure": "KPI",
+                        "switch_selector_table": "Selector",
+                        "switch_selector_column": "Name",
+                        "switch_selector_value": "Volume",
+                    }
+                ],
+            },
+            {
+                "measure_name": "kpi_margin",
+                "original_name": "KPI",
+                "dax_expression": "SWITCH(...)",
+                "pbi_kind": "unresolved",
+                "pbi_sources": [],
+            },
+            {
+                "measure_name": "kpi_other",
+                "original_name": "KPI by plant",
+                "dax_expression": "SWITCH(...)",
+                "pbi_kind": "dimension_conditional",
+            },
+            {
+                "measure_name": "sales",
+                "original_name": "Sales",
+                "dax_expression": "CALCULATE(...)",
+            },
+        ]
+    }
+    mappings, gaps = assemble_mappings(
+        {"Fact": view}, resolved, {"Fact": "c.s.fact"}, {}, MODEL
+    )
+    entries = {m["ucmv_measure"]: m for m in mappings["Fact"]["measures"]}
+    assert entries["kpi_volume"]["pbi_kind"] == "switch"
+    assert entries["kpi_volume"]["pbi_measure"] == "KPI"
+    assert entries["kpi_volume"]["switch_selector_value"] == "Volume"
+    assert entries["kpi_margin"]["pbi_kind"] == "unresolved"
+    assert entries["kpi_other"]["pbi_kind"] == "unresolved"
+    assert entries["sales"]["pbi_kind"] == "direct"
+    loaded = load_mapping_dict(mappings["Fact"])
+    assert [m.ucmv_measure for m in loaded.resolved_measures()] == [
+        "kpi_volume",
+        "sales",
+    ]
