@@ -394,6 +394,22 @@ def review_overview(rows: list[dict[str, object]]) -> dict[str, dict[str, int]]:
     return overview
 
 
+def review_headline(rows: list[dict[str, object]]) -> dict[str, object]:
+    """The whole run in five numbers: the in-scope Power BI measures, how many are in a
+    deployed view, how many of those were compared, how many match, and the share of the
+    compared ones that match."""
+    total = review_overview(rows).get("total") or {}
+    matching = int(total.get("match", 0))
+    compared = matching + int(total.get("below_bar", 0))
+    return {
+        "in_scope": int(total.get("in_scope", 0)),
+        "in_view": int(total.get("translated", 0)),
+        "compared": compared,
+        "matching": matching,
+        "matching_pct": round(100.0 * matching / compared, 1) if compared else None,
+    }
+
+
 def with_review(
     output: Mapping[str, object], config: object = None
 ) -> dict[str, object]:
@@ -409,6 +425,7 @@ def with_review(
         "review_bar_pct": bar,
         "review_summary": review_summary(output, rows, bar),
         "review_overview": review_overview(rows),
+        "review_headline": review_headline(rows),
         "review_csv": review_csv(rows),
     }
 

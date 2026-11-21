@@ -26,6 +26,21 @@ export interface UCMVStats {
 }
 
 /** Counts of one view (or of all views, under "total") in a verify-numbers run. */
+export interface UCMVReviewHeadline {
+  in_scope: number;
+  in_view: number;
+  compared: number;
+  matching: number;
+  matching_pct: number | null;
+}
+
+/** Periods a metric view has and Power BI returns nothing for: left out of the comparison. */
+export interface UCMVPeriodsLeftOut {
+  periods: number;
+  first: string;
+  last: string;
+}
+
 export interface UCMVReviewCounts {
   in_scope: number;
   translated: number;
@@ -44,6 +59,7 @@ export interface UCMVReviewViewStatus {
   status: string;
   pct_aligned?: number | null;
   measures?: Record<string, number>;
+  periods_not_in_power_bi?: UCMVPeriodsLeftOut;
 }
 
 export interface UCMVResult {
@@ -59,6 +75,8 @@ export interface UCMVResult {
   migration_report?: string;
   /** Verify numbers: per-view counts of in-scope measures (keyed by view, plus "total"). */
   review_overview?: Record<string, UCMVReviewCounts>;
+  /** Verify numbers: the run in five numbers (in scope, in a view, compared, matching, share). */
+  review_headline?: UCMVReviewHeadline;
   /** Verify numbers: per-view status against the bar. */
   review_summary?: Record<string, UCMVReviewViewStatus>;
   /** Verify numbers: the bar (share of matching cells, in percent) a measure has to reach. */

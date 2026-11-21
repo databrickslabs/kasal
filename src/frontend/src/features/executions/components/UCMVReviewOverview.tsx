@@ -21,7 +21,7 @@ import {
   Typography,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
-import type { UCMVReviewCounts, UCMVReviewViewStatus } from './ucmvResultTypes';
+import type { UCMVReviewCounts, UCMVReviewHeadline, UCMVReviewViewStatus } from './ucmvResultTypes';
 
 const COLUMNS: { key: keyof UCMVReviewCounts; label: string; help: string }[] = [
   { key: 'in_scope', label: 'In scope', help: 'Power BI measures on this table, without display or slicer logic' },
@@ -46,9 +46,10 @@ export interface UCMVReviewOverviewProps {
   summary?: Record<string, UCMVReviewViewStatus>;
   barPct?: number;
   csv?: string;
+  headline?: UCMVReviewHeadline;
 }
 
-const UCMVReviewOverview: React.FC<UCMVReviewOverviewProps> = ({ overview, summary, barPct, csv }) => {
+const UCMVReviewOverview: React.FC<UCMVReviewOverviewProps> = ({ overview, summary, barPct, csv, headline }) => {
   const handleDownload = useCallback(() => {
     const blob = new Blob([csv || ''], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -63,6 +64,9 @@ const UCMVReviewOverview: React.FC<UCMVReviewOverviewProps> = ({ overview, summa
     .filter((view) => view !== 'total' && (overview[view].in_scope > 0 || overview[view].column_sums > 0))
     .sort((a, b) => overview[b].in_scope - overview[a].in_scope || a.localeCompare(b));
   const total = overview.total;
+  const leftOut = Object.entries(summary || {})
+    .filter(([, status]) => status.periods_not_in_power_bi)
+    .sort(([a], [b]) => a.localeCompare(b));
   const row = (name: string, counts: UCMVReviewCounts, bold: boolean) => {
     const status = summary?.[name];
     const weight = bold ? 600 : 400;
@@ -87,6 +91,13 @@ const UCMVReviewOverview: React.FC<UCMVReviewOverviewProps> = ({ overview, summa
 
   return (
     <Box sx={{ p: 2 }}>
+      {headline && (
+        <Typography variant="body1" sx={{ mb: 1, fontWeight: 500 }}>
+          {headline.in_view} of {headline.in_scope} in-scope measures are in a deployed view.{' '}
+          {headline.compared} were compared with Power BI; {headline.matching} match
+          {headline.matching_pct === null ? '' : ` (${headline.matching_pct.toFixed(1)} %)`}.
+        </Typography>
+      )}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
           Power BI measures per view, without display logic. A measure matches when at least{' '}
@@ -121,6 +132,18 @@ const UCMVReviewOverview: React.FC<UCMVReviewOverviewProps> = ({ overview, summa
           </TableBody>
         </Table>
       </TableContainer>
+      {leftOut.length > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          Not compared, because Power BI returns nothing for these periods:{' '}
+          {leftOut
+            .map(([view, status]) => {
+              const periods = status.periods_not_in_power_bi;
+              return periods ? `${view} (${periods.periods} periods, ${periods.first} to ${periods.last})` : view;
+            })
+            .join('; ')}
+          .
+        </Typography>
+      )}
     </Box>
   );
 };

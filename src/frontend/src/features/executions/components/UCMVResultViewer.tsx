@@ -709,6 +709,7 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
             summary={result.review_summary}
             barPct={result.review_bar_pct}
             csv={result.review_csv}
+            headline={result.review_headline}
           />
         </Section>
       )}

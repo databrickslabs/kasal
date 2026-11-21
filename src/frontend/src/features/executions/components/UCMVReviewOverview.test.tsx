@@ -75,4 +75,32 @@ describe('UCMVResultViewer — review overview', () => {
     expect(screen.getByText('Review: measures per view')).toBeInTheDocument();
     expect(screen.getByText('Download Review')).toBeInTheDocument();
   });
+
+  it('says the run in one sentence and names the periods that were left out', () => {
+    render(
+      <UCMVReviewOverview
+        overview={overview}
+        summary={{
+          ...summary,
+          fact_sales: {
+            status: 'below_bar',
+            pct_aligned: 84.4,
+            periods_not_in_power_bi: { periods: 88, first: '2014003', last: '2021012' },
+          },
+        }}
+        barPct={90}
+        headline={{ in_scope: 104, in_view: 75, compared: 75, matching: 65, matching_pct: 86.7 }}
+      />,
+    );
+    expect(
+      screen.getByText(/75 of 104 in-scope measures are in a deployed view\. 75 were compared with Power BI; 65 match \(86\.7 %\)\./),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/fact_sales \(88 periods, 2014003 to 2021012\)/)).toBeInTheDocument();
+  });
+
+  it('shows neither line when the run does not carry them', () => {
+    render(<UCMVReviewOverview overview={overview} summary={summary} barPct={90} />);
+    expect(screen.queryByText(/in-scope measures are in a deployed view/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Power BI returns nothing for these periods/)).not.toBeInTheDocument();
+  });
 });

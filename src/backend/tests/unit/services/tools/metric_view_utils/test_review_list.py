@@ -367,3 +367,36 @@ measures:
     scopes = {r["measure"]: r["scope"] for r in rows}
     assert scopes == {"sales_py": "helper", "growth": "in_scope"}
     assert review_overview(rows)["total"]["in_scope"] == 1
+
+
+def test_the_headline_says_the_run_in_five_numbers():
+    from src.services.tools.metric_view_utils.reconciliation.review_list import (
+        review_headline,
+        with_review,
+    )
+
+    def row(status, **more):
+        return {
+            "view": "Fact",
+            "measure": "m",
+            "status": status,
+            "kind": "measure",
+            "scope": "in_scope",
+            **more,
+        }
+
+    rows = (
+        [row("reconciled")] * 3
+        + [row("below_bar")]
+        + [row("not_compared"), row("removed_on_deploy"), row("not_translated")]
+        + [row("reconciled", kind="column_sum"), row("not_translated", scope="display")]
+    )
+    assert review_headline(rows) == {
+        "in_scope": 7,
+        "in_view": 5,
+        "compared": 4,
+        "matching": 3,
+        "matching_pct": 75.0,
+    }
+    assert review_headline([])["matching_pct"] is None
+    assert "review_headline" in with_review({"yaml": {}})
