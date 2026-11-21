@@ -79,8 +79,13 @@ from src.services.tools.uc_metric_view_generator_utils.visual_usage_triage impor
     apply_visual_usage,
     derive_mapping_and_connections,
 )
+from src.services.tools.metric_view_utils.source_columns import (
+    parse_source_columns,
+)
+from src.services.tools.uc_metric_view_generator_utils.best_effort_step import (
+    apply_best_effort,
+)
 from src.services.tools.uc_metric_view_generator_utils.zero_view_diagnosis import (
-    build_best_effort_views,
     diagnose_zero_views,
 )
 
@@ -168,6 +173,15 @@ class UCMetricViewGeneratorSchema(BaseModel):
             "and whose DAX is unchanged keeps its previous SQL and window without being "
             "sent to the LLM. Everything else is translated as usual. Output lists the "
             "reused measures in reused_from_previous_run."
+        ),
+    )
+    source_columns_json: Optional[str] = Field(
+        None,
+        description=(
+            "JSON {table key: [{name, type}]}: the real columns of each source-layer view "
+            "(read mode). Set by the reconciliation loop after it deploys the source layer; "
+            "it lets the generator know which columns a metric view may reference. Not "
+            "usually supplied by hand; without it the columns are taken from the Power Query."
         ),
     )
     naming_config: Optional[str] = Field(
@@ -359,6 +373,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "report_scope",
             "config_json",
             "naming_config",
+            "source_columns_json",
             "domain_context",
             "refinement_feedback",
             "previous_output",
@@ -740,6 +755,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             unflatten_tables=unflatten,
             llm_config=llm_config,
             pins=pin_plan,
+            source_columns=parse_source_columns(_get_json("source_columns_json")),
         )
 
         # Visual usage: tag measures (direct, indirect), optional triage, then the
@@ -798,31 +814,13 @@ class UCMetricViewGeneratorTool(BaseTool):
                 zero_view_diagnosis["recommended_action"],
             )
 
-        best_effort_report = None
-        if (not yaml_output) and _get("allow_best_effort") and _get("fact_source_map"):
-            fsm = _get("fact_source_map")
-            if isinstance(fsm, str):
-                try:
-                    fsm = json.loads(fsm)
-                except Exception:
-                    logger.debug(
-                        "[UCMVGenerator] fact_source_map is not valid JSON; ignoring it",
-                        exc_info=True,
-                    )
-                    fsm = None
-            be_views, best_effort_report = build_best_effort_views(
-                fact_source_map=fsm, config=config, measures=measures
-            )
-            if be_views:
-                yaml_output = be_views
-                logger.warning(
-                    "[UCMVGenerator] BEST-EFFORT mode: drafted %s view(s) / %s measure(s) "
-                    "from a thin report; %s measure(s) unresolved and skipped. "
-                    "Tables/measures may be MISSING — every measure marked TODO: verify.",
-                    best_effort_report["tables_emitted"],
-                    best_effort_report["measures_emitted"],
-                    best_effort_report["measures_skipped_unresolved"],
-                )
+        yaml_output, best_effort_report = apply_best_effort(
+            yaml_output,
+            allow=_get("allow_best_effort"),
+            fact_source_map=_get("fact_source_map"),
+            config=config,
+            measures=measures,
+        )
 
         # Count only the real generated views; the catch-all is added next and must
         # not inflate views_generated.

@@ -115,6 +115,7 @@ class MetricViewPipeline:
         rls_tables: set[str] | None = None,
         mquery_expressions: dict | None = None,
         relationships: list[dict] | None = None,
+        source_columns: dict[str, list[str]] | None = None,
     ):
         self.mapping = mapping
         for entry in mapping:
@@ -126,6 +127,11 @@ class MetricViewPipeline:
             entry.setdefault("original_name", entry.get("measure_name", ""))
         self.mquery_tables = mquery_tables
         self.config = config or {}
+        # Real columns of the source-layer views. They describe what a metric view reads, so
+        # they are used only in read mode (see source_columns.py).
+        self.source_columns: dict[str, list[str]] = (
+            dict(source_columns or {}) if read_from_source_layer(self.config) else {}
+        )
         self.inner_dim_joins = inner_dim_joins
         self.scan_data = scan_data or {}
         # Raw Power Query M per table, for physical-name resolution (Gaps 1-3).

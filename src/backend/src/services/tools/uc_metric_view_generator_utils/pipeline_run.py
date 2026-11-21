@@ -28,6 +28,7 @@ def _build_and_run(
     inner_dim_joins: bool,
     unflatten_tables: bool,
     llm_config: dict | None,
+    source_columns: dict[str, list[str]] | None = None,
 ) -> MetricViewPipeline:
     from src.services.tools.metric_view_utils.pipeline import MetricViewPipeline
 
@@ -47,6 +48,7 @@ def _build_and_run(
         no_summarize_columns=scan_parser.get_no_summarize_columns() or None,
         rls_tables=scan_parser.get_rls_tables() or None,
         relationships=parsed.relationships or None,
+        source_columns=source_columns,
     )
     pipeline.run()
     return pipeline
@@ -81,6 +83,7 @@ def run_pipeline(
     unflatten_tables: bool,
     llm_config: dict | None,
     pins: Optional[PinPlan] = None,
+    source_columns: dict[str, list[str]] | None = None,
 ) -> MetricViewPipeline:
     """Build the pipeline from the parsed inputs and run it.
 
@@ -98,6 +101,7 @@ def run_pipeline(
             inner_dim_joins=inner_dim_joins,
             unflatten_tables=unflatten_tables,
             llm_config=llm_config,
+            source_columns=source_columns,
         )
 
     if pins is None or not pins.pins:

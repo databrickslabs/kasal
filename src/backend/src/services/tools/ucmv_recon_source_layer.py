@@ -19,6 +19,7 @@ import re
 from collections.abc import Mapping
 
 from src.services.tools.metric_view_deployer_utils.sql_helpers import (
+    SqlRunner,
     error_text,
     sanitize_namespace,
 )
@@ -65,14 +66,35 @@ def fingerprint(ddl_map: Mapping[str, object]) -> str:
     return digest.hexdigest()
 
 
+def layer_session(
+    deployer: object, deploy_base: Mapping[str, object]
+) -> tuple[str, str, SqlRunner | None, str]:
+    """``(catalog, schema, SQL runner, error)`` for the deployer's session on the layer's
+    namespace; the runner is None and the error set when no session opens."""
+    from src.services.tools.metric_view_deployer_tool import _RunOptions
+
+    catalog = sanitize_namespace(str(deploy_base.get("catalog") or "main"))
+    schema = sanitize_namespace(str(deploy_base.get("schema_name") or "default"))
+    opts = _RunOptions(
+        catalog=catalog,
+        schema=schema,
+        host_override=str(deploy_base.get("databricks_host") or "") or None,
+        warehouse_id=str(deploy_base.get("warehouse_id") or ""),
+        preserve_grants=False,
+        group_by=None,
+        timing=False,
+        slow_s=5.0,
+    )
+    open_session = getattr(deployer, "_open_session")
+    runner, session_error = open_session(opts)
+    return catalog, schema, runner, str(session_error or "")
+
+
 def deploy_source_layer(
     deployer: object, ddl_map: Mapping[str, object], deploy_base: Mapping[str, object]
 ) -> RawMap:
     """Create the source-layer views. Returns ``{deployed: [...], failures: {table: reason}}``."""
-    from src.services.tools.metric_view_deployer_tool import (
-        MetricViewDeployerTool,
-        _RunOptions,
-    )
+    from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
 
     views, failures = planned_views(ddl_map)
     if not views:
@@ -87,23 +109,11 @@ def deploy_source_layer(
             "failures": {**failures, "_session": "no deployer session"},
         }
 
-    catalog = sanitize_namespace(str(deploy_base.get("catalog") or "main"))
-    schema = sanitize_namespace(str(deploy_base.get("schema_name") or "default"))
-    opts = _RunOptions(
-        catalog=catalog,
-        schema=schema,
-        host_override=str(deploy_base.get("databricks_host") or "") or None,
-        warehouse_id=str(deploy_base.get("warehouse_id") or ""),
-        preserve_grants=False,
-        group_by=None,
-        timing=False,
-        slow_s=5.0,
-    )
-    runner, session_error = deployer._open_session(opts)
+    catalog, schema, runner, session_error = layer_session(deployer, deploy_base)
     if runner is None:
         return {
             "deployed": [],
-            "failures": {**failures, "_session": str(session_error)},
+            "failures": {**failures, "_session": session_error},
         }
     MetricViewDeployerTool._ensure_schema(runner, catalog, schema)
 

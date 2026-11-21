@@ -120,6 +120,52 @@ def _positive_or(value: object, default: float) -> float:
         return default
 
 
+def _source_columns_json(
+    generator: ToolRunner,
+    deployer: ToolRunner,
+    gen_kwargs: Mapping[str, object],
+    deploy_base: Mapping[str, object],
+    context: Mapping[str, object],
+    source_layer: dict[str, object],
+    probe: dict[str, object],
+) -> Optional[str]:
+    """``source_columns_json`` for the real generation: the columns the deployed source-layer
+    views really have. Read once per run. A generation with the LLM off gives the source-layer
+    DDL (the DDL does not depend on the translation), the layer is deployed, and the views'
+    columns are read; the expensive translation then runs once, with the columns known.
+    ``None`` when no view could be read (the generator then uses what it can parse)."""
+    from src.services.tools.metric_view_utils.source_layer_binding import (
+        source_layer_leaf_name,
+        source_layer_naming,
+    )
+    from src.services.tools.ucmv_source_columns import read_source_columns
+
+    if "json" in probe:  # read once per run; later cycles reuse the answer
+        cached = probe["json"]
+        return cached if isinstance(cached, str) else None
+    probe["json"] = None
+    pre = _loads(generator._run(**{**gen_kwargs, "use_llm_fallback": False}))
+    source_layer["ddl"] = as_map(pre.get("source_layer_ddl"))
+    layer_note = _deploy_layer_once(deployer, source_layer, deploy_base)
+    deployed = [
+        str(table)
+        for table in as_list(as_map(source_layer.get("report")).get("deployed"))
+    ]
+    naming = source_layer_naming(dict(_config(context)))
+    leaves = {source_layer_leaf_name(t, naming).lower(): t for t in deployed}
+    found = read_source_columns(deployer, deploy_base, sorted(leaves))
+    columns = {leaves[leaf]: [dict(c) for c in cols] for leaf, cols in found.items()}
+    probe["report"] = {
+        "views_deployed": len(deployed),
+        "views_with_columns": len(columns),
+        "layer": layer_note,
+    }
+    if not columns:
+        return None
+    probe["json"] = json.dumps(columns)
+    return str(probe["json"])
+
+
 def run_iterative_ucmv_generation(
     *,
     generator: ToolRunner,
@@ -167,6 +213,8 @@ def run_iterative_ucmv_generation(
     # Each cycle's mappings (as compared, heals included): the result carries every
     # view's mapping from the cycle its YAML comes from, so crew 4 can reconcile it.
     cycle_mappings: list[dict[str, object]] = []
+    # The real columns of the source views (read once per run; see _source_columns_json).
+    probe_state: dict[str, object] = {}
 
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
         nonlocal resolved_state, specs_state
@@ -199,6 +247,18 @@ def run_iterative_ucmv_generation(
                     carried_measures,
                     carried_tables,
                 )
+        if read_mode:
+            columns_json = _source_columns_json(
+                generator,
+                deployer,
+                gen_base,
+                deploy_base,
+                context,
+                source_layer,
+                probe_state,
+            )
+            if columns_json:
+                kw["source_columns_json"] = columns_json
         out = _loads(generator._run(**kw))
         resolved_state = as_map(out.get("resolved_measures_by_table"))
         specs_state = as_map(out.get("specs_summary"))
@@ -284,6 +344,8 @@ def run_iterative_ucmv_generation(
         "cycles": [dataclasses.asdict(c) for c in result.cycles],
         "yaml": result.final_yaml,
         "reconciliation": result.final_reconciliation,
+        # The source views' columns as read from the warehouse (absent without read mode).
+        "source_columns_probe": probe_state.get("report"),
     }
     # What a person has to check, per measure: statistics only, no values.
     return with_review(output, _loads(context.get("config_json")))

@@ -1,0 +1,113 @@
+"""The columns of the source-layer views, as the warehouse reports them.
+
+In read mode a metric view reads one source-layer view per Power BI table. The generator
+translates the measures before those views exist, so it guesses their columns from the
+Power Query text; the guess is often empty. When the loop has deployed the views it reads
+their real columns and passes them in as ``{table key: [{name, type}]}`` (``source_columns_json``).
+
+Two things follow from a known column list and are decided here, once:
+
+* the fact's column set (``spec.fact_columns``) and the joined views' column sets, so a
+  reference to a column a view does not have is not emitted;
+* a column named like the fact's alias (``source``) is exposed under another name. In a metric
+  view ``source.<name>`` is the fact's column reference; when the fact has a column called
+  ``source`` and a reference to a column it lacks is written, Databricks reports
+  ``INVALID_EXTRACT_BASE_FIELD_TYPE`` on ``source`` instead of the missing column, and the
+  healer cannot tell which reference to remove.
+
+Pure functions: no I/O.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Mapping
+
+#: The alias a metric view gives its fact; a fact column with this name collides with it.
+QUALIFIER = "source"
+_RENAME_SUFFIX = "_"
+
+
+def parse_source_columns(raw: object) -> dict[str, list[str]]:
+    """``{table key: [column names]}`` from the JSON input (or an already parsed mapping).
+
+    Accepts ``{key: [{"name": ..., "type": ...}]}`` and ``{key: ["name", ...]}``. A key whose
+    list is empty or malformed is left out: its columns are then unknown, not empty.
+    """
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(raw, Mapping):
+        return {}
+    out: dict[str, list[str]] = {}
+    for key, columns in raw.items():
+        if not isinstance(columns, list):
+            continue
+        names: list[str] = []
+        for column in columns:
+            name = column.get("name") if isinstance(column, Mapping) else column
+            if isinstance(name, str) and name.strip() and name.strip() not in names:
+                names.append(name.strip())
+        if names:
+            out[str(key)] = names
+    return out
+
+
+def column_renames(columns: Mapping[str, list[str]]) -> dict[str, dict[str, str]]:
+    """``{table key: {column (lower case): new name}}`` for each view with a column named
+    like the fact alias. The new name is ``source_`` (or more underscores when that is taken).
+    """
+    out: dict[str, dict[str, str]] = {}
+    for key, names in columns.items():
+        taken = {name.lower() for name in names}
+        if QUALIFIER not in taken:
+            continue
+        new = QUALIFIER + _RENAME_SUFFIX
+        while new in taken:
+            new += _RENAME_SUFFIX
+        out[key] = {QUALIFIER: new}
+    return out
+
+
+def renamed_columns(
+    columns: Mapping[str, list[str]], renames: Mapping[str, Mapping[str, str]]
+) -> dict[str, list[str]]:
+    """The columns each view exposes once the renames are applied."""
+    return {
+        key: [renames.get(key, {}).get(name.lower(), name) for name in names]
+        for key, names in columns.items()
+    }
+
+
+def rename_references(text: str, alias: str, renames: Mapping[str, str]) -> str:
+    """``alias.col`` (back-quoted or not) rewritten to ``alias.<new name>`` for each renamed
+    column, matched case-insensitively. Text without such a reference is returned unchanged.
+    """
+    if not text or not renames:
+        return text
+    pattern = re.compile(
+        rf"(?<![\w.])({re.escape(alias)})\.(`?)(\w+)\2(?!\w)", re.IGNORECASE
+    )
+
+    def _sub(match: re.Match[str]) -> str:
+        new = renames.get(match.group(3).lower())
+        if new is None:
+            return match.group(0)
+        quote = match.group(2)
+        return f"{match.group(1)}.{quote}{new}{quote}"
+
+    return pattern.sub(_sub, text)
+
+
+def columns_read(text: str, alias: str) -> set[str]:
+    """Lower-cased column names read as ``alias.col`` in a measure or dimension expression."""
+    pattern = re.compile(
+        rf"(?<![\w.]){re.escape(alias)}\.`?(\w+)`?(?!\w)", re.IGNORECASE
+    )
+    return {name.lower() for name in pattern.findall(text or "")}
