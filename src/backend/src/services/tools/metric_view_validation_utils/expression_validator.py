@@ -20,8 +20,18 @@ from .measure_fingerprint import (
     var_used_inside_calculate,
 )
 from .measure_expression_tree import compare_shapes, composed_of_measures_only
-from .measure_references import dax_measure_refs, ucmv_measure_refs
-from .prior_year_check import PriorYearJudgement, is_prior_year_dax, judge_prior_year
+from .measure_references import (
+    SELECTION_CONTEXT,
+    dax_measure_names,
+    dax_measure_refs,
+    ucmv_measure_refs,
+)
+from .prior_year_check import (
+    PriorYearJudgement,
+    is_prior_year_dax,
+    judge_prior_year,
+    loose_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +209,39 @@ class ExpressionValidator:
             "evaluated": matched_measures,
         }
 
+    def _selection_context_review(
+        self, result: dict, dax_expr: str, databricks_expr: Optional[str]
+    ) -> dict:
+        """An INVALID verdict that rests on a measure the DAX references by name, whose own
+        definition depends on the selection (ISFILTERED, HASONEVALUE, ...), becomes REVIEW.
+        The translation inlines such a measure as the calculation it evaluates to in the
+        view, and the static comparison cannot read the selection logic. Never promotes.
+        """
+        if result.get("status") != STATUS_INVALID or not self.data_handler:
+            return result
+        called = ucmv_measure_refs(databricks_expr or "")
+        dependent = [
+            name
+            for name in sorted(
+                dax_measure_names(self.dax_parser.resolved_expression(dax_expr))
+            )
+            if loose_name(name) not in called
+            and SELECTION_CONTEXT.search(
+                self.data_handler.get_measure_definition(name) or ""
+            )
+        ]
+        if not dependent:
+            return result
+        result["status"] = STATUS_REVIEW
+        result["is_valid"] = False
+        result["confidence"] = "low"
+        result["recommendations"].append(
+            "The DAX references measure(s) whose definition depends on the selection "
+            f"{dependent}: the static comparison cannot read the selection logic, so the "
+            "measure is for review (check the referenced measure's own row)"
+        )
+        return result
+
     def validate_measure_by_name(self, measure_name: str) -> Dict[str, Any]:
         """
         Validate a measure by looking it up in the data handler.
@@ -316,7 +359,7 @@ class ExpressionValidator:
                 result["status"] = STATUS_REVIEW
             else:
                 result["status"] = STATUS_INVALID
-            return result
+            return self._selection_context_review(result, dax_expr, databricks_expr)
         except (ValueError, RuntimeError) as e:
             logger.error("Error validating measure %s: %s", measure_name, e)
             return {

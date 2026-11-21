@@ -21,6 +21,7 @@ class DataInputHandler:
         metrics_view_path: str,
         table_mapping_path: str,
         table_mappings: Optional[Dict] = None,
+        measure_definitions_path: Optional[str] = None,
     ):
         """
         Initialize the DataInputHandler.
@@ -29,6 +30,9 @@ class DataInputHandler:
             metrics_view_path: Path to metrics view YAML file
             table_mapping_path: Path to table mapping JSON file
             table_mappings: Optional dictionary for table name mappings
+            measure_definitions_path: Optional JSON of every DAX measure of the model. It is
+                read only to find the definition of a measure a DAX expression references
+                (the referenced measure may sit on another table than the mapping holds).
 
         Raises:
             ValueError: If metrics_view_path or table_mapping_path are empty
@@ -41,9 +45,23 @@ class DataInputHandler:
         self.table_mappings = table_mappings or {}
         self.mv_parser = UCMetricsViewParser(metrics_view_path)
         self.table_mapping_parser = MeasureTableMappingParser(table_mapping_path)
+        self.definition_parser = (
+            MeasureTableMappingParser(measure_definitions_path)
+            if measure_definitions_path
+            else self.table_mapping_parser
+        )
         self.dax_parser = DAXExpressionParser()
         self._yaml_measures_cache: Optional[List[Dict]] = None
         self._dax_measures_cache: Optional[List[Dict]] = None
+
+    def get_measure_definition(self, measure_name: str) -> Optional[str]:
+        """The DAX of a measure by its Power BI name, from every measure of the model when
+        the handler was given them, else from the mapping. None when unknown."""
+        if not measure_name or not measure_name.strip():
+            return None
+        found = self.definition_parser.get_measure_by_name(measure_name)
+        text = (found or {}).get("dax_expression")
+        return text if text and text != "Not available" else None
 
     def get_yaml_measure(self, measure_name: str) -> Optional[Dict]:
         """

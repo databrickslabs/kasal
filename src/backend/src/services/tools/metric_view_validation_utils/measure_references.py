@@ -10,9 +10,15 @@ are compared by ``loose_name``: case, spaces, underscores and punctuation remove
 from __future__ import annotations
 
 import re
-from typing import Set
+from typing import List, Set
 
 from .prior_year_check import loose_name
+
+# Selection-context logic in a measure definition: its value depends on which filters or
+# slicers are active, which a static comparison of the SQL cannot read.
+SELECTION_CONTEXT = re.compile(
+    r"\b(?:ISFILTERED|ISCROSSFILTERED|HASONEVALUE|SELECTEDVALUE)\s*\(", re.IGNORECASE
+)
 
 # MEASURE(name) or MEASURE(`name`) in Databricks SQL.
 UCMV_MEASURE_CALL = re.compile(
@@ -36,3 +42,8 @@ def ucmv_measure_refs(sql: str) -> Set[str]:
 def dax_measure_refs(dax: str) -> Set[str]:
     """Loose names of the measures a DAX expression references as ``[name]``."""
     return {loose_name(m.group(1)) for m in DAX_BARE_REF.finditer(dax or "")}
+
+
+def dax_measure_names(dax: str) -> List[str]:
+    """The measure names a DAX expression references as ``[name]``, as written (no duplicates)."""
+    return sorted({m.group(1).strip() for m in DAX_BARE_REF.finditer(dax or "")})
