@@ -515,3 +515,50 @@ def test_a_window_on_a_dimension_the_view_never_had_is_removed_with_its_readers(
         "measure growth (reads a removed measure)",
         "measure growth_pct (reads a removed measure)",
     ]
+
+
+def test_a_dimension_on_a_missing_fact_column_reported_without_its_name_is_found():
+    # A joined table has a column called `source`: Databricks reads source.<column> as a
+    # field of it and names neither the dimension nor the column.
+    from src.services.tools.ucmv_recon_heal import bisect_dimension
+
+    spec = """version: '1.1'
+source: prod.md.fact
+dimensions:
+  - name: country
+    expr: source.country
+  - name: plant
+    expr: source.plant
+  - name: kbi_code
+    expr: source.kbi_code
+  - name: version
+    expr: source.version
+measures:
+  - name: volume
+    expr: SUM(source.volume)
+"""
+    error = (
+        '[INVALID_EXTRACT_BASE_FIELD_TYPE] Can\'t extract a value from "source". Need a '
+        'complex type [STRUCT, ARRAY, MAP] but got "STRING".'
+    )
+    calls = []
+
+    def redeploy(specs):
+        calls.append(1)
+        names = _names(specs["Fact"], "dimensions")
+        return {"deployed_views": [] if "kbi_code" in names else ["Fact"]}
+
+    text, removed = bisect_dimension(redeploy, "Fact", spec, error)
+    assert _names(text, "dimensions") == ["country", "plant", "version"]
+    assert removed == ["dimension kbi_code (found by bisection)"]
+    assert len(calls) <= 4
+    assert bisect_dimension(redeploy, "Fact", spec, "[NESTED_AGGREGATE_FUNCTION]") == (
+        None,
+        [],
+    )
+    # in the healing loop: found, redeployed, and reported with the error
+    verdict, healed_yaml, healed = heal_failed_views(
+        redeploy, {"Fact": spec}, {"deployed_views": [], "failures": {"Fact": error}}
+    )
+    assert verdict["deployed_views"] == ["Fact"]
+    assert healed["Fact"][0].startswith("dimension kbi_code (found by bisection)")

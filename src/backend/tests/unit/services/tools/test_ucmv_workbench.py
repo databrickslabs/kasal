@@ -93,6 +93,17 @@ def test_mapping_is_rebound_to_the_sandbox_and_new_measures_resolve():
     }
     with pytest.raises(edits.EditError):
         edits.rebind_mapping(MAPPING, "not a name; DROP")
+    # a catalog or schema with hyphens is a valid name (quoted when queried)
+    hyphenated = edits.rebind_mapping(
+        MAPPING, "acme-dev-catalog.my-schema.fact_sales"
+    )
+    assert (
+        hyphenated["binding"]["ucmv_table"]
+        == "acme-dev-catalog.my-schema.fact_sales"
+    )
+    for bad in ("a-b.c.d-e", "a.b", "a.b.c; DROP", "a`.b.c"):
+        with pytest.raises(edits.EditError):
+            edits.rebind_mapping(MAPPING, bad)
 
 
 def test_gaps_close_by_translation_reconciliation_or_classification():

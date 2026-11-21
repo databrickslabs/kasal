@@ -263,6 +263,8 @@ _SOURCE_ERRORS = (
     "PERMISSION_DENIED",
 )
 MAX_BISECT_DEPLOYS = 8
+# Databricks read ``source.<column>`` as a field of a joined table's column named ``source``.
+_SOURCE_AS_FIELD = "INVALID_EXTRACT_BASE_FIELD_TYPE"
 
 
 def bisect_measure(
@@ -279,24 +281,55 @@ def bisect_measure(
     sandbox, capped at MAX_BISECT_DEPLOYS. ``(None, [])`` when the error is about the source,
     the view has a single measure, or no single measure explains the failure.
     """
+    return _bisect(redeploy, key, yaml_text, error, "measures")
+
+
+def bisect_dimension(
+    redeploy: Callable[[Mapping[str, str]], RawMap],
+    key: str,
+    yaml_text: str,
+    error: str,
+) -> tuple[str | None, list[str]]:
+    """The YAML without the one dimension that makes the view fail, for
+    ``INVALID_EXTRACT_BASE_FIELD_TYPE`` on ``source``.
+
+    A dimension on ``source.<column>`` the fact does not have normally fails as an unresolved
+    column, which names it. When a joined table has a column called ``source``, Databricks
+    reads ``source.<column>`` as a field of that column and reports only that it is not a
+    struct. Found the same way as a measure: by deploying halves. ``(None, [])`` for any
+    other error."""
+    if _SOURCE_AS_FIELD not in error:
+        return None, []
+    return _bisect(redeploy, key, yaml_text, error, "dimensions")
+
+
+def _bisect(
+    redeploy: Callable[[Mapping[str, str]], RawMap],
+    key: str,
+    yaml_text: str,
+    error: str,
+    section: str,
+) -> tuple[str | None, list[str]]:
+    """``bisect_measure`` / ``bisect_dimension`` over one section of the view."""
+    what = section[:-1]
     if any(code in error for code in _SOURCE_ERRORS):
         return None, []
     try:
         spec = dict(as_map(yaml.safe_load(yaml_text)))
     except yaml.YAMLError:
         return None, []
-    measures = [dict(as_map(m)) for m in as_list(spec.get("measures"))]
-    if len(measures) < 2:
+    items = [dict(as_map(m)) for m in as_list(spec.get(section))]
+    if len(items) < 2:
         return None, []
 
     def deploys(subset: list[dict[str, object]]) -> bool:
         trial = yaml.safe_dump(
-            {**spec, "measures": subset}, sort_keys=False, allow_unicode=True
+            {**spec, section: subset}, sort_keys=False, allow_unicode=True
         )
         outcome = redeploy({key: trial})
         return key in {str(v) for v in as_list(outcome.get("deployed_views"))}
 
-    candidates, budget = measures, MAX_BISECT_DEPLOYS
+    candidates, budget = items, MAX_BISECT_DEPLOYS
     while len(candidates) > 1 and budget > 1:
         half = candidates[: len(candidates) // 2]
         budget -= 1
@@ -304,22 +337,22 @@ def bisect_measure(
     if len(candidates) != 1 or budget < 1:
         return None, []
     culprit = candidates[0]
-    rest = [m for m in measures if m is not culprit]
+    rest = [m for m in items if m is not culprit]
     if not deploys(rest):
-        # Another culprit, or the failure is not a measure's: remove this one only if it is
-        # broken on its own while another measure alone deploys; the next round goes on.
+        # Another culprit, or the failure is not this section's: remove this one only if it
+        # is broken on its own while another item alone deploys; the next round goes on.
         other = next((m for m in rest), None)
         if other is None or deploys([culprit]) or not deploys([other]):
             return None, []
-    logger.info("[UCMV] bisect: %s fails on measure %s", key, culprit.get("name"))
-    rest, dependents = _split_dependents(rest, {str(culprit.get("name"))})
+    logger.info("[UCMV] bisect: %s fails on %s %s", key, what, culprit.get("name"))
+    removed = [f"{what} {culprit.get('name')} (found by bisection)"]
+    if section == "measures":
+        rest, dependents = _split_dependents(rest, {str(culprit.get("name"))})
+        removed += [f"measure {n} (reads a removed measure)" for n in dependents]
     healed = yaml.safe_dump(
-        {**spec, "measures": rest}, sort_keys=False, allow_unicode=True
+        {**spec, section: rest}, sort_keys=False, allow_unicode=True
     )
-    return healed, [
-        f"measure {culprit.get('name')} (found by bisection)",
-        *(f"measure {n} (reads a removed measure)" for n in dependents),
-    ]
+    return healed, removed
 
 
 def heal_failed_views(
@@ -341,6 +374,10 @@ def heal_failed_views(
                 continue
             current = healed_yaml.get(key) or str(yaml_specs.get(key) or "")
             text, removed = heal_view(current, reason)
+            if text is None and _SOURCE_AS_FIELD in reason:
+                # A dimension on a fact column that does not exist, reported without
+                # its name (bisect_dimension).
+                text, removed = bisect_dimension(redeploy, key, current, reason)
             if text is None:
                 # The error names nothing removable: find the measure by bisection.
                 text, removed = bisect_measure(redeploy, key, current, reason)

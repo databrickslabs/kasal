@@ -17,7 +17,9 @@ import yaml
 from src.services.tools.metric_view_deployer_utils.yaml_safety import yaml_is_safe
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_FQN = re.compile(r"^[A-Za-z_][\w]*\.[A-Za-z_][\w]*\.[A-Za-z_][\w]*$")
+# catalog.schema.view; a catalog or schema may hold hyphens (``acme-dev-catalog``). The
+# reconciliation backtick-quotes every part of the name.
+_FQN = re.compile(r"^[A-Za-z_][\w-]*\.[A-Za-z_][\w-]*\.[A-Za-z_][\w]*$")
 
 
 class EditError(ValueError):
