@@ -410,15 +410,20 @@ def review_headline(rows: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def review_bar(config: object = None) -> float:
+    """The acceptance bar: ``review_bar_pct`` in the pipeline config, default 90."""
+    configured = _number(as_map(config).get("review_bar_pct"))
+    if configured is not None and configured > 0:
+        return configured
+    return DEFAULT_BAR_PCT
+
+
 def with_review(
     output: Mapping[str, object], config: object = None
 ) -> dict[str, object]:
     """``output`` plus ``review_csv``, ``review_summary`` and the bar they were built with
     (``review_bar_pct`` in the pipeline config, default 90)."""
-    bar = DEFAULT_BAR_PCT
-    configured = _number(as_map(config).get("review_bar_pct"))
-    if configured is not None and configured > 0:
-        bar = configured
+    bar = review_bar(config)
     rows = build_review_list(output, bar)
     return {
         **output,

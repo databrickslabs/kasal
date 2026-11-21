@@ -444,3 +444,70 @@ def test_refine_cycle_carries_forward_passing_measures_only():
     assert gen.manual_overrides_seen[0] is None
     mo = gen.manual_overrides_seen[1]
     assert mo and set(o["name"] for o in mo["fact_a"]) == {"good"}
+
+
+# ── Refinement target: the acceptance bar decides what is retranslated ──
+
+
+def test_a_measure_at_or_above_the_bar_is_not_sent_back_to_the_llm():
+    # 95 % is below the 100 % stop target but above the 90 % bar: no refinement feedback.
+    gen = _FakeGenerator()
+    result = run_iterative_ucmv_generation(
+        generator=gen,
+        deployer=_FakeDeployer(ok=True),
+        reconciler=_FakeReconciler([95, 95]),
+        gen_kwargs={"measures_json": "[]"},
+        deploy_kwargs={},
+        recon_kwargs={},
+        max_cycles=5,
+        target_pct=100,
+        refine_pct=90,
+    )
+    assert gen.feedback_seen[1] is None  # cycle 2 carries the measure forward
+    assert result.get("stop_reason") == "converged"  # the target still decides the stop
+    assert result["cycles"][0]["failing_measures"] == []
+
+
+def test_a_measure_below_the_bar_is_still_sent_back():
+    gen = _FakeGenerator()
+    run_iterative_ucmv_generation(
+        generator=gen,
+        deployer=_FakeDeployer(ok=True),
+        reconciler=_FakeReconciler([85, 100]),
+        gen_kwargs={"measures_json": "[]"},
+        deploy_kwargs={},
+        recon_kwargs={},
+        max_cycles=5,
+        target_pct=100,
+        refine_pct=90,
+    )
+    assert gen.feedback_seen[1] is not None
+    assert "bug" in gen.feedback_seen[1]
+
+
+def test_the_stop_target_still_stops_the_loop_when_reached():
+    gen = _FakeGenerator()
+    result = run_iterative_ucmv_generation(
+        generator=gen,
+        deployer=_FakeDeployer(ok=True),
+        reconciler=_FakeReconciler([95]),
+        gen_kwargs={"measures_json": "[]"},
+        deploy_kwargs={},
+        recon_kwargs={},
+        max_cycles=5,
+        target_pct=95,
+        refine_pct=90,
+    )
+    assert result.get("stop_reason") == "target_reached"
+    assert len(gen.feedback_seen) == 1
+
+
+def test_review_bar_reads_the_config_with_the_90_default():
+    from src.services.tools.metric_view_utils.reconciliation.review_list import (
+        review_bar,
+    )
+
+    assert review_bar(None) == 90.0
+    assert review_bar({"review_bar_pct": 95}) == 95.0
+    assert review_bar({"review_bar_pct": "0"}) == 90.0
+    assert review_bar({"review_bar_pct": "not a number"}) == 90.0

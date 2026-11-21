@@ -30,7 +30,10 @@ from src.services.tools.metric_view_utils.raw_fields import (
 from src.services.tools.metric_view_utils.reconciliation import (
     run_reconciliation_loop,
 )
-from src.services.tools.metric_view_utils.reconciliation.review_list import with_review
+from src.services.tools.metric_view_utils.reconciliation.review_list import (
+    review_bar,
+    with_review,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +128,7 @@ def run_iterative_ucmv_generation(
     max_cycles: int = 5,
     target_pct: float = 100.0,
     settings: Optional[Mapping[str, object]] = None,
+    refine_pct: Optional[float] = None,
 ) -> dict[str, object]:
     """Run the generate→deploy→reconcile→refine loop and return a JSON-able report.
 
@@ -261,6 +265,7 @@ def run_iterative_ucmv_generation(
         reconcile=reconcile,
         max_cycles=max_cycles,
         target_pct=target_pct,
+        refine_pct=refine_pct,
     )
     output = {
         # Everything the generator produced (untranslatable_items, source_layer_ddl,
@@ -577,6 +582,8 @@ def run_from_generator(
         },
         max_cycles=int(_positive_or(cfg("max_reconciliation_cycles"), 5)),
         target_pct=_positive_or(cfg("reconciliation_target_pct"), 100.0),
+        # What is retranslated is decided by the acceptance bar, not the stop target.
+        refine_pct=review_bar(_loads(cfg("config_json"))),
         settings={
             "config_json": cfg("config_json"),
             "dataset_id": cfg("dataset_id"),

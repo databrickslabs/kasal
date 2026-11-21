@@ -158,6 +158,7 @@ def run_reconciliation_loop(
     reconcile: ReconcileFn,
     max_cycles: int = 5,
     target_pct: float = 100.0,
+    refine_pct: float | None = None,
 ) -> LoopResult:
     """Run the iterative loop.
 
@@ -174,7 +175,14 @@ def run_reconciliation_loop(
 
     Returns the BEST cycle's YAML + reconciliation (highest overall %), the
     per-cycle history, and why it stopped.
+
+    Two numbers, two jobs. ``target_pct`` is the STOP criterion (the cycle that reaches it
+    ends the loop). ``refine_pct`` decides what is retranslated: only measures below it are
+    sent back to the LLM, the others are carried forward. It defaults to ``target_pct``; the
+    generator passes the acceptance bar (``review_bar_pct``, 90), so a measure reconciled at
+    90 to 99.9 % is no longer sent back to the model that already matched it.
     """
+    refine = target_pct if refine_pct is None else refine_pct
     max_cycles = max(1, int(max_cycles))
     result = LoopResult()
     best_views: dict[str, tuple[float, int, object, RawMap]] = {}
@@ -234,7 +242,7 @@ def run_reconciliation_loop(
             measures_at_100=as_int(overall.get("measures_at_100")),
             total_measures=as_int(overall.get("total_measures")),
             failing_measures=[
-                str(f["measure"]) for f in build_refinement_feedback(report, target_pct)
+                str(f["measure"]) for f in build_refinement_feedback(report, refine)
             ],
             note=str_or(deploy_out.get("note"), ""),
             deploy_failures=failures,
@@ -269,7 +277,7 @@ def run_reconciliation_loop(
             result.stop_reason = "converged"  # no improvement — stop burning cycles
             break
         prev_pct = pct
-        feedback = build_refinement_feedback(report, target_pct)
+        feedback = build_refinement_feedback(report, refine)
     else:
         result.stop_reason = "max_cycles"
 
