@@ -135,16 +135,32 @@ def guard_view(
         return ""
 
     kept_dims: list[dict] = []
+    # A name whose dimension was dropped stays taken: a later dimension of the same name (from
+    # another join, e.g. an alternative calendar) must not silently take over what the view
+    # read before. The writer already kept the first of such names; this keeps that.
+    taken_by_dropped: set[str] = set()
     for dim in dimensions:
+        name = str(dim.get("name") or "")
         own = _fact_column_of_dropped_join(
             str(dim.get("expr") or ""), dropped, fact_columns
         )
         if own:  # a column of a dropped join that the fact has itself (e.g. a period)
             kept_dims.append({**dim, "expr": own})
             continue
+        if name.lower() in taken_by_dropped:
+            gaps.append(
+                SourceGap(
+                    key,
+                    "dimension",
+                    name,
+                    "a dimension of the same name was dropped; this one would replace it",
+                )
+            )
+            continue
         reason = reason_for(str(dim.get("expr") or ""))
         if reason:
-            gaps.append(SourceGap(key, "dimension", str(dim.get("name") or ""), reason))
+            taken_by_dropped.add(name.lower())
+            gaps.append(SourceGap(key, "dimension", name, reason))
             continue
         kept_dims.append(dim)
 

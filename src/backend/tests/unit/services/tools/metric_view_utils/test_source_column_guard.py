@@ -133,6 +133,48 @@ def test_guard_bound_spec_does_not_mutate_its_input():
     assert len(result.gaps) == 1
 
 
+def test_a_dropped_dimension_name_is_not_taken_over_by_another_join():
+    # `period` reads dim_a, whose view lacks the key: dropped. A later `period` reads dim_b, a valid
+    # join. Before the guard the writer kept the first; the later one must not replace it.
+    result = _guard(
+        joins=[
+            dict(JOIN, name="dim_a", on="source.plant_code = dim_a.missing_key"),
+            dict(
+                JOIN,
+                name="dim_b",
+                source="tgt.ucmv.src_dim_b",
+                on="source.plant_code = dim_b.plant_code",
+            ),
+        ],
+        dimensions=[
+            {"name": "period", "expr": "dim_a.period"},
+            {"name": "period", "expr": "dim_b.period"},
+            {"name": "code", "expr": "source.plant_code"},
+        ],
+        columns_by_key={**COLUMNS, "Dim_B": frozenset({"plant_code", "period"})},
+        key_by_view={**KEY_BY_VIEW, "tgt.ucmv.src_dim_b": "Dim_B"},
+    )
+    assert [d["expr"] for d in result.dimensions] == ["source.plant_code"]
+    assert [(g.kind, g.name) for g in result.gaps if g.kind == "dimension"] == [
+        ("dimension", "period"),
+        ("dimension", "period"),
+    ]
+
+
+def test_a_later_dimension_of_a_kept_name_is_unaffected():
+    result = _guard(
+        dimensions=[
+            {"name": "plant_name", "expr": "dim_plant.plant_name"},
+            {"name": "plant_name", "expr": "source.plant_code"},
+        ],
+        columns_by_key=COLUMNS,
+    )
+    assert [d["expr"] for d in result.dimensions] == [
+        "dim_plant.plant_name",
+        "source.plant_code",
+    ]
+
+
 def test_view_key_by_name_matches_the_bound_view_names():
     assert view_key_by_name({"Dim_Plant": "`tgt`.`ucmv`.`src_dim_plant`"}) == {
         "tgt.ucmv.src_dim_plant": "Dim_Plant"
