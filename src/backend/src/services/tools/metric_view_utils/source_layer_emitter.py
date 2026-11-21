@@ -264,6 +264,9 @@ class ViewSpec:
     materialized: bool = False
     partition_by: Optional[List[str]] = None
     row_filter: Optional[RowFilter] = None
+    # Base columns exposed under another name ({column: new name}): a column named like the
+    # metric view's fact alias (see source_columns.py). Empty: the columns are as the source has them.
+    renamed_columns: Dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +470,7 @@ class _Builder:
             self.todo_steps.append(f"CalcColumn '{c.name}': {desc}")
 
         if not translated and not todo:
-            return f"SELECT *\nFROM {current}"
+            return f"SELECT {self._star()}\nFROM {current}"
 
         parts = [f"       {c.sql_expr} AS {c.name}" for c in translated]
         todo_parts = [
@@ -475,7 +478,16 @@ class _Builder:
             for c in todo
         ]
         calc_block = ",\n".join(parts + todo_parts)
-        return f"SELECT *,\n{calc_block}\nFROM {current}"
+        return f"SELECT {self._star()},\n{calc_block}\nFROM {current}"
+
+    def _star(self) -> str:
+        """``*``, or with renamed columns: each is excepted and re-added under its new name."""
+        renames = self._spec.renamed_columns
+        if not renames:
+            return "*"
+        old = ", ".join(renames)
+        new = ", ".join(f"{column} AS {name}" for column, name in renames.items())
+        return f"* EXCEPT ({old}), {new}"
 
     # ------------------------------------------------------------------
     # DDL assembly
@@ -487,7 +499,11 @@ class _Builder:
         # Wrap in WITH … only when there are actual CTEs
         if not self._ctes:
             body = final
-        elif len(self._ctes) == 1 and not self._spec.calc_columns:
+        elif (
+            len(self._ctes) == 1
+            and not self._spec.calc_columns
+            and not self._spec.renamed_columns
+        ):
             # Single base CTE, no calc columns → inline directly
             body = self._ctes[0][1]
         else:

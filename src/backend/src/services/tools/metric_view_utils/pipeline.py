@@ -38,11 +38,18 @@ from .pipeline_results import build_results
 from .scan_columns import extract_columns_from_scan, extract_source_table_from_scan
 from .source_artifacts import build_source_layer
 from .source_column_guard import guard_bound_spec, view_key_by_name
+from .source_columns import (
+    QUALIFIER,
+    column_renames,
+    rename_references,
+    renamed_columns,
+)
 from .source_layer_binding import (
     SourceLayerBinding,
     bind_metric_views,
     binding_report_lines,
     calc_columns_by_key,
+    normalized_name,
     raw_source_by_key,
     read_from_source_layer,
     source_layer_naming,
@@ -132,6 +139,10 @@ class MetricViewPipeline:
         # they are used only in read mode (see source_columns.py).
         self.source_columns: dict[str, list[str]] = (
             dict(source_columns or {}) if read_from_source_layer(self.config) else {}
+        )
+        # Columns named like the fact alias are exposed under another name (source_columns.py).
+        self.column_renames: dict[str, dict[str, str]] = column_renames(
+            self.source_columns
         )
         self.inner_dim_joins = inner_dim_joins
         self.scan_data = scan_data or {}
@@ -635,6 +646,7 @@ class MetricViewPipeline:
             validate_filter_consistency_fn=MetricViewPipeline._validate_filter_consistency,
         )
         self._sanitize_spec_measures(spec)
+        self._rename_fact_references(table_key, spec)
         from .join_columns import add_join_key_dimensions
 
         spec.fact_columns = self._fact_columns(table_key, table_info)
@@ -648,8 +660,30 @@ class MetricViewPipeline:
 
         known = self.source_columns.get(table_key)
         if known:
-            return sorted({c.lower() for c in known})
+            names = renamed_columns({table_key: known}, self.column_renames)[table_key]
+            return sorted({c.lower() for c in names})
         return known_fact_columns(table_info)
+
+    def _rename_fact_references(self, table_key: str, spec: MetricViewSpec) -> None:
+        """The fact's references to a renamed column (``source.<col>``) use the new name."""
+        renames = self.column_renames.get(table_key)
+        if not renames:
+            return
+        for dim in spec.dimensions:
+            dim["expr"] = rename_references(
+                str(dim.get("expr") or ""), QUALIFIER, renames
+            )
+        for measure in spec.measures:
+            if measure.sql_expr:
+                measure.sql_expr = rename_references(
+                    measure.sql_expr, QUALIFIER, renames
+                )
+        for join in spec.joins:
+            for field_name in ("join_on", "on"):
+                if join.get(field_name):
+                    join[field_name] = rename_references(
+                        str(join[field_name]), QUALIFIER, renames
+                    )
 
     def _sanitize_spec_measures(self, spec: MetricViewSpec) -> None:
         """P5 correctness batch + PROP-3a/4a silent-wrong guard.
@@ -976,6 +1010,7 @@ class MetricViewPipeline:
             schema,
             mquery_expressions=self._mquery_expressions,
             combined_sources=self.combined_sources,
+            column_renames=self.column_renames,
         )
         if not read_from_source_layer(self.config):
             return {}
@@ -1008,15 +1043,17 @@ class MetricViewPipeline:
         """Drop what reads a column a bound view does not have, where the views' columns are
         known (``source_column_guard``). Removed measures are also moved to the table's
         untranslated list, so the results report them."""
+        exposed = renamed_columns(self.source_columns, self.column_renames)
         columns = {
             key: frozenset(c.lower() for c in cols)
-            for key, cols in self.source_columns.items()
+            for key, cols in exposed.items()
             if key in views and cols  # an empty list: the view's columns are unknown
         }
         key_by_view = view_key_by_name(views)
         guarded: dict[str, MetricViewSpec] = {}
         gaps: list[dict[str, str]] = []
         for key, spec in bound.items():
+            self._rename_join_references(spec, key_by_view)
             guarded[key], result = guard_bound_spec(
                 key, spec, columns_by_key=columns, key_by_view=key_by_view
             )
@@ -1025,6 +1062,32 @@ class MetricViewPipeline:
         if gaps:
             self._limitations["source_column_gaps"] = gaps
         return guarded
+
+    def _rename_join_references(
+        self, spec: MetricViewSpec, key_by_view: dict[str, str]
+    ) -> None:
+        """A joined view's renamed column is referenced under the new name (``<join>.<col>``)."""
+        for join in spec.joins:
+            target = key_by_view.get(normalized_name(str(join.get("source") or "")))
+            renames = self.column_renames.get(target) if target else None
+            alias = str(join.get("name") or "")
+            if not renames or not alias:
+                continue
+            for dim in spec.dimensions:
+                dim["expr"] = rename_references(
+                    str(dim.get("expr") or ""), alias, renames
+                )
+            for measure in spec.measures:
+                if measure.sql_expr:
+                    measure.sql_expr = rename_references(
+                        measure.sql_expr, alias, renames
+                    )
+            for other in spec.joins:
+                for field_name in ("join_on", "on"):
+                    if other.get(field_name):
+                        other[field_name] = rename_references(
+                            str(other[field_name]), alias, renames
+                        )
 
     def _record_removed_measures(self, key: str, removed: list) -> None:
         """Take measures the guard removed out of the table's measures, into its untranslated list."""

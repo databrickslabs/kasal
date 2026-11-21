@@ -261,6 +261,7 @@ def build_source_layer(
     schema: str,
     mquery_expressions: dict | None = None,
     combined_sources: Mapping[str, "CombinedSource"] | None = None,
+    column_renames: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict:
     """One source-layer UC view per PBI table (rec #3).
 
@@ -382,6 +383,7 @@ def build_source_layer(
                 comment=f"Source layer for PBI table {key} — read the metric view off this.",
                 materialized=(read_mode and materialize) or row_filter is not None,
                 row_filter=row_filter,
+                renamed_columns=dict((column_renames or {}).get(key, {})),
             )
         )
     out: dict = {
