@@ -8,6 +8,7 @@ rejected by it (measured offline, see the commit message).
 from src.services.tools.metric_view_utils.data_classes import TranslationResult
 from src.services.tools.metric_view_utils.dax_llm_fallback import _apply_parsed
 from src.services.tools.metric_view_utils.llm_reference_check import (
+    column_violation,
     missing_references,
     reference_violation,
 )
@@ -81,3 +82,51 @@ class TestAcceptance:
         )
         assert m.is_translatable
         assert m.sql_expr == "MEASURE(sales) * 2"
+
+
+COLUMNS = frozenset(
+    {"number_of_deliveries_final", "number_of_deliveries", "bic_chversion"}
+)
+
+
+class TestColumnSubstitution:
+    def test_the_exact_column_of_the_view_is_read(self):
+        dax = "CALCULATE(DISTINCTCOUNT(Fact[number_of_deliveries_final]))"
+        sql = "COUNT(DISTINCT source.number_of_deliveries_final)"
+        assert column_violation(dax, sql, COLUMNS) is None
+
+    def test_a_sibling_column_read_instead_is_a_violation(self):
+        dax = "CALCULATE(DISTINCTCOUNT(Fact[number_of_deliveries_final]))"
+        sql = "COUNT(DISTINCT source.number_of_deliveries)"
+        reason = column_violation(dax, sql, COLUMNS)
+        assert reason and "number_of_deliveries_final" in reason
+
+    def test_a_filter_reads_its_column_bare(self):
+        dax = 'CALCULATE(SUM(Fact[number_of_deliveries]), Fact[bic_chversion] = "0000")'
+        sql = "SUM(source.number_of_deliveries) FILTER (WHERE bic_chversion = '0000')"
+        assert column_violation(dax, sql, COLUMNS) is None
+
+    def test_a_column_the_view_does_not_have_is_not_checked(self):
+        dax = "SUM(Fact[not_in_view])"
+        assert (
+            column_violation(dax, "SUM(source.number_of_deliveries)", COLUMNS) is None
+        )
+
+    def test_a_sibling_column_translation_is_not_accepted(self):
+        m = TranslationResult(
+            measure_name="m",
+            original_name="M",
+            sql_expr=None,
+            is_translatable=False,
+            skip_reason="No matching pattern",
+            dax_expression="SUM(Fact[number_of_deliveries_final])",
+            confidence="none",
+            category="unassigned",
+        )
+        _apply_parsed(
+            m,
+            {"success": True, "sql_expr": "SUM(source.number_of_deliveries)"},
+            view_columns=COLUMNS,
+        )
+        assert not m.is_translatable
+        assert m.skip_reason.startswith("LLM translation rejected:")

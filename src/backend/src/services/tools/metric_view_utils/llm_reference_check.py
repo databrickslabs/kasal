@@ -69,6 +69,29 @@ def reference_violation(
     return None
 
 
+_IDENTIFIER = re.compile(r"\b[A-Za-z_]\w*\b")
+
+
+def column_violation(dax: str, sql: str, view_columns: frozenset[str]) -> str | None:
+    """A ``Table[col]`` of the DAX whose exact name is a column of the view must be read in the
+    SQL as ``source.<col>``. The LLM sometimes reads a similar column instead (the ``_final``
+    column for its prefix). ``view_columns``: the view's source column names, lower case.
+    """
+    # Any identifier, with or without the ``source.`` prefix: a filter reads its column bare.
+    read = {c.lower() for c in _IDENTIFIER.findall(sql or "")}
+    wanted = set()
+    for col in _TABLE_COLUMN.findall(dax or ""):
+        exact, snake = col.lower(), to_snake_case(col).lower()
+        if exact in view_columns:
+            wanted.add(exact)
+        elif snake in view_columns:
+            wanted.add(snake)
+    missing = sorted(c for c in wanted if c not in read)
+    if missing:
+        return "DAX column(s) of the view not read in the SQL: " + ", ".join(missing)
+    return None
+
+
 def missing_references(
     dax: str, sql: str, original_to_snake: Mapping[str, str]
 ) -> list[str]:

@@ -236,6 +236,15 @@ def _route_dax_measures(
     return cross_table_translated
 
 
+def _source_column_names(table_info: TableInfo) -> list[str]:
+    """The fact's source column names (its aggregate columns), empty names dropped."""
+    names = (
+        c.get("source_col") or c.get("name")
+        for c in (table_info.aggregate_columns or [])
+    )
+    return [n for n in names if n]
+
+
 def process_table(
     table_key: str,
     table_info: TableInfo,
@@ -420,7 +429,8 @@ def process_table(
         _llm_batch = [
             m
             for m in untranslatable
-            if m.category != "external_measure"  # EXTERNALMEASURE: never translated in part
+            if m.category
+            != "external_measure"  # EXTERNALMEASURE: never translated in part
             and m.original_name not in _authoritative_names
             and to_snake_case(m.original_name) not in _authoritative_names
         ]
@@ -429,11 +439,7 @@ def process_table(
         # measures) so the LLM emits real source columns / join aliases instead
         # of guessing. Goes in the per-measure user prompt (not the cached prefix).
         _ctx_lines = [f"- source table: {source_table or '(unknown)'}"]
-        _agg_cols_raw = [
-            c.get("source_col") or c.get("name")
-            for c in (table_info.aggregate_columns or [])
-        ]
-        _agg_cols: list[str] = [c for c in _agg_cols_raw if c]
+        _agg_cols: list[str] = _source_column_names(table_info)
         if _agg_cols:
             _ctx_lines.append(
                 f"- fact source columns (use as source.<col>): {', '.join(sorted(set(_agg_cols))[:60])}"
@@ -483,6 +489,7 @@ def process_table(
                     table_key=table_key,
                     base_names=base_names,
                     original_to_snake=original_to_snake,
+                    view_columns=frozenset(c.lower() for c in _agg_cols),
                     model=ctx.llm_config.get(
                         "llm_model", "databricks-claude-sonnet-4-5"
                     ),
