@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from .definition import item_names
-from .measure_check import check_view_measures
+from .measure_check import check_view_measures, window_orders
 from .sql_helpers import SqlRunner
 
 
@@ -34,6 +34,7 @@ def check_one(
         group_by=group_by,
         timing=timing,
         slow_s=slow_s,
+        orders=window_orders(spec),
     )
     status = "failing" if report["failing"] else "ok"
     return {"status": status, "view_name": view_name, **report}
