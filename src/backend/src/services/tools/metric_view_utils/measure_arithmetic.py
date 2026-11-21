@@ -94,10 +94,32 @@ def _expression_body(dax_expr: str) -> str:
         if _VAR_LINE.match(s):
             expr_lines.append(s)
             continue
-        if s.lower().startswith("return "):
-            s = s[7:]
-        expr_lines.append(s)
+        expr_lines.append(s)  # RETURN stays: the chain resolver substitutes into it
     return " ".join(item.strip() for item in expr_lines if item.strip())
+
+
+_RETURN_LINE = re.compile(r"^\s*return\s+(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _result_only(resolved: str) -> str | None:
+    """The RETURN expression of a resolved ``VAR ... RETURN`` block, None when it still
+    reads a variable (one the resolver does not inline: a CALCULATE or an iterator).
+
+    Without this the variable lines were emitted as they stood
+    (``var ret = MEASURE(x) ret``), which is not SQL."""
+    lines = [line.strip() for line in resolved.split("\n") if line.strip()]
+    names = [m.group(1) for line in lines if (m := _VAR_LINE.match(line))]
+    if not names:
+        only = _RETURN_LINE.match(resolved.strip())
+        return only.group(1).strip() if only else resolved
+    for line in lines:
+        result = _RETURN_LINE.match(line)
+        if result:
+            text = result.group(1).strip()
+            if any(re.search(rf"\b{re.escape(n)}\b", text) for n in names):
+                return None
+            return text
+    return None
 
 
 def _if_blank_to_case(expr: str) -> str:
@@ -135,7 +157,10 @@ def _to_sql(
 ) -> str | None:
     """``expr`` (DAX over measures of this view) as SQL over ``MEASURE()``; None when a
     DAX-only construct remains."""
-    expr = resolve_var_chain_fn(expr)
+    result = _result_only(resolve_var_chain_fn(expr))
+    if result is None:
+        return None
+    expr = result
     for ref_name in sorted(measure_refs, key=len, reverse=True):
         snake = original_to_snake.get(ref_name, to_snake_case(ref_name))
         expr = expr.replace(f"[{ref_name}]", f"MEASURE({snake})")

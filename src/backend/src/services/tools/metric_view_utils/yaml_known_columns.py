@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from .data_classes import MetricViewSpec
+from .measure_order import order_by_dependencies
 
 
 def known_source_columns(
@@ -120,6 +121,9 @@ def drop_phantom_dimensions(
     _drop_orphan_windows(
         spec, [base_measures, implicit_measures, dax_measures, switch_measures]
     )
+    # Each list is emitted in its order: a measure must come after the ones it reads.
+    order_by_dependencies(dax_measures)
+    order_by_dependencies(switch_measures)
 
 
 _MEASURE_REF = re.compile(r"\bMEASURE\(\s*`?(\w+)`?\s*\)", re.IGNORECASE)

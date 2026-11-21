@@ -140,6 +140,11 @@ _SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
             r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|SAMEPERIOD", re.IGNORECASE
         ),
     ),
+    # a DAX VAR block emitted as it stood ("var ret = MEASURE(x) ret")
+    (
+        "untranslated DAX variable",
+        re.compile(r"^\s*var\s+\w+\s*=", re.IGNORECASE),
+    ),
     # raw DAX constructs that never got translated
     (
         "untranslated DAX (SUMX/FILTER/CALCULATE)",
