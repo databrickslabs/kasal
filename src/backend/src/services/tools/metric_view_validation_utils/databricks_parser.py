@@ -92,6 +92,9 @@ class UCMetricsViewParser:
                 "comment": measure.get("comment", ""),
                 "display_name": measure.get("display_name"),
                 "synonyms": measure.get("synonyms", []),
+                # A prior-year measure carries its window (offset back one year);
+                # the validator judges it against the DAX shift.
+                "window": measure.get("window"),
             }
             self.measures.append(entry)
             if entry["name"]:

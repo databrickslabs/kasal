@@ -8,6 +8,7 @@ from .constants import PBI_COMMENT_MARKER
 from .databricks_parser import UCMetricsViewParser
 from .dax_expression_parser import DAXExpressionParser
 from .measure_table_mapping_parser import MeasureTableMappingParser
+from .prior_year_check import loose_name
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,23 @@ class DataInputHandler:
                     "Found case-insensitive match for measure '%s'", measure_name
                 )
                 return dax
+
+        # Strategy 2b: the same name with case, spaces and underscores removed. The
+        # generator names a measure in snake_case (``sales_py``) while the DAX source
+        # keeps the Power BI name (``Sales PY``). Only a single DAX measure may match.
+        loose = loose_name(measure_name)
+        loose_hits = {
+            dax.get("measure_name", "")
+            for dax in all_dax
+            if loose and loose_name(dax.get("measure_name")) == loose
+        }
+        if len(loose_hits) == 1:
+            for dax in all_dax:
+                if dax.get("measure_name", "") in loose_hits:
+                    logger.debug(
+                        "Found loose-name match for measure '%s'", measure_name
+                    )
+                    return dax
 
         # Strategy 3: Extract from PBI comment using regex
         comment = yaml_measure.get("comment", "")

@@ -19,6 +19,7 @@ from .measure_fingerprint import (
     sql_fingerprint,
     var_used_inside_calculate,
 )
+from .prior_year_check import PriorYearJudgement, is_prior_year_dax, judge_prior_year
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,28 @@ _BASE_MEASURE_RE = re.compile(
 def _is_base_measure_expr(expr: Optional[str]) -> bool:
     """True when the emitted SQL is a plain single-column aggregate (base measure)."""
     return bool(expr and _BASE_MEASURE_RE.match(expr.strip()))
+
+
+def _judged_result(
+    measure_name: str,
+    judgement: PriorYearJudgement,
+    databricks_expr: Optional[str],
+    dax_expr: str,
+) -> dict:
+    """The result for a prior-year measure the window settles on its own."""
+    is_valid = judgement.status == STATUS_VALID
+    return {
+        "measure_name": measure_name,
+        "status": judgement.status,
+        "is_valid": is_valid,
+        "confidence": "high" if is_valid else "medium",
+        "reason": judgement.reason,
+        "databricks_expr": databricks_expr,
+        "dax_expr": dax_expr,
+        "differences": [] if is_valid else [judgement.reason],
+        "similarities": [judgement.reason] if is_valid else [],
+        "recommendations": [],
+    }
 
 
 class ExpressionValidator:
@@ -98,6 +121,28 @@ class ExpressionValidator:
                     }
                 )
                 continue
+            # A prior-year measure (it has a window, or its DAX shifts a year back) is
+            # judged against its DAX whatever its SQL looks like: a plain aggregate
+            # must not pass as correct by construction when the shift is not carried.
+            dax_match = self.data_handler.find_matching_dax_for_yaml_measure(measure)
+            if measure.get("window") or is_prior_year_dax(
+                (dax_match or {}).get("dax_expression")
+            ):
+                if dax_match:
+                    matched_measures.append(
+                        {
+                            "measure_eval": "matched",
+                            "measure_name": measure["name"],
+                            "measure_eval_result": self.validate_measure_by_name(
+                                measure["name"]
+                            ),
+                        }
+                    )
+                else:
+                    unmatched_measures.append(
+                        {"measure_eval": "unmatched", "measure_name": measure["name"]}
+                    )
+                continue
             # Base measures — plain single-column aggregates like
             # SUM(source.col) or SUM(COALESCE(source.col, 0)) — are correct BY
             # CONSTRUCTION (they come straight from the MQuery SUM columns, not a
@@ -133,7 +178,7 @@ class ExpressionValidator:
                         "measure_expression": measure["expr"],
                     }
                 )
-            elif self.data_handler.get_dax_measure(measure.get("name", "")):
+            elif dax_match:
                 matched_measures.append(
                     {
                         "measure_eval": "matched",
@@ -243,11 +288,22 @@ class ExpressionValidator:
                 "recommendations": [],
             }
 
-        # Validate using the existing validate method
+        # A prior-year measure: the window must carry the DAX's one-year shift. The
+        # window can settle the measure, or leave its un-shifted base to compare.
         databricks_expr = yaml_measure.get("expr")
+        judgement = judge_prior_year(yaml_measure, dax_expr)
+        if judgement is not None and judgement.status:
+            return _judged_result(measure_name, judgement, databricks_expr, dax_expr)
+        compare_dax = (
+            judgement.base_dax
+            if judgement is not None and judgement.base_dax
+            else dax_expr
+        )
         try:
-            result = self.validate(databricks_expr or "", dax_expr, strict=False)
+            result = self.validate(databricks_expr or "", compare_dax, strict=False)
             result["measure_name"] = measure_name
+            if judgement is not None:
+                result["similarities"].append(judgement.reason)
             if result["is_valid"]:
                 self._demote_if_fingerprints_differ(result)
             if result["is_valid"]:
