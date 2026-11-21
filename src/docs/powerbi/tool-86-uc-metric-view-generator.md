@@ -118,7 +118,7 @@ Not accepted (the reason is in the review list): row counts (`COUNTROWS`, `COUNT
 
 The shared grain becomes the view's dimensions. Each fact's source view already carries its Power Query filters and transformations, so the other fact's filters apply to its arm.
 
-Requires `read_from_source_layer`. Pipeline config: `cross_table_union_sources: false` turns it off (default on). Only the reconciliation loop runs it, so it has no effect offline.
+Requires `read_from_source_layer`. Pipeline config: `cross_table_union_sources: true` turns it on (default off: the combined source has not been deployed and compared on a real model yet). Only the reconciliation loop runs it, so it has no effect offline.
 
 Limits:
 
@@ -257,6 +257,8 @@ Some tables have no warehouse source: an Excel, SharePoint or Web import, or a
 lists them as `pbi_only_ingestion_tasks`. The snapshot step (package
 `services/tools/pbi_snapshot_utils/`) can copy their rows out of Power BI into the
 workspace.
+
+**Status: the package is built and tested, but the generator does not call it yet.** Setting the keys below has no effect until it is connected (it needs a step before the pipeline with the Power BI login, the warehouse and the column types, and the source layer has to read the snapshot table).
 
 **It copies data out of Power BI.** It is OFF by default.
 

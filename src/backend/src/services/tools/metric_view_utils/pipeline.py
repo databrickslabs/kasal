@@ -548,7 +548,7 @@ class MetricViewPipeline:
         # reconciliation is active to validate the numbers (see
         # cross_table_source_planner). Off → leave them collected, as before.
         if self.config.get("reconciliation_active") and self.config.get(
-            "cross_table_union_sources", True
+            "cross_table_union_sources", False
         ):
             try:
                 from .cross_table_source_planner import plan_cross_table_sources

@@ -53,6 +53,7 @@ def _pipeline(mapping, mquery, **config):
     cfg = {
         "read_from_source_layer": True,
         "reconciliation_active": True,
+        "cross_table_union_sources": True,  # opt-in (default off)
         "source_layer_materialized": False,
         **config,
     }
