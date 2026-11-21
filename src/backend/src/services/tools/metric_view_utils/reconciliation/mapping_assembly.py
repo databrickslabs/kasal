@@ -158,6 +158,9 @@ def _measures(spec: RawMap, resolved: object) -> list[RawMap]:
         name, original = str(m.get("measure_name") or ""), str(
             m.get("original_name") or ""
         )
+        # A prior-year helper has no Power BI measure of its own (prior_year_mixed.py).
+        if m.get("helper_of"):
+            continue
         if m.get("dax_expression") and name in in_view and original:
             out.append(
                 {

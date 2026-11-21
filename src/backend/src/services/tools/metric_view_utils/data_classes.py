@@ -77,6 +77,10 @@ class TranslationResult:
     # a mix within one list.
     pbi_sources: list = field(default_factory=list)
     pbi_operator: str | None = None  # "passthrough" | "add" | "subtract" | "divide"
+    # Set on a prior-year helper measure (prior_year_mixed.py): the name of the Power BI
+    # measure whose shifted call it holds. A helper has no Power BI measure of its own, so
+    # reconciliation does not compare it.
+    helper_of: str | None = None
 
 
 @dataclass

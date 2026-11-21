@@ -19,7 +19,7 @@ import re
 from dataclasses import replace
 from typing import Any
 
-from . import prior_year
+from . import prior_year, prior_year_mixed
 from .artifact_cascade import (
     collect_unassigned,
     count_artifacts,
@@ -244,6 +244,7 @@ class MetricViewPipeline:
         """
         # Prior-year measures are translated without their year shift and get it back
         # as a window at the end (prior_year.py).
+        prior_year_mixed.split_mixed_shifts(self.mapping, self.config)
         prior_year.take_out_shifts(self.mapping, self.config)
         self._allocate_by_columns()
         prior_year.follow_base_measures(self.mapping)
@@ -259,6 +260,7 @@ class MetricViewPipeline:
         self._cross_table_artifact_cascade(self.all_specs)
         self._reclassify_secondary_allocations()
         self._resolve_generated_table_names()
+        prior_year_mixed.drop_unused_helpers(self.all_specs, self.mapping)
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
         for spec in self.all_specs.values():

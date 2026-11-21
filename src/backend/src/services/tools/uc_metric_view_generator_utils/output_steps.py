@@ -214,6 +214,7 @@ def build_resolved_measures_by_table(
                     "original_name": m.get("original_name", ""),
                     "sql_expr": m.get("sql_expr", ""),
                     "window": m.get("window"),
+                    "helper_of": m.get("helper_of"),
                     "dax_expression": m.get("dax_expression", ""),
                     "proposed_allocation": table_key,  # fact-table key, matches YAML
                     "table_name": table_key,

@@ -67,6 +67,8 @@ def build_results(pipeline: MetricViewPipeline) -> dict:
                     "category": m.category,
                     # A prior-year measure is its expression plus this window.
                     "window": m.window_spec,
+                    # The Power BI measure a prior-year helper shifts (no PBI measure of its own).
+                    "helper_of": m.helper_of,
                     # Business-usage signal (PROP-8): which report page(s)/
                     # visual(s) draw or filter on this measure — see
                     # `visual_usage_annotator.annotate_visual_usage`.

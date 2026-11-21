@@ -276,6 +276,32 @@ def _variables_in(expr: str, names: list[str]) -> list[str]:
     return [n for n in names if n.lower() in words]
 
 
+def may_shift(dax: object) -> bool:
+    """Whether the DAX text has a time-shift function at all (a cheap pre-check)."""
+    return bool(_MAY_SHIFT.search(str(dax or "")))
+
+
+def shifted_calls(dax: object) -> tuple[str, list[tuple[int, int]]]:
+    """The DAX without comments, and the ``(start, end)`` span (``end`` exclusive) of each
+    CALCULATE call in it that shifts one year. A call inside a listed call is not listed.
+    """
+    text = _without_comments(str(dax or ""))
+    spans: list[tuple[int, int]] = []
+    position = 0
+    for call in _CALCULATE.finditer(text):
+        if call.start() < position:
+            continue
+        opening = call.end() - 1
+        closing = _closing(text, opening)
+        if closing < 0:
+            continue
+        if _year_shift(_arguments(text[opening + 1 : closing])[1:]) is None:
+            continue
+        spans.append((call.start(), closing + 1))
+        position = closing + 1
+    return text, spans
+
+
 def unshifted(dax: object) -> PriorYear | None:
     """The measure without its one-year shift, None when it is not a prior-year measure as
     a whole (see the module text)."""

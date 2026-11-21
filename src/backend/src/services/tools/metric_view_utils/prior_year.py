@@ -51,6 +51,8 @@ from .measure_allocator import (
 from .prior_year_dax import unshifted
 
 MARK = "_prior_year"
+# Mapping key on a helper measure (prior_year_mixed.py): the Power BI measure it shifts.
+HELPER_OF = "_prior_year_helper_of"
 # Year-first period keys, and how many keys one year is.
 PERIOD_STEPS: dict[str, int] = {
     "fiscper": 1000,
@@ -76,7 +78,12 @@ def take_out_shifts(mapping: list[dict], config: Mapping[str, object]) -> int:
         found = unshifted(dax)
         if found is None:
             continue
-        entry[MARK] = {"dax": dax, "calendar": found.calendar, "column": found.column}
+        entry[MARK] = {
+            "dax": dax,
+            "calendar": found.calendar,
+            "column": found.column,
+            "helper_of": entry.get(HELPER_OF),
+        }
         entry["dax_expression"] = found.dax
         changed += 1
     return changed
@@ -280,6 +287,8 @@ def _window_one_view(
             "offset": offset,
             "semiadditive": "last",
         }
+        helper_of = info.get("helper_of")
+        measure.helper_of = str(helper_of) if helper_of else None
         windowed.append(measure.measure_name)
     _demote_dependents(spec, gone)
     for measure in spec.untranslatable:
