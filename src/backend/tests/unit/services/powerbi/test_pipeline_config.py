@@ -252,7 +252,7 @@ class TestMeasureRefResolution:
     def test_constant(self):
         assert self._R("1") == {"base_expr": "1", "base_filters": []}
 
-    def test_switch_picks_first_calculate_branch_no_leak(self):
+    def test_switch_resolves_to_branch_b_no_leak(self):
         plant = (
             "Switch(TRUE(),\n"
             "  Or(ISFILTERED(C_Dim_Plant[plant_desc]),HASONEVALUE(C_Dim_Plant[plant])),\n"
@@ -261,10 +261,11 @@ class TestMeasureRefResolution:
         )
         r = self._R(plant)
         assert r["base_expr"] == "SUM(source.kbi_value)"
-        # only the FIRST (plant) branch filters — Company Code must NOT leak in
+        # A dimension-conditional SWITCH resolves to branch B only (see geo_selector_split);
+        # the Plant branch must NOT leak in
         assert r["base_filters"] == [
             "bic_chversion = '0000'",
-            "bic_creg_type = 'Plant'",
+            "bic_creg_type = 'Company Code'",
         ]
 
     def test_untranslatable_returns_none(self):
@@ -292,7 +293,7 @@ class TestMeasureRefResolution:
         assert r["base_expr"] == "SUM(source.kbi_value)"
         assert r["base_filters"] == [
             "bic_chversion = 'B000'",
-            "bic_creg_type = 'Plant'",
+            "bic_creg_type = 'Company Code'",
         ]
 
     def test_var_scaffolding_plain_sumx_filter(self):

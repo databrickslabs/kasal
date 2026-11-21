@@ -233,6 +233,11 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     """
     if not dax:
         return None
+    if is_presence_switch(dax):
+        # A dimension-conditional SWITCH: branch B, the unfiltered branch (see
+        # geo_selector_split). A presence SWITCH that does not split resolves to nothing.
+        split = geo_selector_split(dax)
+        return split["absent"] if split else None
     d = dax.strip()
 
     # Strip leading slicer-scalar scaffolding vars before locating the aggregate.
@@ -620,3 +625,84 @@ def derive_switch_decompositions(
             decompositions[resolved["table"] or selector_table].append(entry)
 
     return dict(decompositions)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dimension-conditional SWITCH measures (ISFILTERED / HASONEVALUE)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# ``SWITCH(TRUE(), Or(ISFILTERED(T[a]), HASONEVALUE(T[b])), <branch A>, <branch B>)``
+# returns branch A only when the query filters or groups by table T. A metric view has
+# no query context to test, so a measure that REFERENCES such a measure cannot choose a
+# branch from the DAX; see ``geo_selector_split`` for the choice made.
+
+_SWITCH_TRUE_HEAD = re.compile(r"\s*switch\s*\(\s*true\s*\(\s*\)\s*,", re.IGNORECASE)
+_PRESENCE_CALL = re.compile(
+    r"\b(?:ISFILTERED|HASONEVALUE)\s*\(\s*'?([A-Za-z_]\w*)'?\[\w+\]\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _return_expression(dax: str) -> str:
+    """The RETURN expression of a ``VAR ... RETURN`` block, else the DAX itself."""
+    ret = re.search(r"\breturn\b\s*(.+)$", dax, re.IGNORECASE | re.DOTALL)
+    if ret and re.match(r"(?is)^\s*var\s+", dax):
+        return ret.group(1).strip()
+    return dax.strip()
+
+
+def _switch_true_args(text: str) -> list[str] | None:
+    """The arguments of ``text`` when it is exactly one ``SWITCH(TRUE(), ...)`` call."""
+    head = _SWITCH_TRUE_HEAD.match(text)
+    if not head:
+        return None
+    depth, pos = 1, head.end()
+    while pos < len(text) and depth:
+        if text[pos] in "([{":
+            depth += 1
+        elif text[pos] in ")]}":
+            depth -= 1
+        pos += 1
+    if depth or text[pos:].strip():
+        return None
+    return _split_balanced_args(text[head.end() : pos - 1])
+
+
+def _presence_table(condition: str) -> str | None:
+    """The one table a condition tests with ISFILTERED/HASONEVALUE, when nothing else is
+    tested (no slicer, no measure, no comparison of another column); else None."""
+    tables = {m.group(1) for m in _PRESENCE_CALL.finditer(condition)}
+    if len(tables) != 1:
+        return None
+    rest = _PRESENCE_CALL.sub("", condition)
+    rest = re.sub(r"\bOR\s*\(", "(", rest, flags=re.IGNORECASE)
+    rest = re.sub(r"\bTRUE\s*\(\s*\)", "", rest, flags=re.IGNORECASE)
+    if not re.fullmatch(r"[\s,()=|&]*", rest):
+        return None
+    return tables.pop()
+
+
+def is_presence_switch(dax: str) -> bool:
+    """A SWITCH(TRUE(), ...) that branches on ISFILTERED/HASONEVALUE."""
+    return bool(
+        re.search(r"SWITCH\s*\(\s*TRUE\s*\(\s*\)", dax, re.IGNORECASE)
+        and re.search(r"\b(ISFILTERED|HASONEVALUE)\s*\(", dax, re.IGNORECASE)
+    )
+
+
+def geo_selector_split(dax: str) -> dict | None:
+    """``{"dimension", "present", "absent"}`` for a two-branch presence SWITCH, where
+    ``present`` is branch A (the dimension is filtered or grouped) and ``absent`` branch B.
+    Each branch is a ``_resolve_referenced_measure_dax`` resolution. None when the DAX is
+    not exactly this shape or a branch does not resolve to SQL."""
+    args = _switch_true_args(_return_expression(dax))
+    if not args or len(args) != 3:
+        return None
+    dimension = _presence_table(args[0])
+    if dimension is None:
+        return None
+    present = _resolve_referenced_measure_dax(args[1])
+    absent = _resolve_referenced_measure_dax(args[2])
+    if not present or not absent:
+        return None
+    return {"dimension": dimension, "present": present, "absent": absent}
