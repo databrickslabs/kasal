@@ -14,6 +14,7 @@ from .constants import (
     RE_SUMX_FILTER,
 )
 from .data_classes import TranslateFn, TranslationResult
+from .measure_arithmetic import _operand
 from .dax_condition_sql import (
     DaxConditionMixin,
     _sql_in_list,
@@ -956,7 +957,8 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
         num_result = self.translate_expression(num_dax.strip(), table_key)
         den_result = self.translate_expression(den_dax.strip(), table_key)
         if num_result and den_result:
-            return f"{num_result} / NULLIF({den_result}, 0)", ""
+            # A numerator that is a sum must stay together: a + b / d divides only b.
+            return f"{_operand(num_result)} / NULLIF({den_result}, 0)", ""
         return None, "DIVIDE sub-expression not translatable"
 
     # ── Helpers ──────────────────────────────────────────────────────────

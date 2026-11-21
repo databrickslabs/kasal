@@ -134,3 +134,17 @@ def test_float_noise_on_a_large_value_is_not_a_mismatch_but_a_real_difference_is
         False,
         True,
     ]
+
+
+def test_the_rule_based_division_keeps_a_summed_numerator_together():
+    from src.services.tools.metric_view_utils.measure_arithmetic import _operand
+
+    assert (
+        _operand("SUM(source.a) + SUM(source.b)") == "(SUM(source.a) + SUM(source.b))"
+    )
+    assert _operand("SUM(source.a) FILTER (WHERE source.k = 'x-y')") == (
+        "SUM(source.a) FILTER (WHERE source.k = 'x-y')"
+    )
+    assert _operand("ABS(SUM(source.a) - SUM(source.b))") == (
+        "ABS(SUM(source.a) - SUM(source.b))"
+    )
