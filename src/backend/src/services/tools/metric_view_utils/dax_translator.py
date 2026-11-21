@@ -22,6 +22,7 @@ from .dax_condition_sql import (
     split_top_level_args,
 )
 from .dax_preclean import preclean_dax
+from .dax_sumx_terms import match_sumx_terms, translate_sumx_terms
 from .dax_scalar_converters import DaxScalarConvertersMixin
 from .filter_reach import drop_non_filtering_filters, filter_reach, model_mentions
 from .join_detector import _sanitize_alias
@@ -99,6 +100,7 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
                 self._translate_calculate_equality_filter,
             ),
             ("simple_sumx", self._match_simple_sumx, self._translate_simple_sumx),
+            ("sumx_terms", self._match_sumx_terms, self._translate_sumx_terms),
             (
                 "calculate_sumx_vars_divide",
                 self._match_calc_sumx_vars_divide,
@@ -184,6 +186,7 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
             "simple_agg",
             "calculate_equality_filter",
             "simple_sumx",
+            "sumx_terms",
             "distinctcountnoblank",
             # Deterministic scalar/date converters — cheap, reproducible, no LLM.
             "date_part",
@@ -729,6 +732,14 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
     ) -> tuple[str | None, str]:
         col = match["column"]
         return f"SUM(source.{col})", ""
+
+    def _match_sumx_terms(self, dax: str, name: str) -> dict | None:
+        return match_sumx_terms(self._strip_return(self._strip_var_block(dax)))
+
+    def _translate_sumx_terms(
+        self, match: dict, dax: str, table_key: str
+    ) -> tuple[str | None, str]:
+        return translate_sumx_terms(match["terms"])
 
     def _translate_simple_sumx(
         self, match: dict, dax: str, table_key: str
