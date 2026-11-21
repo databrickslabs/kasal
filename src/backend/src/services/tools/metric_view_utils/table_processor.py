@@ -17,6 +17,7 @@ from .dependency_graph import build_dependency_graph
 from .implicit_column_builder import build_implicit_measures
 from .join_detector import _sanitize_alias
 from .m_transform_folder import MTransformFolder
+from .measure_arithmetic import resolve_measure_arithmetic
 from .pbi_parameter_resolver import PbiParameterResolver
 from .sql_post_processor import SqlPostProcessor
 from .table_structure import build_table_structure
@@ -380,160 +381,15 @@ def process_table(
     # Build topo order lookup for processing priority
     _topo_priority = {name: i for i, name in enumerate(dep_graph.get("topo_order", []))}
 
-    for _pass2_iter in range(5):
-        pass2_resolved: list[TranslationResult] = []
-        still_untranslatable: list[TranslationResult] = []
-        # Process in topological order (leaves first, composed measures later)
-        sorted_untranslatable = sorted(
-            untranslatable, key=lambda m: _topo_priority.get(m.original_name, 999)
-        )
-        for m in sorted_untranslatable:
-            dax_expr = m.dax_expression
-            # Pre-clean: strip comment lines and date var lines BEFORE ref extraction
-            dax_clean_lines = []
-            for _line in dax_expr.split("\n"):
-                _s = _line.strip()
-                if _s.startswith("//"):
-                    continue
-                if re.match(
-                    r"^var\s+\w+\s*=\s*CALCULATE\s*\(\s*\[(F_Start_date|F_End_date|PY_Start_date|PY_End_date)\]",
-                    _s,
-                    re.IGNORECASE,
-                ):
-                    continue
-                if re.match(r"^var\s+(std|etd)\b", _s, re.IGNORECASE):
-                    continue
-                dax_clean_lines.append(_s)
-            dax_clean = "\n".join(dax_clean_lines)
-            # Find standalone [Ref] (not Table[col])
-            measure_refs: set[str] = set()
-            for ref_match in re.finditer(r"\[([^\]]+)\]", dax_clean):
-                ref_name = ref_match.group(1)
-                before = dax_clean[: ref_match.start()].rstrip()
-                if before and re.search(r"\w$", before):
-                    continue  # Table[col] -- skip
-                measure_refs.add(ref_name)
-            # Check all refs resolve to translated measures on THIS table
-            if measure_refs and all(
-                original_to_snake.get(r, to_snake_case(r)) in base_names
-                for r in measure_refs
-            ):
-                expr = dax_expr
-                # Strip var/return and comments
-                expr_lines: list[str] = []
-                for line in expr.split("\n"):
-                    s = line.strip()
-                    if not s or s.startswith("//"):
-                        continue
-                    if re.match(r"^var\s+(std|etd|x|y)\b", s, re.IGNORECASE):
-                        continue
-                    if re.match(
-                        r"^var\s+\w+\s*=\s*CALCULATE\s*\(\s*\[(F_Start|F_End|PY_Start|PY_End)",
-                        s,
-                        re.IGNORECASE,
-                    ):
-                        continue
-                    vm = re.match(r"^var\s+(\w+)\s*=\s*(.+)$", s, re.IGNORECASE)
-                    if vm:
-                        expr_lines.append(s)
-                        continue
-                    if s.lower().startswith("return "):
-                        s = s[7:]
-                    expr_lines.append(s)
-                expr = " ".join(
-                    item_value.strip()
-                    for item_value in expr_lines
-                    if item_value.strip()
-                )
-                # Resolve simple var chains
-                expr = resolve_var_chain_fn(expr)
-                # Replace [Ref] with MEASURE(snake_case)
-                for ref_name in sorted(measure_refs, key=len, reverse=True):
-                    snake = original_to_snake.get(ref_name, to_snake_case(ref_name))
-                    expr = expr.replace(f"[{ref_name}]", f"MEASURE({snake})")
-                # Convert DIVIDE(a, b) -> a / NULLIF(b, 0)
-                while "DIVIDE(" in expr.upper():
-                    div_args = extract_divide_args_fn(expr)
-                    if not div_args:
-                        break
-                    d_start, d_end, num, den = div_args
-                    expr = (
-                        expr[:d_start]
-                        + f"{num.strip()} / NULLIF({den.strip()}, 0)"
-                        + expr[d_end:]
-                    )
-                # Clean up DAX remnants
-                expr = re.sub(r"\bBLANK\(\)", "NULL", expr, flags=re.IGNORECASE)
-                expr = re.sub(
-                    r"\bIF\s*\(\s*ISBLANK\s*\(\s*(MEASURE\([^)]+\))\s*\)\s*,\s*0\s*,\s*\1\s*\)",
-                    r"\1",
-                    expr,
-                    flags=re.IGNORECASE,
-                )
-                # Strip SAMEPERIODLASTYEAR wrapper BEFORE CALCULATE strip
-                expr = re.sub(
-                    r",\s*SAMEPERIODLASTYEAR\([^)]+\)", "", expr, flags=re.IGNORECASE
-                )
-                # Strip leftover CALCULATE() wrappers (bare, no filter)
-                expr = re.sub(
-                    r"\bCALCULATE\(\s*(MEASURE\([^)]+\))\s*\)",
-                    r"\1",
-                    expr,
-                    flags=re.IGNORECASE,
-                )
-
-                # Convert CALCULATE(SUM(Table[col]))*N -> SUM(source.col) * N
-                def _repl_calc_sum(cm: re.Match[str]) -> str:
-                    s = f"SUM(source.{cm.group(1)})"
-                    if cm.group(2):
-                        s += f" * {cm.group(2)}"
-                    if cm.group(3):
-                        s += f" * {cm.group(3)}"
-                    return s
-
-                expr = re.sub(
-                    r"\bCALCULATE\s*\(\s*SUM\s*\(\s*\w+\[(\w+)\]\s*\)\s*(?:\*\s*(\d+)\s*)?\)"
-                    r"(?:\s*\*\s*(\d+))?",
-                    _repl_calc_sum,
-                    expr,
-                    flags=re.IGNORECASE,
-                )
-                # Convert bare SUM(Table[col]) -> SUM(source.col)
-                expr = re.sub(
-                    r"\bSUM\s*\(\s*\w+\[(\w+)\]\s*\)",
-                    r"SUM(source.\1)",
-                    expr,
-                    flags=re.IGNORECASE,
-                )
-                # Convert bare Table[col] refs -> source.col
-                expr = re.sub(r"\b\w+\[(\w+)\]", r"source.\1", expr)
-                # Validation gate: reject if DAX-only functions/keywords remain
-                # Strip MEASURE(...) wrappers before checking — MEASURE() is valid SQL
-                _DAX_ONLY = re.compile(
-                    r"\b(SELECTEDVALUE|ISFILTERED|HASONEVALUE|FORMAT|CONTAINSSTRING|"
-                    r"SWITCH|CALCULATE\s*\(|SAMEPERIODLASTYEAR|DATEADD|"
-                    r"FIRSTDATE|LASTDATE|EARLIER|VALUES|SUMX|SUMMARIZE|"
-                    r"var\s+\w+\s*=|return\s)\b",
-                    re.IGNORECASE,
-                )
-                _check_str = re.sub(r"MEASURE\s*\([^)]*\)", "", expr)
-                if _DAX_ONLY.search(_check_str):
-                    still_untranslatable.append(m)
-                    continue
-                m.sql_expr = expr
-                m.is_translatable = True
-                m.skip_reason = ""
-                m.category = "measure_arithmetic"
-                pass2_resolved.append(m)
-            else:
-                still_untranslatable.append(m)
-        if not pass2_resolved:
-            break  # no progress
-        for m in pass2_resolved:
-            original_to_snake[m.original_name] = m.measure_name
-            base_names.add(m.measure_name)
-        translated.extend(pass2_resolved)
-        untranslatable = still_untranslatable
+    translated, untranslatable = resolve_measure_arithmetic(
+        translated,
+        untranslatable,
+        base_names,
+        original_to_snake,
+        _topo_priority,
+        resolve_var_chain_fn=resolve_var_chain_fn,
+        extract_divide_args_fn=extract_divide_args_fn,
+    )
 
     # ── Step 5d: LLM fallback for remaining untranslatable measures (opt-in) ──
     if ctx.llm_config and ctx.llm_config.get("use_llm_fallback"):
@@ -792,6 +648,19 @@ def process_table(
                     m.skip_reason = "Covered by SWITCH decomposition (not a gap)"
                 reclassified_untranslatable.append(m)
             untranslatable = reclassified_untranslatable
+
+    # ── Step 6b-late: arithmetic over measures the LLM, SWITCH or prior-year pass
+    # translated after Step 5b (a measure the LLM declined only because its base was not
+    # in the list yet).
+    translated, untranslatable = resolve_measure_arithmetic(
+        translated,
+        untranslatable,
+        base_names,
+        original_to_snake,
+        _topo_priority,
+        resolve_var_chain_fn=resolve_var_chain_fn,
+        extract_divide_args_fn=extract_divide_args_fn,
+    )
 
     # ── Step 6c: Auto-add joins referenced by SWITCH/DAX measures ──────
     _all_translated_measures = translated + switch_measures
