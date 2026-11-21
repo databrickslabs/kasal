@@ -40,6 +40,7 @@ from src.services.tools.metric_view_utils.raw_fields import (
     as_map,
     opt_float,
 )
+from src.services.tools.metric_view_utils.translation_source import REUSED_PIN_COMMENT
 
 if TYPE_CHECKING:
     from src.services.tools.metric_view_utils.data_classes import (
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PIN_COMMENT = "reused from the previous run (reconciled at or above the lock threshold)"
+PIN_COMMENT = REUSED_PIN_COMMENT
 DEFAULT_LOCK_PCT = 99.0
 DEFAULT_MIN_CELLS = 10
 
@@ -374,7 +375,11 @@ class PinOutcome:
     """What the pins did in the final pipeline run."""
 
     planned: int
+    # Measures whose SQL is the override (the pin took effect), by table key
     reused: dict[str, list[str]]
+    # Measures a rule translated first (rules run before overrides) to the same SQL: the pin
+    # was not needed for them, and they are not reported as reused.
+    rule_same_sql: int
     invalidated: dict[str, dict[str, str]]
     not_pinned: dict[str, int]
 
@@ -384,6 +389,7 @@ class PinOutcome:
             "previous_run_pins": {
                 "planned": self.planned,
                 "reused": sum(len(v) for v in self.reused.values()),
+                "rule_translated_same_sql": self.rule_same_sql,
                 "invalidated": self.invalidated,
                 "not_pinned": self.not_pinned,
             },
@@ -395,17 +401,25 @@ def pin_outcome(
     plan: PinPlan,
     invalidated: Mapping[Key, str],
 ) -> PinOutcome:
-    """The reused pins of the final run (in effect, same SQL) and the invalidated ones."""
+    """The pins of the final run: reused (the override is the measure's SQL), rule-translated to
+    the same SQL, and the invalidated ones."""
     reused: dict[str, list[str]] = {}
+    same_by_rule = 0
     for (table, name), sql in plan.pins.items():
-        if _in_effect(specs.get(table), name, sql) is not None:
+        measure = _in_effect(specs.get(table), name, sql)
+        if measure is None:
+            continue
+        if measure.category == "manual_override" and measure.skip_reason == PIN_COMMENT:
             reused.setdefault(table, []).append(name)
+        else:
+            same_by_rule += 1
     dropped: dict[str, dict[str, str]] = {}
     for (table, name), reason in invalidated.items():
         dropped.setdefault(table, {})[name] = reason
     return PinOutcome(
         planned=len(plan.pins),
         reused={t: sorted(names) for t, names in sorted(reused.items())},
+        rule_same_sql=same_by_rule,
         invalidated=dropped,
         not_pinned=dict(plan.not_pinned),
     )

@@ -27,6 +27,9 @@ from src.services.tools.metric_view_utils.raw_fields import (
     as_list,
     as_map,
 )
+from src.services.tools.metric_view_utils.translation_source import (
+    CARRIED_FORWARD_COMMENT,
+)
 from src.services.tools.metric_view_utils.reconciliation import (
     run_reconciliation_loop,
 )
@@ -101,7 +104,7 @@ def _carry_forward_overrides(
                     "name": name,
                     "original_name": r.get("original_name") or name,
                     "expr": expr,
-                    "comment": "carried forward (reconciled in prior cycle)",
+                    "comment": CARRIED_FORWARD_COMMENT,
                 }
             )
     return overrides

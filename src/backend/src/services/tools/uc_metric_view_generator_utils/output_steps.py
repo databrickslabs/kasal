@@ -211,6 +211,7 @@ def build_resolved_measures_by_table(
             rows.append(
                 {
                     "measure_name": m.get("name", ""),
+                    "source": m.get("source", ""),
                     "original_name": m.get("original_name", ""),
                     "sql_expr": m.get("sql_expr", ""),
                     "window": m.get("window"),

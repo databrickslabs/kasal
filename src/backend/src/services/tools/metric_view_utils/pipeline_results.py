@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from .metadata_lint import LintConfig, lint_metric_view, summarize_findings
 from .report_emitter import build_proposal, emit_migration_report
+from .translation_source import translation_source
 
 if TYPE_CHECKING:
     from .pipeline import MetricViewPipeline
@@ -65,6 +66,8 @@ def build_results(pipeline: MetricViewPipeline) -> dict:
                     "dax_expression": m.dax_expression,
                     "confidence": m.confidence,
                     "category": m.category,
+                    # rule | llm | reused | carried_forward | manual | none
+                    "source": translation_source(m.category, m.sql_expr, m.skip_reason),
                     # A prior-year measure is its expression plus this window.
                     "window": m.window_spec,
                     # The Power BI measure a prior-year helper shifts (no PBI measure of its own).

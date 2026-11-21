@@ -272,13 +272,24 @@ def test_a_pin_the_rules_replaced_is_not_in_effect_so_not_stale():
 
 def test_outcome_reports_reused_and_invalidated():
     plan = plan_previous_run_pins(_previous(), _measures(), {"rerun_lock_pct": 90})
-    spec = _spec([], measures=[_translated("m_good", "SUM(source.amount)")])
-    spec.measures[0].measure_name = "m_good"
+    pinned = _translated("m_good", "SUM(source.amount)")
+    pinned.category = "manual_override"
+    pinned.skip_reason = PIN_COMMENT  # the override took effect
+    spec = _spec([], measures=[pinned])
     outcome = pin_outcome({"fact_a": spec}, plan, {("fact_a", "m_close"): "gone"})
     out = outcome.as_output()
     assert out["reused_from_previous_run"] == {"fact_a": ["m_good"]}
     assert out["previous_run_pins"]["invalidated"] == {"fact_a": {"m_close": "gone"}}
     assert out["previous_run_pins"]["reused"] == 1
+    assert out["previous_run_pins"]["rule_translated_same_sql"] == 0
+
+
+def test_a_rule_translation_to_the_same_sql_is_not_reported_as_reused():
+    plan = plan_previous_run_pins(_previous(), _measures(), {"rerun_lock_pct": 90})
+    by_rule = _translated("m_good", "SUM(source.amount)")  # category single_table
+    out = pin_outcome({"fact_a": _spec([], measures=[by_rule])}, plan, {}).as_output()
+    assert out["reused_from_previous_run"] == {}
+    assert out["previous_run_pins"]["rule_translated_same_sql"] == 1
 
 
 def test_pin_report_is_empty_without_a_pipeline_outcome():
@@ -338,3 +349,22 @@ def test_prior_year_pin_gets_its_window_from_add_windows_not_from_the_pin():
     prior_year.add_windows({"fact_a": pinned_with_window}, _mapping(), {})
     assert pinned_with_window.measures == []  # demoted: a window already on the measure
     assert [m.measure_name for m in pinned_with_window.untranslatable] == ["sales_py"]
+
+
+def test_each_measure_records_how_its_sql_was_reached():
+    from src.services.tools.metric_view_utils.translation_source import (
+        CARRIED_FORWARD_COMMENT,
+        translation_source,
+    )
+
+    assert translation_source("llm_translated", "SUM(x)", "") == "llm"
+    assert translation_source("manual_override", "SUM(x)", PIN_COMMENT) == "reused"
+    assert (
+        translation_source("manual_override", "SUM(x)", CARRIED_FORWARD_COMMENT)
+        == "carried_forward"
+    )
+    assert (
+        translation_source("manual_override", "SUM(x)", "Manual override") == "manual"
+    )
+    assert translation_source("single_table", "SUM(x)", "") == "rule"
+    assert translation_source("single_table", None, "not translated") == "none"
