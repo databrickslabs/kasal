@@ -37,6 +37,7 @@ from .pbi_parameter_resolver import PbiParameterResolver
 from .pipeline_results import build_results
 from .scan_columns import extract_columns_from_scan, extract_source_table_from_scan
 from .source_artifacts import build_source_layer
+from .source_column_guard import guard_bound_spec, view_key_by_name
 from .source_layer_binding import (
     SourceLayerBinding,
     bind_metric_views,
@@ -631,11 +632,21 @@ class MetricViewPipeline:
             validate_filter_consistency_fn=MetricViewPipeline._validate_filter_consistency,
         )
         self._sanitize_spec_measures(spec)
-        from .join_columns import add_join_key_dimensions, known_fact_columns
+        from .join_columns import add_join_key_dimensions
 
-        spec.fact_columns = known_fact_columns(table_info)
+        spec.fact_columns = self._fact_columns(table_key, table_info)
         add_join_key_dimensions(spec, self._dimension_exclusions.get(table_key, ()))
         return spec
+
+    def _fact_columns(self, table_key: str, table_info: TableInfo) -> list[str]:
+        """The fact's columns: the source view's real ones when they are known (read mode),
+        else the native query's select list (``known_fact_columns``)."""
+        from .join_columns import known_fact_columns
+
+        known = self.source_columns.get(table_key)
+        if known:
+            return sorted({c.lower() for c in known})
+        return known_fact_columns(table_info)
 
     def _sanitize_spec_measures(self, spec: MetricViewSpec) -> None:
         """P5 correctness batch + PROP-3a/4a silent-wrong guard.
@@ -984,7 +995,42 @@ class MetricViewPipeline:
             join_key_map=self.config.get("join_key_map"),
         )
         self._limitations["source_layer_binding"] = self.source_layer_binding.to_dict()
+        if self.source_columns:
+            bound = self._guard_source_columns(bound, self.source_layer_binding.views)
         return bound
+
+    def _guard_source_columns(
+        self, bound: dict[str, MetricViewSpec], views: dict[str, str]
+    ) -> dict[str, MetricViewSpec]:
+        """Drop what reads a column a bound view does not have, where the views' columns are
+        known (``source_column_guard``). Removed measures are also moved to the table's
+        untranslated list, so the results report them."""
+        columns = {
+            key: frozenset(c.lower() for c in cols)
+            for key, cols in self.source_columns.items()
+            if key in views
+        }
+        key_by_view = view_key_by_name(views)
+        guarded: dict[str, MetricViewSpec] = {}
+        gaps: list[dict[str, str]] = []
+        for key, spec in bound.items():
+            guarded[key], result = guard_bound_spec(
+                key, spec, columns_by_key=columns, key_by_view=key_by_view
+            )
+            gaps += [gap.to_dict() for gap in result.gaps]
+            self._record_removed_measures(key, result.removed_measures)
+        if gaps:
+            self._limitations["source_column_gaps"] = gaps
+        return guarded
+
+    def _record_removed_measures(self, key: str, removed: list) -> None:
+        """Take measures the guard removed out of the table's measures, into its untranslated list."""
+        original = self.all_specs.get(key)
+        if original is None or not removed:
+            return
+        gone = {id(m) for m in removed}
+        original.measures = [m for m in original.measures if id(m) not in gone]
+        original.untranslatable = [*original.untranslatable, *removed]
 
     def emit_all_yaml(
         self, catalog: str = "main", schema: str = "default"
