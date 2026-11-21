@@ -19,6 +19,7 @@ from .measure_fingerprint import (
     sql_fingerprint,
     var_used_inside_calculate,
 )
+from .composed_verdicts import COMPOSED_DIFFERENCE, resolve_composed_verdicts
 from .measure_expression_tree import compare_shapes, composed_of_measures_only
 from .measure_references import (
     SELECTION_CONTEXT,
@@ -204,6 +205,12 @@ class ExpressionValidator:
                 unmatched_measures.append(
                     {"measure_eval": "unmatched", "measure_name": measure["name"]}
                 )
+        view_names = {
+            loose_name(m["name"])
+            for m in self.data_handler.mv_parser.measures
+            if m.get("name")
+        }
+        resolve_composed_verdicts(matched_measures, view_names)
         return {
             "skipped": unmatched_measures + simple_measures,
             "evaluated": matched_measures,
@@ -440,6 +447,7 @@ class ExpressionValidator:
         # column. The two sides must call the same measures, and then the arithmetic around
         # the calls must have the same shape (operator precedence, ratio, grouping).
         called = ucmv_measure_refs(db_expr)
+        composed_refs: List[str] = []
         if called:
             dax_resolved = self.dax_parser.resolved_expression(dax_expr)
             dax_called = dax_measure_refs(dax_resolved)
@@ -461,9 +469,11 @@ class ExpressionValidator:
                     similarities.append(f"Measure references match: {why}")
                     if composed_of_measures_only(db_expr):
                         # No column aggregate here: the value is the referenced measures'
-                        # values, which their own rows judge. Not VALID on this row alone.
+                        # values. Not VALID on this row alone; the view resolves it from
+                        # the verdicts of the measures it reads (composed_verdicts).
+                        composed_refs = sorted(called)
                         differences.append(
-                            "Composed of measures only: judged by the referenced measures' "
+                            f"{COMPOSED_DIFFERENCE}: judged by the referenced measures' "
                             "own rows, not by this expression"
                         )
                 else:
@@ -521,6 +531,7 @@ class ExpressionValidator:
             "recommendations": recommendations,
             "databricks_parsed": db_parsed,
             "dax_parsed": dax_parsed,
+            "composed_refs": composed_refs,
         }
 
     def _is_equivalent(self, result: dict) -> bool:
