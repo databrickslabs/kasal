@@ -562,3 +562,108 @@ measures:
     )
     assert verdict["deployed_views"] == ["Fact"]
     assert healed["Fact"][0].startswith("dimension kbi_code (found by bisection)")
+
+
+def _deployer_failing_on_culprit_or_missing_reads(culprit):
+    """Databricks behaviour: a view fails when the culprit is in it, or when a MEASURE() it
+    reads is not in it. Records every batch."""
+    import re
+
+    calls = []
+
+    def redeploy(batch):
+        calls.append(batch)
+        failures, deployed = {}, []
+        for key, text in batch.items():
+            names = set(_names(text, "measures"))
+            reads = set(re.findall(r"MEASURE\(\s*(\w+)\s*\)", text))
+            if culprit in names or reads - names:
+                failures[key] = "[NESTED_AGGREGATE_FUNCTION] not allowed"
+            else:
+                deployed.append(key)
+        return {"deployed_views": deployed, "failures": failures}
+
+    return redeploy, calls
+
+
+def test_a_correct_measure_that_reads_the_culprits_sibling_is_kept():
+    from src.services.tools.ucmv_recon_heal import bisect_measure
+
+    spec = """version: '1.1'
+source: prod.md.fact
+measures:
+  - name: reader
+    expr: MEASURE(sibling) / 2
+  - name: sibling
+    expr: SUM(source.s)
+  - name: a
+    expr: SUM(source.a)
+  - name: bad
+    expr: SUM(SUM(source.b))
+"""
+    redeploy, calls = _deployer_failing_on_culprit_or_missing_reads("bad")
+    text, removed = bisect_measure(
+        redeploy, "Fact", spec, "[NESTED_AGGREGATE_FUNCTION] x"
+    )
+    assert removed == ["measure bad (found by bisection)"]
+    assert sorted(_names(text, "measures")) == ["a", "reader", "sibling"]
+    assert len(calls) <= 4
+
+
+def test_the_bisection_does_not_depend_on_the_order_the_measures_are_listed_in():
+    from src.services.tools.ucmv_recon_heal import bisect_measure
+
+    spec = """version: '1.1'
+source: prod.md.fact
+measures:
+  - name: reader
+    expr: MEASURE(sibling) / 2
+  - name: a
+    expr: SUM(source.a)
+  - name: bad
+    expr: SUM(SUM(source.b))
+  - name: sibling
+    expr: SUM(source.s)
+"""
+    redeploy, _ = _deployer_failing_on_culprit_or_missing_reads("bad")
+    text, removed = bisect_measure(
+        redeploy, "Fact", spec, "[NESTED_AGGREGATE_FUNCTION] x"
+    )
+    assert removed == ["measure bad (found by bisection)"]
+    assert sorted(_names(text, "measures")) == ["a", "reader", "sibling"]
+
+
+def test_the_trial_deploys_stay_within_the_cap_on_a_large_view():
+    from src.services.tools.ucmv_recon_heal import MAX_BISECT_DEPLOYS, bisect_measure
+
+    many = "".join(f"  - name: m{i}\n    expr: SUM(source.c{i})\n" for i in range(200))
+    spec = (
+        "version: '1.1'\nsource: prod.md.fact\nmeasures:\n"
+        + many
+        + "  - name: bad\n    expr: SUM(SUM(source.b))\n"
+    )
+    redeploy, calls = _deployer_failing_on_culprit_or_missing_reads("bad")
+    text, removed = bisect_measure(
+        redeploy, "Fact", spec, "[NESTED_AGGREGATE_FUNCTION] x"
+    )
+    assert removed == ["measure bad (found by bisection)"]
+    assert "bad" not in _names(text, "measures")
+    assert len(calls) <= MAX_BISECT_DEPLOYS
+
+    # A culprit the budget cannot pin down (the view fails for a reason no measure explains)
+    # is not guessed at: the view stays failed.
+    always_fails = lambda batch: {  # noqa: E731 - a one-line fake
+        "deployed_views": [],
+        "failures": {k: "[NESTED_AGGREGATE_FUNCTION] x" for k in batch},
+    }
+    calls_cap = []
+
+    def capped(batch):
+        calls_cap.append(batch)
+        return always_fails(batch)
+
+    assert bisect_measure(capped, "Fact", spec, "[NESTED_AGGREGATE_FUNCTION] x") == (
+        None,
+        [],
+    )
+    assert len(calls_cap) <= MAX_BISECT_DEPLOYS

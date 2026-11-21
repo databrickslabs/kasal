@@ -321,38 +321,107 @@ def _bisect(
     items = [dict(as_map(m)) for m in as_list(spec.get(section))]
     if len(items) < 2:
         return None, []
+    order, reads = _dependency_order(items, section)
 
-    def deploys(subset: list[dict[str, object]]) -> bool:
+    def closed(indexes: set[int]) -> set[int]:
+        """``indexes`` plus every measure they read through MEASURE() references."""
+        out, todo = set(indexes), list(indexes)
+        while todo:
+            for j in reads[todo.pop()]:
+                if j not in out:
+                    out.add(j)
+                    todo.append(j)
+        return out
+
+    def deploys(chosen: set[int]) -> bool:
+        subset = [items[i] for i in sorted(chosen)]
         trial = yaml.safe_dump(
             {**spec, section: subset}, sort_keys=False, allow_unicode=True
         )
         outcome = redeploy({key: trial})
         return key in {str(v) for v in as_list(outcome.get("deployed_views"))}
 
-    candidates, budget = items, MAX_BISECT_DEPLOYS
-    while len(candidates) > 1 and budget > 1:
-        half = candidates[: len(candidates) // 2]
+    # Trials are prefixes of the dependency order, closed under MEASURE(): a trial never fails
+    # only because a measure it reads is outside it. "The first k fail" is then monotone in k,
+    # and the least failing k holds the culprit. Trial deploys stay capped; one is kept for
+    # the rest.
+    lo, hi, budget = 1, len(order), MAX_BISECT_DEPLOYS
+    while lo < hi and budget > 1:
+        mid = (lo + hi) // 2
         budget -= 1
-        candidates = candidates[len(half) :] if deploys(half) else half
-    if len(candidates) != 1 or budget < 1:
+        if deploys(closed(set(order[:mid]))):
+            lo = mid + 1
+        else:
+            hi = mid
+    if lo != hi:
         return None, []
-    culprit = candidates[0]
-    rest = [m for m in items if m is not culprit]
-    if not deploys(rest):
+    new = closed(set(order[:lo])) - closed(set(order[: lo - 1]))
+    if len(new) != 1:
+        return None, []
+    culprit_i = next(iter(new))
+    name = str(items[culprit_i].get("name"))
+    rest_i = set(range(len(items))) - {culprit_i}
+    removed = [f"{what} {name} (found by bisection)"]
+    if section == "measures":
+        # The readers of the culprit go with it, before the rest is deployed.
+        kept, dependents = _split_dependents([items[i] for i in sorted(rest_i)], {name})
+        removed += [f"measure {n} (reads a removed measure)" for n in dependents]
+        kept_ids = {id(m) for m in kept}
+        rest_i = {i for i in rest_i if id(items[i]) in kept_ids}
+    if not deploys(closed(rest_i)):
         # Another culprit, or the failure is not this section's: remove this one only if it
         # is broken on its own while another item alone deploys; the next round goes on.
-        other = next((m for m in rest), None)
-        if other is None or deploys([culprit]) or not deploys([other]):
+        others = sorted(rest_i)
+        if (
+            not others
+            or deploys(closed({culprit_i}))
+            or not deploys(closed({others[0]}))
+        ):
             return None, []
-    logger.info("[UCMV] bisect: %s fails on %s %s", key, what, culprit.get("name"))
-    removed = [f"{what} {culprit.get('name')} (found by bisection)"]
-    if section == "measures":
-        rest, dependents = _split_dependents(rest, {str(culprit.get("name"))})
-        removed += [f"measure {n} (reads a removed measure)" for n in dependents]
+    logger.info("[UCMV] bisect: %s fails on %s %s", key, what, name)
     healed = yaml.safe_dump(
-        {**spec, section: rest}, sort_keys=False, allow_unicode=True
+        {**spec, section: [items[i] for i in sorted(rest_i)]},
+        sort_keys=False,
+        allow_unicode=True,
     )
     return healed, removed
+
+
+def _dependency_order(
+    items: list[dict[str, object]], section: str
+) -> tuple[list[int], dict[int, set[int]]]:
+    """Item indexes with each measure after the measures it reads (MEASURE() references), and
+    every item's reads. A cycle is broken where it closes; the closure in ``_bisect`` covers it.
+    """
+    by_name = {str(m.get("name")).lower(): i for i, m in enumerate(items)}
+    reads: dict[int, set[int]] = {}
+    for i, item in enumerate(items):
+        refs: set[int] = set()
+        if section == "measures":
+            for ref in re.findall(
+                r"\bMEASURE\(\s*`?(\w+)`?\s*\)", str(item.get("expr") or ""), re.I
+            ):
+                j = by_name.get(ref.lower())
+                if j is not None and j != i:
+                    refs.add(j)
+        reads[i] = refs
+    order: list[int] = []
+    done: set[int] = set()
+
+    def visit(i: int, stack: set[int]) -> None:
+        if i in done or i in stack:
+            return
+        stack.add(i)
+        for j in sorted(reads[i]):
+            visit(j, stack)
+        stack.discard(i)
+        if i not in done:
+            done.add(i)
+            order.append(i)
+
+    for i in range(len(items)):
+        visit(i, set())
+    return order, reads
 
 
 def heal_failed_views(
