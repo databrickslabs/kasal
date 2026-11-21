@@ -32,8 +32,9 @@ _RENAME_SUFFIX = "_"
 def parse_source_columns(raw: object) -> dict[str, list[str]]:
     """``{table key: [column names]}`` from the JSON input (or an already parsed mapping).
 
-    Accepts ``{key: [{"name": ..., "type": ...}]}`` and ``{key: ["name", ...]}``. A key whose
-    list is empty or malformed is left out: its columns are then unknown, not empty.
+    Accepts ``{key: [{"name": ..., "type": ...}]}`` and ``{key: ["name", ...]}``. A key with an
+    empty list means its view exists but its columns are unknown (the parsed ones are used); a
+    key that is not there has no source view at all. A malformed value is left out.
     """
     if isinstance(raw, str):
         text = raw.strip()
@@ -54,8 +55,7 @@ def parse_source_columns(raw: object) -> dict[str, list[str]]:
             name = column.get("name") if isinstance(column, Mapping) else column
             if isinstance(name, str) and name.strip() and name.strip() not in names:
                 names.append(name.strip())
-        if names:
-            out[str(key)] = names
+        out[str(key)] = names
     return out
 
 

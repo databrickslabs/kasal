@@ -318,7 +318,10 @@ class MetricViewPipeline:
             from .measure_allocator import reallocate_by_columns
 
             self._allocation_report = reallocate_by_columns(
-                self.mapping, self.mquery_tables, config=self.config
+                self.mapping,
+                self.mquery_tables,
+                config=self.config,
+                source_columns=self.source_columns,
             )
             _r = self._allocation_report
             if any(_r.get(k) for k in ("rescued", "rehomed", "broken", "cross_fact")):
@@ -1008,7 +1011,7 @@ class MetricViewPipeline:
         columns = {
             key: frozenset(c.lower() for c in cols)
             for key, cols in self.source_columns.items()
-            if key in views
+            if key in views and cols  # an empty list: the view's columns are unknown
         }
         key_by_view = view_key_by_name(views)
         guarded: dict[str, MetricViewSpec] = {}

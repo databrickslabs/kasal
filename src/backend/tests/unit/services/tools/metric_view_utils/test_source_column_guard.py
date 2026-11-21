@@ -198,17 +198,25 @@ def test_the_pipeline_drops_a_joined_dimension_the_view_lacks_and_records_it():
 
 
 def test_the_pipeline_moves_a_measure_the_fact_view_lacks_to_untranslated():
+    # `amount` exists only in the dimension's view: the allocator leaves the measure on the
+    # fact (no fact-resident column), and the guard finds the fact's view lacks `amount`.
     pipeline = _pipeline(
         {
             "Fact_Sales": ["plant_code"],
-            "Dim_Plant": ["plant_code", "plant_name"],
+            "Dim_Plant": ["plant_code", "plant_name", "amount"],
         }
     )
     pipeline.emit_all_yaml(catalog="tgt", schema="ucmv")  # the guard runs when binding
     spec = pipeline.all_specs["Fact_Sales"]
     assert "total_amount" not in {m.measure_name for m in spec.measures}
     assert "total_amount" in {m.measure_name for m in spec.untranslatable}
-    assert pipeline._limitations["source_column_gaps"][0]["kind"] == "measure"
+    # The base measure `amount` reads the same missing column, so it is removed too.
+    names = {
+        g["name"]
+        for g in pipeline._limitations["source_column_gaps"]
+        if g["kind"] == "measure"
+    }
+    assert {"total_amount", "amount"} <= names
 
 
 def test_without_source_columns_nothing_is_guarded():

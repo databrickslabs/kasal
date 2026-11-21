@@ -33,6 +33,7 @@ further wiring.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .data_classes import TableInfo
@@ -126,12 +127,29 @@ def candidate_fact_keys(mquery_tables: dict, mapping: list[dict]) -> set[str]:
     return keys
 
 
+def _real_or_parsed(
+    key: str, tinfo: TableInfo, source_columns: Mapping[str, list[str]] | None
+) -> set[str]:
+    """A table's column keys: its source view's real columns when they are known, else what the
+    parser read from its Power Query (a view's real columns are what a metric view references).
+    """
+    real = (source_columns or {}).get(key)
+    if real:
+        return {_norm(c) for c in real}
+    return _table_columns(tinfo)
+
+
 def build_fact_column_index(
-    mquery_tables: dict, fact_keys: set[str]
+    mquery_tables: dict,
+    fact_keys: set[str],
+    source_columns: Mapping[str, list[str]] | None = None,
 ) -> dict[str, set[str]]:
-    """fact_key → set of normalized column keys it exposes."""
+    """fact_key → set of normalized column keys it exposes (its real source-view columns when
+    ``source_columns`` has them, else the parsed ones)."""
     return {
-        k: _table_columns(mquery_tables[k]) for k in fact_keys if k in mquery_tables
+        k: _real_or_parsed(k, mquery_tables[k], source_columns)
+        for k in fact_keys
+        if k in mquery_tables
     }
 
 
@@ -148,12 +166,14 @@ def build_fact_grain_index(
     return out
 
 
-def build_known_columns(mquery_tables: dict) -> set[str]:
+def build_known_columns(
+    mquery_tables: dict, source_columns: Mapping[str, list[str]] | None = None
+) -> set[str]:
     """Every column key across ALL tables (facts + dimensions). A referenced
     column absent from this set exists nowhere → the measure is broken (M10)."""
     known: set[str] = set()
-    for t in mquery_tables.values():
-        known |= _table_columns(t)
+    for key, t in mquery_tables.items():
+        known |= _real_or_parsed(key, t, source_columns)
     return known
 
 
@@ -350,7 +370,10 @@ def _clear_home(m: dict) -> None:
 
 
 def reallocate_by_columns(
-    mapping: list[dict], mquery_tables: dict, config: dict | None = None
+    mapping: list[dict],
+    mquery_tables: dict,
+    config: dict | None = None,
+    source_columns: Mapping[str, list[str]] | None = None,
 ) -> dict:
     """Correct each measure's fact allocation by its referenced columns.
 
@@ -382,9 +405,9 @@ def reallocate_by_columns(
     fact_keys = candidate_fact_keys(mquery_tables, mapping)
     if not fact_keys:
         return report
-    full_index = build_fact_column_index(mquery_tables, fact_keys)
+    full_index = build_fact_column_index(mquery_tables, fact_keys, source_columns)
     grain_index = build_fact_grain_index(mquery_tables, fact_keys)
-    known_cols = build_known_columns(mquery_tables)
+    known_cols = build_known_columns(mquery_tables, source_columns)
     cols_index, mref_index = build_measure_column_index(mapping)
 
     # A fact whose columns we could not parse (e.g. a plain `SELECT *` source)
@@ -462,6 +485,22 @@ def reallocate_by_columns(
                 }
             )
         elif decision.kind == "ambiguous":
+            # Known source views: a home that has no view of its own emits nothing, so when
+            # exactly one of the facts that own the columns has a view, the measure goes there.
+            viewed = [f for f in decision.facts if f in (source_columns or {})]
+            if source_columns and home not in source_columns and len(viewed) == 1:
+                _set_home(m, viewed[0])
+                entry = {
+                    "measure": name,
+                    "to": viewed[0],
+                    "columns": sorted(decision.fact_columns),
+                }
+                if home is None:
+                    report["rescued"].append(entry)
+                else:
+                    m[REHOMED_KEY] = {"from": home, "to": viewed[0]}
+                    report["rehomed"].append({**entry, "from": home})
+                continue
             report["ambiguous"].append({"measure": name, "facts": decision.facts})
         # "no_columns" → leave as-is (existing routing / catch-all handles it)
 

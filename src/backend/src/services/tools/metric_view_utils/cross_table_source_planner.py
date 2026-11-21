@@ -141,13 +141,14 @@ def _build_index(pipeline: MetricViewPipeline) -> _Index:
     mquery = pipeline.mquery_tables
     mapping = pipeline.mapping
     fact_keys = candidate_fact_keys(mquery, mapping)
-    full = build_fact_column_index(mquery, fact_keys)
+    source_columns = pipeline.source_columns
+    full = build_fact_column_index(mquery, fact_keys, source_columns)
     cols_by_measure, refs_by_measure = build_measure_column_index(mapping)
     return _Index(
         mquery=mquery,
         known_facts={k: v for k, v in full.items() if v},
         grain=build_fact_grain_index(mquery, fact_keys),
-        known_cols=build_known_columns(mquery),
+        known_cols=build_known_columns(mquery, source_columns),
         cols_by_measure=cols_by_measure,
         refs_by_measure=refs_by_measure,
     )

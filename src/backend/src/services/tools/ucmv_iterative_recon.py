@@ -154,13 +154,18 @@ def _source_columns_json(
     naming = source_layer_naming(dict(_config(context)))
     leaves = {source_layer_leaf_name(t, naming).lower(): t for t in deployed}
     found = read_source_columns(deployer, deploy_base, sorted(leaves))
-    columns = {leaves[leaf]: [dict(c) for c in cols] for leaf, cols in found.items()}
+    # Every deployed view is listed: an empty list means it exists but its columns could not be
+    # read (the parsed columns are used for it, and it still counts as a view).
+    columns = {
+        table: [dict(c) for c in found.get(leaf, [])] for leaf, table in leaves.items()
+    }
+    with_columns = {table: cols for table, cols in columns.items() if cols}
     probe["report"] = {
         "views_deployed": len(deployed),
-        "views_with_columns": len(columns),
+        "views_with_columns": len(with_columns),
         "layer": layer_note,
     }
-    if not columns:
+    if not with_columns:
         return None
     probe["json"] = json.dumps(columns)
     return str(probe["json"])

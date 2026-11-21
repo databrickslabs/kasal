@@ -12,7 +12,8 @@ from src.services.tools.metric_view_utils.source_columns import (
 
 def test_parse_accepts_typed_entries_and_plain_names():
     raw = '{"fact_a": [{"name": "Qty", "type": "DOUBLE"}, {"name": "qty"}, "k"], "dim": []}'
-    assert parse_source_columns(raw) == {"fact_a": ["Qty", "qty", "k"]}
+    # An empty list is a view whose columns are unknown, not a missing view.
+    assert parse_source_columns(raw) == {"fact_a": ["Qty", "qty", "k"], "dim": []}
 
 
 def test_parse_is_empty_on_missing_or_malformed_input():
