@@ -52,11 +52,13 @@ class TestManualOverrides:
         spec = specs["fact"]
         names = {m.measure_name for m in spec.measures}
         assert "custom_metric" in names
-        assert "with_window" in names
-        # Check window spec
-        windowed = [m for m in spec.measures if m.measure_name == "with_window"][0]
-        assert windowed.window_spec is not None
-        assert windowed.window_spec["semiadditive"] == "last"
+        # The window orders by "key", which is not a dimension of the written view: a
+        # view with it would not deploy, so the override is reported, not emitted.
+        assert "with_window" not in names
+        reported = [m for m in spec.untranslatable if m.measure_name == "with_window"][
+            0
+        ]
+        assert "no dimension key" in reported.skip_reason
 
     def test_manual_override_does_not_duplicate(self):
         """If a regex already translated the measure, the override should not duplicate it."""

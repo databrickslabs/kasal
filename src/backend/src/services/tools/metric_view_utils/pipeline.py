@@ -28,6 +28,7 @@ from .artifact_cascade import (
 )
 from .data_classes import MetricViewSpec, ScanTableInfo, TableInfo, TranslationResult
 from .dax_translator import DaxTranslator
+from .emitted_measures import report_unemitted
 from .dax_var_chain import extract_divide_args, resolve_var_chain
 from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
@@ -115,6 +116,13 @@ class MetricViewPipeline:
         mquery_expressions: dict | None = None,
     ):
         self.mapping = mapping
+        for entry in mapping:
+            # An older extract names the DAX "expression" and the home "table_name".
+            if not entry.get("dax_expression") and entry.get("expression"):
+                entry["dax_expression"] = entry["expression"]
+            if not entry.get("proposed_allocation") and entry.get("table_name"):
+                entry["proposed_allocation"] = entry["table_name"]
+            entry.setdefault("original_name", entry.get("measure_name", ""))
         self.mquery_tables = mquery_tables
         self.config = config or {}
         self.inner_dim_joins = inner_dim_joins
@@ -282,6 +290,9 @@ class MetricViewPipeline:
         windowed = prior_year.add_windows(self.all_specs, self.mapping, self.config)
         if windowed:
             self._limitations["prior_year_windows"] = windowed
+        unwritten = report_unemitted(self.all_specs, self._written_yaml)
+        if unwritten:
+            self._limitations["measures_not_written"] = unwritten
         return self.all_specs
 
     # ── Run phases (each step of run(), in execution order) ───────────
@@ -540,6 +551,19 @@ class MetricViewPipeline:
                 ),
                 "skipped": False,
             }
+
+    def _written_yaml(self, table_key: str, spec: MetricViewSpec) -> str:
+        """The view as the writer emits it (to see which measures it keeps)."""
+        return emit_yaml(
+            spec,
+            measure_metadata=self._measure_metadata.get(table_key, {}),
+            dimension_metadata=self._dimension_metadata.get(table_key, {}),
+            dimension_order=self._dimension_order.get(table_key),
+            percentage_multiplier_patterns=self.config.get(
+                "percentage_multiplier_patterns"
+            ),
+            pbi_format_strings=self.config.get("measure_format_strings"),
+        )
 
     def _plan_cross_table_specs(self) -> None:
         """Cross-fact measures: same-grain UNION combined sources (reconciliation-gated)."""

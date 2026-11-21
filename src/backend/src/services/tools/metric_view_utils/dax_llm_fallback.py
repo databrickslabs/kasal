@@ -694,6 +694,8 @@ async def translate_batch_with_llm(
                                 model=model,
                                 cache=run_cache,
                                 table_context=table_context,
+                                domain_context=domain_context,
+                                time_intel_enabled=time_intel_enabled,
                             )
                             for m in missing
                         )

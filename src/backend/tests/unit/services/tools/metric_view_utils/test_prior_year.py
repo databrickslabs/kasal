@@ -230,13 +230,19 @@ def test_the_emitter_does_not_write_a_window_without_its_dimension():
     latest.window_spec = {"order": "week", "range": "current", "semiadditive": "last"}
     base = [_measure("sales", "SUM(source.amount)")]
     dax = [sales_py, growth, latest]
-    spec = _spec([{"name": "country", "expr": "source.country"}], base + dax)
-    spec.fact_columns = ["country", "amount", "stock"]
+    spec = _spec(
+        [
+            {"name": "country", "expr": "source.country"},
+            {"name": "week", "expr": "source.week"},
+        ],
+        base + dax,
+    )
+    spec.fact_columns = ["country", "amount", "stock", "week"]
     drop_phantom_dimensions(spec, base, [], dax, [])
-    # the prior-year measure and its reader go; a window without an offset is not touched
+    # the prior-year measure and its reader go; a window whose dimension is there stays
     assert [m.measure_name for m in dax] == ["latest_stock"]
     gone = {m.measure_name: m.skip_reason for m in spec.untranslatable}
-    assert "fiscper_key" in gone["sales_py"] and "prior-year" in gone["growth"]
+    assert "fiscper_key" in gone["sales_py"] and "window measure" in gone["growth"]
 
     kept = _measure("sales_py", "MEASURE(sales)")
     kept.window_spec = dict(window)

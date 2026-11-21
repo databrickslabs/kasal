@@ -54,10 +54,16 @@ def build_dependency_graph(measures: list[dict]) -> dict:
     """
     # Build name set
     all_names: set[str] = set()
+    # The measures in the order they were given. Iterating the set made the order (and
+    # with it the LLM batches and the order of the emitted measures) depend on the
+    # process's hash seed: the same input gave a different result on every run.
+    ordered_names: list[str] = []
     name_to_dax: dict[str, str] = {}
     for m in measures:
         name = m.get("measure_name", m.get("name", m.get("original_name", "")))
         if name:
+            if name not in all_names:
+                ordered_names.append(name)
             all_names.add(name)
             name_to_dax[name] = m.get("dax_expression", "")
 
@@ -66,7 +72,7 @@ def build_dependency_graph(measures: list[dict]) -> dict:
     reverse_adj: dict[str, list[str]] = {}
     in_degree: dict[str, int] = {}
 
-    for name in all_names:
+    for name in ordered_names:
         dax = name_to_dax.get(name, "")
         deps = _find_measure_refs(dax, all_names - {name})  # exclude self-refs
         adjacency[name] = sorted(deps)
@@ -76,7 +82,7 @@ def build_dependency_graph(measures: list[dict]) -> dict:
             in_degree[name] = in_degree.get(name, 0) + 1
 
     # Ensure all names in in_degree
-    for name in all_names:
+    for name in ordered_names:
         in_degree.setdefault(name, 0)
         reverse_adj.setdefault(name, [])
 

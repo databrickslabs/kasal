@@ -130,9 +130,9 @@ _MEASURE_REF = re.compile(r"\bMEASURE\(\s*`?(\w+)`?\s*\)", re.IGNORECASE)
 
 
 def _drop_orphan_windows(spec: MetricViewSpec, measure_lists: list[list]) -> None:
-    """Take out the prior-year measures (a window with an ``offset``) whose order
-    dimension is not among the view's dimensions, and the measures that read them: a
-    view with such a window does not deploy at all. They are listed with the reason."""
+    """Take out the window measures whose order dimension is not among the view's
+    dimensions, and the measures that read them: a view with such a window does not
+    deploy at all. ``prior_year.report_unemitted`` reports them with the reason."""
     dimensions = {str(d.get("name")) for d in spec.dimensions}
     gone: dict[str, str] = {}
     changed = True
@@ -144,15 +144,13 @@ def _drop_orphan_windows(spec: MetricViewSpec, measure_lists: list[list]) -> Non
                 reads = {
                     n.lower() for n in _MEASURE_REF.findall(str(measure.sql_expr or ""))
                 }
-                if window.get("offset") is not None and (
-                    str(window.get("order")) not in dimensions
-                ):
+                if window.get("order") and str(window["order"]) not in dimensions:
                     reason = (
-                        f"prior year: the view has no dimension {window.get('order')} "
-                        "for the window to order by"
+                        f"the view has no dimension {window.get('order')} "
+                        "for the measure's window to order by"
                     )
                 elif reads & set(gone):
-                    reason = "uses a prior-year measure that is not in this view"
+                    reason = "uses a window measure that is not in this view"
                 else:
                     continue
                 measures.remove(measure)

@@ -301,7 +301,33 @@ def detect_silent_wrong(sql: str | None) -> str | None:
     for reason, pat in _SILENT_WRONG_CHECKS:
         if pat.search(sql):
             return reason
+    if _has_nested_aggregate(sql):
+        return "aggregate inside an aggregate"
     return None
+
+
+_AGGREGATE = re.compile(r"\b(SUM|AVG|MIN|MAX|COUNT)\s*\(", re.IGNORECASE)
+_AGGREGATED = re.compile(r"\b(SUM|AVG|MIN|MAX|COUNT|MEASURE)\s*\(", re.IGNORECASE)
+
+
+def _has_nested_aggregate(sql: str) -> bool:
+    """Whether an aggregate's argument holds another aggregate or a ``MEASURE()``
+    (``SUM(MEASURE(x) * source.y)``). Databricks rejects the whole view for it
+    (NESTED_AGGREGATE_FUNCTION) without naming the measure, and finding it by
+    deploying halves removed measures that were fine."""
+    for call in _AGGREGATE.finditer(sql):
+        depth, i = 0, call.end() - 1
+        while i < len(sql):
+            if sql[i] == "(":
+                depth += 1
+            elif sql[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if _AGGREGATED.search(sql[call.end() : i]):
+            return True
+    return False
 
 
 def sanitize_measure_sql(sql: str, *, is_base: bool) -> tuple[str | None, str | None]:
