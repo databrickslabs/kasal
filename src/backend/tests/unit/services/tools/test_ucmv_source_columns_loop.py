@@ -120,3 +120,18 @@ def test_when_no_column_can_be_read_the_real_pass_gets_no_columns(fake_layer):
     assert len(generator.calls) == 2
     assert "source_columns_json" not in generator.calls[1]
     assert report["source_columns_probe"]["views_with_columns"] == 0
+
+
+def test_the_switch_off_means_no_probe_and_no_extra_generation(fake_layer):
+    # use_source_columns off: the loop reads nothing and runs no LLM-off pre-pass; the layer is
+    # still deployed by the loop (the metric views read it), with one generation only.
+    generator = _Generator()
+    _run(
+        generator,
+        config=json.dumps(
+            {"read_from_source_layer": True, "use_source_columns": False}
+        ),
+    )
+    assert len(generator.calls) == 1
+    assert "source_columns_json" not in generator.calls[0]
+    assert fake_layer["probed"] == []

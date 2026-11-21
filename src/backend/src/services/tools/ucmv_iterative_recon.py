@@ -140,6 +140,12 @@ def _source_columns_json(
     )
     from src.services.tools.ucmv_source_columns import read_source_columns
 
+    from src.services.tools.metric_view_utils.source_columns import (
+        source_columns_enabled,
+    )
+
+    if not source_columns_enabled(dict(_config(context))):
+        return None  # use_source_columns off: no probe, no pre-pass; the layer is still deployed
     if "json" in probe:  # read once per run; later cycles reuse the answer
         cached = probe["json"]
         return cached if isinstance(cached, str) else None

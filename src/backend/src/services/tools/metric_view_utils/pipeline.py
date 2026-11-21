@@ -43,6 +43,7 @@ from .source_columns import (
     column_renames,
     rename_references,
     renamed_columns,
+    source_columns_enabled,
 )
 from .source_layer_binding import (
     SourceLayerBinding,
@@ -138,7 +139,10 @@ class MetricViewPipeline:
         # Real columns of the source-layer views. They describe what a metric view reads, so
         # they are used only in read mode (see source_columns.py).
         self.source_columns: dict[str, list[str]] = (
-            dict(source_columns or {}) if read_from_source_layer(self.config) else {}
+            dict(source_columns or {})
+            if read_from_source_layer(self.config)
+            and source_columns_enabled(self.config)
+            else {}
         )
         # Columns named like the fact alias are exposed under another name (source_columns.py).
         self.column_renames: dict[str, dict[str, str]] = column_renames(

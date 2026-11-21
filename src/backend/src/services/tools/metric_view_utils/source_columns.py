@@ -29,6 +29,16 @@ QUALIFIER = "source"
 _RENAME_SUFFIX = "_"
 
 
+def source_columns_enabled(config: Mapping[str, object] | None) -> bool:
+    """The pipeline config switch ``use_source_columns`` (default true). Off: the loop does not read
+    the source views' columns and the generator ignores any it is given, so a run can be compared
+    with and without them."""
+    raw = (config or {}).get("use_source_columns", True)
+    if isinstance(raw, str):
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    return bool(raw)
+
+
 def parse_source_columns(raw: object) -> dict[str, list[str]]:
     """``{table key: [column names]}`` from the JSON input (or an already parsed mapping).
 
