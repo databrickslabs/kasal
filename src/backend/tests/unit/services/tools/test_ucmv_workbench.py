@@ -268,9 +268,11 @@ def test_the_working_copy_starts_from_crew_2b_reconciliation():
     gaps = bench.gaps("Fact_Sales")
     assert [g["measure"] for g in gaps["below_100"]] == ["revenue"]
     assert bench.overview()[0]["reconciled"] is True
-    # an edited measure must be compared again: its old result no longer counts
+    # an edited measure must be compared again: its old result no longer counts, and until it
+    # is compared it is an open gap, not a closed one
     bench.set_measure("Fact_Sales", "revenue", "SUM(source.net_amount)")
-    assert bench.gaps("Fact_Sales")["below_100"] == []
+    assert [g["measure"] for g in bench.gaps("Fact_Sales")["below_100"]] == ["revenue"]
+    assert bench.gaps("Fact_Sales")["below_100"][0]["classification"] == "edited_not_compared"
 
 
 def test_a_view_whose_comparison_fails_reports_the_error_and_is_not_marked_reconciled():

@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
 from src.services.tools.ucmv_workbench_utils import edits
+from src.services.tools.ucmv_workbench_utils.review import review_for_export
 from src.services.tools.ucmv_workbench_utils.state import CLASSIFICATIONS, Workbench
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,11 @@ class UCMVWorkbenchSchema(BaseModel):
     display_name: Optional[str] = Field(None, description="set_measure: display name")
     format_json: Optional[str] = Field(None, description='set_measure: format as JSON, e.g. {"type": "number"}')
     comment: Optional[str] = Field(None, description="set_measure: comment")
+    clear_window: Optional[bool] = Field(
+        None,
+        description="set_measure: true only when the measure is now the current period. A prior-year "
+        "measure (it has a window) keeps its window when the expr is replaced; set this to remove it.",
+    )
     classification: Optional[str] = Field(None, description="classify: " + " | ".join(CLASSIFICATIONS))
     note: Optional[str] = Field(None, description="classify: what was checked and why it is not a translation error")
 
@@ -203,8 +209,13 @@ class UCMVWorkbenchTool(BaseTool):
                 display_name=str(a.get("display_name") or ""),
                 fmt=edits.parse_format(str(a.get("format_json") or "") or None),
                 comment=str(a.get("comment") or ""),
+                clear_window=bool(a.get("clear_window")),
             )
-            return {"ok": True, "measure": measure, "change": how, "next": "deploy, then reconcile this view"}
+            window = bench.has_window(view, measure)
+            return {
+                "ok": True, "measure": measure, "change": how, "window_kept": window,
+                "next": "deploy, then reconcile this view",
+            }
         if action == "remove_measure":
             bench.remove_measure(view, measure)
             return {"ok": True, "removed": measure}
@@ -225,6 +236,7 @@ class UCMVWorkbenchTool(BaseTool):
                     for k, v in bench.views.items() if v.mapping
                 },
                 "finishing_report": bench.report(),
+                **review_for_export(bench),
             }
         raise edits.EditError(f"unknown action {action!r}; one of {', '.join(_ACTIONS)}")
 
@@ -237,6 +249,7 @@ class UCMVWorkbenchTool(BaseTool):
         status = str(result.get("status") or out.get("error") or "unknown")
         message = str(result.get("message") or "")
         v.deployed = "ok" if status.startswith("deployed") else (message or status)[:400]
+        v.changed = True
         return {"view": v.key, "status": status, "deployed_as": self._fqn(v.key), "message": message}
 
     def _reconcile_action(self, bench: Workbench, view: str) -> dict[str, object]:
@@ -256,8 +269,16 @@ class UCMVWorkbenchTool(BaseTool):
         for m, e in _map(report.get("measures")).items():
             entry = _map(e)
             compact[str(m)] = {k: entry[k] for k in _RECON_KEYS if k in entry}
-        bench.record_reconciliation(v.key, compact)
-        return {"view": v.key, "summary": report.get("summary"), "measures": compact}
+        # The comparison's view-level part (not_compared, periods, summary) is kept with the
+        # measures: a measure it left out stays an open gap, with the reason.
+        bench.record_reconciliation(v.key, compact, report)
+        v.changed = True
+        return {
+            "view": v.key,
+            "summary": report.get("summary"),
+            "measures": compact,
+            "not_compared": report.get("not_compared") or {},
+        }
 
     def _run(self, **kwargs: object) -> str:
         action = str(kwargs.get("action") or "overview")

@@ -54,6 +54,13 @@ def measure_names(text: str) -> list[str]:
     return [str(m.get("name")) for m in _measures(_load(text)) if m.get("name")]
 
 
+def dimension_names(text: str) -> list[str]:
+    dimensions = _load(text).get("dimensions")
+    if not isinstance(dimensions, list):
+        return []
+    return [str(d.get("name")) for d in dimensions if isinstance(d, dict) and d.get("name")]
+
+
 def measure_entry(text: str, name: str) -> Optional[dict[str, object]]:
     return next((m for m in _measures(_load(text)) if m.get("name") == name), None)
 
@@ -78,8 +85,14 @@ def set_measure(
     display_name: Optional[str] = None,
     fmt: Optional[dict[str, object]] = None,
     comment: Optional[str] = None,
+    clear_window: bool = False,
 ) -> tuple[str, bool]:
-    """Add or replace one measure. Returns ``(new_yaml, replaced)``."""
+    """Add or replace one measure. Returns ``(new_yaml, replaced)``.
+
+    A prior-year measure keeps its ``window`` when its expression is replaced: the window is
+    what makes it a prior-year measure, and the expression is usually the same calculation with
+    a fix to its base. ``clear_window`` removes it, for a measure that is now the current period.
+    """
     if not _IDENTIFIER.match(name or ""):
         raise EditError(f"measure name {name!r} must be a plain identifier (letters, digits, _)")
     if not (expr or "").strip():
@@ -97,8 +110,11 @@ def set_measure(
     replaced = False
     for i, m in enumerate(measures):
         if isinstance(m, dict) and m.get("name") == name:
-            # keep what the edit does not set (format, display_name, synonyms, ...)
-            measures[i] = {**m, **entry}
+            # keep what the edit does not set (format, display_name, synonyms, window, ...)
+            merged = {**m, **entry}
+            if clear_window:
+                merged.pop("window", None)
+            measures[i] = merged
             replaced = True
             break
     if not replaced:
@@ -143,9 +159,19 @@ def rebind_mapping(mapping: dict[str, object], ucmv_fqn: str) -> dict[str, objec
     return {**mapping, "binding": binding}
 
 
-def upsert_mapping_measure(mapping: dict[str, object], ucmv_measure: str, pbi_measure: str) -> dict[str, object]:
+def upsert_mapping_measure(
+    mapping: dict[str, object],
+    ucmv_measure: str,
+    pbi_measure: str,
+    *,
+    time_shifted: bool = False,
+) -> dict[str, object]:
     """Compare ``ucmv_measure`` with the Power BI measure ``pbi_measure`` (``pbi_kind: direct``).
-    An existing entry keeps its options (aggregation, filters, tolerance) and becomes resolved."""
+    An existing entry keeps its options (aggregation, filters, tolerance) and becomes resolved.
+
+    ``time_shifted`` marks a prior-year measure (it has a window): the reconciliation compares it
+    in its second pass, grouped by the calendar, so the mapping entry must say so.
+    """
     measures = mapping.get("measures")
     entries = [dict(m) for m in measures if isinstance(m, dict)] if isinstance(measures, list) else []
     for m in entries:
@@ -153,9 +179,16 @@ def upsert_mapping_measure(mapping: dict[str, object], ucmv_measure: str, pbi_me
             if m.get("pbi_kind") in (None, "unresolved"):
                 m["pbi_kind"] = "direct"
             m.setdefault("pbi_measure", pbi_measure)
+            if time_shifted:
+                m["time_shifted"] = True
+            elif m.get("time_shifted"):
+                m["time_shifted"] = False
             break
     else:
-        entries.append({"ucmv_measure": ucmv_measure, "pbi_measure": pbi_measure, "pbi_kind": "direct"})
+        entry: dict[str, object] = {"ucmv_measure": ucmv_measure, "pbi_measure": pbi_measure, "pbi_kind": "direct"}
+        if time_shifted:
+            entry["time_shifted"] = True
+        entries.append(entry)
     return {**mapping, "measures": entries}
 
 
