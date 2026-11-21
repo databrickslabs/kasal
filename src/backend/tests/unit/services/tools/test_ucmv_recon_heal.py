@@ -667,3 +667,69 @@ def test_the_trial_deploys_stay_within_the_cap_on_a_large_view():
         [],
     )
     assert len(calls_cap) <= MAX_BISECT_DEPLOYS
+
+
+def test_a_healed_measure_goes_back_to_the_llm_even_when_nothing_is_below_the_bar():
+    # `fte` fails to deploy and is healed away; the only reconciled measure is at 95 %, above
+    # the 90 % bar, so the reconciliation feedback is empty. The removal must still reach the LLM.
+    feedback_seen = []
+
+    class _Generator:
+        def _run(self, **kwargs):
+            feedback_seen.append(kwargs.get("refinement_feedback"))
+            return json.dumps(
+                {
+                    "yaml": {"Fact": YAML},
+                    "resolved_measures_by_table": {
+                        "Fact": [
+                            {"measure_name": "fte", "original_name": "FTE"},
+                            {"measure_name": "volume", "original_name": "Volume"},
+                        ]
+                    },
+                }
+            )
+
+    class _Deployer:
+        def _run(self, yaml_specs_json, **kwargs):
+            results = {}
+            for key, text in json.loads(yaml_specs_json).items():
+                bad = "fte" in _names(text, "measures")
+                results[key] = (
+                    {
+                        "status": "error",
+                        "message": "with name `source`.`fte` cannot be resolved",
+                    }
+                    if bad
+                    else {"status": "deployed"}
+                )
+            return json.dumps({"deployment_results": results})
+
+    class _Reconciler:
+        def _run(self, **kwargs):
+            return json.dumps(
+                {
+                    "views": {"Fact": {"measures": {"volume": {"pct_aligned": 95.0}}}},
+                    "overall": {"cells_total": 2, "overall_cell_pct": 95.0},
+                }
+            )
+
+    out = run_iterative_ucmv_generation(
+        generator=_Generator(),
+        deployer=_Deployer(),
+        reconciler=_Reconciler(),
+        gen_kwargs={
+            "dataset_id": "ds",
+            "workspace_id": "ws",
+            "config_json": json.dumps({"join_key_map": {"Geo": {"alias": "dim_geo"}}}),
+        },
+        deploy_kwargs={"catalog": "c", "schema_name": "s", "warehouse_id": "wh"},
+        max_cycles=2,
+        target_pct=100,
+        refine_pct=90,
+    )
+    assert out["cycles"][0]["deploy_healed"]["Fact"][0].startswith("measure fte")
+    assert feedback_seen[1] is not None
+    second = json.loads(feedback_seen[1])
+    assert any(
+        item.get("measure") == "fte" and item.get("deploy_error") for item in second
+    )

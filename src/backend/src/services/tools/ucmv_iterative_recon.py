@@ -171,10 +171,12 @@ def run_iterative_ucmv_generation(
     def generate(feedback: Optional[list[RawMap]]) -> RawMap:
         nonlocal resolved_state, specs_state
         kw = dict(gen_base)
-        if feedback:
+        # A measure a deploy heal removed goes back to the LLM even when nothing reconciled
+        # below the bar (the reconciliation feedback is then empty).
+        if feedback or heal_state["feedback"]:
             # The generator normalises this into the DAX LLM's per-measure hints.
             feedback = [
-                *feedback,
+                *(feedback or []),
                 *(as_map(x) for x in as_list(heal_state["feedback"])),
             ]
             kw["refinement_feedback"] = json.dumps(feedback)
