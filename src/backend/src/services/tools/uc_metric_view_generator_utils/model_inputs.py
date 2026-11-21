@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .shared_types import as_dict, as_list, as_str
@@ -33,6 +33,20 @@ class ParsedModelInputs:
     inactive_relationships: list[dict]
     scan_data: dict[str, ScanTableInfo]
     scan_parser: ScanDataParser
+    # The model's full relationship list as given (a table that no relationship names filters
+    # nothing); empty when none was given, so no predicate is left out.
+    relationships: list[dict] = field(default_factory=list)
+
+
+def _relationship_rows(relationships_raw: object) -> list[dict]:
+    """The relationship rows as dicts. A JSON string is decoded; anything else is not a list."""
+    value = relationships_raw
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return [row for row in as_list(value) if isinstance(row, dict)]
 
 
 def _json_source(value: object) -> list | dict:
@@ -159,4 +173,5 @@ def parse_model_inputs(
         inactive_relationships=inactive_relationships,
         scan_data=scan_data,
         scan_parser=scan_parser,
+        relationships=_relationship_rows(relationships_raw),
     )

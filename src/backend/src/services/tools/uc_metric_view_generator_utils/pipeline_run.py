@@ -37,6 +37,7 @@ def run_pipeline(
         refresh_policy_tables=scan_parser.get_refresh_policy_tables() or None,
         no_summarize_columns=scan_parser.get_no_summarize_columns() or None,
         rls_tables=scan_parser.get_rls_tables() or None,
+        relationships=parsed.relationships or None,
     )
     pipeline.run()
     return pipeline

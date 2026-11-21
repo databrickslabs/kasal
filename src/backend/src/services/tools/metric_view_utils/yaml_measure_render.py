@@ -17,6 +17,7 @@ from .metadata_generator import MetadataGenerator
 from .utils import col_to_readable
 from .yaml_annotations import (
     _categorize_untranslatable,
+    _dropped_filter_suffix,
     _indirect_visual_usage_suffix,
     _provenance_suffix,
     _usage_suffix,
@@ -204,6 +205,7 @@ def render_dax_measures(
             if _fp:
                 dax_comment = f"{dax_comment} · {_fp}" if dax_comment else _fp
             dax_comment += _provenance_suffix(m)
+            dax_comment += _dropped_filter_suffix(m)
             dax_comment += _window_caveat(m.window_spec)
         dax_comment += _usage_suffix(m.referenced_by)
         dax_comment += _visual_usage_suffix(m)

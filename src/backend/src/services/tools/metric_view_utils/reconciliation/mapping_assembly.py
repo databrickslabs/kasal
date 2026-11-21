@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 import yaml
 
+from ..filter_reach import filter_reach
 from ..raw_fields import RawMap, as_list, as_map
 from . import time_shift
 
@@ -274,20 +275,7 @@ def fact_filters(
     filter it: grouped by such a table, Power BI returns the same total on every row."""
     rels = [as_map(r) for r in as_list(relationships)]
     if rels:
-        reachable = {fact}
-        frontier = [fact]
-        while frontier:
-            current = frontier.pop()
-            for rel in rels:
-                target = str(rel.get("to_table") or "")
-                if (
-                    rel.get("is_active") is not False
-                    and str(rel.get("from_table") or "") == current
-                    and target not in reachable
-                ):
-                    reachable.add(target)
-                    frontier.append(target)
-        return FactFilters(reachable=frozenset(reachable))
+        return FactFilters(reachable=filter_reach(fact, rels))
     blocked = {
         str(as_map(r).get("to_table") or "")
         for r in as_list(inactive_relationships)

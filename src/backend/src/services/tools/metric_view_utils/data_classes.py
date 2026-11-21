@@ -71,6 +71,10 @@ class TranslationResult:
     # for the vast majority of measures, without needing it stamped here.
     # pbi_kind: "direct" | "composite" | "dimension_conditional" | None.
     pbi_kind: str | None = None
+    # Tables whose CALCULATE predicate was left out of the DAX before translation: they have
+    # no active relationship path to the fact, so Power BI does not filter the fact with them
+    # (``filter_reach.drop_non_filtering_filters``). Named in the measure's comment.
+    dropped_filter_tables: tuple[str, ...] = ()
     # Plain measure-name strings for a switch resolution (e.g. ["ACT", "BP"]),
     # or {"kind": "raw_column", "table", "column", "value_column",
     # "filter_value"} dicts for an fx_* code-filtered EAV resolution — never

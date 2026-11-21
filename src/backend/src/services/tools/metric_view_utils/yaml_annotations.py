@@ -261,3 +261,15 @@ def _provenance_suffix(measure: TranslationResult) -> str:
             explanation = explanation[: _MAX_EXPLANATION - 1].rstrip() + "…"
         parts += f": {explanation}"
     return f" · {parts}"
+
+
+def _dropped_filter_suffix(measure: TranslationResult) -> str:
+    """Note for a CALCULATE predicate left out because its table does not filter the fact."""
+    tables = getattr(measure, "dropped_filter_tables", ()) or ()
+    if not tables:
+        return ""
+    names = ", ".join(sorted(set(tables)))
+    return (
+        f" · predicate on {names} left out: that table has no active relationship "
+        "path to the fact, so Power BI does not filter the fact with it"
+    )

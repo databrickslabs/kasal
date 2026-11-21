@@ -114,6 +114,7 @@ class MetricViewPipeline:
         no_summarize_columns: list[dict] | None = None,
         rls_tables: set[str] | None = None,
         mquery_expressions: dict | None = None,
+        relationships: list[dict] | None = None,
     ):
         self.mapping = mapping
         for entry in mapping:
@@ -173,6 +174,7 @@ class MetricViewPipeline:
             self._limitations["field_parameters"] = field_parameters
 
         self.translator = DaxTranslator(config=self.config)
+        self.translator.set_model_relationships(relationships or [])
         self.join_detector = JoinDetector(mquery_tables, config=self.config)
 
         # Merge auto-enrichment joins from PBI relationships.
