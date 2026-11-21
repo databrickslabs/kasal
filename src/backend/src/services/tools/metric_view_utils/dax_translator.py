@@ -21,13 +21,39 @@ from .dax_condition_sql import (
     _sql_str_literal,
     split_top_level_args,
 )
-from .dax_preclean import preclean_dax
+from .dax_preclean import preclean_dax, unwrap_keepfilters
 from .dax_sumx_terms import match_sumx_terms, translate_sumx_terms
 from .dax_scalar_converters import DaxScalarConvertersMixin
-from .filter_reach import drop_non_filtering_filters, filter_reach, model_mentions
+from .filter_reach import (
+    dax_table_names,
+    drop_non_filtering_filters,
+    filter_reach,
+    model_mentions,
+)
 from .join_detector import _sanitize_alias
 from .sql_measure_sanitizer import sanitize_measure_name
 from .utils import to_snake_case
+
+
+def _outer_calculate_filters(text: str) -> tuple[str, str]:
+    """``CALCULATE(<body>, <f1>, ...)`` as ``("CALCULATE(<body>)", "<f1>, ...")``; the text
+    unchanged with "" when it is not one CALCULATE call with filter arguments after the body."""
+    head = re.match(r"\s*CALCULATE\s*\(", text, re.IGNORECASE)
+    if not head:
+        return text, ""
+    depth, pos = 1, head.end()
+    while pos < len(text) and depth:
+        if text[pos] == "(":
+            depth += 1
+        elif text[pos] == ")":
+            depth -= 1
+        pos += 1
+    if depth or text[pos:].strip():
+        return text, ""
+    args = split_top_level_args(text[head.end() : pos - 1])
+    if len(args) < 2:
+        return text, ""
+    return f"CALCULATE({args[0]})", ", ".join(args[1:])
 
 
 class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
@@ -45,6 +71,8 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
         self._source_col_map: dict[str, str] = {}
         self._relationships: list[dict] = []
         self._reach_cache: dict[str, frozenset[str] | None] = {}
+        # The view being translated: match functions get DAX only, so translate() records it.
+        self._view_key: str = ""
         self._patterns: list[tuple[str, Callable, TranslateFn]] = []
         self._register_patterns()
 
@@ -236,7 +264,31 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
         aren't the primary path in llm_first mode.
         """
         name = measure.get("measure_name", "")
+        self._view_key = table_key
         dax = self._preclean_dax(measure.get("dax_expression", ""))
+        dax = unwrap_keepfilters(
+            dax, lambda p: self._keepfilters_accepted(p, table_key)
+        )
+        wrapped, outer = _outer_calculate_filters(dax.strip())
+        if (
+            outer
+            and "DIVIDE" in wrapped.upper()
+            and not self._keepfilters_accepted(outer, table_key)
+        ):
+            # The DIVIDE translations below read the numerator and denominator and drop this
+            # filter: a filter on a model dimension wrapping a DIVIDE is not translated.
+            return TranslationResult(
+                measure_name=sanitize_measure_name(
+                    to_snake_case(measure.get("original_name", name))
+                ),
+                original_name=measure.get("original_name", name),
+                sql_expr=None,
+                is_translatable=False,
+                skip_reason="CALCULATE filter on a model dimension wraps DIVIDE",
+                dax_expression=dax,
+                confidence="none",
+                category="unassigned",
+            )
         # A predicate on a table that does not filter this fact has no effect in Power BI and
         # no join in the view: it is left out before any translation (rules and LLM alike).
         dax, dropped_filter_tables = self._drop_non_filtering_filters(dax, table_key)
@@ -651,9 +703,19 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
         up = cleaned.upper()
         if "DIVIDE(" not in up and "DIVIDE (" not in up:
             return None
+        # CALCULATE(DIVIDE(...), <filters>): the outer filters apply to every measure the
+        # DIVIDE reads, so they are added to each reference and taken off the wrapper.
+        cleaned, outer = _outer_calculate_filters(cleaned)
+        if outer and not self._keepfilters_accepted(outer, self._view_key):
+            return None  # an outer filter on a model dimension: not translated
         refs = self._find_calculate_measure_refs(cleaned)
         if not refs:
             return None
+        if outer:
+            refs = [
+                {**r, "filter_text": ", ".join(p for p in (r["filter_text"], outer) if p)}
+                for r in refs
+            ]
         return {"cleaned": cleaned, "refs": refs}
 
     def _match_divide(self, dax: str, name: str) -> dict | None:
@@ -1231,6 +1293,21 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
                 return None
             conditions.append(cond)
         return conditions
+
+    def _keepfilters_accepted(self, predicate: str, table_key: str) -> bool:
+        """Whether a KEEPFILTERS predicate may be unwrapped: it reads the fact's own columns,
+        or only tables the model does not describe. A predicate on a model dimension stays
+        wrapped (refused): its column is not a fact column, and the view has no join to it.
+        """
+        others = {t.lower() for t in dax_table_names(predicate)} - {table_key.lower()}
+        if not others:
+            return True
+        related = {
+            str(r.get(end) or "").lower()
+            for r in self._relationships
+            for end in ("from_table", "to_table")
+        }
+        return not others & (related | {k.lower() for k in self._dim_alias_map})
 
     def _resolve_measure_ref(
         self, ref_name: str, extra_filters: list[str]

@@ -8,6 +8,42 @@ that the ratio measures carry. Pure string transform.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+
+
+_KEEPFILTERS = re.compile(r"\bKEEPFILTERS\s*\(", re.IGNORECASE)
+
+
+def unwrap_keepfilters(dax: str, accept: Callable[[str], bool]) -> str:
+    """``KEEPFILTERS(<filter>)`` as the bare ``<filter>``, where ``accept(<filter>)`` holds.
+
+    KEEPFILTERS changes only how a CALCULATE filter combines with the filters already on the
+    same column: it intersects them where a plain filter replaces them. A metric view
+    measure's FILTER (WHERE ...) already intersects with the query's filters, so the
+    predicate is the same measure. A KEEPFILTERS that is not accepted stays as written, so
+    the CALCULATE argument it sits in is not read as a predicate. Unbalanced text is left
+    as written.
+    """
+    position = 0
+    while True:
+        found = _KEEPFILTERS.search(dax, position)
+        if not found:
+            return dax
+        start, depth, pos = found.end(), 1, found.end()
+        while pos < len(dax) and depth:
+            if dax[pos] == "(":
+                depth += 1
+            elif dax[pos] == ")":
+                depth -= 1
+            pos += 1
+        if depth:
+            return dax
+        inner = dax[start : pos - 1]
+        if not accept(inner):
+            position = pos  # keep this one; look for the next
+            continue
+        dax = dax[: found.start()] + inner + dax[pos:]
+        position = found.start()
 
 
 def preclean_dax(dax: str) -> str:
