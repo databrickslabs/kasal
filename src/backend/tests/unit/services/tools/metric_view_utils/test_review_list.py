@@ -277,3 +277,52 @@ def test_the_overview_counts_in_scope_measures_apart_from_column_sums_and_displa
     # revenue (matches), volume and =cmd are plain column sums
     assert (sales["column_sums"], sales["column_sums_match"]) == (3, 1)
     assert with_review(output)["review_overview"]["total"]["in_scope"] >= 3
+
+
+def test_a_measure_translated_on_its_fact_and_listed_on_its_holder_table_counts_once():
+    from src.services.tools.metric_view_utils.reconciliation.review_list import (
+        build_review_list,
+        review_overview,
+    )
+
+    fact = """version: '1.1'
+source: c.s.fact
+dimensions:
+  - name: country
+    expr: source.country
+measures:
+  - name: sales_py
+    expr: MEASURE(sales)
+"""
+    output = {
+        "yaml": {"Fact": fact},
+        "resolved_measures_by_table": {
+            "Fact": [
+                {
+                    "measure_name": "sales_py",
+                    "original_name": "Sales PY",
+                    "dax_expression": "CALCULATE([Sales])",
+                },
+                # resolved, but not in the emitted view: does not count as translated
+                {
+                    "measure_name": "margin_py",
+                    "original_name": "Margin PY",
+                    "dax_expression": "CALCULATE([Margin])",
+                },
+            ]
+        },
+        "untranslatable_items": [
+            {"table_key": "Calendar", "original_name": "Sales PY", "skip_reason": "x"},
+            {"table_key": "Calendar", "original_name": "Margin PY", "skip_reason": "x"},
+            {"table_key": "Calendar", "original_name": "Other", "skip_reason": "x"},
+        ],
+    }
+    rows = build_review_list(output)
+    scopes = {(r["view"], r["measure"]): r["scope"] for r in rows}
+    assert scopes[("Calendar", "Sales PY")] == "counted_elsewhere"
+    assert scopes[("Calendar", "Margin PY")] == "in_scope"
+    assert scopes[("Calendar", "Other")] == "in_scope"
+    overview = review_overview(rows)
+    assert overview["Calendar"]["in_scope"] == 2
+    assert overview["Calendar"]["not_translated"] == 2
+    assert overview["total"]["in_scope"] == 3  # Sales PY once, on its fact

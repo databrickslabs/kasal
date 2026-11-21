@@ -131,6 +131,19 @@ def _power_bi_measures(output: Mapping[str, object]) -> dict[str, set[str]]:
     }
 
 
+def _translated_on(output: Mapping[str, object]) -> dict[str, set[str]]:
+    """``{Power BI measure: views whose metric view holds it}``."""
+    built = as_map(output.get("yaml"))
+    views: dict[str, set[str]] = {}
+    for view, measures in as_map(output.get("resolved_measures_by_table")).items():
+        emitted = {str(m.get("name")) for m in _view_measures(built.get(view))}
+        for raw in as_list(measures):
+            entry = as_map(raw)
+            if entry.get("original_name") and str(entry.get("measure_name")) in emitted:
+                views.setdefault(str(entry["original_name"]), set()).add(str(view))
+    return views
+
+
 def _compared_rows(
     view: str,
     yaml_text: object,
@@ -248,16 +261,26 @@ def build_review_list(
                         reason=_short(item),
                     )
                 )
+    translated_on = _translated_on(output)
     for raw in as_list(output.get("untranslatable_items")):
         item = as_map(raw)
+        view = str(item.get("table_key") or item.get("view_name") or "")
+        scope = _untranslated_scope(item)
+        # A measure Power BI keeps on one table (a calendar, a measure table) and the
+        # generator translated on the fact it reads is listed on both: it counts once,
+        # where it is translated.
+        if scope == "in_scope" and translated_on.get(
+            str(item.get("original_name") or ""), set()
+        ) - {view}:
+            scope = "counted_elsewhere"
         rows.append(
             _row(
-                str(item.get("table_key") or item.get("view_name") or ""),
+                view,
                 str(item.get("original_name") or ""),
                 "not_translated",
                 power_bi=str(item.get("original_name") or ""),
                 kind="measure",
-                scope=_untranslated_scope(item),
+                scope=scope,
                 used_on_visuals=len(as_list(item.get("used_in_visuals")))
                 + len(as_list(item.get("indirect_visual_usage"))),
                 reason=_short(item.get("skip_reason")),
