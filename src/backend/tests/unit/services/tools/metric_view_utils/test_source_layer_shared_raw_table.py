@@ -80,8 +80,8 @@ def test_a_shared_alias_binds_to_the_table_that_has_the_columns_the_measures_rea
     from types import SimpleNamespace
 
     from src.services.tools.metric_view_utils.source_layer_binding import (
-        _table_with_measure_columns,
         shared_alias_columns,
+        shared_alias_target,
     )
 
     shared = shared_alias_columns(
@@ -100,30 +100,37 @@ def test_a_shared_alias_binds_to_the_table_that_has_the_columns_the_measures_rea
     assert sorted(shared) == ["dim_plant"]  # only aliases more than one table uses
     views = {"C_Dim_Plant": "c.s.src_c_dim_plant", "Dim_Plant": "c.s.src_dim_plant"}
 
-    def spec(*exprs: str) -> SimpleNamespace:
-        return SimpleNamespace(measures=[SimpleNamespace(sql_expr=e) for e in exprs])
+    def spec(measures: tuple = (), dims: tuple = ()) -> SimpleNamespace:
+        return SimpleNamespace(
+            measures=[SimpleNamespace(sql_expr=e) for e in measures],
+            dimensions=[{"expr": e} for e in dims],
+        )
+
+    def target(s: SimpleNamespace, current: str | None = None) -> str | None:
+        return shared_alias_target(s, "dim_plant", shared, views, current)
 
     filtered = spec(
-        "SUM(source.qty) FILTER (WHERE dim_plant.plant_txtmd_ref NOT IN ('A'))"
+        ("SUM(source.qty) FILTER (WHERE dim_plant.plant_txtmd_ref NOT IN ('A'))",)
     )
-    assert (
-        _table_with_measure_columns(filtered, "dim_plant", shared, views) == "Dim_Plant"
+    assert target(filtered) == "Dim_Plant"
+    # a dimension reading the column the other table renames is what decides, too
+    named = spec(dims=("dim_plant.plant_desc",))
+    assert target(named) == "C_Dim_Plant"
+    # the current choice stays when it covers the most (a tie keeps it)
+    assert target(named, "Dim_Plant") == "C_Dim_Plant"
+    assert target(spec(dims=("dim_plant.plant",)), "Dim_Plant") == "Dim_Plant"
+    # a tie with a current choice outside the best keeps the sorted first
+    assert target(spec(dims=("dim_plant.plant",)), "Other") == "C_Dim_Plant"
+    # the measures and dimensions together: the view that covers more items wins
+    mixed = spec(
+        measures=("SUM(source.qty) FILTER (WHERE dim_plant.plant_txtmd_ref = 'A')",),
+        dims=("dim_plant.plant_desc", "dim_plant.plant_desc"),
     )
-    # both tables have the column, or no measure reads the alias: not guessed
-    assert (
-        _table_with_measure_columns(
-            spec("SUM(source.qty) FILTER (WHERE dim_plant.plant = 'A')"),
-            "dim_plant",
-            shared,
-            views,
-        )
-        is None
-    )
-    assert (
-        _table_with_measure_columns(spec("SUM(source.qty)"), "dim_plant", shared, views)
-        is None
-    )
-    assert _table_with_measure_columns(filtered, "dim_geography", shared, views) is None
+    assert target(mixed) == "C_Dim_Plant"  # 2 dimensions beat 1 measure
+    # no read through the alias, or no candidate covers one: the current choice stands
+    assert target(spec(measures=("SUM(source.qty)",)), "Dim_Plant") == "Dim_Plant"
+    assert target(spec(dims=("dim_plant.unknown_col",)), None) is None
+    assert shared_alias_target(filtered, "dim_geography", shared, views, None) is None
 
 
 def test_a_placeholder_override_does_not_stand_in_for_a_translation():

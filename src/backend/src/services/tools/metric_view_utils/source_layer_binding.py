@@ -187,30 +187,55 @@ def shared_alias_columns(
     return {alias: tables for alias, tables in by_alias.items() if len(tables) > 1}
 
 
-def _table_with_measure_columns(
+def _alias_reads(texts: list[str], alias: str) -> list[frozenset[str]]:
+    """One set per measure or dimension text: the columns it reads through the alias."""
+    reads = re.compile(rf"\b{re.escape(alias)}\.`?(\w+)`?")
+    out = []
+    for text in texts:
+        columns = frozenset(c.lower() for c in reads.findall(text))
+        if columns:
+            out.append(columns)
+    return out
+
+
+def shared_alias_target(
     spec: MetricViewSpec,
     alias: str,
     shared: Mapping[str, Mapping[str, frozenset[str]]] | None,
     views: Mapping[str, str],
+    current: str | None,
 ) -> str | None:
-    """The PBI table behind a join alias that several tables share (two plant tables over one
-    warehouse table): the one table that has every column the view's measures read through
-    the alias. The join then reads that table's view, with the columns Power Query adds or
-    renames; left on the raw table, a measure that filters on such a column cannot deploy.
+    """The PBI table whose view a join over a shared alias should read, for this metric view.
+
+    Several PBI tables can share one join alias and one warehouse table (two plant tables).
+    Their views differ: one carries the columns Power Query adds or renames, the other does not.
+    A measure or dimension that reads a column the view lacks is removed on deploy. So each
+    candidate is scored by how many of this view's measures and dimensions read through the
+    alias are covered by its columns. The current choice stays when it is among the best.
+    With no measure or dimension reading the alias, or no candidate covering any of them, the
+    current choice stands.
     """
-    candidates = (shared or {}).get(alias)
-    if not candidates:
-        return None
-    reads = re.compile(rf"\b{re.escape(alias)}\.`?(\w+)`?")
-    needed = {
-        column.lower()
-        for measure in spec.measures
-        for column in reads.findall(str(measure.sql_expr or ""))
+    candidates = {
+        table: columns
+        for table, columns in (shared or {}).get(alias, {}).items()
+        if table in views
     }
-    if not needed:
-        return None
-    fits = [t for t, columns in candidates.items() if t in views and needed <= columns]
-    return fits[0] if len(fits) == 1 else None
+    texts = [str(m.sql_expr or "") for m in spec.measures]
+    texts += [str(d.get("expr", "")) for d in spec.dimensions]
+    reads = _alias_reads(texts, alias)
+    if not candidates or not reads:
+        return current
+    scores = {
+        table: sum(1 for needed in reads if needed <= columns)
+        for table, columns in candidates.items()
+    }
+    best = max(scores.values())
+    if best == 0:
+        return current
+    tops = sorted(table for table, score in scores.items() if score == best)
+    if current in tops:
+        return current
+    return tops[0]
 
 
 def placeholder_join_target(source: str, views: Mapping[str, str]) -> str | None:
@@ -354,8 +379,8 @@ def _rebind_joins(
         )
         if target is None or target not in views:
             target = placeholder_join_target(source, views) or target
-        if target is None or target not in views:
-            target = _table_with_measure_columns(spec, alias, shared, views) or target
+        if alias in (shared or {}):
+            target = shared_alias_target(spec, alias, shared, views, target)
         if target is not None and target in views:
             joins.append({**join, "source": views[target]})
             bound_aliases[alias] = target
