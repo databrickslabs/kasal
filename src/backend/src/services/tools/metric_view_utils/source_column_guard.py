@@ -134,35 +134,46 @@ def guard_view(
                 return f"reads column {', '.join(gap)}, which the source view of join {alias} does not have"
         return ""
 
-    kept_dims: list[dict] = []
-    # A name whose dimension was dropped stays taken: a later dimension of the same name (from
-    # another join, e.g. an alternative calendar) must not silently take over what the view
-    # read before. The writer already kept the first of such names; this keeps that.
-    taken_by_dropped: set[str] = set()
+    # Decide each dimension first: "own" (the fact's own column of a dropped join), "drop" (with a
+    # reason) or "keep".
+    decided: list[tuple[dict, str, str, str]] = []
     for dim in dimensions:
-        name = str(dim.get("name") or "")
         own = _fact_column_of_dropped_join(
             str(dim.get("expr") or ""), dropped, fact_columns
         )
         if own:  # a column of a dropped join that the fact has itself (e.g. a period)
-            kept_dims.append({**dim, "expr": own})
+            decided.append((dim, "own", own, ""))
             continue
-        if name.lower() in taken_by_dropped:
+        reason = reason_for(str(dim.get("expr") or ""))
+        decided.append((dim, "drop" if reason else "keep", "", reason))
+    # A name with a dropped dimension is taken by nothing else, whatever the order: another join's
+    # dimension of that name (an alternative calendar, say) would otherwise read a different table
+    # under the name the view had. Without real columns the writer kept the first such name; the
+    # removal is recorded with the reason.
+    dropped_names = {
+        str(dim.get("name") or "").lower()
+        for dim, status, _, _ in decided
+        if status == "drop"
+    }
+    kept_dims: list[dict] = []
+    for dim, status, own, reason in decided:
+        name = str(dim.get("name") or "")
+        if status == "own":
+            kept_dims.append({**dim, "expr": own})
+        elif status == "drop":
+            gaps.append(SourceGap(key, "dimension", name, reason))
+        elif name.lower() in dropped_names:
             gaps.append(
                 SourceGap(
                     key,
                     "dimension",
                     name,
-                    "a dimension of the same name was dropped; this one would replace it",
+                    "a dimension of the same name was dropped or reads the fact's column; "
+                    "this one of another join would replace it",
                 )
             )
-            continue
-        reason = reason_for(str(dim.get("expr") or ""))
-        if reason:
-            taken_by_dropped.add(name.lower())
-            gaps.append(SourceGap(key, "dimension", name, reason))
-            continue
-        kept_dims.append(dim)
+        else:
+            kept_dims.append(dim)
 
     kept_measures: list[TranslationResult] = []
     removed: list[TranslationResult] = []

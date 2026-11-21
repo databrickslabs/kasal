@@ -161,6 +161,31 @@ def test_a_dropped_dimension_name_is_not_taken_over_by_another_join():
     ]
 
 
+def test_a_valid_dimension_listed_before_a_dropped_one_of_the_same_name_is_removed_too():
+    # The valid alternative comes first in the list: it must not be the one the view emits under
+    # the name, nor is the dropped one replaced by it.
+    result = _guard(
+        joins=[
+            dict(JOIN, name="dim_a", on="source.plant_code = dim_a.missing_key"),
+            dict(
+                JOIN,
+                name="dim_b",
+                source="tgt.ucmv.src_dim_b",
+                on="source.plant_code = dim_b.plant_code",
+            ),
+        ],
+        dimensions=[
+            {"name": "period", "expr": "dim_b.period"},
+            {"name": "period", "expr": "dim_a.period"},
+            {"name": "code", "expr": "source.plant_code"},
+        ],
+        columns_by_key={**COLUMNS, "Dim_B": frozenset({"plant_code", "period"})},
+        key_by_view={**KEY_BY_VIEW, "tgt.ucmv.src_dim_b": "Dim_B"},
+    )
+    assert [d["expr"] for d in result.dimensions] == ["source.plant_code"]
+    assert sorted(g.kind for g in result.gaps) == ["dimension", "dimension", "join"]
+
+
 def test_a_later_dimension_of_a_kept_name_is_unaffected():
     result = _guard(
         dimensions=[
