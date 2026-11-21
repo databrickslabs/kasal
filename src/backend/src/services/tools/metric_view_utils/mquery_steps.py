@@ -29,7 +29,7 @@ from .mquery_let_evaluator import (
 # Catalog-browse connectors (same families as mquery_parser's gate) plus
 # Sql.Database(s) table navigation. Only valid as the FIRST step.
 _CONNECTOR_RE = re.compile(
-    r"(Databricks\.\w+|Snowflake\.Databases|PostgreSQL\.Database|MySQL\.Database|"
+    r"(Databricks(?:MultiCloud)?\.\w+|Snowflake\.Databases|PostgreSQL\.Database|MySQL\.Database|"
     r"Oracle\.Database|AmazonRedshift\.Database|GoogleBigQuery\.Database|"
     r"Sql\.Databases?)"
 )

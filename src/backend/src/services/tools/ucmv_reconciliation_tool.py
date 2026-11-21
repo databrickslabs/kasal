@@ -1,0 +1,777 @@
+"""UCMV Reconciliation Tool for CrewAI.
+
+Given a reconciliation MAPPING (which PBI measure/column each UCMV measure maps
+to), a deployed UC Metric View, and the live Power BI model, VERIFY every UCMV
+measure returns the numbers PBI shows: run the UCMV side on a Databricks SQL
+warehouse, run the PBI side via the Execute Queries (DAX) API, join cell-by-cell
+within tolerance, and classify mismatches.
+
+The tool does I/O + orchestration only. Every query is built and every
+comparison is made by the deterministic core in
+``metric_view_utils/reconciliation/`` — the LLM is never in the comparison path.
+
+Mapping features (per measure or per time dimension, in the mapping YAML):
+
+- ``value_format: raw_number_hundred``: PBI's 0-100 number divided by 100 for a
+  UCMV fraction.
+- ``time_dimension.grain: week``: ``YYYYWW``, ``WW.YYYY`` and ``YYYY-WW`` keys all
+  compare as ``YYYYWW``; every week before the view's latest (open) week counts.
+- ``time_dimension.pbi_year_column`` + ``pbi_month_column`` (month grain): PBI is
+  grouped by the calendar's year and month numbers instead of a fiscper column.
+- ``time_dimension.ucmv.group_by`` / ``ucmv.period_format: date_to_fiscper``: the
+  UCMV side groups an order column, and turns a date period column into YYYY0MM.
+- ``pbi_chunk_by: period | member`` (per measure): a heavy PBI query is split
+  without trying it all at once first.
+- ``extra_group_by: [{pbi: "Table[Column]", ucmv: column}]``: a calendar label
+  read by the measure; a period where the label is NULL in the metric view is
+  not queried in PBI and not compared (counted per measure in the output).
+
+Operator options (constructor, never LLM-set):
+
+- ``cross_breakdown``: add a per-measure period x member table for every measure
+  below 100 % (cell class counts and relative difference only, no values).
+- ``lock`` / ``lock_wait_seconds``: one reconciliation at a time per SQL
+  warehouse, across processes (a lock file in the temp dir; a stale lock whose
+  process is gone is taken over). Off by default; with ``lock_wait_seconds`` the
+  run waits up to that long for a held lock.
+
+Timeouts: a PBI query that times out is retried per measure, then in chunks. A
+measure that still times out is listed under ``timed_out_measures`` and is not
+compared; the run goes on.
+
+Reuse (no reinvention):
+
+- PBI auth: ``powerbi_auth_utils.get_powerbi_access_token`` (same as
+  ``powerbi_dax_executor_tool.py``).
+- PBI Execute Queries: ``PowerBIDaxExecutorTool._execute_dax_query`` (reused
+  verbatim through a wrapper executor).
+- Databricks SQL warehouse: ``MetricViewDeployerTool._execute_sql_sync`` (a
+  staticmethod, reused directly — no change to the deployer).
+- Databricks auth / User-Agent telemetry / SSRF: ``databricks_auth`` +
+  ``telemetry.get_user_agent_header(KasalProduct.POWERBI)`` + ``url_security``,
+  the same pattern the deployer uses.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+import contextvars
+import json
+import logging
+import time
+from collections.abc import Coroutine, Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING, Optional, Type, TypeVar
+
+import pandas as pd
+from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils import reconciliation as recon
+from src.services.tools.metric_view_utils.raw_fields import (
+    DimensionValue,
+    RawMap,
+    as_int,
+    as_list,
+    as_map,
+    opt_scalar_list,
+    opt_str,
+    opt_str_list,
+)
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
+
+logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+# Constructor-injected config keys (kept out of the LLM-facing schema). Defined
+# at module scope, not as a class attribute: a leading-underscore class
+# attribute is treated by pydantic as a private attr and cannot be read in
+# __init__ before super().__init__() has run.
+_CONFIG_KEYS = (
+    "mapping",
+    "mappings_json",
+    "warehouse_id",
+    "databricks_host",
+    "reference_years",
+    "dimension_values",
+    "periods",
+    "dry_run",
+    # PBI connection + auth
+    "pbi_workspace_id",
+    "pbi_dataset_id",
+    "pbi_access_token",
+    "pbi_tenant_id",
+    "pbi_client_id",
+    "pbi_client_secret",
+    "pbi_username",
+    "pbi_password",
+    "pbi_auth_method",
+    # Optional refresh boundaries for classification
+    "pbi_refresh_period",
+    "mv_refresh_period",
+    # Privacy / scale options. Operator-set (constructor), never LLM-set.
+    "statistics_only",
+    "scale_check",
+    "scale_threshold",
+    # Output and run options. Operator-set (constructor), never LLM-set.
+    "cross_breakdown",
+    "lock",
+    "lock_wait_seconds",
+)
+
+
+class UCMVReconciliationSchema(BaseModel):
+    """Input schema for UCMVReconciliationTool.
+
+    Connection/auth/ids are injected at construction time (see ``__init__``) —
+    exposing credentials as LLM-fillable parameters bloats every call and invites
+    the model to echo them, so only the "what to reconcile" knobs live here.
+    """
+
+    mapping: Optional[str] = Field(
+        None,
+        description="A single reconciliation mapping as YAML or JSON text.",
+    )
+    mappings_json: Optional[str] = Field(
+        None,
+        description="JSON object of {view_name: mapping} for reconciling several views at once. "
+        "Each mapping value may be a mapping object or a YAML string.",
+    )
+    warehouse_id: Optional[str] = Field(
+        None, description="Databricks SQL warehouse ID."
+    )
+    databricks_host: Optional[str] = Field(
+        None, description="Override workspace URL (optional)."
+    )
+    reference_years: Optional[list] = Field(
+        None, description="Fiscal years to reconcile, e.g. [2025, 2026]."
+    )
+    dimension_values: Optional[list] = Field(
+        None,
+        description="Explicit dimension values to reconcile (e.g. countries). If omitted, they are "
+        "discovered from the PBI model.",
+    )
+    periods: Optional[list] = Field(
+        None,
+        description="Snapshot load dates (snapshot grain) or explicit context periods. Optional; "
+        "monthly context periods are derived from the UCMV result when needed.",
+    )
+    dry_run: bool = Field(
+        False,
+        description="If True, build and return the UCMV SQL and PBI DAX without executing anything.",
+    )
+
+
+# ── Executors: thin adapters over the reused I/O helpers ─────────────────────
+
+
+def _run_coro_sync(coro: Coroutine[object, object, _T]) -> _T:
+    """Run a coroutine to completion from a sync context, propagating contextvars
+    (execution_id, group_id, OBO token) into any worker thread."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+    ctx = contextvars.copy_context()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        value: _T = ex.submit(ctx.run, asyncio.run, coro).result()
+    return value
+
+
+class _PBIExecutor:
+    """``execute(semantic_model_id, dax) -> (DataFrame, err)`` over the reused
+    ``PowerBIDaxExecutorTool._execute_dax_query``."""
+
+    def __init__(self, workspace_id: str, access_token: str) -> None:
+        from src.services.tools.powerbi_dax_executor_tool import PowerBIDaxExecutorTool
+
+        self.workspace_id = workspace_id
+        self.access_token = access_token
+        self._tool = PowerBIDaxExecutorTool()
+
+    def execute(
+        self, semantic_model_id: str, dax_query: str
+    ) -> tuple[Optional[pd.DataFrame], object]:
+        result = as_map(
+            _run_coro_sync(
+                self._tool._execute_dax_query(
+                    self.workspace_id, semantic_model_id, self.access_token, dax_query
+                )
+            )
+        )
+        if not result.get("success"):
+            return pd.DataFrame(), result.get("error")
+        return pd.DataFrame(as_list(result.get("data"))), None
+
+
+def _sql_result_to_df(payload: RawMap) -> pd.DataFrame:
+    """Turn a Databricks SQL Statement API SUCCEEDED payload into a DataFrame,
+    using the manifest column names for the (inline) data_array rows."""
+    manifest = as_map(payload.get("manifest"))
+    schema = as_map(manifest.get("schema"))
+    columns = [as_map(c).get("name") for c in as_list(schema.get("columns"))]
+    rows = as_list(as_map(payload.get("result")).get("data_array"))
+    if not columns:
+        return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=columns)
+
+
+_UNFINISHED = ("RUNNING", "PENDING")
+SQL_WAIT_SECONDS = 900
+_SQL_POLL_SECONDS = 5
+
+
+def wait_for_statement(
+    workspace_url: str, statement_id: str, headers: dict
+) -> dict[str, object]:
+    """Poll a SQL statement that is still running until it ends, for up to
+    ``SQL_WAIT_SECONDS``. A statement that does not finish is cancelled, so it does not go
+    on using the warehouse, and reported as not finished (never as "no rows")."""
+    import requests
+
+    from src.services.tools.metric_view_deployer_utils.connection import (
+        retry_connection_reset,
+    )
+
+    url = f"{workspace_url}/api/2.0/sql/statements/{statement_id}"
+    deadline = time.monotonic() + SQL_WAIT_SECONDS
+    state = "RUNNING"
+    data: dict[str, object] = {}
+    while state in _UNFINISHED and time.monotonic() < deadline:
+        time.sleep(_SQL_POLL_SECONDS)
+        data = retry_connection_reset(
+            lambda: requests.get(
+                url, headers=headers, timeout=30
+            )  # host checked by is_trusted_databricks_host in _build_sql_executor — nosemgrep: tmp.databricks.ssrf.requests-user-url
+        ).json()
+        state = str(as_map(data.get("status")).get("state") or "")
+    if state == "SUCCEEDED":
+        return {"success": True, "state": state, "data": data}
+    if state in _UNFINISHED:
+        try:
+            requests.post(
+                f"{url}/cancel", headers=headers, timeout=30
+            )  # same trusted host — nosemgrep: tmp.databricks.ssrf.requests-user-url
+        except requests.RequestException:
+            logger.warning(
+                "[UCMVReconciliation] could not cancel statement %s", statement_id
+            )
+        return {
+            "success": False,
+            "state": state,
+            "error": f"the query did not finish within {SQL_WAIT_SECONDS} s and was cancelled",
+        }
+    error = as_map(as_map(data.get("status")).get("error"))
+    return {
+        "success": False,
+        "state": state,
+        "error": error.get("message", f"State: {state}"),
+    }
+
+
+class _SQLExecutor:
+    """``execute(sql) -> (DataFrame, err)`` over the reused
+    ``MetricViewDeployerTool._execute_sql_sync``."""
+
+    def __init__(self, workspace_url: str, warehouse_id: str, headers: dict) -> None:
+        from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
+
+        self.workspace_url = workspace_url
+        self.warehouse_id = warehouse_id
+        self.headers = headers
+        self._exec = MetricViewDeployerTool._execute_sql_sync
+
+    def execute(self, sql: str) -> tuple[pd.DataFrame, object]:
+        result = as_map(
+            self._exec(sql, self.workspace_url, self.warehouse_id, self.headers)
+        )
+        if result.get("state") in _UNFINISHED and result.get("statement_id"):
+            # A wide view over a heavy source takes longer than the deployer waits for a
+            # DDL. Giving up there reported "no rows" for a query that was still running.
+            result = wait_for_statement(
+                self.workspace_url, str(result["statement_id"]), self.headers
+            )
+        if not result.get("success"):
+            return pd.DataFrame(), result.get("error")
+        return _sql_result_to_df(as_map(result.get("data"))), None
+
+
+def _as_seconds(value: object) -> float:
+    """A non-negative number of seconds from a config value (0 when unusable)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return 0.0
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return 0.0
+
+
+class UCMVReconciliationTool(BaseTool):
+    """Reconcile deployed UC Metric View measures against the live Power BI model."""
+
+    name: str = "UCMV Reconciliation"
+    description: str = (
+        "Verify that a deployed UC Metric View returns the same numbers as its source Power BI "
+        "report. Runs the UCMV side on a Databricks SQL warehouse and the PBI side via the Execute "
+        "Queries (DAX) API, then compares every measure cell-by-cell within tolerance and classifies "
+        "mismatches. Input: a reconciliation mapping (or a dict of them). Output: per-measure "
+        "alignment percentages, cell counts, classification, and sample mismatches, plus an overall "
+        "summary. Deterministic — no LLM in the comparison path."
+    )
+    args_schema: Type[BaseModel] = UCMVReconciliationSchema
+    _default_config: dict = PrivateAttr(default_factory=dict)
+
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
+
+    def __init__(self, **kwargs: object) -> None:
+        default_config = {k: kwargs.pop(k, None) for k in _CONFIG_KEYS}
+        super().__init__(**kwargs)
+        self._default_config = {
+            k: v for k, v in default_config.items() if v is not None
+        }
+
+    # ── config + mapping parsing ────────────────────────────────────────────
+
+    def _cfg(self, kwargs: Mapping[str, object], key: str) -> object:
+        val = kwargs.get(key)
+        return val if val is not None else self._default_config.get(key)
+
+    @staticmethod
+    def _parse_mappings(
+        mapping_text: Optional[str], mappings_json: Optional[str]
+    ) -> dict[str, recon.UCMVMapping]:
+        """Return {view_name: UCMVMapping}. Accepts a single mapping (keyed by its
+        UCMV table) or a JSON dict of many."""
+        out: dict[str, recon.UCMVMapping] = {}
+        if mappings_json:
+            parsed = (
+                json.loads(mappings_json)
+                if isinstance(mappings_json, str)
+                else mappings_json
+            )
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    "mappings_json must be a JSON object of {view_name: mapping}."
+                )
+            for name, m in parsed.items():
+                out[str(name)] = (
+                    recon.load_mapping(m)
+                    if isinstance(m, str)
+                    else recon.load_mapping_dict(as_map(m))
+                )
+        if mapping_text:
+            mp = recon.load_mapping(mapping_text)
+            out[mp.binding.ucmv_table] = mp
+        return out
+
+    # ── auth ────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _authenticate_databricks(
+        host_override: Optional[str] = None,
+    ) -> Optional[AuthContext]:
+        """Resolve a Databricks AuthContext (OBO -> PAT -> SPN), off the event loop."""
+        from src.utils.databricks_auth import get_auth_context
+
+        def _run_in_thread() -> Optional[AuthContext]:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(get_auth_context())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            auth: Optional[AuthContext] = executor.submit(_run_in_thread).result(
+                timeout=30
+            )
+        # The override may only name the credential's OWN workspace: the SQL
+        # request carries that credential's bearer token.
+        from src.services.tools.databricks_tool_utils.auth import apply_host_override
+
+        return apply_host_override(auth, host_override)
+
+    def _build_sql_executor(
+        self, warehouse_id: str, host_override: Optional[str]
+    ) -> _SQLExecutor:
+        auth = self._authenticate_databricks(host_override=host_override)
+        if not auth:
+            raise RuntimeError("Databricks authentication failed")
+        headers = auth.get_headers()
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+        headers.update(get_user_agent_header(KasalProduct.POWERBI))
+        workspace_url = (auth.workspace_url or "").rstrip("/")
+        if not workspace_url:
+            raise RuntimeError("workspace_url not configured")
+
+        # SSRF check — fail closed.
+        try:
+            from src.utils.url_security import is_trusted_databricks_host
+
+            trusted = is_trusted_databricks_host(workspace_url)
+        except Exception:  # noqa: BLE001 — any check failure must fail closed
+            trusted = False
+        if not trusted:
+            raise RuntimeError(f"Untrusted Databricks host: {workspace_url}")
+        return _SQLExecutor(workspace_url, warehouse_id, headers)
+
+    def _build_pbi_executor(
+        self, kwargs: Mapping[str, object], mapping: recon.UCMVMapping
+    ) -> _PBIExecutor:
+        from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
+
+        workspace_id = str(
+            self._cfg(kwargs, "pbi_workspace_id")
+            or mapping.binding.pbi_workspace_id
+            or ""
+        )
+        if not workspace_id:
+            raise RuntimeError(
+                "pbi_workspace_id is required (config or mapping binding)"
+            )
+        token = _run_coro_sync(
+            get_powerbi_access_token(
+                tenant_id=opt_str(self._cfg(kwargs, "pbi_tenant_id")),
+                client_id=opt_str(self._cfg(kwargs, "pbi_client_id")),
+                client_secret=opt_str(self._cfg(kwargs, "pbi_client_secret")),
+                access_token=opt_str(self._cfg(kwargs, "pbi_access_token")),
+                username=opt_str(self._cfg(kwargs, "pbi_username")),
+                password=opt_str(self._cfg(kwargs, "pbi_password")),
+                auth_method=opt_str(self._cfg(kwargs, "pbi_auth_method")),
+            )
+        )
+        return _PBIExecutor(workspace_id, token)
+
+    # ── dimension discovery ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _discover_dimension_values(
+        pbi_executor: _PBIExecutor,
+        model_id: str,
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+    ) -> list[DimensionValue]:
+        dax = recon.build_dimension_scope_query(mapping, dimension_name)
+        df, err = pbi_executor.execute(model_id, dax)
+        if df is None or df.empty:
+            raise RuntimeError(f"Could not discover dimension values from PBI: {err}")
+        discovered: list[DimensionValue] = [
+            v for v in df.iloc[:, 0].tolist() if v is not None
+        ]
+        return discovered
+
+    # ── per-view reconciliation ──────────────────────────────────────────────
+
+    def _reconcile_view(
+        self,
+        view_name: str,
+        mapping: recon.UCMVMapping,
+        kwargs: Mapping[str, object],
+        dry_run: bool,
+    ) -> dict[str, object]:
+        dimension_name = mapping.binding.default_dimension
+        # reference_years is OPTIONAL: empty means "all years" (no year filter).
+        # The query builder and comparator both treat an empty list that way.
+        reference_years = as_list(self._cfg(kwargs, "reference_years"))
+        dimension_values = opt_scalar_list(self._cfg(kwargs, "dimension_values"))
+        periods = opt_str_list(self._cfg(kwargs, "periods"))
+        model_id = str(
+            self._cfg(kwargs, "pbi_dataset_id")
+            or mapping.binding.pbi_semantic_model_id
+            or ""
+        )
+
+        if dry_run:
+            ucmv_sql = recon.build_ucmv_query(
+                mapping, dimension_name, dimension_values or [], reference_years
+            )
+            measures = mapping.resolved_measures()
+            direct, direct_ctx, switch = recon.partition_measures_by_shape(measures)
+            pbi_dax: dict[str, list[str]] = {}
+            # One query PER extra_filter group — mirrors the live runner, so the
+            # preview does not misleadingly collapse differently-filtered measures
+            # (e.g. actual '0000' vs budget 'B000') into one filterless query.
+            direct_qs = recon.build_direct_queries(
+                mapping, dimension_name, dimension_values or [], direct
+            )
+            if direct_qs:
+                pbi_dax["direct"] = direct_qs
+            if switch:
+                pbi_dax["switch"] = [
+                    q
+                    for q, *_ in recon.build_switch_queries(
+                        mapping, dimension_name, dimension_values or [], switch
+                    )
+                ]
+            return {
+                "dry_run": True,
+                "dimension": dimension_name,
+                "measures": [m.ucmv_measure for m in measures],
+                "ucmv_sql": ucmv_sql,
+                "pbi_dax": pbi_dax,
+            }
+
+        warehouse_id = str(self._cfg(kwargs, "warehouse_id") or "")
+        if not warehouse_id:
+            return {"error": "warehouse_id is required"}
+        host_override = opt_str(self._cfg(kwargs, "databricks_host"))
+
+        pbi_executor = self._build_pbi_executor(kwargs, mapping)
+        sql_executor = self._build_sql_executor(warehouse_id, host_override)
+
+        if not dimension_values:
+            dimension_values = self._discover_dimension_values(
+                pbi_executor, model_id, mapping, dimension_name
+            )
+
+        # Prior-year measures are compared in a second pass with their own time
+        # dimension (reconciliation/time_shift.py); the others as before.
+        plain, shifted = recon.split_time_shifted(mapping)
+        scale = self._scale_check(kwargs, plain, dimension_name, sql_executor)
+        sides = (sql_executor, pbi_executor, model_id)
+        ucmv_df, pbi_df, report = self._frames(
+            plain, dimension_name, dimension_values, reference_years, periods, sides
+        )
+        compared, not_compared = mapping, {}
+        if shifted is not None:
+            try:
+                # No year filter: a prior-year value needs the year before in the query.
+                second = self._frames(
+                    shifted, dimension_name, dimension_values, [], periods, sides
+                )
+            except Exception as e:
+                logger.exception(
+                    "[UCMVReconciliation] %s: prior-year measures not compared",
+                    view_name,
+                )
+                compared = plain
+                not_compared = {
+                    m.ucmv_measure: f"the prior-year comparison failed: {e}"[:300]
+                    for m in shifted.measures
+                }
+            else:
+                ucmv_df = recon.merge_frames(ucmv_df, second[0], dimension_name)
+                pbi_df = recon.merge_frames(pbi_df, second[1], dimension_name)
+                report.timed_out.update(second[2].timed_out)
+                report.skipped_periods.update(second[2].skipped_periods)
+
+        result = self._compare_view(
+            compared, dimension_name, reference_years, ucmv_df, pbi_df, report, kwargs
+        )
+        if not_compared:
+            result["not_compared"] = not_compared
+        if scale is not None:
+            result["scale_check"] = scale
+        return result
+
+    def _frames(
+        self,
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        dimension_values: list[DimensionValue],
+        reference_years: list[object],
+        periods: Optional[list[str]],
+        sides: tuple[recon.UcmvExecutor, _PBIExecutor, str],
+    ) -> tuple[pd.DataFrame, pd.DataFrame, recon.PbiRunReport]:
+        """Both sides of one mapping: the metric view's frame, Power BI's, and what the
+        Power BI run left out. ``sides``: the SQL executor, the Power BI executor and
+        the semantic model."""
+        sql_executor, pbi_executor, model_id = sides
+        ucmv_sql = recon.build_ucmv_query(
+            mapping, dimension_name, dimension_values, reference_years
+        )
+        ucmv_df = recon.run_ucmv_query(sql_executor, ucmv_sql, dimension_name)
+        for m in mapping.resolved_measures():
+            if m.ucmv_measure in ucmv_df.columns:
+                ucmv_df[m.ucmv_measure] = pd.to_numeric(
+                    ucmv_df[m.ucmv_measure], errors="coerce"
+                )
+
+        # PBI side — context periods cover snapshot dates + calendar-label measures
+        context_periods = periods or sorted(
+            str(p) for p in ucmv_df["period"].astype(str).unique().tolist()
+        )
+        labels = recon.labels_from_ucmv(ucmv_df, mapping.resolved_measures())
+        pbi_df, report = recon.run_pbi_queries_reported(
+            pbi_executor,
+            model_id,
+            mapping,
+            dimension_name,
+            dimension_values,
+            context_periods=context_periods,
+            context_labels=labels,
+        )
+        return ucmv_df, pbi_df, report
+
+    def _scale_check(
+        self,
+        kwargs: Mapping[str, object],
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        sql_executor: recon.UcmvExecutor,
+    ) -> Optional[dict[str, object]]:
+        """Counts-only percentage scale check on the UC side (``scale_check``).
+
+        Returns ``None`` when the option is off. Otherwise one verdict per
+        measure (``fraction`` / ``0-100`` / ``no_data``) with its group counts.
+        """
+        if not self._cfg(kwargs, "scale_check"):
+            return None
+        threshold_raw = self._cfg(kwargs, "scale_threshold")
+        threshold = (
+            float(threshold_raw)
+            if isinstance(threshold_raw, (int, float, str))
+            else recon.DEFAULT_SCALE_THRESHOLD
+        )
+        verdicts = recon.run_scale_check(
+            sql_executor, mapping, dimension_name, threshold
+        )
+        return {"threshold": threshold, "measures": verdicts}
+
+    def _compare_view(
+        self,
+        mapping: recon.UCMVMapping,
+        dimension_name: str,
+        reference_years: list[object],
+        ucmv_df: pd.DataFrame,
+        pbi_df: pd.DataFrame,
+        report: recon.PbiRunReport,
+        kwargs: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Compare the two sides cell-by-cell and build the view's report. Measures
+        that timed out are left out of the comparison, and so are the cells of
+        periods the PBI side did not query."""
+        compared = [
+            m
+            for m in mapping.resolved_measures()
+            if m.ucmv_measure not in report.timed_out
+        ]
+        scoped = replace(mapping, measures=compared)
+        grain = mapping.binding.time_dimension.grain
+        lacking: list[str] = []
+        if grain not in ("snapshot", "week") and "period" in pbi_df.columns:
+            # Periods the run itself did not query (no calendar label) are counted
+            # per measure below; these are the ones Power BI has no row for at all.
+            skipped = {str(p) for ps in report.skipped_periods.values() for p in ps}
+            lacking = [
+                p
+                for p in recon.periods_power_bi_lacks(
+                    ucmv_df["period"], pbi_df["period"]
+                )
+                if p not in skipped
+            ]
+            ucmv_df = ucmv_df[~ucmv_df["period"].astype(str).isin(lacking)]
+        wide = recon.compare(ucmv_df, pbi_df, scoped, dimension_name, reference_years)
+        long_df = recon.to_long_format(wide, scoped, dimension_name)
+        long_df, cells_left_out = recon.drop_skipped_cells(
+            long_df, report.skipped_periods, mapping.binding.time_dimension.grain
+        )
+        run_info = recon.ViewRunInfo(
+            timed_out=sorted(report.timed_out),
+            periods_skipped={
+                name: len(periods) for name, periods in report.skipped_periods.items()
+            },
+            cells_left_out=cells_left_out,
+        )
+        options = recon.ViewOptions(
+            statistics_only=bool(self._cfg(kwargs, "statistics_only")),
+            cross_breakdown=bool(self._cfg(kwargs, "cross_breakdown")),
+            pbi_refresh_period=opt_str(self._cfg(kwargs, "pbi_refresh_period")),
+            mv_refresh_period=opt_str(self._cfg(kwargs, "mv_refresh_period")),
+        )
+        view = recon.build_view_report(
+            long_df, scoped, dimension_name, options, run_info
+        )
+        if lacking:
+            # Not compared: Power BI returned no row for these periods at all.
+            view["periods_not_in_power_bi"] = {
+                "periods": len(lacking),
+                "first": lacking[0],
+                "last": lacking[-1],
+            }
+        return view
+
+    # ── entry point ───────────────────────────────────────────────────────────
+
+    def _reconcile_all(
+        self,
+        mappings: dict[str, recon.UCMVMapping],
+        kwargs: Mapping[str, object],
+        dry_run: bool,
+    ) -> dict[str, dict[str, object]]:
+        views: dict[str, dict[str, object]] = {}
+        for view_name, mapping in mappings.items():
+            try:
+                views[view_name] = self._reconcile_view(
+                    view_name, mapping, kwargs, dry_run
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[UCMVReconciliation] %s failed: %s", view_name, e)
+                views[view_name] = {"error": str(e)}
+        return views
+
+    def _run(self, **kwargs: object) -> str:
+        dry_run = bool(self._cfg(kwargs, "dry_run") or False)
+        try:
+            mappings = self._parse_mappings(
+                opt_str(self._cfg(kwargs, "mapping")),
+                opt_str(self._cfg(kwargs, "mappings_json")),
+            )
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"error": f"Could not parse mapping(s): {e}"})
+        if not mappings:
+            return json.dumps(
+                {"error": "No mapping provided (mapping or mappings_json required)."}
+            )
+
+        warehouse_id = str(self._cfg(kwargs, "warehouse_id") or "")
+        if dry_run or not self._cfg(kwargs, "lock") or not warehouse_id:
+            views = self._reconcile_all(mappings, kwargs, dry_run)
+        else:
+            # One run at a time per warehouse (shared SQL warehouse and PBI account).
+            try:
+                with recon.warehouse_run_lock(
+                    warehouse_id,
+                    wait_seconds=_as_seconds(self._cfg(kwargs, "lock_wait_seconds")),
+                ):
+                    views = self._reconcile_all(mappings, kwargs, dry_run)
+            except (recon.RunLockHeldError, OSError) as e:
+                return json.dumps({"error": f"Reconciliation not started: {e}"})
+
+        return json.dumps(
+            {"views": views, "overall": _overall(views)}, indent=2, default=str
+        )
+
+
+def _overall(views: dict[str, dict[str, object]]) -> dict[str, object]:
+    summaries = [as_map(v["summary"]) for v in views.values() if "summary" in v]
+    measures_at_100 = sum(as_int(s.get("measures_at_100")) for s in summaries)
+    total_measures = sum(as_int(s.get("total_measures")) for s in summaries)
+    measures_timed_out = sum(as_int(s.get("measures_timed_out")) for s in summaries)
+    cells_total = sum(as_int(s.get("cells_total")) for s in summaries)
+    cells_aligned = sum(as_int(s.get("cells_aligned")) for s in summaries)
+    scored = summaries
+    return {
+        "views": len(views),
+        "views_scored": len(scored),
+        "measures_at_100": measures_at_100,
+        "total_measures": total_measures,
+        "measures_timed_out": measures_timed_out,
+        "cells_total": cells_total,
+        "cells_aligned": cells_aligned,
+        "overall_cell_pct": (
+            round(100 * cells_aligned / cells_total, 2) if cells_total else 0.0
+        ),
+    }

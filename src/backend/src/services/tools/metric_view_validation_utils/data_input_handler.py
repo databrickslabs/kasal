@@ -8,6 +8,7 @@ from .constants import PBI_COMMENT_MARKER
 from .databricks_parser import UCMetricsViewParser
 from .dax_expression_parser import DAXExpressionParser
 from .measure_table_mapping_parser import MeasureTableMappingParser
+from .prior_year_check import loose_name
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class DataInputHandler:
         metrics_view_path: str,
         table_mapping_path: str,
         table_mappings: Optional[Dict] = None,
+        measure_definitions_path: Optional[str] = None,
     ):
         """
         Initialize the DataInputHandler.
@@ -28,6 +30,9 @@ class DataInputHandler:
             metrics_view_path: Path to metrics view YAML file
             table_mapping_path: Path to table mapping JSON file
             table_mappings: Optional dictionary for table name mappings
+            measure_definitions_path: Optional JSON of every DAX measure of the model. It is
+                read only to find the definition of a measure a DAX expression references
+                (the referenced measure may sit on another table than the mapping holds).
 
         Raises:
             ValueError: If metrics_view_path or table_mapping_path are empty
@@ -40,9 +45,23 @@ class DataInputHandler:
         self.table_mappings = table_mappings or {}
         self.mv_parser = UCMetricsViewParser(metrics_view_path)
         self.table_mapping_parser = MeasureTableMappingParser(table_mapping_path)
+        self.definition_parser = (
+            MeasureTableMappingParser(measure_definitions_path)
+            if measure_definitions_path
+            else self.table_mapping_parser
+        )
         self.dax_parser = DAXExpressionParser()
         self._yaml_measures_cache: Optional[List[Dict]] = None
         self._dax_measures_cache: Optional[List[Dict]] = None
+
+    def get_measure_definition(self, measure_name: str) -> Optional[str]:
+        """The DAX of a measure by its Power BI name, from every measure of the model when
+        the handler was given them, else from the mapping. None when unknown."""
+        if not measure_name or not measure_name.strip():
+            return None
+        found = self.definition_parser.get_measure_by_name(measure_name)
+        text = (found or {}).get("dax_expression")
+        return text if text and text != "Not available" else None
 
     def get_yaml_measure(self, measure_name: str) -> Optional[Dict]:
         """
@@ -130,6 +149,23 @@ class DataInputHandler:
                     "Found case-insensitive match for measure '%s'", measure_name
                 )
                 return dax
+
+        # Strategy 2b: the same name with case, spaces and underscores removed. The
+        # generator names a measure in snake_case (``sales_py``) while the DAX source
+        # keeps the Power BI name (``Sales PY``). Only a single DAX measure may match.
+        loose = loose_name(measure_name)
+        loose_hits = {
+            dax.get("measure_name", "")
+            for dax in all_dax
+            if loose and loose_name(dax.get("measure_name")) == loose
+        }
+        if len(loose_hits) == 1:
+            for dax in all_dax:
+                if dax.get("measure_name", "") in loose_hits:
+                    logger.debug(
+                        "Found loose-name match for measure '%s'", measure_name
+                    )
+                    return dax
 
         # Strategy 3: Extract from PBI comment using regex
         comment = yaml_measure.get("comment", "")

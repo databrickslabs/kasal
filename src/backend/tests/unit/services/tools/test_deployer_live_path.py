@@ -116,7 +116,7 @@ class TestLivePathErrors:
         assert "warehouse_id" in data["deployment_results"]["fact_test"]["message"]
 
     def test_live_path_empty_yaml_content(self):
-        """Empty YAML content → error result."""
+        """Empty YAML content (a table without measures) → skipped, not an error."""
         tool = MetricViewDeployerTool()
         yaml_specs = {"fact_test": ""}  # Empty YAML
         result = tool._run(
@@ -125,10 +125,9 @@ class TestLivePathErrors:
             warehouse_id="wh-123",
         )
         data = json.loads(result)
-        assert data["deployment_results"]["fact_test"]["status"] == "error"
-        assert (
-            "Empty YAML content" in data["deployment_results"]["fact_test"]["message"]
-        )
+        assert data["deployment_results"]["fact_test"]["status"] == "skipped"
+        assert "empty YAML" in data["deployment_results"]["fact_test"]["message"]
+        assert data["summary"]["skipped"] == 1 and data["summary"]["errors"] == 0
 
     def test_live_path_no_yaml_specs(self):
         """No yaml_specs → top-level error dict."""
@@ -399,3 +398,48 @@ class TestToolConfig:
         assert "deployed" in data["summary"]
         assert "errors" in data["summary"]
         assert "dry_run" in data["summary"]
+
+
+class TestConnectionReset:
+    """A proxy resetting the TLS handshake once must not fail the view's deploy."""
+
+    @patch("src.services.tools.metric_view_deployer_utils.connection.time.sleep")
+    @patch("requests.post")
+    def test_a_reset_connection_is_retried(self, mock_post, _sleep):
+        import requests
+
+        ok = MagicMock(status_code=200)
+        ok.json.return_value = {"statement_id": "s", "status": {"state": "SUCCEEDED"}}
+        mock_post.side_effect = [requests.ConnectionError("reset by peer"), ok]
+        out = MetricViewDeployerTool._execute_sql_sync(
+            "SELECT 1", "https://example.com", "wh", {}
+        )
+        assert out["success"] is True and mock_post.call_count == 2
+
+    @patch("src.services.tools.metric_view_deployer_utils.connection.time.sleep")
+    @patch("requests.post")
+    def test_a_connection_that_stays_down_still_fails(self, mock_post, _sleep):
+        import pytest
+        import requests
+
+        mock_post.side_effect = requests.ConnectionError("reset by peer")
+        with pytest.raises(requests.ConnectionError):
+            MetricViewDeployerTool._execute_sql_sync(
+                "SELECT 1", "https://example.com", "wh", {}
+            )
+        assert mock_post.call_count == 3
+
+    @patch("src.services.tools.metric_view_deployer_utils.connection.time.sleep")
+    @patch("requests.post")
+    def test_a_statement_that_writes_rows_is_sent_once(self, mock_post, _sleep):
+        """The connection can break after the server accepted an INSERT; a second send
+        would load the snapshot rows twice."""
+        import pytest
+        import requests
+
+        mock_post.side_effect = requests.ConnectionError("reset by peer")
+        with pytest.raises(requests.ConnectionError):
+            MetricViewDeployerTool._execute_sql_sync(
+                "INSERT INTO c.s.t VALUES (1)", "https://example.com", "wh", {}
+            )
+        assert mock_post.call_count == 1

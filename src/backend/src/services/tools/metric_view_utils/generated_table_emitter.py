@@ -100,6 +100,11 @@ def _m_scalar_to_sql(expr: str) -> str | None:
     # If anything M-specific survived, we can't safely translate it.
     if re.search(r"\b(Date|Time|Text|Number|List|Table)\.", s) or "#" in s:
         return None
+    # What is left is written into a view: one expression, never a second statement,
+    # a comment that hides the rest of the line, or a query of its own.
+    bare = re.sub(r"'(?:[^'\\]|\\.|'')*'", "''", s)
+    if re.search(r";|--|/\*|\$\$|\b(?:SELECT|FROM|UNION)\b", bare, re.IGNORECASE):
+        return None
     return s
 
 

@@ -172,7 +172,53 @@ class TestSaveDaxToConversionHistory:
         assert data["input_data"]["dax_raw"] == raw_dax
         assert data["input_data"]["workspace_id"] == "ws-1"
         assert data["measure_count"] == 1
+        # Mapping defaults to {} (never None) when omitted, like yaml/sql.
+        assert data["output_data"]["pbi_ucmv_mapping"] == {}
         mock_repo.session.commit.assert_awaited_once()
+
+    def test_persists_pbi_ucmv_mapping(self):
+        """The PBI<->UCMV mapping draft lands in output_data so it is
+        downloadable by execution_id, like yaml/sql."""
+        tool = UCMetricViewGeneratorTool()
+        captured = {}
+        mock_repo = MagicMock()
+
+        async def _create(payload, *_a, **_k):
+            captured["data"] = (
+                payload.model_dump() if hasattr(payload, "model_dump") else payload
+            )
+            return SimpleNamespace(id=9, group_id=None)
+
+        mock_repo.create_history = AsyncMock(side_effect=_create)
+        mock_repo.session = MagicMock()
+        mock_repo.session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def _repo_ctx(*_a, **_k):
+            yield mock_repo
+
+        mapping = {
+            "Fact_OTC": "measures:\n  - ucmv_measure: order_accuracy__pct\n",
+            "Fact_NPS": "measures:\n  - ucmv_measure: nps_agg\n",
+        }
+        with patch(
+            "src.services.tools.tool_session_provider.ToolSessionProvider.converter_service",
+            _repo_ctx,
+        ):
+            self._run(
+                tool._save_dax_to_conversion_history(
+                    raw_dax=[],
+                    yaml_output={"Fact_OTC": "version: '1.1'"},
+                    sql_output={"Fact_OTC": "-- sql"},
+                    workspace_id="ws",
+                    dataset_id="ds",
+                    catalog="main",
+                    schema="default",
+                    pbi_ucmv_mapping=mapping,
+                )
+            )
+
+        assert captured["data"]["output_data"]["pbi_ucmv_mapping"] == mapping
 
     def test_json_mode_counts_views_not_zero(self):
         """JSON/flow mode: raw_dax empty but views generated → count = views, not 0.

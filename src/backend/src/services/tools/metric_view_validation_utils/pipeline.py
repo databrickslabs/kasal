@@ -82,6 +82,7 @@ class MetricExpressionValidatorPipeline:
         table_mapping_json_path: Optional[str] = None,
         table_mappings: Optional[Dict[str, str]] = None,
         column_mappings: Optional[Dict[str, str]] = None,
+        measure_definitions_json_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run the validation pipeline and return a structured result dict.
 
@@ -102,6 +103,8 @@ class MetricExpressionValidatorPipeline:
                 Required for file-based mode.
             table_mappings: Per-call override for table name mappings.
             column_mappings: Per-call override for column name mappings.
+            measure_definitions_json_path: Optional JSON of every DAX measure of the
+                model, used only to inline the measures a DAX expression references.
 
         Returns:
             A dict whose shape depends on the mode:
@@ -125,6 +128,7 @@ class MetricExpressionValidatorPipeline:
                 table_mapping_json_path=table_mapping_json_path,
                 table_mappings=effective_table_mappings,
                 column_mappings=effective_column_mappings,
+                measure_definitions_json_path=measure_definitions_json_path,
             )
 
         if databricks_expr and dax_expr:
@@ -153,6 +157,7 @@ class MetricExpressionValidatorPipeline:
         table_mapping_json_path: str,
         table_mappings: Dict[str, str],
         column_mappings: Dict[str, str],
+        measure_definitions_json_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute file-based validation mode."""
         logger.info(
@@ -165,6 +170,7 @@ class MetricExpressionValidatorPipeline:
                 metrics_view_path=metrics_view_yaml_path,
                 table_mapping_path=table_mapping_json_path,
                 table_mappings=table_mappings,
+                measure_definitions_path=measure_definitions_json_path,
             )
             validator = ExpressionValidator(
                 data_handler=data_handler,

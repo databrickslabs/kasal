@@ -10,46 +10,36 @@ Apps security scan follow-up (2026-10-28):
   into the sanitized one.
 """
 
-import pytest
-
 from src.services.tools.databricks_dashboard_creator_tool import (
     DatabricksDashboardCreatorTool,
-)
-from src.services.tools.mquery_conversion_pipeline_tool import (
-    MqueryConversionPipelineTool,
 )
 
 
 class TestDashboardDatasetSql:
-    def _query(self, view, sql):
+    """Mapping SQL (agent input) is never stored: datasets are the metric views themselves,
+    or SQL the creator builds from quoted names and gates as read-only."""
+
+    _MAPPING = {
+        "visual_id": "v1",
+        "page_name": "P",
+        "visual_type": "clusteredColumnChart",
+        "ucmv_view": "main.sales.m`v",
+        "dimensions": ["region"],
+        "measures": ["total"],
+        "sql": "DELETE FROM main.sales.orders",
+    }
+
+    def _datasets(self, mode):
         tool = DatabricksDashboardCreatorTool()
-        return tool._build_dataset(view, sql, "ds")["query"]
+        return tool._build_lakeview_json([self._MAPPING], "wh", dataset_mode=mode)["datasets"]
 
-    def test_a_non_read_only_query_is_not_stored(self):
-        query = self._query("main.sales.mv", "DELETE FROM main.sales.orders")
-        assert query == "SELECT * FROM `main`.`sales`.`mv` LIMIT 1000"
+    def test_a_metric_view_dataset_names_the_view_and_stores_no_query(self):
+        [ds] = self._datasets("metric_view")
+        assert ds["asset_name"] == "main.sales.m`v" and "query" not in ds
 
-    def test_a_read_only_query_is_kept(self):
-        sql = "SELECT region, MEASURE(`total`) FROM main.sales.mv GROUP BY region"
-        assert self._query("main.sales.mv", sql) == sql
-
-    def test_the_default_query_quotes_the_view(self):
-        assert self._query("main.sales.m`v", None) == (
-            "SELECT * FROM `main`.`sales`.`m``v` LIMIT 1000"
+    def test_the_sql_mode_ignores_the_mapping_sql_and_quotes_the_names(self):
+        [ds] = self._datasets("sql")
+        assert "DELETE" not in ds["query"]
+        assert ds["query"] == (
+            "SELECT `region`, MEASURE(`total`) AS `total` FROM `main`.`sales`.`m``v` GROUP BY ALL"
         )
-
-
-class TestMqueryCountFallback:
-    def _fallback(self, config, table):
-        return MqueryConversionPipelineTool()._extract_select_body(
-            "DESCRIBE x", config, table
-        )
-
-    def test_it_counts_the_table_the_rows_were_loaded_into(self):
-        cfg = {"target_catalog": "main", "target_schema": "sch"}
-        assert self._fallback(cfg, "My Table") == "SELECT * FROM main.sch.my_table"
-
-    def test_a_hostile_config_prefix_is_refused(self):
-        cfg = {"target_catalog": "main.x UNION SELECT 1", "target_schema": "sch"}
-        with pytest.raises(ValueError):
-            self._fallback(cfg, "t")

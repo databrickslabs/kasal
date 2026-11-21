@@ -35,6 +35,7 @@ from src.seeds.skills_data import (
     databricks_sql,
     document_grounding,
     option_comparison,
+    powerbi_to_metric_views,
     presentation_content,
     query_validation,
     report_writing,
@@ -62,6 +63,8 @@ BUILTIN_SKILLS: List[Dict[str, Any]] = [
     presentation_content.SKILL,
     dashboard_content.SKILL,
     option_comparison.SKILL,
+    # Power BI migration
+    powerbi_to_metric_views.SKILL,
     # Communication
     team_updates.SKILL,
     workplace_messages.SKILL,

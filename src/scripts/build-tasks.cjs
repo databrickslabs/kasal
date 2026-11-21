@@ -27,6 +27,7 @@ const EXCLUDED_DOC_FILES = [
   'internal-dbu-tagging-plan.md',
   'kasal-platform-feedback-for-product-teams.md',
   'powerbi/ucmv-coverage-evaluation-and-roadmap.md', // names a customer
+  'powerbi/otc-management-session-handoff-2026-09-22.md', // internal session handoff
   'deployment/lakebase-persistence-across-redeploys.md', // proposal, not decided
 ];
 // A Markdown page whose opening carries a "**Status: internal" banner (the

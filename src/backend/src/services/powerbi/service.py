@@ -13,6 +13,8 @@ from src.core.exceptions import (
 )
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
+from src.services.powerbi.http_retry import send_with_throttle_retry_async
+from src.services.powerbi.ids import execute_queries_url
 
 if TYPE_CHECKING:
     from src.services.settings.api_keys import ApiKeysService
@@ -236,9 +238,7 @@ class PowerBIService:
                     "through the API Keys Service."
                 )
 
-            logger.info(
-                f"Authenticating with username length: {len(username)}, password length: {len(password)}"
-            )
+            logger.info("Authenticating with the group's service account")
 
             # Create credential and get token
             from azure.identity import UsernamePasswordCredential
@@ -277,7 +277,7 @@ class PowerBIService:
             Raw query results from Power BI API
         """
         try:
-            datasets_url = f"https://api.powerbi.com/v1.0/myorg/datasets/{semantic_model_id}/executeQueries"
+            datasets_url = execute_queries_url(semantic_model_id)
 
             headers = {
                 "Content-Type": "application/json",
@@ -292,10 +292,13 @@ class PowerBIService:
             logger.debug(f"Query: {dax_query[:200]}...")  # Log first 200 chars
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(datasets_url, headers=headers, json=body)
+                response = await send_with_throttle_retry_async(
+                    lambda: client.post(datasets_url, headers=headers, json=body),
+                    "executeQueries",
+                )
 
             if response.status_code != 200:
-                error_msg = f"Power BI API error (status {response.status_code}): {response.text}"
+                error_msg = f"Power BI API error (status {response.status_code}): {response.text[:500]}"
                 logger.error(error_msg)
                 raise KasalError(detail=error_msg, status_code=response.status_code)
 

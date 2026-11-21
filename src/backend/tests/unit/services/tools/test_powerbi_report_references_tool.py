@@ -887,61 +887,29 @@ class TestReportReferencesAsyncHelpers:
 
         assert result == []
 
-    def test_fetch_report_definition_200_returns_parts(self):
+    def test_fetch_report_definition_delegates_to_shared_fetch(self):
         parts = [{"path": "definition/report.json", "payload": "base64data"}]
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"definition": {"parts": parts}}
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.fetch_report_parts",
+            return_value=(parts, False),
+        ) as fetch:
+            result = self._run(
+                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
+            )
+        assert result == parts
+        assert fetch.call_args.args[1] == ACCESS_TOKEN
+        assert REPORT_ID in fetch.call_args.args[0]
 
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=mock_response)
+    def test_fetch_report_definition_failure_returns_empty(self):
+        from src.services.powerbi.fabric_definition import FabricDefinitionError
 
         with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
+            "src.services.tools.powerbi_report_references_tool.fetch_report_parts",
+            side_effect=FabricDefinitionError("HTTP 404"),
         ):
             result = self._run(
                 self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
             )
-
-        assert len(result) == 1
-        assert result[0]["path"] == "definition/report.json"
-
-    def test_fetch_report_definition_non_200_returns_empty(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = self._run(
-                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
-            )
-
-        assert result == []
-
-    def test_fetch_report_definition_exception_returns_empty(self):
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(side_effect=Exception("network error"))
-
-        with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = self._run(
-                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
-            )
-
         assert result == []
 
 
@@ -2086,121 +2054,3 @@ class TestExtractReportReferencesAsync:
                     )
 
         assert "Error" in result or isinstance(result, str)
-
-
-# ===========================================================================
-# _fetch_report_definition async path: 202 polling
-# ===========================================================================
-
-
-class TestFetchReportDefinition202:
-    """Tests for the 202 async polling path in _fetch_report_definition."""
-
-    def setup_method(self):
-        self.tool = PowerBIReportReferencesTool()
-
-    def _run(self, coro):
-        return asyncio.run(coro)
-
-    def test_202_polling_succeeded(self):
-        parts = [{"path": "definition/report.json", "payload": "data"}]
-
-        poll_response = MagicMock()
-        poll_response.json.return_value = {"status": "Succeeded"}
-
-        result_response = MagicMock()
-        result_response.raise_for_status = MagicMock()
-        result_response.json.return_value = {"definition": {"parts": parts}}
-
-        initial_response = MagicMock()
-        initial_response.status_code = 202
-        initial_response.headers = {"Location": "https://api.powerbi.com/poll/123"}
-
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=initial_response)
-        mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
-
-        with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = self._run(
-                    self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
-                )
-
-        assert len(result) == 1
-        assert result[0]["path"] == "definition/report.json"
-
-    def test_202_polling_failed_status(self):
-        poll_response = MagicMock()
-        poll_response.json.return_value = {
-            "status": "Failed",
-            "error": {"message": "Fail"},
-        }
-
-        initial_response = MagicMock()
-        initial_response.status_code = 202
-        initial_response.headers = {"Location": "https://api.powerbi.com/poll/123"}
-
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=initial_response)
-        mock_client.get = AsyncMock(return_value=poll_response)
-
-        with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = self._run(
-                    self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
-                )
-
-        assert result == []
-
-    def test_202_no_location_header(self):
-        initial_response = MagicMock()
-        initial_response.status_code = 202
-        initial_response.headers = {}  # No Location
-
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=initial_response)
-
-        with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = self._run(
-                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
-            )
-
-        assert result == []
-
-    def test_http_status_error_returns_empty(self):
-        import httpx
-
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        mock_resp.text = "Forbidden"
-        mock_client.post = AsyncMock(
-            side_effect=httpx.HTTPStatusError(
-                "Forbidden", request=MagicMock(), response=mock_resp
-            )
-        )
-
-        with patch(
-            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            self._run(
-                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
-            )

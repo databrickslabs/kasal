@@ -31,13 +31,22 @@ interface PowerBIOAuthState {
 interface UsePowerBIOAuthReturn extends PowerBIOAuthState {
   signIn: () => void;
   signOut: () => void;
-  handleCallback: (code: string) => Promise<void>;
+  handleCallback: (code: string, returnedState: string | null) => Promise<void>;
 }
 
 // Storage keys
 const STORAGE_KEY_TOKEN = 'powerbi_oauth_token';
 const STORAGE_KEY_EXPIRES = 'powerbi_oauth_expires';
 const STORAGE_KEY_EMAIL = 'powerbi_oauth_email';
+
+/** Whether `url` points into this app (same scheme, host and port). */
+export function isSameOrigin(url: string): boolean {
+  try {
+    return new URL(url, window.location.origin).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Hook for Power BI OAuth authentication
@@ -143,7 +152,20 @@ export function usePowerBIOAuth(config?: PowerBIOAuthConfig): UsePowerBIOAuthRet
   /**
    * Handle OAuth callback after user authenticates
    */
-  const handleCallback = useCallback(async (code: string) => {
+  const handleCallback = useCallback(async (code: string, returnedState: string | null) => {
+    // CSRF: the callback must carry the state this tab sent. Without the check another
+    // site could finish a sign-in it started and bind its own Power BI account here.
+    const expectedState = sessionStorage.getItem('powerbi_oauth_state');
+    sessionStorage.removeItem('powerbi_oauth_state');
+    if (!expectedState || !returnedState || returnedState !== expectedState) {
+      setState(prev => ({
+        ...prev,
+        error: 'Sign-in could not be verified (state mismatch). Please sign in again.',
+        isLoading: false,
+      }));
+      return;
+    }
+
     if (!effectiveConfig.clientId) {
       setState(prev => ({
         ...prev,
@@ -215,8 +237,9 @@ export function usePowerBIOAuth(config?: PowerBIOAuthConfig): UsePowerBIOAuthRet
 
       // Redirect back to original page
       const returnUrl = sessionStorage.getItem('powerbi_oauth_return_url');
-      if (returnUrl) {
-        sessionStorage.removeItem('powerbi_oauth_return_url');
+      sessionStorage.removeItem('powerbi_oauth_return_url');
+      // Only back into this app: never to another origin or a javascript: URL.
+      if (returnUrl && isSameOrigin(returnUrl)) {
         window.location.href = returnUrl;
       }
     } catch (err: any) {

@@ -142,7 +142,9 @@ async def get_fabric_access_token(
     """
     import httpx
 
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    from src.services.powerbi.ids import token_url
+
+    url = token_url(tenant_id)
 
     # Determine authentication method
     if auth_method == "service_account" or (

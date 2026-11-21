@@ -39,7 +39,9 @@ def make_async_session_factory(*sessions):
     """
     call_idx = [0]
 
-    def factory():
+    def factory(*args, **kwargs):
+        # Accept and ignore kwargs (e.g. soft_complete_on_closed) so the double
+        # tracks the real _smart_db_session signature.
         idx = min(call_idx[0], len(sessions) - 1)
         call_idx[0] += 1
         return sessions[idx]

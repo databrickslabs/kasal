@@ -33,7 +33,7 @@ class PowerBIConfig(Base):
     # Service account credentials (alternative auth method)
     encrypted_username: Mapped[Optional[str]] = mapped_column(
         String, nullable=True
-    )  # Encrypted username (e.g., sa_datamesh_powerbi@domain.com)
+    )  # Encrypted username (e.g., svc-powerbi@example.com)
     encrypted_password: Mapped[Optional[str]] = mapped_column(
         String, nullable=True
     )  # Encrypted password

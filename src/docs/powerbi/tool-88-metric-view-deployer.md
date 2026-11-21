@@ -56,6 +56,11 @@ If dry_run=false:
 | `databricks_host` | Deploy only | - | Workspace URL (e.g. `https://xyz.cloud.databricks.com`) |
 | `databricks_token` | Deploy only | - | PAT token for deployment |
 | `warehouse_id` | Deploy only | - | SQL warehouse ID |
+| `preserve_grants` | No | `true` | Read the grants before a replace and re-apply them; fails closed if they cannot be read |
+| `mode` | No | `deploy` | `verify`: compare each deployed definition with the YAML; `check`: run every measure once. Both read-only |
+| `group_by`, `timing`, `slow_threshold_s` | No | - | `check` only: group the test query, measure duration, flag slow measures |
+| `min_reconciled_pct` | No | - | Tool configuration only (not an argument an agent can pass). Deploy only the views that were compared with Power BI and reached this share of matching cells; the others are reported as skipped with the reason. Needs a verify-numbers output as input; without one every view is held back |
+| `flag_unreconciled_measures` | No | `false` | Tool configuration only. Add a note to the comment of every measure that is below the review bar or was not compared, e.g. `[Not reconciled with Power BI: 66.7 % of cells match]` |
 
 ---
 
