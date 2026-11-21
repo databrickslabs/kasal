@@ -301,7 +301,11 @@ def _resolve_nps_var(
     mref = re.fullmatch(r"\s*\[([^\]]+)\]\s*", body)
     if mref:
         res = translator._measure_resolutions.get(mref.group(1))
-        if res and res.get("base_expr") and not res.get("base_filters"):
+        if res and res.get("base_filters"):
+            # A filtered referenced measure is not a plain distinct count, and carrying
+            # its filters into this shape is not done here: no translation.
+            return None
+        if res and res.get("base_expr"):
             return str(res["base_expr"])
         return f"COUNT(DISTINCT source.{id_col})"
     return None
@@ -426,14 +430,21 @@ def translate_calc_measure_code_ratio(
             cond_sql = cond_to_sql(filt)
             if cond_sql is None:
                 continue
+            res = translator._measure_resolutions.get(ref_name)
+            if not res or not res.get("base_expr"):
+                continue
+            # The referenced measure's own filters (version, type, ...) stay on every
+            # path; dropping them made the variable the sum of every version.
+            conds = [*(res.get("base_filters") or []), cond_sql]
             base_col = _resolve_base_sum_col(translator, ref_name)
             if base_col:
-                resolved[var] = f"SUM(CASE WHEN {cond_sql} THEN source.{base_col} END)"
+                resolved[var] = (
+                    f"SUM(CASE WHEN {' AND '.join(conds)} THEN source.{base_col} END)"
+                )
             else:
-                res = translator._measure_resolutions.get(ref_name)
-                if not res or not res.get("base_expr"):
-                    continue
-                resolved[var] = f"{res['base_expr']} FILTER (WHERE {cond_sql})"
+                resolved[var] = (
+                    f"{res['base_expr']} FILTER (WHERE {' AND '.join(conds)})"
+                )
             continue
         dm = re.fullmatch(
             r"DIVIDE\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*", body, re.IGNORECASE
@@ -533,6 +544,7 @@ def match_calc_filters(dax: str, name: str) -> dict | None:
 def translate_calc_filters(
     match: dict, dax: str, table_key: str, translator: DaxTranslator
 ) -> tuple[str | None, str]:
+    conds = list(match["conds"])
     if match["sum_col"]:
         agg = f"SUM(source.{match['sum_col']})"
     else:
@@ -540,7 +552,9 @@ def translate_calc_filters(
         if not res or not res.get("base_expr"):
             return None, f"Cannot resolve [{match['ref_name']}]"
         agg = res["base_expr"]
-    return f"{agg} FILTER (WHERE {' AND '.join(match['conds'])})", ""
+        # the referenced measure's own filters stay with the CALCULATE's
+        conds = [*(res.get("base_filters") or []), *conds]
+    return f"{agg} FILTER (WHERE {' AND '.join(conds)})", ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
