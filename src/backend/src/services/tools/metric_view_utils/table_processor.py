@@ -397,8 +397,7 @@ def process_table(
 
         # Precedence: if config-gen supplied an AUTHORITATIVE SWITCH decomposition
         # for a measure (Step 6, real SQL from the $SYSTEM.MDSCHEMA_MEASURES API),
-        # that customer-validated SQL wins over a best-effort LLM attempt — exclude
-        # it from the LLM batch so it isn't preempted.
+        # that customer-validated SQL wins over a best-effort LLM attempt: exclude it.
         #
         # BUT `derive_switch_decompositions` also emits SKELETON entries whose
         # `raw_expr` is a literal "TODO: SQL expression for SWITCH measure ..."
@@ -421,7 +420,8 @@ def process_table(
         _llm_batch = [
             m
             for m in untranslatable
-            if m.original_name not in _authoritative_names
+            if m.category != "external_measure"  # EXTERNALMEASURE: never translated in part
+            and m.original_name not in _authoritative_names
             and to_snake_case(m.original_name) not in _authoritative_names
         ]
 

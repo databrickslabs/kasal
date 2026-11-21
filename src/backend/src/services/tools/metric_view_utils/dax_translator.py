@@ -37,7 +37,8 @@ from .utils import to_snake_case
 
 def _outer_calculate_filters(text: str) -> tuple[str, str]:
     """``CALCULATE(<body>, <f1>, ...)`` as ``("CALCULATE(<body>)", "<f1>, ...")``; the text
-    unchanged with "" when it is not one CALCULATE call with filter arguments after the body."""
+    unchanged with "" when it is not one CALCULATE call with filter arguments after the body.
+    """
     head = re.match(r"\s*CALCULATE\s*\(", text, re.IGNORECASE)
     if not head:
         return text, ""
@@ -269,6 +270,21 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
         dax = unwrap_keepfilters(
             dax, lambda p: self._keepfilters_accepted(p, table_key)
         )
+        if re.search(r"\bEXTERNALMEASURE\s*\(", dax, re.IGNORECASE):
+            # A measure of another model (DirectQuery to Analysis Services): never part of a
+            # translation, and not routed to the LLM either (table_processor).
+            return TranslationResult(
+                measure_name=sanitize_measure_name(
+                    to_snake_case(measure.get("original_name", name))
+                ),
+                original_name=measure.get("original_name", name),
+                sql_expr=None,
+                is_translatable=False,
+                skip_reason="EXTERNALMEASURE: a measure of another model is not translatable",
+                dax_expression=dax,
+                confidence="none",
+                category="external_measure",
+            )
         wrapped, outer = _outer_calculate_filters(dax.strip())
         if (
             outer
@@ -713,7 +729,10 @@ class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
             return None
         if outer:
             refs = [
-                {**r, "filter_text": ", ".join(p for p in (r["filter_text"], outer) if p)}
+                {
+                    **r,
+                    "filter_text": ", ".join(p for p in (r["filter_text"], outer) if p),
+                }
                 for r in refs
             ]
         return {"cleaned": cleaned, "refs": refs}

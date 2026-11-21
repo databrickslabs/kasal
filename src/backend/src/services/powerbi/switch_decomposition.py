@@ -231,8 +231,8 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     Returns ``{'base_expr': str, 'base_filters': [str]}`` or ``None`` when the DAX
     is not one of these self-contained aggregate shapes (caller then keeps a TODO).
     """
-    if not dax:
-        return None
+    if not dax or _EXTERNAL_MEASURE.search(dax):
+        return None  # a measure of another model has no SQL here
     if is_presence_switch(dax):
         # A dimension-conditional SWITCH: branch B, the unfiltered branch (see
         # geo_selector_split). A presence SWITCH that does not split resolves to nothing.
@@ -564,6 +564,31 @@ def _resolve_switch_branch(
     return None
 
 
+_EXTERNAL_MEASURE = re.compile(r"\bEXTERNALMEASURE\s*\(", re.IGNORECASE)
+_MEASURE_REF = re.compile(r"(?<![\w'\]])\[([^\]]+)\]")
+
+
+def reaches_external_measure(
+    dax: str, measure_by_name: dict[str, dict], _seen: "set[str] | None" = None
+) -> bool:
+    """Whether ``dax`` reads an ``EXTERNALMEASURE(...)`` (a measure of another model, in
+    DirectQuery to Analysis Services), directly or through the measures of this model it
+    references, at any depth. Such a measure is not translatable, in part or in whole.
+    """
+    if _EXTERNAL_MEASURE.search(dax or ""):
+        return True
+    seen = _seen if _seen is not None else set()
+    for ref in _MEASURE_REF.findall(dax or ""):
+        if ref in seen or ref not in measure_by_name:
+            continue
+        seen.add(ref)
+        if reaches_external_measure(
+            measure_by_name[ref].get("expression", "") or "", measure_by_name, seen
+        ):
+            return True
+    return False
+
+
 def derive_switch_decompositions(
     measures: list[dict], fact_tables: "set[str] | None" = None
 ) -> dict[str, list[dict]]:
@@ -610,6 +635,10 @@ def derive_switch_decompositions(
         if "SELECTEDVALUE" not in dax_upper or "SWITCH" not in dax_upper:
             continue
 
+        if reaches_external_measure(dax, measure_by_name):
+            # An option that is another model's measure would be dropped while the others
+            # translate: the whole SWITCH is left out, never decomposed in part.
+            continue
         vars_map = _parse_dax_vars(dax)
         # Collect every DISTINCT resolution (dedup by SQL) instead of stopping
         # at the first — see docstring for why one vs. many matters.
