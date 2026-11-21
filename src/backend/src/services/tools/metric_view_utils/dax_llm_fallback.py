@@ -12,10 +12,12 @@ import json
 import logging
 import re
 from collections import OrderedDict
+from collections.abc import Mapping
 
 from src.services.settings.engine_settings import setting as engine_setting
 
 from .data_classes import TranslationResult
+from .llm_reference_check import reference_violation
 from .dax_llm_prompts import _BATCH_OUTPUT_CONTRACT as _BATCH_OUTPUT_CONTRACT
 from .dax_llm_prompts import _FALLBACK_INSTRUCTIONS as _FALLBACK_INSTRUCTIONS
 from .dax_llm_prompts import _OUTPUT_CONTRACT as _OUTPUT_CONTRACT
@@ -261,7 +263,10 @@ def _llm_declined_reason(dax_class: str | None, detail: str) -> str:
 
 
 def _apply_parsed(
-    measure: TranslationResult, parsed: dict, usage: dict | None = None
+    measure: TranslationResult,
+    parsed: dict,
+    usage: dict | None = None,
+    original_to_snake: Mapping[str, str] | None = None,
 ) -> None:
     """Apply a parsed LLM result dict to a measure in place (success or decline).
 
@@ -279,6 +284,20 @@ def _apply_parsed(
                 f"[DAX_LLM] LLM output contains DAX constructs for {measure.original_name}"
             )
             return
+        # A MEASURE() of a measure the DAX does not read: the LLM resolved a reference to a
+        # sibling measure. Not translated, with the reason (llm_reference_check).
+        if original_to_snake is not None:
+            violation = reference_violation(
+                measure.dax_expression or "", sql_expr, original_to_snake
+            )
+            if violation:
+                logger.warning(
+                    "[DAX_LLM] rejected translation of %s: %s",
+                    measure.original_name,
+                    violation,
+                )
+                measure.skip_reason = f"LLM translation rejected: {violation}"
+                return
         measure.sql_expr = sql_expr
         measure.is_translatable = True
         measure.confidence = parsed.get("confidence", "medium")
@@ -619,7 +638,7 @@ async def translate_batch_with_llm(
         for m in batch:
             cached = run_cache.get(_ck(m))
             if cached is not None:
-                _apply_parsed(m, cached)
+                _apply_parsed(m, cached, original_to_snake=original_to_snake)
             else:
                 need_llm.append(m)
 
@@ -677,7 +696,12 @@ async def translate_batch_with_llm(
                     if len(run_cache) >= _RUN_CACHE_MAX:
                         run_cache.popitem(last=False)
                     run_cache[_ck(m)] = found
-                    _apply_parsed(m, found, response.get("usage", {}) or {})
+                    _apply_parsed(
+                        m,
+                        found,
+                        response.get("usage", {}) or {},
+                        original_to_snake=original_to_snake,
+                    )
                 # Any measure the model dropped from the array → per-measure retry.
                 if missing:
                     logger.warning(
