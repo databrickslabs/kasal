@@ -96,6 +96,6 @@
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._run": 226,
   "src/backend/src/services/tools/powerbi_report_references_tool.py::PowerBIReportReferencesTool._format_markdown_output_multi": 222,
   "src/backend/src/services/tools/tool_factory.py::ToolFactory._create_tool_impl": 1203,
-  "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 387,
+  "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 378,
   "src/backend/src/utils/databricks_auth.py::get_auth_context": 288
 }

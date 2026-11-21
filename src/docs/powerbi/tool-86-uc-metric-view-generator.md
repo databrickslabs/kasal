@@ -154,6 +154,8 @@ With `enable_reconciliation`, the output also carries the review list: `review_c
 
 Pipeline config keys added for production readiness: `read_from_source_layer` and `source_layer_naming` (metric views read from the `src_<table>` views). Each measure now carries a `format` derived from its Power BI format string. See [Step 2: convert](./ucmv-production-readiness.md#step-2-convert).
 
+**Rerun from a previous output.** The optional input `previous_output` takes the JSON a previous run returned. A measure that in that run sat in a deployed view, was compared with Power BI, reached `rerun_lock_pct` (pipeline config, default 99) on at least `rerun_min_cells` cells (default 10), was not removed by deploy healing, and whose DAX is unchanged keeps its previous SQL and window and is not sent to the LLM. Everything else is translated as usual; the output lists the reused measures in `reused_from_previous_run` (view → measure names) and the counts in `previous_run_pins`. A pinned measure is retranslated when the new view no longer has a column, join alias or measure its SQL reads, or when its window changed. Off unless `previous_output` is given.
+
 ---
 
 ## Example crew (JSON mode, full pipeline)

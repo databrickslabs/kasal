@@ -97,8 +97,12 @@ def apply_config_overlays(
     naming_raw: object,
     implicit_column_measures_raw: object,
     manual_overrides_raw: object,
+    pinned_overrides: object = None,
 ) -> None:
-    """Merge the optional overlays into ``config`` (mutates it in place)."""
+    """Merge the optional overlays into ``config`` (mutates it in place).
+
+    ``pinned_overrides`` (rerun pins) go LAST: the first override of a measure wins, so a
+    carry-forward or user override of the same measure takes precedence over a pin."""
     # Cross-fact UNION sources are emitted ONLY inside the reconciliation loop,
     # where PBI validates the numbers cell-by-cell (see cross_table_source_planner).
     if in_recon_loop:
@@ -107,6 +111,7 @@ def apply_config_overlays(
     _merge_implicit_column_measures(config, implicit_column_measures_raw)
     _drop_placeholder_overrides(config)
     _merge_manual_overrides(config, manual_overrides_raw)
+    _merge_manual_overrides(config, pinned_overrides)
 
 
 def _drop_placeholder_overrides(config: dict[str, object]) -> None:

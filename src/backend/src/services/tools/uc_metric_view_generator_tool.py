@@ -52,6 +52,10 @@ from src.services.tools.uc_metric_view_generator_utils.pipeline_config_assembly 
 from src.services.tools.uc_metric_view_generator_utils.pipeline_run import (
     run_pipeline,
 )
+from src.services.tools.uc_metric_view_generator_utils.previous_run_pins import (
+    pin_report,
+    plan_previous_run_pins,
+)
 from src.services.tools.uc_metric_view_generator_utils.reconciliation_gate import (
     run_reconciliation_gate,
 )
@@ -86,6 +90,33 @@ logger = logging.getLogger(__name__)
 from src.services.tools.metric_view_utils.utils import (  # noqa: E402 - import follows module initialization
     run_async as _run_async,
 )
+
+
+def _looks_like_json(v: Any) -> bool:
+    if not isinstance(v, (str, list, dict)):
+        return False
+    if isinstance(v, (list, dict)):
+        return True
+    s = v.strip()
+    return s.startswith("{") or s.startswith("[")
+
+
+def _json_arg(kwargs: dict, defaults: dict, key: str) -> object:
+    """A JSON-shaped argument: a valid kwarg, else the flow-injected default, else the kwarg."""
+    kw_val = kwargs.get(key)
+    default_val = defaults.get(key)
+    # Prefer a valid kwarg; else the injected default; else the kwarg as-is.
+    if kw_val is not None and _looks_like_json(kw_val):
+        return kw_val
+    if default_val is not None and _looks_like_json(default_val):
+        if kw_val is not None and not _looks_like_json(kw_val):
+            logger.warning(
+                "[UCMV] agent passed non-JSON %s=%r; using flow-injected value instead",
+                key,
+                str(kw_val)[:40],
+            )
+        return default_val
+    return kw_val or default_val
 
 
 class UCMetricViewGeneratorSchema(BaseModel):
@@ -126,6 +157,17 @@ class UCMetricViewGeneratorSchema(BaseModel):
             "fallback on, the DAX translator is told which measures mismatched "
             "Power BI last cycle so it fixes them. Set by the reconciliation loop; "
             "not usually supplied by hand."
+        ),
+    )
+    previous_output: Optional[str] = Field(
+        None,
+        description=(
+            "OPTIONAL: the JSON this tool returned in a previous run (a rerun). A measure "
+            "that in that run sat in a deployed view, reached the lock threshold "
+            "(rerun_lock_pct, default 99) on enough cells (rerun_min_cells, default 10) "
+            "and whose DAX is unchanged keeps its previous SQL and window without being "
+            "sent to the LLM. Everything else is translated as usual. Output lists the "
+            "reused measures in reused_from_previous_run."
         ),
     )
     naming_config: Optional[str] = Field(
@@ -319,6 +361,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "naming_config",
             "domain_context",
             "refinement_feedback",
+            "previous_output",
             "enable_reconciliation",
             "max_reconciliation_cycles",
             "reconciliation_target_pct",
@@ -541,29 +584,8 @@ class UCMetricViewGeneratorTool(BaseTool):
         # the good injected value via _get's `or` — then json.loads() fails at
         # char 0. Guard: for JSON-shaped fields, if the kwarg isn't valid JSON but
         # the injected default IS present, use the injected default.
-        def _looks_like_json(v: Any) -> bool:
-            if not isinstance(v, (str, list, dict)):
-                return False
-            if isinstance(v, (list, dict)):
-                return True
-            s = v.strip()
-            return s.startswith("{") or s.startswith("[")
-
         def _get_json(key: str) -> Any:
-            kw_val = kwargs.get(key)
-            default_val = self._default_config.get(key)
-            # Prefer a valid kwarg; else the injected default; else the kwarg as-is.
-            if kw_val is not None and _looks_like_json(kw_val):
-                return kw_val
-            if default_val is not None and _looks_like_json(default_val):
-                if kw_val is not None and not _looks_like_json(kw_val):
-                    logger.warning(
-                        "[UCMV] agent passed non-JSON %s=%r; using flow-injected value instead",
-                        key,
-                        str(kw_val)[:40],
-                    )
-                return default_val
-            return kw_val or default_val
+            return _json_arg(kwargs, self._default_config, key)
 
         measures_raw = _get_json("measures_json") or "[]"
         mquery_raw = _get_json("mquery_json") or "[]"
@@ -675,12 +697,21 @@ class UCMetricViewGeneratorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
+        # Rerun pins from a previous output (see previous_run_pins). Pins are planned
+        # against this run's DAX; this run's refinement feedback is never pinned again.
+        pin_plan = plan_previous_run_pins(
+            _get_json("previous_output"),
+            measures,
+            config,
+            _get_json("refinement_feedback"),
+        )
         apply_config_overlays(
             config,
             in_recon_loop=bool(kwargs.get("_in_recon_loop")),
             naming_raw=_get_json("naming_config"),
             implicit_column_measures_raw=raw.implicit_column_measures,
             manual_overrides_raw=_get("manual_overrides"),
+            pinned_overrides=pin_plan.overrides,
         )
 
         # The whole M per table, captured before the M → SQL recovery rewrites it.
@@ -708,6 +739,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             inner_dim_joins=inner_joins,
             unflatten_tables=unflatten,
             llm_config=llm_config,
+            pins=pin_plan,
         )
 
         # Visual usage: tag measures (direct, indirect), optional triage, then the
@@ -874,6 +906,8 @@ class UCMetricViewGeneratorTool(BaseTool):
             "pbi_validation": source_layers.pbi_validation,
             "report_scope": finalize_report_scope(_get_json("report_scope"), pipeline),
             "_diagnostics": diag,
+            # Rerun pins: which measures kept their previous SQL (empty without previous_output).
+            **pin_report(pipeline),
         }
         output_json = json.dumps(output, indent=2)
 
