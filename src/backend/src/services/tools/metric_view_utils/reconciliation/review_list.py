@@ -13,8 +13,9 @@ the run. A measure is one of:
 
 Each row also says what the measure is: ``kind`` is ``measure`` (a Power BI measure) or
 ``column_sum`` (a plain aggregate of one table column, which the model has no measure for),
-and ``scope`` is ``in_scope``, ``display`` (formatting or slicer logic: not a data measure) or
-``counted_elsewhere`` (the same measure is listed on its primary table). ``review_overview``
+and ``scope`` is ``in_scope``, ``display`` (formatting or slicer logic: not a data measure),
+``counted_elsewhere`` (the same measure is listed on its primary table) or ``helper`` (a
+measure the generator added for a part of another measure). ``review_overview``
 counts, per view, the in-scope measures that are translated, match Power BI, are below the
 bar, were lost on deploy or are not translated.
 
@@ -142,6 +143,16 @@ def _translated_on(output: Mapping[str, object]) -> dict[str, set[str]]:
             if entry.get("original_name") and str(entry.get("measure_name")) in emitted:
                 views.setdefault(str(entry["original_name"]), set()).add(str(view))
     return views
+
+
+def _helper_measures(output: Mapping[str, object]) -> set[tuple[str, str]]:
+    """``(view, measure)`` of the measures the generator added itself (``helper_of``)."""
+    return {
+        (str(view), str(as_map(m).get("measure_name")))
+        for view, measures in as_map(output.get("resolved_measures_by_table")).items()
+        for m in as_list(measures)
+        if as_map(m).get("helper_of")
+    }
 
 
 def _compared_rows(
@@ -287,7 +298,12 @@ def build_review_list(
             )
         )
     from_measures = _power_bi_measures(output)
+    helpers = _helper_measures(output)
     for row in rows:
+        # A measure the generator added for a part of another measure (the prior-year
+        # half of a year-on-year measure) is not a Power BI measure: listed, not counted.
+        if (str(row["view"]), str(row["measure"])) in helpers:
+            row["scope"] = "helper"
         # A Power BI measure that is itself one column aggregate (Total = SUM(T[x])) is a
         # measure; a measure healing removed has no expression left to judge by.
         if str(row["measure"]) in from_measures.get(str(row["view"]), set()):

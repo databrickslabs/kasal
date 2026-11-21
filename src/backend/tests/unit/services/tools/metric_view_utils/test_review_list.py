@@ -326,3 +326,44 @@ measures:
     assert overview["Calendar"]["in_scope"] == 2
     assert overview["Calendar"]["not_translated"] == 2
     assert overview["total"]["in_scope"] == 3  # Sales PY once, on its fact
+
+
+def test_a_helper_measure_is_listed_but_not_counted():
+    from src.services.tools.metric_view_utils.reconciliation.review_list import (
+        build_review_list,
+        review_overview,
+    )
+
+    fact = """version: '1.1'
+source: c.s.fact
+dimensions:
+  - name: country
+    expr: source.country
+measures:
+  - name: sales_py
+    expr: MEASURE(sales)
+  - name: growth
+    expr: MEASURE(sales) - MEASURE(sales_py)
+"""
+    output = {
+        "yaml": {"Fact": fact},
+        "resolved_measures_by_table": {
+            "Fact": [
+                {
+                    "measure_name": "sales_py",
+                    "original_name": "Sales PY",
+                    "dax_expression": "CALCULATE([Sales])",
+                    "helper_of": "Growth",
+                },
+                {
+                    "measure_name": "growth",
+                    "original_name": "Growth",
+                    "dax_expression": "[Sales] - [Sales PY]",
+                },
+            ]
+        },
+    }
+    rows = build_review_list(output)
+    scopes = {r["measure"]: r["scope"] for r in rows}
+    assert scopes == {"sales_py": "helper", "growth": "in_scope"}
+    assert review_overview(rows)["total"]["in_scope"] == 1
