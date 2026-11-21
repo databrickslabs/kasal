@@ -15,6 +15,9 @@ from typing import Any, Optional, Type
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_validation_utils.comparison_status import (
+    comparison_summary_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +64,13 @@ def _compact_output(
     yaml_tables: dict,
     untranslatable_items: list,
     totals: dict,
+    ucmv_output: object,
 ) -> dict:
     """The agent-facing result of one validation: totals, per-view counts, the measures
-    that need attention (capped) and the views' YAML."""
+    that need attention (capped) and the views' YAML. When crew 2b handed in a comparison
+    with Power BI, each judged measure carries its outcome next to the static verdict (the
+    verdicts themselves do not change)."""
+    comparison = comparison_summary_for(results, ucmv_output)
     # ── Build a COMPACT agent-facing return ──────────────────────────────
     # The crew agent ingests this tool result into its LLM context. Returning
     # the full per-measure `details` for every table PLUS all the YAML docs
@@ -109,6 +116,11 @@ def _compact_output(
                     "measure_eval_result": {
                         "status": status,
                         "similarities": [reason_line] if reason_line else [],
+                        **(
+                            {"comparison": mer["comparison"]}
+                            if "comparison" in mer
+                            else {}
+                        ),
                     },
                 }
             )
@@ -133,7 +145,7 @@ def _compact_output(
         }
 
     attention_truncated = len(attention) > _ATTENTION_CAP
-    output = {
+    output: dict = {
         "summary": {
             "tables_validated": len(results),
             "total_evaluated": totals["total_evaluated"],
@@ -166,6 +178,7 @@ def _compact_output(
         f"({len(attention)} need attention"
         f"{', capped at %d' % _ATTENTION_CAP if attention_truncated else ''})"
     )
+    output["summary"].update(comparison)
     return output
 
 
@@ -485,11 +498,10 @@ class MetricViewValidatorTool(BaseTool):
             "total_review": total_review,
             "total_invalid": total_invalid,
         }
-        return json.dumps(
-            _compact_output(results, yaml_tables, untranslatable_items, totals),
-            indent=2,
-            default=str,
+        compact = _compact_output(
+            results, yaml_tables, untranslatable_items, totals, ucmv_raw
         )
+        return json.dumps(compact, indent=2, default=str)
 
     def _run_scope(self) -> tuple[Optional[str], list[str]]:
         """This run's job id (trace context) and group (GroupContext).
