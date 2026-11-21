@@ -33,6 +33,27 @@ def columns_query(catalog: str, schema: str, leaves: Sequence[str]) -> str:
     )
 
 
+def _truncated(data: object, rows: int) -> bool:
+    """Whether the answer does not hold every row: more than one chunk, a link to the next chunk,
+    or fewer rows than the statement reports."""
+    if not isinstance(data, Mapping):
+        return True
+    manifest = data.get("manifest")
+    result = data.get("result")
+    manifest = manifest if isinstance(manifest, Mapping) else {}
+    result = result if isinstance(result, Mapping) else {}
+    chunks = manifest.get("total_chunk_count")
+    total = manifest.get("total_row_count")
+    if isinstance(chunks, int) and chunks > 1:
+        return True
+    if (
+        result.get("next_chunk_internal_link")
+        or result.get("next_chunk_index") is not None
+    ):
+        return True
+    return isinstance(total, int) and total != rows
+
+
 def read_source_columns(
     deployer: object, deploy_base: Mapping[str, object], leaves: Sequence[str]
 ) -> dict[str, list[dict[str, str]]]:
@@ -50,8 +71,13 @@ def read_source_columns(
             "[UCMV] source columns not read: %s", str(outcome.get("error") or "")[:300]
         )
         return {}
+    rows = result_rows(outcome.get("data"))
+    if _truncated(outcome.get("data"), len(rows)):
+        # A partial listing would make real columns look missing: all or nothing.
+        logger.warning("[UCMV] source columns not read: the answer was truncated")
+        return {}
     out: dict[str, list[dict[str, str]]] = {}
-    for row in result_rows(outcome.get("data")):
+    for row in rows:
         if len(row) < 2 or row[0] is None or row[1] is None:
             continue
         dtype = "" if len(row) < 3 or row[2] is None else str(row[2])

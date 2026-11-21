@@ -32,6 +32,7 @@ further wiring.
 
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -369,6 +370,61 @@ def _clear_home(m: dict) -> None:
     m["proposed_allocation"] = UNASSIGNED
 
 
+def _parsed_placements(
+    mapping: list[dict], mquery_tables: dict, config: dict | None
+) -> tuple[list[str | None], dict[str, set[str]]]:
+    """Where each measure lands from the parsed columns alone, i.e. the allocation without the real
+    columns, and the parsed column index of the candidate facts. The mapping is not changed.
+    """
+    trial = copy.deepcopy(mapping)
+    reallocate_by_columns(trial, mquery_tables, config=config)
+    homes = [_current_home(m) for m in trial]
+    fact_keys = candidate_fact_keys(mquery_tables, mapping)
+    return homes, build_fact_column_index(mquery_tables, fact_keys)
+
+
+def _placement_confirmed(
+    eff: set[str],
+    kept: str | None,
+    parsed_index: Mapping[str, set[str]],
+    source_columns: Mapping[str, list[str]],
+) -> tuple[bool, set[str]]:
+    """Whether the real columns of the view ``kept`` confirm the columns the no-columns placement
+    relies on: the measure's columns that ``kept`` owns by the parsed columns. Returns the verdict
+    and those columns. A view with no real columns, or no column the placement relies on, confirms
+    nothing (the measure is then judged by the real columns as before)."""
+    if kept is None or not source_columns.get(kept):
+        return False, set()
+    owned = parsed_index.get(kept)
+    if not owned:
+        return False, set()
+    needed = {c for c in eff if c in owned}
+    if not needed:
+        return False, needed
+    real = {_norm(c) for c in source_columns[kept]}
+    return needed <= real, needed
+
+
+def _keep_placement(
+    m: dict, home: str | None, kept: str, needed: set[str], report: dict, name: str
+) -> None:
+    """Home the measure on ``kept`` (its no-columns placement) when it is not there already."""
+    if kept == home:
+        return
+    entry = {
+        "measure": name,
+        "to": kept,
+        "columns": sorted(needed),
+        "basis": "no-columns placement, confirmed by the view's real columns",
+    }
+    _set_home(m, kept)
+    if home is None:
+        report["rescued"].append(entry)
+    else:
+        m[REHOMED_KEY] = {"from": home, "to": kept}
+        report["rehomed"].append({**entry, "from": home})
+
+
 def reallocate_by_columns(
     mapping: list[dict],
     mquery_tables: dict,
@@ -402,6 +458,13 @@ def reallocate_by_columns(
     if not mapping or not mquery_tables:
         return report
 
+    # With real columns, the placement the parsed columns give is the reference: a measure keeps it
+    # where the real columns of that view confirm the columns the placement relies on (see
+    # _placement_confirmed). Computed before the mapping is changed below.
+    placed = (
+        _parsed_placements(mapping, mquery_tables, config) if source_columns else None
+    )
+
     fact_keys = candidate_fact_keys(mquery_tables, mapping)
     if not fact_keys:
         return report
@@ -419,7 +482,7 @@ def reallocate_by_columns(
     fact_index = {k: cols for k, cols in full_index.items() if cols}
     has_wildcard = bool(wildcard_facts)
 
-    for m in mapping:
+    for i, m in enumerate(mapping):
         dax = m.get("dax_expression") or m.get("expression") or ""
         eff = resolve_effective_columns(dax, cols_index, mref_index)
         if not eff:
@@ -428,6 +491,15 @@ def reallocate_by_columns(
         home = _current_home(m)
         if home in wildcard_facts:
             continue  # can't validate against an unknown-column source
+        if placed is not None:
+            kept, parsed_index = placed
+            kept_home = kept[i]
+            confirmed, needed = _placement_confirmed(
+                eff, kept_home, parsed_index, source_columns or {}
+            )
+            if confirmed and kept_home is not None:
+                _keep_placement(m, home, kept_home, needed, report, name)
+                continue
         decision = allocate(eff, fact_index, grain_index, known_cols)
         home_cols = fact_index.get(home, set()) if home else set()
         home_owns = bool(decision.fact_columns) and decision.fact_columns <= home_cols

@@ -2,6 +2,8 @@
 could not read (a wildcard) becomes judgeable, a correctly homed measure stays where it is, and
 without the columns nothing changes."""
 
+import dataclasses
+
 from src.services.tools.metric_view_utils.data_classes import TableInfo
 from src.services.tools.metric_view_utils.measure_allocator import reallocate_by_columns
 
@@ -111,3 +113,68 @@ def test_an_ambiguous_measure_homed_on_a_table_with_no_view_goes_to_the_viewed_f
     assert report["rehomed"] == [
         {"measure": "m", "from": "Fact_C", "to": "Fact_A", "columns": ["amount"]}
     ]
+
+
+def _no_view_home() -> TableInfo:
+    """A table the measure is homed on, with no source table: it has no view and emits nothing."""
+    return dataclasses.replace(_table("Fact_P", fact=False), source_table="")
+
+
+def _dax_measure(name: str, dax: str, home: str | None) -> dict:
+    entry = _measure(name, dax, home or "")
+    if home is None:
+        entry["all_allocations"] = []
+        entry["proposed_allocation"] = "__unassigned__"
+    return entry
+
+
+def test_a_placement_the_real_columns_confirm_is_kept_although_a_dimension_now_counts():
+    # Without columns: Fact_A owns `volume` (the calendar Dim_C is unknown, so it owns nothing).
+    # With real columns Dim_C owns `month`, the verdict turns cross-fact, and the measure would leave
+    # Fact_A. Fact_A's real columns hold `volume`, so the placement stays.
+    tables = {
+        "Fact_A": _table("Fact_A", parsed=["volume"]),
+        "Dim_C": _table("Dim_C"),
+        "Fact_P": _no_view_home(),
+    }
+    mapping = [_dax_measure("m", "SUM(Fact_A[volume]) + SUM(Dim_C[month])", "Fact_P")]
+    without = [dict(m) for m in mapping]
+    reallocate_by_columns(without, tables)
+    assert _home(without[0]) == "Fact_A"
+
+    report = reallocate_by_columns(
+        mapping,
+        tables,
+        source_columns={"Fact_A": ["id", "volume"], "Dim_C": ["month"]},
+    )
+    assert _home(mapping[0]) == "Fact_A"
+    (entry,) = report["rehomed"]
+    assert entry["to"] == "Fact_A" and entry["from"] == "Fact_P"
+    assert "confirmed" in entry["basis"]
+
+
+def test_a_placement_the_real_columns_do_not_confirm_is_judged_by_them():
+    # Fact_A's real view lacks `volume`: the placement is not confirmed, so the real verdict applies
+    # and the measure does not stay on a view that lacks its column.
+    tables = {
+        "Fact_A": _table("Fact_A", parsed=["volume"]),
+        "Dim_C": _table("Dim_C"),
+        "Fact_P": _no_view_home(),
+    }
+    mapping = [_dax_measure("m", "SUM(Fact_A[volume]) + SUM(Dim_C[month])", "Fact_P")]
+    reallocate_by_columns(
+        mapping,
+        tables,
+        source_columns={"Fact_A": ["id"], "Dim_C": ["month"]},
+    )
+    assert _home(mapping[0]) != "Fact_A"
+
+
+def test_a_measure_with_no_home_gets_the_placement_the_real_columns_confirm():
+    tables = {"Fact_A": _table("Fact_A", parsed=["volume"])}
+    mapping = [_dax_measure("m", "SUM(Fact_A[volume])", None)]
+    report = reallocate_by_columns(
+        mapping, tables, source_columns={"Fact_A": ["volume"]}
+    )
+    assert _home(mapping[0]) == "Fact_A"
+    assert report["rescued"] and report["rescued"][0]["to"] == "Fact_A"
