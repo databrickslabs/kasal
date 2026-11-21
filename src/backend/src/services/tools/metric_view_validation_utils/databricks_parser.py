@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Set
 import yaml
 
 from .constants import AGGREGATION_FUNCTIONS, SQL_IDENTIFIER_EXCLUSIONS
+from .measure_references import strip_measure_calls
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +198,12 @@ class UCMetricsViewParser:
         """Extract references (e.g., source.column, dim_wkctr.column, and standalone columns)."""
         references = set()
 
-        # Remove string literals (both single and double quoted) to avoid extracting from them
-        expr_without_strings = _STRING_LITERAL_PATTERN.sub("", expr)
+        # Remove string literals (both single and double quoted) to avoid extracting from them.
+        # A MEASURE(name) call names a measure, not a column: it is compared as a measure
+        # reference (measure_references), never as a column.
+        expr_without_strings = strip_measure_calls(
+            _STRING_LITERAL_PATTERN.sub("", expr)
+        )
 
         # Pattern 1: table.column (qualified references)
         for match in _TABLE_COLUMN_PATTERN.finditer(expr_without_strings):

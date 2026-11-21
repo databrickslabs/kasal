@@ -19,6 +19,8 @@ from .measure_fingerprint import (
     sql_fingerprint,
     var_used_inside_calculate,
 )
+from .measure_expression_tree import compare_shapes, composed_of_measures_only
+from .measure_references import dax_measure_refs, ucmv_measure_refs
 from .prior_year_check import PriorYearJudgement, is_prior_year_dax, judge_prior_year
 
 logger = logging.getLogger(__name__)
@@ -390,6 +392,39 @@ class ExpressionValidator:
             differences.append(f"Reference mismatch: {column_result['details']}")
             if column_result.get("recommendation"):
                 recommendations.append(column_result["recommendation"])
+
+        # 3b. Measure references: a MEASURE(name) call is a reference to a measure, not a
+        # column. The two sides must call the same measures, and then the arithmetic around
+        # the calls must have the same shape (operator precedence, ratio, grouping).
+        called = ucmv_measure_refs(db_expr)
+        if called:
+            dax_resolved = self.dax_parser.resolved_expression(dax_expr)
+            dax_called = dax_measure_refs(dax_resolved)
+            missing = called - dax_called
+            extra = dax_called - called
+            if missing:
+                differences.append(
+                    "Reference mismatch (measures): MEASURE() calls a measure the DAX "
+                    f"does not reference: {sorted(missing)}"
+                )
+            elif extra:
+                differences.append(
+                    "Reference mismatch (measures): the DAX references a measure the "
+                    f"metric view does not call: {sorted(extra)}"
+                )
+            else:
+                same_shape, why = compare_shapes(db_expr, dax_resolved)
+                if same_shape:
+                    similarities.append(f"Measure references match: {why}")
+                    if composed_of_measures_only(db_expr):
+                        # No column aggregate here: the value is the referenced measures'
+                        # values, which their own rows judge. Not VALID on this row alone.
+                        differences.append(
+                            "Composed of measures only: judged by the referenced measures' "
+                            "own rows, not by this expression"
+                        )
+                else:
+                    differences.append(f"Structure mismatch (measures): {why}")
 
         # 4. Strict mode: require structural equivalence in addition to semantic match
         if strict:
