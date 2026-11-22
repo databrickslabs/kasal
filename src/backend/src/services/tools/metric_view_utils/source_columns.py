@@ -121,3 +121,55 @@ def columns_read(text: str, alias: str) -> set[str]:
         rf"(?<![\w.]){re.escape(alias)}\.`?(\w+)`?(?!\w)", re.IGNORECASE
     )
     return {name.lower() for name in pattern.findall(text or "")}
+
+
+_STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\"")
+_MEASURE_CALL = re.compile(r"\bMEASURE\s*\(\s*`?\w+`?\s*\)", re.IGNORECASE)
+_TYPE_AFTER_AS = re.compile(r"\bAS\s+[A-Za-z_]\w*", re.IGNORECASE)
+_QUALIFIED = re.compile(
+    r"(?<![\w.`])(?:`[^`]+`|[A-Za-z_]\w*)\s*\.\s*(?:`[^`]+`|[A-Za-z_]\w*)"
+)
+_BACKTICKED = re.compile(r"`([^`]+)`")
+_BARE_WORD = re.compile(r"(?<![\w.])([A-Za-z_]\w*)")
+# Words that are SQL syntax, not column names, when they stand alone in an expression.
+_SQL_WORDS = frozenset(
+    {
+        "and", "or", "not", "in", "is", "null", "case", "when", "then", "else", "end",
+        "between", "like", "ilike", "exists", "any", "all", "some", "escape", "as",
+        "filter", "where", "distinct", "over", "partition", "by", "order", "rows",
+        "range", "unbounded", "preceding", "following", "current", "row", "asc", "desc",
+        "nulls", "first", "last", "true", "false", "date", "timestamp", "interval",
+        "day", "week", "month", "quarter", "year", "hour", "minute", "second",
+        "int", "integer", "bigint", "smallint", "tinyint", "double", "float", "decimal",
+        "numeric", "string", "varchar", "char", "boolean", "binary", "from", "div", "mod",
+    }
+)
+
+
+def bare_columns_read(text: str) -> set[str]:
+    """Lower-cased column names written WITHOUT a qualifier in an expression: ``filter_code`` in
+    ``sum(case when filter_code in ('A1') then amount end)``.
+
+    Databricks resolves such a name against the fact's own columns, so it fails the deploy when
+    the fact has no column of that name, as ``source.<col>`` does. Not counted: string literals,
+    qualified references (``alias.col``), function names (followed by ``(``), SQL keywords and
+    type names, the argument of ``MEASURE(...)``, and the fact alias itself.
+    """
+    if not text:
+        return set()
+    body = _STRING_LITERAL.sub(" ", text)
+    body = _MEASURE_CALL.sub(" ", body)
+    body = _TYPE_AFTER_AS.sub(" ", body)
+    body = _QUALIFIED.sub(" ", body)
+    names: set[str] = set()
+    for match in _BACKTICKED.finditer(body):
+        if not re.match(r"\s*\(", body[match.end():]):
+            names.add(match.group(1).lower())
+    body = _BACKTICKED.sub(" ", body)
+    for match in _BARE_WORD.finditer(body):
+        word = match.group(1)
+        if re.match(r"\s*\(", body[match.end():]) or word.lower() in _SQL_WORDS:
+            continue
+        names.add(word.lower())
+    names.discard(QUALIFIER)
+    return names

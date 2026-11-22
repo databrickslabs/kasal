@@ -2,6 +2,7 @@
 rewrite of the references to it."""
 
 from src.services.tools.metric_view_utils.source_columns import (
+    bare_columns_read,
     column_renames,
     columns_read,
     parse_source_columns,
@@ -71,3 +72,19 @@ def test_columns_read_lists_lower_cased_names_of_one_alias():
         "fiscper",
     }
     assert columns_read("dim.month", "source") == set()
+
+
+def test_bare_columns_read_finds_unqualified_fact_columns_only():
+    expr = (
+        "sum(case when filter_code in ('A1', 'B2') and `quoted name` is not null"
+        " then value_amount end) + MEASURE(other) + dim_plant.plant_name + source.amount"
+        " + CAST(qty AS INT) + DATE_TRUNC('MONTH', event_date)"
+    )
+    assert bare_columns_read(expr) == {
+        "filter_code",
+        "quoted name",
+        "value_amount",
+        "qty",
+        "event_date",
+    }
+    assert bare_columns_read("") == set()

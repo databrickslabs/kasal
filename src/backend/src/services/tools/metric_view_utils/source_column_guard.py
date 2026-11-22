@@ -19,7 +19,7 @@ import re
 from collections.abc import Mapping
 
 from .data_classes import MetricViewSpec, TranslationResult
-from .source_columns import QUALIFIER, columns_read
+from .source_columns import QUALIFIER, bare_columns_read, columns_read
 from .source_layer_binding import normalized_name
 
 
@@ -58,10 +58,17 @@ def view_key_by_name(views: Mapping[str, str]) -> dict[str, str]:
 
 
 def _missing(text: str, alias: str, columns: frozenset[str] | None) -> list[str]:
-    """Columns the expression reads through ``alias`` that the view does not have (sorted)."""
+    """Columns the expression reads through ``alias`` that the view does not have (sorted).
+
+    For the fact (``alias`` is the fact qualifier) a column written without a qualifier is read
+    from the fact too: Databricks resolves it against the fact's own columns, so a measure that
+    names a column the fact lacks fails the deploy whichever way it is written."""
     if columns is None:
         return []
-    return sorted(columns_read(text, alias) - columns)
+    read = columns_read(text, alias)
+    if alias == QUALIFIER:
+        read |= bare_columns_read(text)
+    return sorted(read - columns)
 
 
 _QUALIFIED = re.compile(r"(?<![\w.])(\w+)\.(`?)(\w+)\2(?!\w)")

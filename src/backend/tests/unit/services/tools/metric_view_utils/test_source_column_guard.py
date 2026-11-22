@@ -467,3 +467,40 @@ def test_a_window_whose_period_the_fact_lacks_is_reported_with_its_reason():
     gone = {m.measure_name: m.skip_reason for m in guarded.untranslatable}
     assert "fiscper_key" in gone["sales_py"]
     assert "window measure" in gone["growth"]
+
+
+def test_a_measure_reading_a_bare_fact_column_the_fact_lacks_is_removed():
+    # A measure written with the fact's columns unqualified (a CASE on a filter column) reads
+    # the column the same way as ``source.<col>``: the deploy fails on it with
+    # UNRESOLVED_COLUMN, so the guard must catch it before the deploy.
+    sql = "sum(case when filter_code in ('A1', 'B2') then amount end)"
+    result = _guard(
+        measures=[_measure("nsr", sql)],
+        fact_columns=frozenset({"plant_code", "amount"}),
+    )
+    assert result.measures == []
+    (removed,) = result.removed_measures
+    assert "filter_code" in removed.skip_reason
+
+
+def test_a_bare_fact_column_the_fact_has_is_kept():
+    sql = "sum(case when plant_code = 'P1' then amount end)"
+    result = _guard(
+        measures=[_measure("ok", sql)],
+        fact_columns=frozenset({"plant_code", "amount"}),
+    )
+    assert [m.measure_name for m in result.measures] == ["ok"]
+    assert result.removed_measures == []
+
+
+def test_bare_words_that_are_not_columns_do_not_remove_a_measure():
+    # Functions, keywords, a string literal, MEASURE(name) and a join reference are not columns.
+    sql = (
+        "coalesce(sum(case when amount > 0 and 'filter_code' <> 'x' then amount end), 0)"
+        " + MEASURE(total) + count(distinct plant_code) + dim_plant.plant_name"
+    )
+    result = _guard(
+        measures=[_measure("mixed", sql)],
+        fact_columns=frozenset({"plant_code", "amount"}),
+    )
+    assert [m.measure_name for m in result.measures] == ["mixed"]
