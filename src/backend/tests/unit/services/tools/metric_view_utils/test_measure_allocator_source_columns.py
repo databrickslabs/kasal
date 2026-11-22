@@ -178,3 +178,70 @@ def test_a_measure_with_no_home_gets_the_placement_the_real_columns_confirm():
     )
     assert _home(mapping[0]) == "Fact_A"
     assert report["rescued"] and report["rescued"][0]["to"] == "Fact_A"
+
+
+def test_a_measure_reading_only_its_home_qualifier_keeps_its_home_when_names_are_shared():
+    # Every column is qualified by Fact_X, the home. A calendar helper (a dimension) supplies `date`,
+    # and Fact_Y's view also has `date`, so the column names alone span several views. The verdict
+    # must not turn cross-fact on a name match.
+    tables = {
+        "Fact_X": _table("Fact_X"),
+        "Fact_Y": _table("Fact_Y"),
+        "Dim_Cal": _table("Dim_Cal", fact=False),
+    }
+    source_columns = {
+        "Fact_X": ["colA", "colB", "value"],
+        "Fact_Y": ["colA", "colB", "period", "date"],
+        "Dim_Cal": ["date"],
+    }
+    mapping = [
+        _measure(
+            "m",
+            'SUMX(FILTER(Fact_X, Fact_X[colA] = "x" && Fact_X[colB] = "y"), Fact_X[value]) '
+            "* [F_Start_date]",
+            "Fact_X",
+        ),
+        _measure("F_Start_date", "MIN(Dim_Cal[date])", "Dim_Cal"),
+    ]
+    report = reallocate_by_columns(mapping, tables, source_columns=source_columns)
+    assert _home(mapping[0]) == "Fact_X"
+    assert report["cross_fact"] == [] and report["rehomed"] == []
+
+
+def test_a_measure_reading_two_facts_by_qualifier_is_cross_fact():
+    # A numerator on Fact_X and a denominator on Fact_Y: neither fact owns both columns.
+    tables = {"Fact_X": _table("Fact_X"), "Fact_Y": _table("Fact_Y")}
+    source_columns = {"Fact_X": ["colA", "value"], "Fact_Y": ["period", "colB"]}
+    mapping = [
+        _measure("ratio", "DIVIDE(SUM(Fact_X[colA]), SUM(Fact_Y[period]))", "Fact_X")
+    ]
+    report = reallocate_by_columns(mapping, tables, source_columns=source_columns)
+    assert _home(mapping[0]) is None
+    (entry,) = report["cross_fact"]
+    assert entry["measure"] == "ratio"
+    assert entry["facts"] == ["Fact_X", "Fact_Y"]
+
+
+def test_a_ratio_of_measures_on_different_facts_is_cross_fact():
+    tables = {"Fact_X": _table("Fact_X"), "Fact_Y": _table("Fact_Y")}
+    source_columns = {"Fact_X": ["colA", "value"], "Fact_Y": ["period", "colB"]}
+    mapping = [
+        _measure("ratio", "[M_X] / [M_Y]", "Fact_X"),
+        _measure("M_X", "SUM(Fact_X[colA])", "Fact_X"),
+        _measure("M_Y", "SUM(Fact_Y[period])", "Fact_Y"),
+    ]
+    report = reallocate_by_columns(mapping, tables, source_columns=source_columns)
+    assert [e["measure"] for e in report["cross_fact"]] == ["ratio"]
+    assert _home(mapping[0]) is None
+
+
+def test_a_measure_reading_another_fact_through_a_helper_measure_is_cross_fact():
+    # The helper is a measure on Fact_Y, a real fact: the measure reads Fact_Y's columns too.
+    tables = {"Fact_X": _table("Fact_X"), "Fact_Y": _table("Fact_Y")}
+    source_columns = {"Fact_X": ["colA", "value"], "Fact_Y": ["period", "colB"]}
+    mapping = [
+        _measure("m", "SUM(Fact_X[value]) + [M_Y]", "Fact_X"),
+        _measure("M_Y", "SUM(Fact_Y[period])", "Fact_Y"),
+    ]
+    report = reallocate_by_columns(mapping, tables, source_columns=source_columns)
+    assert [e["measure"] for e in report["cross_fact"]] == ["m"]

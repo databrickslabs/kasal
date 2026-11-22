@@ -46,6 +46,8 @@ _COL_REF = re.compile(r"(?:'[^']+'|[A-Za-z_]\w*)\[([^\]]+)\]")
 # Any bracketed token, used to find MEASURE references (`[Measure]` with no
 # table token in front of the `[`).
 _ANY_REF = re.compile(r"\[([^\]]+)\]")
+# The same column reference, with the table token captured: (table, column).
+_QUAL_COL_REF = re.compile(r"(?:'([^']+)'|([A-Za-z_]\w*))\[([^\]]+)\]")
 
 # Allocation-role markers stamped on a mapping entry so downstream routing +
 # the none_allocated catch-all can react without re-deriving anything.
@@ -69,6 +71,16 @@ def extract_column_refs(dax: str) -> set[str]:
     if not dax:
         return set()
     return {_norm(m.group(1)) for m in _COL_REF.finditer(dax)}
+
+
+def extract_qualified_refs(dax: str) -> set[tuple[str, str]]:
+    """Table-qualified column references `Table[col]` as normalized (table, column) pairs."""
+    if not dax:
+        return set()
+    return {
+        (_norm(m.group(1) or m.group(2)), _norm(m.group(3)))
+        for m in _QUAL_COL_REF.finditer(dax)
+    }
 
 
 def extract_measure_refs(dax: str) -> set[str]:
@@ -203,6 +215,151 @@ def build_measure_column_index(
     return cols_idx, mref_idx
 
 
+def build_measure_qualified_index(
+    mapping: list[dict],
+) -> dict[str, set[tuple[str, str]]]:
+    """normalized measure name -> the table-qualified column references of its own DAX."""
+    idx: dict[str, set[tuple[str, str]]] = {}
+    for m in mapping:
+        refs = extract_qualified_refs(
+            m.get("dax_expression") or m.get("expression") or ""
+        )
+        for name in (m.get("measure_name"), m.get("original_name"), m.get("name")):
+            if name:
+                idx[_norm(name)] = refs
+    return idx
+
+
+def resolve_qualified_refs(
+    dax: str,
+    qual_index: Mapping[str, set[tuple[str, str]]],
+    mref_index: Mapping[str, set[str]] | None = None,
+    depth: int = 3,
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """(own, helper): the qualified column references of the measure's DAX, and those of the
+    measures it references (transitively, up to ``depth`` hops, cycle-guarded)."""
+    mref_index = mref_index or {}
+    own = extract_qualified_refs(dax)
+    helper: set[tuple[str, str]] = set()
+    seen: set[str] = set()
+    frontier = set(extract_measure_refs(dax))
+    for _ in range(max(0, depth)):
+        if not frontier:
+            break
+        nxt: set[str] = set()
+        for ref in frontier:
+            if ref in seen:
+                continue
+            seen.add(ref)
+            helper |= qual_index.get(ref, set())
+            nxt |= mref_index.get(ref, set())
+        frontier = nxt - seen
+    return own, helper
+
+
+# Who owns a table-qualified reference. FACT: a candidate fact with known columns. DIM: a model
+# table with known columns that is not a fact. UNKNOWN: anything else, judged by its column name as
+# before. IGNORED: a referenced measure's qualifier on a non-fact table (see _Owners.helper).
+_FACT, _DIM, _UNKNOWN, _IGNORED = "fact", "dim", "unknown", "ignored"
+
+
+@dataclass(frozen=True)
+class _Owners:
+    # normalized table -> fact key, for candidate facts with known columns
+    facts: Mapping[str, str]
+    # normalized tables the model flags as facts
+    fact_tables: frozenset[str]
+    # normalized tables whose columns are known (a source view or the parsed columns)
+    structured: frozenset[str]
+
+    def own(self, table: str) -> tuple[str, str | None]:
+        """A measure's own `Table[col]`: a reference to a candidate fact is a fact reference, a
+        reference to a known non-fact table is a dimension one, anything else is judged by name.
+        """
+        if table in self.facts:
+            return _FACT, self.facts[table]
+        if table in self.structured and table not in self.fact_tables:
+            return _DIM, None
+        return _UNKNOWN, None
+
+    def helper(self, table: str) -> tuple[str, str | None]:
+        """A referenced measure's `Table[col]`: only a fact contributes. A date helper on a
+        non-fact table is not a second fact, so it is ignored."""
+        if table in self.facts and table in self.fact_tables:
+            return _FACT, self.facts[table]
+        if table in self.structured and table not in self.fact_tables:
+            return _IGNORED, None
+        return _UNKNOWN, None
+
+
+def _referenced(
+    own: set[tuple[str, str]],
+    helper: set[tuple[str, str]],
+    owners: _Owners,
+) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
+    """Column names a measure reads, split by who owns them.
+
+    Returns (eff, fact_refs, dim_only, own_fact_keys, helper_fact_keys): ``eff`` is every name the
+    measure is judged by; ``fact_refs`` the names read through a fact's qualifier (they must be
+    owned by one fact); ``dim_only`` the names read only through a dimension's qualifier, or only
+    by a referenced measure on a non-fact table (they are not fact columns); the two key sets are
+    the facts the own and the helper references name.
+    """
+    fact_refs: set[str] = set()
+    other: set[str] = set()
+    dim: set[str] = set()
+    own_fact_keys: set[str] = set()
+    helper_fact_keys: set[str] = set()
+    for table, col in own:
+        kind, key = owners.own(table)
+        if kind == _FACT and key is not None:
+            fact_refs.add(col)
+            own_fact_keys.add(key)
+        elif kind == _DIM:
+            dim.add(col)
+        else:
+            other.add(col)
+    for table, col in helper:
+        kind, key = owners.helper(table)
+        if kind == _FACT and key is not None:
+            fact_refs.add(col)
+            helper_fact_keys.add(key)
+        elif kind == _UNKNOWN:
+            other.add(col)
+        elif kind == _IGNORED:
+            # Not a fact column, but still a known column: the measure is not "broken" on it.
+            dim.add(col)
+    eff = fact_refs | other | dim
+    dim_only = dim - fact_refs - other
+    return eff, fact_refs, dim_only, own_fact_keys, helper_fact_keys
+
+
+def _home_keeps_measure(
+    home: str,
+    own: set[tuple[str, str]],
+    own_fact_keys: set[str],
+    helper_fact_keys: set[str],
+    known_cols: set[str],
+    fact_index: Mapping[str, set[str]],
+) -> bool:
+    """Whether the references say the measure reads its home's columns, so it stays there.
+
+    (a) every own column reference is qualified by the home, and the columns are known to the
+        model; or
+    (b) the home owns every column the measure reads directly, and no own reference names another
+        fact.
+    Either way a referenced measure that reads a different fact keeps the verdict open.
+    """
+    if helper_fact_keys - {home}:
+        return False
+    own_names = {col for _, col in own}
+    if not own_names or own_fact_keys - {home}:
+        return False
+    if all(table == _norm(home) for table, _ in own) and own_names <= known_cols:
+        return True
+    return own_names <= fact_index.get(home, set())
+
+
 def resolve_effective_columns(
     dax: str,
     cols_index: dict[str, set[str]],
@@ -258,14 +415,27 @@ def allocate(
     fact_index: dict[str, set[str]],
     grain_index: dict[str, list[str]],
     known_cols: set[str],
+    *,
+    fact_refs: set[str] | None = None,
+    dim_only_refs: set[str] | None = None,
 ) -> AllocationDecision:
-    """Decide the home of a measure from the columns it references."""
+    """Decide the home of a measure from the columns it references.
+
+    ``fact_refs`` are names read through a fact's qualifier: they are fact columns even when no
+    single fact owns them (that is the cross-fact evidence). ``dim_only_refs`` are names read only
+    through a dimension's qualifier: they are not fact columns, whatever fact view has the name.
+    """
     referenced = set(effective_cols)
     if not referenced:
         return AllocationDecision(kind="no_columns", reason="no column references")
 
+    forced = set(fact_refs or ()) & known_cols
+    skipped = set(dim_only_refs or ())
     fact_resident = {
-        c for c in referenced if any(c in cols for cols in fact_index.values())
+        c
+        for c in referenced
+        if c in forced
+        or (c not in skipped and any(c in cols for cols in fact_index.values()))
     }
     dim_only = {c for c in referenced if c in known_cols} - fact_resident
     unknown = referenced - known_cols
@@ -471,7 +641,8 @@ def reallocate_by_columns(
     full_index = build_fact_column_index(mquery_tables, fact_keys, source_columns)
     grain_index = build_fact_grain_index(mquery_tables, fact_keys)
     known_cols = build_known_columns(mquery_tables, source_columns)
-    cols_index, mref_index = build_measure_column_index(mapping)
+    _, mref_index = build_measure_column_index(mapping)
+    qual_index = build_measure_qualified_index(mapping)
 
     # A fact whose columns we could not parse (e.g. a plain `SELECT *` source)
     # exposes an UNKNOWN column set. We must not judge such a fact's measures:
@@ -481,10 +652,24 @@ def reallocate_by_columns(
     wildcard_facts = {k for k, cols in full_index.items() if not cols}
     fact_index = {k: cols for k, cols in full_index.items() if cols}
     has_wildcard = bool(wildcard_facts)
+    owners = _Owners(
+        facts={_norm(k): k for k in fact_index},
+        fact_tables=frozenset(
+            _norm(k) for k, t in mquery_tables.items() if getattr(t, "is_fact", False)
+        ),
+        structured=frozenset(
+            _norm(k)
+            for k, t in mquery_tables.items()
+            if _real_or_parsed(k, t, source_columns)
+        ),
+    )
 
     for i, m in enumerate(mapping):
         dax = m.get("dax_expression") or m.get("expression") or ""
-        eff = resolve_effective_columns(dax, cols_index, mref_index)
+        own, helper = resolve_qualified_refs(dax, qual_index, mref_index)
+        eff, fact_refs, dim_only, own_fact_keys, helper_fact_keys = _referenced(
+            own, helper, owners
+        )
         if not eff:
             continue  # artifact / measure-only with no resolvable columns
         name = m.get("original_name") or m.get("measure_name") or m.get("name") or ""
@@ -500,7 +685,24 @@ def reallocate_by_columns(
             if confirmed and kept_home is not None:
                 _keep_placement(m, home, kept_home, needed, report, name)
                 continue
-        decision = allocate(eff, fact_index, grain_index, known_cols)
+        # A home with no source view emits nothing, so it is not kept on the references alone.
+        viewed_home = not source_columns or home in source_columns
+        if (
+            viewed_home
+            and home in fact_index
+            and _home_keeps_measure(
+                home, own, own_fact_keys, helper_fact_keys, known_cols, fact_index
+            )
+        ):
+            continue  # the references read the home's columns: nothing to re-home
+        decision = allocate(
+            eff,
+            fact_index,
+            grain_index,
+            known_cols,
+            fact_refs=fact_refs,
+            dim_only_refs=dim_only,
+        )
         home_cols = fact_index.get(home, set()) if home else set()
         home_owns = bool(decision.fact_columns) and decision.fact_columns <= home_cols
 
