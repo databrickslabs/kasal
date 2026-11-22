@@ -14,6 +14,7 @@ from src.services.tools.metric_view_utils.emitted_measures import (
 from src.services.tools.metric_view_utils.sql_measure_sanitizer import (
     detect_silent_wrong,
 )
+from src.services.tools.metric_view_utils.yaml_emitter import emit_yaml
 
 
 def _measure(name, sql, dax="DAX", window=None):
@@ -104,3 +105,50 @@ def test_an_aggregate_inside_an_aggregate_is_rejected_before_deploy():
         "SUM(source.v) FILTER (WHERE source.k IN ('a', 'b'))",
     ):
         assert not detect_silent_wrong(fine), fine
+
+
+def _calendar_window_spec(fact_columns):
+    """A calendar joined on a date the fact lacks; the prior-year window orders by a key the
+    pipeline builds on the calendar's period (TRY_CAST(<calendar>.fiscper AS INT))."""
+    window = {"order": "fiscper_key", "range": "current", "offset": -1000}
+    spec = _spec(
+        [
+            _measure("sales", "SUM(source.amount)"),
+            _measure("sales_py", "MEASURE(sales)", window=window),
+            _measure("growth", "MEASURE(sales) - MEASURE(sales_py)"),
+        ]
+    )
+    spec.joins = [
+        {
+            "name": "dim_cal",
+            "source": "c.s.dim_cal",
+            "join_on": "source.date_key = dim_cal.date_key",
+        }
+    ]
+    spec.dimensions += [
+        {"name": "fiscper", "expr": "dim_cal.fiscper"},
+        {"name": "fiscper_key", "expr": "TRY_CAST(dim_cal.fiscper AS INT)"},
+    ]
+    spec.fact_columns = list(fact_columns)
+    return spec
+
+
+def test_the_writer_keeps_a_window_whose_period_key_wraps_a_dropped_calendar_column():
+    # The writer runs before the source column guard. It dropped the wrapped key with the
+    # calendar join, so the window and every measure reading it were reported as not written
+    # although the fact has the period itself.
+    spec = _calendar_window_spec(["country", "amount", "fiscper"])
+    text = emit_yaml(spec)
+    assert "dim_cal" not in text.split("dimensions:")[1]
+    assert "TRY_CAST(source.fiscper AS INT)" in text
+    assert report_unemitted({"Fact": spec}, lambda _key, s: emit_yaml(s)) == {}
+    assert [m.measure_name for m in spec.measures] == ["sales", "sales_py", "growth"]
+
+
+def test_the_writer_reports_the_window_when_the_fact_lacks_the_period():
+    spec = _calendar_window_spec(["country", "amount"])
+    moved = report_unemitted({"Fact": spec}, lambda _key, s: emit_yaml(s))
+    assert moved == {"Fact": ["sales_py", "growth"]}
+    gone = {m.measure_name: m.skip_reason for m in spec.untranslatable}
+    assert "fiscper_key" in gone["sales_py"]
+    assert gone["growth"] == NOT_WRITTEN

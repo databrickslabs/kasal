@@ -173,3 +173,35 @@ def bare_columns_read(text: str) -> set[str]:
         names.add(word.lower())
     names.discard(QUALIFIER)
     return names
+
+
+_QUALIFIED = re.compile(r"(?<![\w.])(\w+)\.(`?)(\w+)\2(?!\w)")
+
+
+def rebind_dropped_join_columns(
+    expr: str, dropped: set[str], fact_columns: frozenset[str] | set[str] | None
+) -> str:
+    """``expr`` with every ``<dropped join>.<col>`` read as ``source.<col>``, when the fact has
+    each such ``col`` itself; else ``""``. Whatever wraps the column stays as written
+    (``TRY_CAST(alias.col AS INT)``, ``DATE_TRUNC('MONTH', alias.col)``): the dimension keeps
+    its meaning on the fact's own column instead of vanishing with the join. The YAML writer
+    and the source column guard both use it, so they keep the same dimensions (a prior-year
+    window orders by such a key)."""
+    if not fact_columns:
+        return ""
+    rebound = False
+    missing = False
+
+    def rebind(match: re.Match[str]) -> str:
+        nonlocal rebound, missing
+        alias, column = match.group(1), match.group(3)
+        if alias not in dropped:
+            return match.group(0)
+        if column.lower() not in fact_columns:
+            missing = True
+            return match.group(0)
+        rebound = True
+        return f"{QUALIFIER}.{column}"
+
+    text = _QUALIFIED.sub(rebind, expr)
+    return text if rebound and not missing else ""

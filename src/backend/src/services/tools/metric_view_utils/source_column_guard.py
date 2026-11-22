@@ -19,7 +19,12 @@ import re
 from collections.abc import Mapping
 
 from .data_classes import MetricViewSpec, TranslationResult
-from .source_columns import QUALIFIER, bare_columns_read, columns_read
+from .source_columns import (
+    QUALIFIER,
+    bare_columns_read,
+    columns_read,
+    rebind_dropped_join_columns,
+)
 from .source_layer_binding import normalized_name
 
 
@@ -69,36 +74,6 @@ def _missing(text: str, alias: str, columns: frozenset[str] | None) -> list[str]
     if alias == QUALIFIER:
         read |= bare_columns_read(text)
     return sorted(read - columns)
-
-
-_QUALIFIED = re.compile(r"(?<![\w.])(\w+)\.(`?)(\w+)\2(?!\w)")
-
-
-def _rebind_dropped_join_columns(
-    expr: str, dropped: set[str], fact_columns: frozenset[str] | None
-) -> str:
-    """``expr`` with every ``<dropped join>.<col>`` read as ``source.<col>``, when the fact has
-    each such ``col`` itself; else ``""``. Whatever wraps the column stays as written
-    (``TRY_CAST(alias.col AS INT)``, ``DATE_TRUNC('MONTH', alias.col)``): the dimension keeps
-    its meaning on the fact's own column instead of vanishing with the join."""
-    if not fact_columns:
-        return ""
-    rebound = False
-    missing = False
-
-    def rebind(match: re.Match[str]) -> str:
-        nonlocal rebound, missing
-        alias, column = match.group(1), match.group(3)
-        if alias not in dropped:
-            return match.group(0)
-        if column.lower() not in fact_columns:
-            missing = True
-            return match.group(0)
-        rebound = True
-        return f"{QUALIFIER}.{column}"
-
-    text = _QUALIFIED.sub(rebind, expr)
-    return text if rebound and not missing else ""
 
 
 def guard_view(
@@ -158,7 +133,7 @@ def guard_view(
     decided: list[tuple[dict, str, str, str]] = []
     for dim in dimensions:
         expr = str(dim.get("expr") or "")
-        own = _rebind_dropped_join_columns(expr, dropped, fact_columns)
+        own = rebind_dropped_join_columns(expr, dropped, fact_columns)
         # A column of a dropped join that the fact has itself (a period, a date, a cast of one).
         # The rebound text must still read only what the view has.
         if own and not reason_for(own):

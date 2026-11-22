@@ -19,6 +19,7 @@ import re
 from .data_classes import MetricViewSpec
 from .join_columns import missing_join_columns
 from .metadata_generator import MetadataGenerator
+from .source_columns import rebind_dropped_join_columns
 from .sql_guard import SIDE_EFFECT_FUNCTIONS
 from .utils import spark_sql_compat
 from .yaml_annotations import _MAX_EXPLANATION as _MAX_EXPLANATION
@@ -260,9 +261,13 @@ def _drop_unusable_joins(spec: MetricViewSpec, known_missing: set) -> None:
         for d in spec.dimensions:
             # A dimension of a dropped join whose column the fact itself has (a fiscper
             # read through the calendar) reads the fact's column instead of vanishing.
-            m = re.fullmatch(r"\s*(\w+)\.`?(\w+)`?\s*", str(d.get("expr") or ""))
-            if m and m.group(1) in dropped and m.group(2).lower() in own:
-                d["expr"] = f"source.{m.group(2)}"
+            # Whatever wraps the column stays (the period key of a prior-year window is
+            # TRY_CAST(<calendar>.fiscper AS INT)).
+            rebound = rebind_dropped_join_columns(
+                str(d.get("expr") or ""), dropped, own
+            )
+            if rebound:
+                d["expr"] = rebound
         spec.dimensions = [
             d
             for d in spec.dimensions
