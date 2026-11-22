@@ -140,6 +140,10 @@ _SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
             r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|SAMEPERIOD", re.IGNORECASE
         ),
     ),
+    # A SQL window function (LAG(...) OVER (ORDER BY ...)). A metric view measure cannot
+    # hold one: the whole view fails with MISSING_AGGREGATION, which names no measure. A
+    # shift in time is a window measure (prior_year.py), not an OVER clause.
+    ("SQL window function (OVER)", re.compile(r"\)\s*OVER\s*\(", re.IGNORECASE)),
     # a DAX VAR block emitted as it stood ("var ret = MEASURE(x) ret")
     (
         "untranslated DAX variable",
