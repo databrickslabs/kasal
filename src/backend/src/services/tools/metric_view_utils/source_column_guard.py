@@ -64,22 +64,34 @@ def _missing(text: str, alias: str, columns: frozenset[str] | None) -> list[str]
     return sorted(columns_read(text, alias) - columns)
 
 
-_ONE_COLUMN = re.compile(r"\s*(\w+)\.`?(\w+)`?\s*")
+_QUALIFIED = re.compile(r"(?<![\w.])(\w+)\.(`?)(\w+)\2(?!\w)")
 
 
-def _fact_column_of_dropped_join(
+def _rebind_dropped_join_columns(
     expr: str, dropped: set[str], fact_columns: frozenset[str] | None
 ) -> str:
-    """``source.<col>`` when ``expr`` is ``<dropped join>.<col>`` and the fact has ``col``
-    itself; else ``""``. Such a dimension reads the fact's column instead of vanishing.
-    """
-    match = _ONE_COLUMN.fullmatch(expr)
-    if not match or match.group(1) not in dropped or not fact_columns:
+    """``expr`` with every ``<dropped join>.<col>`` read as ``source.<col>``, when the fact has
+    each such ``col`` itself; else ``""``. Whatever wraps the column stays as written
+    (``TRY_CAST(alias.col AS INT)``, ``DATE_TRUNC('MONTH', alias.col)``): the dimension keeps
+    its meaning on the fact's own column instead of vanishing with the join."""
+    if not fact_columns:
         return ""
-    column = match.group(2)
-    if column.lower() not in fact_columns:
-        return ""
-    return f"{QUALIFIER}.{column}"
+    rebound = False
+    missing = False
+
+    def rebind(match: re.Match[str]) -> str:
+        nonlocal rebound, missing
+        alias, column = match.group(1), match.group(3)
+        if alias not in dropped:
+            return match.group(0)
+        if column.lower() not in fact_columns:
+            missing = True
+            return match.group(0)
+        rebound = True
+        return f"{QUALIFIER}.{column}"
+
+    text = _QUALIFIED.sub(rebind, expr)
+    return text if rebound and not missing else ""
 
 
 def guard_view(
@@ -138,13 +150,14 @@ def guard_view(
     # reason) or "keep".
     decided: list[tuple[dict, str, str, str]] = []
     for dim in dimensions:
-        own = _fact_column_of_dropped_join(
-            str(dim.get("expr") or ""), dropped, fact_columns
-        )
-        if own:  # a column of a dropped join that the fact has itself (e.g. a period)
+        expr = str(dim.get("expr") or "")
+        own = _rebind_dropped_join_columns(expr, dropped, fact_columns)
+        # A column of a dropped join that the fact has itself (a period, a date, a cast of one).
+        # The rebound text must still read only what the view has.
+        if own and not reason_for(own):
             decided.append((dim, "own", own, ""))
             continue
-        reason = reason_for(str(dim.get("expr") or ""))
+        reason = reason_for(expr)
         decided.append((dim, "drop" if reason else "keep", "", reason))
     # A name with a dropped dimension is taken by nothing else, whatever the order: another join's
     # dimension of that name (an alternative calendar, say) would otherwise read a different table

@@ -8,8 +8,12 @@ from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TranslationResult,
 )
+from src.services.tools.metric_view_utils import prior_year
 from src.services.tools.metric_view_utils.mquery_parser import MQueryParser
 from src.services.tools.metric_view_utils.pipeline import MetricViewPipeline
+from src.services.tools.metric_view_utils.yaml_known_columns import (
+    drop_phantom_dimensions,
+)
 from src.services.tools.metric_view_utils.source_column_guard import (
     guard_bound_spec,
     guard_view,
@@ -289,3 +293,177 @@ def test_the_pipeline_moves_a_measure_the_fact_view_lacks_to_untranslated():
 def test_without_source_columns_nothing_is_guarded():
     pipeline = _pipeline({})
     assert "source_column_gaps" not in pipeline._limitations
+
+
+def _dimension_of_dropped_join(expr, fact_columns):
+    return _guard(
+        joins=[dict(JOIN, on="source.plant_code = dim_plant.missing")],
+        dimensions=[{"name": "key", "expr": expr}],
+        fact_columns=frozenset(fact_columns),
+        columns_by_key={**COLUMNS, "Dim_Plant": frozenset({"plant_code"})},
+    )
+
+
+def test_a_dimension_wrapping_a_column_of_a_dropped_join_reads_the_fact_column():
+    # The period key of a prior-year window is a cast of the calendar's column; the fact has it.
+    result = _dimension_of_dropped_join(
+        "TRY_CAST(dim_plant.plant_code AS INT)", {"plant_code", "amount"}
+    )
+    assert result.dimensions == [
+        {"name": "key", "expr": "TRY_CAST(source.plant_code AS INT)"}
+    ]
+    assert [(g.kind, g.name) for g in result.gaps if g.kind != "measure"] == [
+        ("join", "dim_plant")
+    ]
+
+
+def test_a_derived_date_of_a_dropped_join_column_reads_the_fact_column():
+    result = _dimension_of_dropped_join(
+        "DATE_TRUNC('MONTH', TRY_CAST(dim_plant.plant_code AS DATE))", {"plant_code"}
+    )
+    assert result.dimensions == [
+        {
+            "name": "key",
+            "expr": "DATE_TRUNC('MONTH', TRY_CAST(source.plant_code AS DATE))",
+        }
+    ]
+
+
+def test_a_wrapped_column_the_fact_lacks_still_drops_the_dimension_with_its_reason():
+    result = _dimension_of_dropped_join(
+        "TRY_CAST(dim_plant.plant_name AS INT)", {"amount"}
+    )
+    assert result.dimensions == []
+    (gap,) = [g for g in result.gaps if g.kind == "dimension"]
+    assert "dim_plant" in gap.reason
+
+
+def test_a_rebound_dimension_reading_a_missing_column_of_a_kept_join_is_still_dropped():
+    result = _guard(
+        joins=[
+            dict(
+                JOIN,
+                name="dim_b",
+                source="tgt.ucmv.src_dim_b",
+                on="source.plant_code = dim_b.plant_code",
+            ),
+            dict(JOIN, name="dim_plant", on="source.plant_code = dim_plant.missing"),
+        ],
+        dimensions=[
+            {"name": "key", "expr": "CONCAT(dim_plant.plant_code, dim_b.period)"}
+        ],
+        fact_columns=frozenset({"plant_code"}),
+        columns_by_key={
+            **COLUMNS,
+            "Dim_B": frozenset({"plant_code"}),
+            "Dim_Plant": frozenset({"plant_code"}),
+        },
+        key_by_view={**KEY_BY_VIEW, "tgt.ucmv.src_dim_b": "Dim_B"},
+    )
+    # The rebound text reads a column of dim_b that its view lacks: the dimension is dropped.
+    # The first reason found is the dropped join it also reads (dim_plant).
+    assert result.dimensions == []
+    (gap,) = [g for g in result.gaps if g.kind == "dimension"]
+    assert "dim_plant" in gap.reason
+
+
+def _prior(name, sql, dax="", original=None):
+    measure = _measure(name, sql)
+    measure.dax_expression = dax
+    measure.original_name = original or name
+    return measure
+
+
+CAL_JOIN = {
+    "name": "dim_cal",
+    "source": "tgt.ucmv.src_dim_cal",
+    "on": "source.date_key = dim_cal.date_key",
+}
+PY = "CALCULATE([Sales], SAMEPERIODLASTYEAR(Calendar[Date]))"
+
+
+def _window_spec_of(fact_columns):
+    """A fact with a calendar joined on a date the fact lacks, a prior-year window ordered by
+    the calendar's period, and a measure that reads the window."""
+    mapping = [
+        {
+            "measure_name": "Sales PY",
+            "original_name": "Sales PY",
+            "dax_expression": PY,
+            "proposed_allocation": "Fact",
+            "all_allocations": [{"table": "Fact", "role": "primary"}],
+        }
+    ]
+    prior_year.take_out_shifts(mapping, {})
+    spec = MetricViewSpec(
+        fact_table_key="Fact",
+        source_table="c.s.fact",
+        view_name="fact",
+        comment="",
+        joins=[dict(CAL_JOIN)],
+        dimensions=[
+            {"name": "fiscper", "expr": "dim_cal.fiscper"},
+            {"name": "country", "expr": "source.country"},
+        ],
+        measures=[
+            _prior("sales", "SUM(source.amount)", original="Sales"),
+            _prior("sales_py", "MEASURE(sales)", "[Sales]", "Sales PY"),
+            _prior("growth", "MEASURE(sales) - MEASURE(sales_py)"),
+        ],
+        untranslatable=[],
+        fact_columns=list(fact_columns),
+    )
+    prior_year.add_windows({"Fact": spec}, mapping, {})
+    return spec
+
+
+def _guard_window_spec(spec, fact_columns):
+    return guard_bound_spec(
+        "Fact",
+        spec,
+        columns_by_key={
+            "Fact": frozenset(fact_columns),
+            "Dim_Cal": frozenset({"date_key", "fiscper"}),
+        },
+        key_by_view={"tgt.ucmv.src_dim_cal": "Dim_Cal"},
+    )
+
+
+def _emit_window_checks(guarded):
+    by_name = {m.measure_name: m for m in guarded.measures}
+    base = [by_name["sales"]]
+    dax = [by_name["sales_py"], by_name["growth"]]
+    drop_phantom_dimensions(guarded, base, [], dax, [])
+    return dax
+
+
+def test_a_window_and_its_reader_survive_a_dropped_calendar_join_when_the_fact_has_the_period():
+    spec = _window_spec_of(["fiscper", "country", "amount"])
+    guarded, result = _guard_window_spec(spec, ["fiscper", "country", "amount"])
+    assert [(g.kind, g.name) for g in result.gaps] == [("join", "dim_cal")]
+    assert guarded.joins == []
+    dax = _emit_window_checks(guarded)
+    assert [d["name"] for d in guarded.dimensions] == [
+        "fiscper",
+        "fiscper_key",
+        "country",
+    ]
+    assert guarded.dimensions[0]["expr"] == "source.fiscper"
+    assert guarded.dimensions[1]["expr"] == "TRY_CAST(source.fiscper AS INT)"
+    assert [m.measure_name for m in dax] == ["sales_py", "growth"]
+    assert dax[0].window_spec["order"] == "fiscper_key"
+    assert guarded.untranslatable == []
+
+
+def test_a_window_whose_period_the_fact_lacks_is_reported_with_its_reason():
+    # Without the fact's own period, the key is a read through the dropped join: the guard
+    # drops it, and the window that orders by it is reported with the reason.
+    spec = _window_spec_of(["country", "amount"])
+    guarded, result = _guard_window_spec(spec, ["country", "amount"])
+    reasons = {(g.kind, g.name) for g in result.gaps}
+    assert ("dimension", "fiscper_key") in reasons
+    dax = _emit_window_checks(guarded)
+    assert dax == []
+    gone = {m.measure_name: m.skip_reason for m in guarded.untranslatable}
+    assert "fiscper_key" in gone["sales_py"]
+    assert "window measure" in gone["growth"]
