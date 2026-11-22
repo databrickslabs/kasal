@@ -206,6 +206,22 @@ def _build_batch_user_prompt(
 - Return a JSON ARRAY with one object per measure, echoing "measure_name" exactly as given."""
 
 
+# Genuine display-only PBI artifacts (FORMAT/Color/ISBLANK guards, empty DAX, BLANK
+# placeholders) have no business logic to translate; they would only waste LLM tokens.
+#
+# NOTE: SELECTEDVALUE / SELECTEDVALUE+SWITCH are deliberately NOT here. They are real,
+# parameterized business measures that the skill corpus was vendored to handle; if the LLM
+# cannot express one it returns success=false and the measure stays a TODO.
+_ARTIFACT_KEYWORDS = (
+    "FORMAT",
+    "Color",
+    "ISBLANK+BLANK",
+    "DAX expression not available",
+    "ISFILTERED",
+    "BLANK() placeholder",
+)
+
+
 def _parse_batch_response(response_text: str) -> list[dict] | None:
     """Parse a batch response into a list of per-measure result dicts.
 
@@ -269,6 +285,7 @@ def _apply_parsed(
     usage: dict | None = None,
     original_to_snake: Mapping[str, str] | None = None,
     view_columns: frozenset[str] | None = None,
+    measure_dax: Mapping[str, str] | None = None,
 ) -> None:
     """Apply a parsed LLM result dict to a measure in place (success or decline).
 
@@ -296,7 +313,7 @@ def _apply_parsed(
             )
         if original_to_snake is not None and violation is None:
             violation = reference_violation(
-                measure.dax_expression or "", sql_expr, original_to_snake
+                measure.dax_expression or "", sql_expr, original_to_snake, measure_dax
             )
         if violation:
             logger.warning(
@@ -558,6 +575,7 @@ async def translate_batch_with_llm(
     domain_context: str = "",
     time_intel_enabled: bool = False,
     view_columns: frozenset[str] | None = None,
+    measure_dax: Mapping[str, str] | None = None,
 ) -> list[TranslationResult]:
     """Attempt LLM translation of a batch of untranslatable measures.
 
@@ -578,29 +596,6 @@ async def translate_batch_with_llm(
     Returns the same list with updated measures where LLM succeeded.
     """
     import asyncio
-
-    # Skip genuine display-only PBI artifacts — no business logic to translate,
-    # so they'd only waste LLM tokens (FORMAT/Color/ISBLANK guards, empty DAX,
-    # BLANK placeholders).
-    #
-    # NOTE: SELECTEDVALUE / SELECTEDVALUE+SWITCH are deliberately NOT here. The
-    # regex quick-reject correctly refuses to translate them (they can't be
-    # expressed as a single regex pattern), but they are real, parameterized
-    # business measures — exactly what the skill corpus (UNSUPPORTED.md's
-    # "skip the SELECTEDVALUE guard, the measure is still valid" + WINDOW.md
-    # time-intelligence → window-measure patterns) was vendored to handle. They
-    # must reach the LLM. If the LLM genuinely can't express one (e.g. a slicer-
-    # driven time-period selector), it returns success=false and the measure
-    # stays a TODO — no worse than filtering it out here, and strictly better
-    # for the salvageable ones.
-    _ARTIFACT_KEYWORDS = (
-        "FORMAT",
-        "Color",
-        "ISBLANK+BLANK",
-        "DAX expression not available",
-        "ISFILTERED",
-        "BLANK() placeholder",
-    )
 
     candidates = [
         m
@@ -627,7 +622,10 @@ async def translate_batch_with_llm(
     # lets identical DAX (same table_context) reuse an earlier result in this run.
     run_cache: OrderedDict[str, dict] = OrderedDict()
     apply = partial(
-        _apply_parsed, original_to_snake=original_to_snake, view_columns=view_columns
+        _apply_parsed,
+        original_to_snake=original_to_snake,
+        view_columns=view_columns,
+        measure_dax=measure_dax,
     )
 
     def _ck(m: TranslationResult) -> str:

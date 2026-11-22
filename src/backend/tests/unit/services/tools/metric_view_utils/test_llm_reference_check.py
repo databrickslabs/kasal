@@ -130,3 +130,61 @@ class TestColumnSubstitution:
         )
         assert not m.is_translatable
         assert m.skip_reason.startswith("LLM translation rejected:")
+
+
+VIEW_TWO_LEVELS = {
+    "Total": "total",
+    "Contrib": "contrib",
+    "Mat Glass": "mat_glass",
+    "Mat Metal": "mat_metal",
+    "Sibling": "sibling",
+}
+VIEW_DAX = {"Contrib": "[Mat Glass] * 2", "Mat Metal": "[Sibling] + 1"}
+
+
+class TestOneLevelRuleInTheTranslationPath:
+    """The one-level rule reaches the translation path: the view's measure DAX is passed to the
+    reference check, so a measure a referenced measure reads is accepted, not rejected."""
+
+    def _measure(self, dax: str) -> TranslationResult:
+        return TranslationResult(
+            measure_name="m",
+            original_name="M",
+            sql_expr=None,
+            is_translatable=False,
+            skip_reason="No matching pattern",
+            dax_expression=dax,
+            confidence="none",
+            category="unassigned",
+        )
+
+    def test_a_measure_one_level_below_a_referenced_one_is_accepted(self):
+        m = self._measure("[Contrib] + [Total]")
+        _apply_parsed(
+            m,
+            {"success": True, "sql_expr": "MEASURE(mat_glass) * 2 + MEASURE(total)"},
+            original_to_snake=VIEW_TWO_LEVELS,
+            measure_dax=VIEW_DAX,
+        )
+        assert m.is_translatable, m.skip_reason
+
+    def test_a_measure_outside_the_referenced_closure_is_still_rejected(self):
+        m = self._measure("[Contrib] + [Total]")
+        _apply_parsed(
+            m,
+            {"success": True, "sql_expr": "MEASURE(sibling) * 2 + MEASURE(total)"},
+            original_to_snake=VIEW_TWO_LEVELS,
+            measure_dax=VIEW_DAX,
+        )
+        assert not m.is_translatable
+        assert "sibling" in m.skip_reason
+
+    def test_without_the_view_dax_a_second_level_measure_is_rejected(self):
+        m = self._measure("[Contrib] + [Total]")
+        _apply_parsed(
+            m,
+            {"success": True, "sql_expr": "MEASURE(mat_glass) * 2 + MEASURE(total)"},
+            original_to_snake=VIEW_TWO_LEVELS,
+        )
+        assert not m.is_translatable
+        assert "mat_glass" in m.skip_reason
