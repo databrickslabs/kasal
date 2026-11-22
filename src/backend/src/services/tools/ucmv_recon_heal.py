@@ -43,10 +43,16 @@ def _norm(name: str) -> str:
     return ".".join(p.strip("`").lower() for p in str(name).split(".") if p.strip("`"))
 
 
-def _refs(expr: object, alias: str | None, column: str) -> bool:
+def _refs(expr: object, alias: str | None, column: str, bare_only: bool = False) -> bool:
     # Without an alias Databricks names a bare identifier (a measure referenced by name),
-    # so match it bare as well as after any alias.
-    prefix = rf"\b{re.escape(alias)}\." if alias else r"(?:\.|(?<![\w`.]))"
+    # so match it bare as well as after any alias. ``bare_only``: an unaliased error about the
+    # fact's own column, where ``dim.<column>`` is a joined table's column that resolves.
+    if alias:
+        prefix = rf"\b{re.escape(alias)}\."
+    elif bare_only:
+        prefix = r"(?<![\w`.])"
+    else:
+        prefix = r"(?:\.|(?<![\w`.]))"
     return bool(
         re.search(prefix + rf"`?{re.escape(column)}`?\b", str(expr or ""), re.I)
     )
@@ -197,16 +203,18 @@ class _View:
             self.spec["measures"] = kept
             self.removed += [f"measure {n} (reads a removed measure)" for n in dropped]
 
-    def drop_column(self, alias: str | None, column: str) -> int:
+    def drop_column(self, alias: str | None, column: str, bare_only: bool = False) -> int:
         removed = 0
         for key, what in (("measures", "measure"), ("dimensions", "dimension")):
             removed += self.drop_items(
-                key, lambda i: not _refs(i.get("expr"), alias, column), what
+                key,
+                lambda i: not _refs(i.get("expr"), alias, column, bare_only),
+                what,
             )
         if removed:
             return removed
         for join in self._items("joins"):
-            if _refs(join.get("on"), alias, column):
+            if _refs(join.get("on"), alias, column, bare_only):
                 removed += self.drop_join(str(join.get("name")))
         return removed
 
@@ -233,7 +241,11 @@ def heal_view(yaml_text: str, error: str) -> tuple[str | None, list[str]]:
         view.drop_items("dimensions", lambda i: i.get("name") != name, "dimension")
     elif m := _UNRESOLVED.search(error):
         alias, column = (m.group(1), m.group(2)) if m.group(2) else (None, m.group(1))
-        view.drop_column("source" if alias == _SUBQUERY_SOURCE else alias, column)
+        view.drop_column(
+            "source" if alias == _SUBQUERY_SOURCE else alias,
+            column,
+            bare_only=alias is None,
+        )
     elif m := _FIELD.search(error):
         # The error lists every field the struct has: drop all references of that
         # join to fields outside the list at once, not one per round.

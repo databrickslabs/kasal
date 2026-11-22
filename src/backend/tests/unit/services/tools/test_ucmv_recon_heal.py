@@ -269,6 +269,22 @@ def test_a_measure_referencing_another_by_bare_name_is_removed():
     assert removed == ["measure dif_actual"] and "volume" in _names(healed, "measures")
 
 
+def test_an_unqualified_unresolved_column_keeps_a_joined_tables_column_of_the_same_name():
+    # The error names a bare column of the fact. A measure on the joined table's column of that
+    # name (dim_geo.fte) resolves and must stay; only the bare reference goes.
+    text = YAML.replace(
+        "    expr: SUM(source.a) = 1\n", "    expr: SUM(dim_geo.fte)\n"
+    ).replace(
+        "    expr: SUM(source.fte)\n", "    expr: SUM(CASE WHEN fte > 0 THEN source.volume END)\n"
+    )
+    healed, removed = heal_view(
+        text,
+        "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `fte` cannot be resolved.",
+    )
+    assert removed == ["measure fte"]
+    assert _names(healed, "measures") == ["volume", "dif_actual"]
+
+
 def test_the_result_keeps_each_views_best_cycle():
     """A refine cycle broke one view (no longer deployed) while it improved another; the cycle
     total of the remaining views read as an improvement and its YAML would have been kept.
