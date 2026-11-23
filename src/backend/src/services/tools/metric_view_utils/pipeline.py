@@ -628,6 +628,7 @@ class MetricViewPipeline:
     ) -> MetricViewSpec:
         ctx = TableProcessorContext(
             config=self.config,
+            source_columns=renamed_columns(self.source_columns, self.column_renames),
             mquery_tables=self.mquery_tables,
             translator=self.translator,
             join_detector=self.join_detector,

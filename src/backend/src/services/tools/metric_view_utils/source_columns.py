@@ -134,8 +134,8 @@ def known_name_fixes(
 ) -> dict[str, str]:
     """``{name as written (lower case): the view's column}`` for each ``alias.<name>`` in
     ``texts`` that the view does not have under that spelling but has under exactly one other
-    spelling of the same letters and digits (``order_date`` for ``OrderDate``, ``fis_code``
-    for ``fiscode``).
+    spelling of the same letters and digits (``order_date`` for ``OrderDate``, ``acc_code``
+    for ``acccode``).
 
     The generator names columns from the Power BI model and the Power Query; the source view
     keeps what its SQL says. The two differ in underscores and case only often enough that a

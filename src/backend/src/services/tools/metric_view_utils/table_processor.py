@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
@@ -136,6 +136,7 @@ class TableProcessorContext:
     cross_table_measures: list[TranslationResult]
     filter_warnings: list[str]
     limitations: dict[str, list]
+    source_columns: dict[str, list[str]] = field(default_factory=dict)
 
 
 def expand_calculation_groups(
@@ -246,16 +247,22 @@ def _source_column_names(table_info: TableInfo) -> list[str]:
 
 
 def _fact_table_context(
-    table_info: TableInfo, source_table: str | None, joins: list[dict]
+    table_info: TableInfo,
+    source_table: str | None,
+    joins: list[dict],
+    view_columns: list[str] | None = None,
 ) -> str:
     """The fact-table block the LLM reads for a table's measures: its source columns,
-    group-by columns, joined aliases and static filters. Built once per table."""
-    # Build the fact-table context block ONCE (stable across this table's
-    # measures) so the LLM emits real source columns / join aliases instead
-    # of guessing. Goes in the per-measure user prompt (not the cached prefix).
+    group-by columns, joined aliases and static filters. Built once per table.
+    ``view_columns``: the deployed source view's real columns, when they are known."""
     _ctx_lines = [f"- source table: {source_table or '(unknown)'}"]
     _agg_cols: list[str] = _source_column_names(table_info)
-    if _agg_cols:
+    if view_columns:  # the Power Query's inner names are not columns of the view
+        _ctx_lines.append(
+            "- columns of the source view (the ONLY names valid as source.<col>): "
+            + ", ".join(sorted(set(view_columns))[:200])
+        )
+    elif _agg_cols:
         _ctx_lines.append(
             f"- fact source columns (use as source.<col>): {', '.join(sorted(set(_agg_cols))[:60])}"
         )
@@ -296,6 +303,19 @@ def _fact_table_context(
             f"- table-level filters already applied: {'; '.join(table_info.static_filters[:10])}"
         )
     return "\n".join(_ctx_lines)
+
+
+def _llm_context(
+    ctx: TableProcessorContext,
+    table_key: str,
+    table_info: TableInfo,
+    source_table: str | None,
+    joins: list[dict],
+) -> str:
+    """``_fact_table_context`` with the fact's real view columns, when the run knows them."""
+    return _fact_table_context(
+        table_info, source_table, joins, ctx.source_columns.get(table_key)
+    )
 
 
 def process_table(
@@ -488,7 +508,7 @@ def process_table(
             and to_snake_case(m.original_name) not in _authoritative_names
         ]
 
-        _table_context = _fact_table_context(table_info, source_table, joins)
+        _table_context = _llm_context(ctx, table_key, table_info, source_table, joins)
         _agg_cols: list[str] = _source_column_names(table_info)
 
         try:
