@@ -6,6 +6,8 @@ a fact ``Orders`` with ``Amount`` and ``Region``, and the measures ``Revenue MTD
 
 import pytest
 
+import yaml
+
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TranslationResult,
@@ -411,6 +413,23 @@ def test_rehome_moves_a_holder_measure_to_the_view_it_reads():
     assert rows[0]["proposed_allocation"] == "Orders"
 
 
+def test_rehome_leaves_a_measure_that_reads_a_table_without_a_view():
+    # Planning has no view. Its measure is not moved to the view of a helper it references:
+    # the columns it reads are not there, and it would be written against the wrong table.
+    rows = [
+        _row(
+            "Plan Value",
+            'VAR s = [Start] RETURN IF(SELECTEDVALUE(Pick_Horizon[Horizon]) = "A", '
+            "SUMX(Planning, Planning[Value]))",
+            table="Measures",
+        ),
+        _row("Start", "MIN(Orders[Day])"),
+    ]
+    moved = rehome_candidates(rows, {"Orders"}, connected={"Orders", "Customers"})
+    assert moved == {}
+    assert rows[0]["proposed_allocation"] == "Measures"
+
+
 # ── the guard and the YAML ───────────────────────────────────────────────
 
 
@@ -460,7 +479,10 @@ def test_emitted_yaml_declares_a_read_parameter_and_no_materialization():
     text = emit_yaml(spec)
     assert "\nparameters:\n" in text
     assert "  - name: pick_horizon_horizon\n" in text
-    assert "    default: 'MTD'\n" in text
+    # A SQL string literal inside the YAML scalar: a bare YAML string is refused on deploy
+    # ("default value must be a constant expression").
+    assert '    default: "\'MTD\'"\n' in text
+    assert yaml.safe_load(text)["parameters"][0]["default"] == "'MTD'"
     assert "materialization" not in text
 
 

@@ -70,6 +70,7 @@ _EQ_LITERAL = re.compile(
 )
 _WHOLE_REF = re.compile(r"\[([^\]]+)\]")
 _TABLE_REF = re.compile(r"(?:'([^']+)'|(\w+))\s*\[")
+_SELECTOR_CALL = re.compile(r"\bSELECTEDVALUE\s*\([^()]*\)", re.IGNORECASE)
 
 # Outcome per measure, best first: a measure seen in several views keeps the best.
 _RANK = {"rule": 0, "translated": 1, "llm": 2, "declined": 3}
@@ -605,11 +606,15 @@ def _fact_home(
 ) -> str | None:
     """The view a DAX reads: its first fact table reference, else (up to four measure hops)
     the view of the first measure it references that has one."""
-    for match in _TABLE_REF.finditer(dax):
+    others = False
+    for match in _TABLE_REF.finditer(_SELECTOR_CALL.sub(" ", dax)):
         table = match.group(1) or match.group(2)
         if table in fact_keys:
             return table
-    if depth >= 4:
+        others = True
+    # A measure that reads a table with no view of its own (a table the model has but the
+    # warehouse does not) is not moved to another measure's view: its columns are not there.
+    if others or depth >= 4:
         return None
     for ref in _WHOLE_REF.finditer(dax):
         name = ref.group(1)

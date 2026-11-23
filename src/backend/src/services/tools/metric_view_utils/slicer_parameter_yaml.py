@@ -17,6 +17,14 @@ def _quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _sql_default(value: str) -> str:
+    """The default as Databricks wants it: a SQL string literal inside the YAML scalar
+    (``default: "'MTD'"``). A bare YAML string is read as an expression and refused
+    ("default value must be a constant expression")."""
+    literal = "'" + value.replace("'", "''") + "'"
+    return '"' + literal.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def insert_parameter_block(
     lines: list[str], at: int, spec: MetricViewSpec, written: Iterable[TranslationResult]
 ) -> None:
@@ -48,6 +56,6 @@ def parameter_block_lines(
         )
         lines.append(f"  - name: {param['name']}")
         lines.append(f"    data_type: {param['data_type']}")
-        lines.append(f"    default: {_quote(str(param['default']))}")
+        lines.append(f"    default: {_sql_default(str(param['default']))}")
     lines.append("")
     return lines
