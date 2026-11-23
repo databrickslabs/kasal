@@ -1,7 +1,7 @@
 """Selector measures become metric view parameters (config switch ``slicer_parameters``).
 
-Names are invented: a disconnected selector ``Pick_Horizon[Horizon]`` and the measures
-``Revenue MTD`` / ``Revenue YTD`` over an ``Orders`` fact.
+Names are invented: a disconnected selector ``Pick_Horizon[Horizon]`` and ``Pick_Region[Region]``,
+a fact ``Orders`` with ``Amount`` and ``Region``, and the measures ``Revenue MTD`` / ``Revenue YTD``.
 """
 
 import pytest
@@ -10,31 +10,40 @@ from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TranslationResult,
 )
+from src.services.tools.metric_view_utils.dax_translator import DaxTranslator
+from src.services.tools.metric_view_utils.slicer_branch import branch_sql
 from src.services.tools.metric_view_utils.slicer_parameter_dax import (
     DispatchDecline,
-    parse_selector_dispatch,
+    expanded_body,
+    parse_case,
     reads_query_grouping,
+    rewrite_selectors,
     selector_refs,
+)
+from src.services.tools.metric_view_utils.slicer_parameter_text import (
+    substitute,
+    token_for,
+    with_parameter_lines,
 )
 from src.services.tools.metric_view_utils.slicer_parameter_yaml import (
     parameter_block_lines,
 )
 from src.services.tools.metric_view_utils.slicer_parameters import (
-    add_slicer_parameters,
+    SlicerReport,
+    connected_tables,
+    finish_view,
+    plan_view,
+    rehome_candidates,
     slicer_parameters_enabled,
 )
+from src.services.tools.metric_view_utils.source_column_guard import guard_view
 from src.services.tools.metric_view_utils.yaml_emitter import emit_yaml
 
 RELATIONSHIPS = [{"from_table": "Orders", "to_table": "Customers"}]
 ON = {"slicer_parameters": True}
 
-DISPATCH = (
-    'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), '
-    '"MTD", [Revenue MTD], "YTD", [Revenue YTD])'
-)
 
-
-def _measure(name, dax, table="Orders"):
+def _row(name, dax, table="Orders"):
     return {
         "measure_name": name,
         "original_name": name,
@@ -43,122 +52,123 @@ def _measure(name, dax, table="Orders"):
     }
 
 
-def _mapping():
-    return [
-        _measure("Revenue MTD", "SUM(Orders[Amount])"),
-        _measure("Revenue YTD", "SUM(Orders[Amount])"),
-        _measure("Revenue View", DISPATCH, table="Pick_Horizon"),
+def _mapping(extra=()):
+    rows = [
+        _row("Revenue MTD", "SUM(Orders[Amount])"),
+        _row("Revenue YTD", "SUM(Orders[Amount])"),
+        _row(
+            "Revenue View",
+            'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), '
+            '"MTD", [Revenue MTD], "YTD", [Revenue YTD])',
+            table="Pick_Horizon",
+        ),
     ]
+    rows.extend(extra)
+    return rows
 
 
-def _spec(measures=None, untranslatable=None):
-    return MetricViewSpec(
+def _run(rows, relationships=RELATIONSHIPS):
+    """Plan, translate the rows as process_table would, then finish. Returns the spec too."""
+    translator = DaxTranslator({})
+    translator.set_model_relationships(relationships)
+    translator.set_fact_joins([])
+    plan = plan_view(
+        "Orders",
+        rows,
+        rows,
+        connected=connected_tables(relationships),
+        taken_names=set(),
+        llm_enabled=False,
+        trivial_only=False,
+    )
+    spec = MetricViewSpec(
         fact_table_key="Orders",
         source_table="cat.sch.orders",
         view_name="orders_view",
         comment="Orders",
         joins=[],
-        dimensions=[{"name": "region", "expr": "source.region", "comment": "Region"}],
-        measures=(
-            measures
-            if measures is not None
-            else [
-                TranslationResult(
-                    measure_name="revenue_mtd",
-                    original_name="Revenue MTD",
-                    sql_expr="SUM(source.amount)",
-                    is_translatable=True,
-                    skip_reason="",
-                    dax_expression="SUM(Orders[Amount])",
-                    confidence="high",
-                    category="single_table",
-                )
-            ]
-        ),
-        untranslatable=untranslatable or [],
-        fact_columns=["amount", "region"],
+        dimensions=[],
+        measures=[],
+        untranslatable=[],
+        # The translator writes the columns as the model names them (source.Amount).
+        fact_columns=["Amount", "Region"],
     )
+    for row in plan.process_rows:
+        result = translator.translate(row, "Orders")
+        (spec.measures if result.is_translatable else spec.untranslatable).append(
+            result
+        )
+    report = SlicerReport()
+    finish_view(plan, spec, translator, report)
+    return plan, spec, report
 
 
-def _untranslated_view_measure():
-    return TranslationResult(
-        measure_name="revenue_view",
-        original_name="Revenue View",
-        sql_expr=None,
-        is_translatable=False,
-        skip_reason="SELECTEDVALUE (requires slicer context)",
-        dax_expression=DISPATCH,
-        confidence="none",
-        category="unassigned",
+def _named(spec, name):
+    return next(m for m in spec.measures if m.measure_name == name)
+
+
+# ── DAX ──────────────────────────────────────────────────────────────────
+
+
+def test_rewrite_replaces_each_selector_by_its_token_and_registers_the_alternate():
+    seen = []
+
+    def register(ref):
+        seen.append((ref.table, ref.column, ref.alternate))
+        return "pick_horizon_horizon"
+
+    text = rewrite_selectors(
+        'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), "MTD", [Revenue MTD])',
+        register,
     )
+    assert text == 'SWITCH("__sel_pick_horizon_horizon", "MTD", [Revenue MTD])'
+    assert seen == [("Pick_Horizon", "Horizon", "MTD")]
 
 
-# ── DAX shape ────────────────────────────────────────────────────────────
+def test_switch_on_the_selector_value_is_a_case_shape():
+    shape = parse_case(
+        'SWITCH("__sel_p", "MTD", [Revenue MTD], "YTD", [Revenue YTD], [Other])'
+    )
+    assert shape.param == "p"
+    assert [v for v, _ in shape.options] == ["MTD", "YTD"]
+    assert shape.otherwise.strip() == "[Other]"
 
 
-def test_switch_on_disconnected_selector_reads_options_and_alternate():
-    dispatch = parse_selector_dispatch(DISPATCH)
-    assert dispatch.shape == "SWITCH"
-    assert dispatch.selector.table == "Pick_Horizon"
-    assert dispatch.selector.column == "Horizon"
-    assert dispatch.selector.alternate == "MTD"
-    assert [o.value for o in dispatch.options] == ["MTD", "YTD"]
-    assert dispatch.options[1].result.strip() == "[Revenue YTD]"
-    assert dispatch.otherwise is None
-
-
-def test_switch_with_otherwise_branch():
-    dax = 'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon]), "MTD", [Revenue MTD], [Revenue YTD])'
-    dispatch = parse_selector_dispatch(dax)
-    assert dispatch.selector.alternate is None
-    assert [o.value for o in dispatch.options] == ["MTD"]
-    assert dispatch.otherwise.strip() == "[Revenue YTD]"
-
-
-def test_variable_bound_selector_is_expanded():
+def test_condition_form_switch_true_is_a_case_shape():
     dax = (
-        "VAR s = SELECTEDVALUE(Pick_Horizon[Horizon]) "
-        'RETURN SWITCH(s, "MTD", [Revenue MTD], "YTD", [Revenue YTD])'
+        'SWITCH(TRUE(), "__sel_p" = "Actual", [Revenue MTD], '
+        '"__sel_p" = "Unit Case", DIVIDE([Revenue MTD], 2))'
     )
-    dispatch = parse_selector_dispatch(dax)
-    assert dispatch.selector.table == "Pick_Horizon"
-    assert [o.value for o in dispatch.options] == ["MTD", "YTD"]
+    shape = parse_case(dax)
+    assert shape.param == "p"
+    assert [v for v, _ in shape.options] == ["Actual", "Unit Case"]
 
 
-def test_if_on_selector_equality():
-    dax = (
-        'IF(SELECTEDVALUE(Pick_Horizon[Horizon]) = "YTD", [Revenue YTD], [Revenue MTD])'
-    )
-    dispatch = parse_selector_dispatch(dax)
-    assert dispatch.shape == "IF"
-    assert [o.value for o in dispatch.options] == ["YTD"]
-    assert dispatch.otherwise.strip() == "[Revenue MTD]"
+def test_if_with_the_selector_on_the_right_is_a_case_shape():
+    shape = parse_case('IF("YTD" = "__sel_p", [Revenue YTD], [Revenue MTD])')
+    assert shape.shape == "IF"
+    assert shape.param == "p"
+    assert shape.options[0][0] == "YTD"
 
 
-def test_switch_on_a_condition_is_declined():
-    with pytest.raises(DispatchDecline, match="condition"):
-        parse_selector_dispatch("SWITCH(TRUE(), [Revenue MTD] > 0, [Revenue YTD])")
+def test_condition_on_two_selectors_is_refused():
+    dax = 'SWITCH(TRUE(), "__sel_p" = "A", [X], "__sel_q" = "B", [Y])'
+    with pytest.raises(DispatchDecline, match="more than one selector"):
+        parse_case(dax)
 
 
-def test_non_text_option_is_declined():
-    dax = "SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon]), 1, [Revenue MTD])"
-    with pytest.raises(DispatchDecline, match="text literal"):
-        parse_selector_dispatch(dax)
-
-
-def test_inequality_is_not_an_equality_dispatch():
-    dax = 'IF(SELECTEDVALUE(Pick_Horizon[Horizon]) <> "YTD", [Revenue YTD], [Revenue MTD])'
+def test_a_condition_that_is_not_an_equality_is_refused():
     with pytest.raises(DispatchDecline, match="not an equality"):
-        parse_selector_dispatch(dax)
+        parse_case('IF("__sel_p" <> "A", [X], [Y])')
 
 
-def test_grouping_functions_are_detected():
+def test_a_var_block_is_read_with_case_insensitive_names():
+    dax = "var a = [Revenue MTD]\nvar b = [Revenue YTD]\nRETURN DIVIDE(A, B, BLANK())"
+    assert expanded_body(dax).replace(" ", "").startswith("DIVIDE((")
+
+
+def test_grouping_functions_are_detected_and_selectors_listed():
     assert reads_query_grouping("IF(ISFILTERED(Orders[Region]), 1, 0)")
-    assert reads_query_grouping("HASONEVALUE(Orders[Region])")
-    assert not reads_query_grouping(DISPATCH)
-
-
-def test_selector_refs_finds_quoted_and_plain_tables():
     refs = selector_refs(
         "SELECTEDVALUE('Selector Act'[Pick]) + SELECTEDVALUE(Pick_Horizon[Horizon])"
     )
@@ -168,41 +178,87 @@ def test_selector_refs_finds_quoted_and_plain_tables():
     ]
 
 
-# ── switch and configuration ─────────────────────────────────────────────
+# ── text and prompt ──────────────────────────────────────────────────────
 
 
-def test_switch_off_by_default_changes_nothing():
-    specs = {"Orders": _spec()}
-    report = add_slicer_parameters(specs, _mapping(), {}, relationships=RELATIONSHIPS)
-    assert report == {}
-    assert specs["Orders"].parameters == []
-    assert all(
-        m.measure_name != "revenue_view__selector" for m in specs["Orders"].measures
+def test_substitute_turns_quoted_and_bare_tokens_into_the_parameter_name():
+    sql = (
+        "CASE WHEN source.Region = '__sel_pick_region' THEN 1 END OR __sel_pick_region"
+    )
+    assert substitute(sql, {"pick_region"}) == (
+        "CASE WHEN source.Region = pick_region THEN 1 END OR pick_region"
     )
 
 
-def test_switch_flag_accepts_string_true_only():
-    assert slicer_parameters_enabled({"slicer_parameters": "true"})
-    assert not slicer_parameters_enabled({"slicer_parameters": "false"})
-    assert not slicer_parameters_enabled(None)
+def test_substitute_leaves_a_token_of_an_unknown_name_visible():
+    assert substitute("x = '__sel_other'", {"pick_region"}) == "x = '__sel_other'"
 
 
-def test_no_relationships_means_no_selector_is_assumed_disconnected():
-    specs = {"Orders": _spec()}
-    report = add_slicer_parameters(specs, _mapping(), ON, relationships=[])
-    assert report["declined"] == {"no relationships supplied": 1}
-    assert specs["Orders"].parameters == []
+def test_llm_context_names_each_parameter_and_says_to_write_it_bare():
+    params = [
+        {
+            "name": "pick_horizon_horizon",
+            "allowed_values": ["MTD", "YTD"],
+            "default": "MTD",
+        }
+    ]
+    text = with_parameter_lines("- source table: x", params)
+    assert "pick_horizon_horizon: values 'MTD', 'YTD'; default 'MTD'" in text
+    assert "Write the bare name" in text
+    assert "NOT columns" in text
+    assert with_parameter_lines("- source table: x", []) == "- source table: x"
 
 
-# ── the pass ─────────────────────────────────────────────────────────────
+def test_token_literal_is_the_parameter_as_a_dax_string():
+    assert token_for("pick_horizon_horizon") == '"__sel_pick_horizon_horizon"'
 
 
-def test_selector_measure_becomes_parameter_measure_with_measure_refs():
-    specs = {"Orders": _spec(untranslatable=[_untranslated_view_measure()])}
-    report = add_slicer_parameters(specs, _mapping(), ON, relationships=RELATIONSHIPS)
+# ── branch composition ───────────────────────────────────────────────────
 
-    spec = specs["Orders"]
-    assert report["translated_count"] == 1
+
+def _branch(text):
+    refs = {"A": "SUM(source.a)", "B": "SUM(source.b)"}
+    return branch_sql(
+        text,
+        lambda name: refs[name],
+        lambda t: f"TRANSLATOR({t})",
+    )
+
+
+def test_branch_difference_of_measures_is_composed():
+    assert _branch("[A] - [B]") == "(SUM(source.a)) - (SUM(source.b))"
+
+
+def test_divide_with_blank_alternate_is_composed_with_nullif():
+    assert _branch("DIVIDE([A], [B], BLANK())") == (
+        "(SUM(source.a)) / NULLIF((SUM(source.b)), 0)"
+    )
+
+
+def test_divide_with_another_alternate_is_refused():
+    with pytest.raises(DispatchDecline, match="alternate other than BLANK"):
+        _branch("DIVIDE([A], [B], 0)")
+
+
+def test_bare_division_is_not_composed_and_goes_to_the_translator():
+    assert _branch("[A] / [B]") == "TRANSLATOR([A] / [B])"
+
+
+def test_numeric_constant_branch_is_its_own_sql():
+    assert _branch("2") == "2"
+
+
+# ── the plan and the finish, with the real translator ────────────────────
+
+
+def test_condition_form_becomes_a_case_over_the_parameter():
+    _, spec, report = _run(_mapping())
+    measure = _named(spec, "revenue_view")
+    assert measure.sql_expr == (
+        "CASE pick_horizon_horizon WHEN 'MTD' THEN SUM(source.Amount) "
+        "WHEN 'YTD' THEN SUM(source.Amount) END"
+    )
+    assert measure.pbi_kind == "slicer_parameter"
     assert spec.parameters == [
         {
             "name": "pick_horizon_horizon",
@@ -212,114 +268,206 @@ def test_selector_measure_becomes_parameter_measure_with_measure_refs():
             "selector": "Pick_Horizon[Horizon]",
         }
     ]
-    param_measure = next(
-        m for m in spec.measures if m.measure_name == "revenue_view__selector"
+    assert report.best["Revenue View"][0] == "rule"
+    assert [u.measure_name for u in spec.untranslatable] == []
+
+
+def test_selector_used_as_a_filter_value_goes_through_the_translator_with_the_bare_name():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue Region",
+                "CALCULATE(SUM(Orders[Amount]), Orders[Region] = "
+                'SELECTEDVALUE(Pick_Region[Region], "East"))',
+            )
+        ]
     )
-    # Revenue MTD is a measure of this view: referenced; Revenue YTD is not: inline SQL.
-    assert param_measure.sql_expr == (
-        "CASE pick_horizon_horizon WHEN 'MTD' THEN MEASURE(revenue_mtd) "
-        "WHEN 'YTD' THEN SUM(source.amount) END"
+    _, spec, report = _run(rows)
+    measure = _named(spec, "revenue_region")
+    assert "source.Region = pick_region_region" in measure.sql_expr
+    assert "__sel_" not in measure.sql_expr
+    assert report.best["Revenue Region"][0] == "translated"
+    region = next(p for p in spec.parameters if p["name"] == "pick_region_region")
+    assert region["default"] == "East"
+    assert region["allowed_values"] == []
+
+
+def test_two_selectors_in_one_measure_give_two_parameters():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue Mix",
+                'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), '
+                '"MTD", CALCULATE(SUM(Orders[Amount]), Orders[Region] = '
+                'SELECTEDVALUE(Pick_Region[Region], "East")), "YTD", [Revenue YTD])',
+            )
+        ]
     )
-    assert param_measure.pbi_kind == "slicer_parameter"
-    # The view no longer lists the PBI measure as untranslatable.
-    assert spec.untranslatable == []
-
-
-def test_branch_that_is_not_translatable_names_the_branch():
-    mapping = _mapping()
-    mapping[2] = _measure(
-        "Revenue View",
-        'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), "MTD", [Revenue MTD], '
-        '"YTD", DIVIDE([Revenue YTD], 2))',
-        table="Pick_Horizon",
+    _, spec, report = _run(rows)
+    names = sorted(p["name"] for p in spec.parameters)
+    assert names == ["pick_horizon_horizon", "pick_region_region"]
+    measure = (
+        _named(spec, "revenue_mix__selector")
+        if report.best["Revenue Mix"][0] != "rule"
+        else _named(spec, "revenue_mix")
     )
-    specs = {"Orders": _spec(untranslatable=[_untranslated_view_measure()])}
-    report = add_slicer_parameters(specs, mapping, ON, relationships=RELATIONSHIPS)
-
-    assert report["translated_count"] == 0
-    assert specs["Orders"].parameters == []
-    assert [d["measure"] for d in report["declined_measures"]] == ["Revenue View"]
-    assert 'option "YTD"' in report["declined_measures"][0]["reason"]
-    assert [u.measure_name for u in specs["Orders"].untranslatable] == ["revenue_view"]
+    assert "CASE pick_horizon_horizon" in measure.sql_expr
+    assert "source.Region = pick_region_region" in measure.sql_expr
 
 
-def test_selector_on_connected_table_is_not_a_parameter():
-    mapping = _mapping()
-    mapping[2] = _measure(
-        "Revenue View",
-        'SWITCH(SELECTEDVALUE(Customers[Segment]), "A", [Revenue MTD], [Revenue YTD])',
-        table="Customers",
+def test_divide_branch_is_composed_and_the_choice_is_a_case():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue Ratio",
+                'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), '
+                '"MTD", DIVIDE([Revenue MTD], [Revenue YTD], BLANK()), "YTD", [Revenue YTD])',
+            )
+        ]
     )
-    specs = {"Orders": _spec()}
-    report = add_slicer_parameters(specs, mapping, ON, relationships=RELATIONSHIPS)
-    # A selector on a connected table is not a candidate at all: no disconnected SELECTEDVALUE.
-    assert report["candidates"] == 0
-    assert report["translated_count"] == 0
-    assert specs["Orders"].parameters == []
-
-
-def test_grouping_measure_is_declined_even_with_a_selector():
-    mapping = _mapping()
-    mapping[2] = _measure(
-        "Revenue View",
-        'IF(ISFILTERED(Orders[Region]), SELECTEDVALUE(Pick_Horizon[Horizon]) = "YTD")',
-        table="Pick_Horizon",
+    _, spec, _ = _run(rows)
+    measure = _named(spec, "revenue_ratio")
+    assert (
+        "WHEN 'MTD' THEN (SUM(source.Amount)) / NULLIF((SUM(source.Amount)), 0)"
+        in measure.sql_expr
     )
-    specs = {"Orders": _spec()}
-    report = add_slicer_parameters(specs, mapping, ON, relationships=RELATIONSHIPS)
-    assert report["translated_count"] == 0
-    assert any("query's grouping" in reason for reason in report["declined"])
 
 
-def test_measure_already_translated_in_view_is_not_duplicated():
-    existing = TranslationResult(
+def test_grouping_measure_is_declined_with_its_reason():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue Flag",
+                'IF(ISFILTERED(Orders[Region]), SELECTEDVALUE(Pick_Horizon[Horizon]) = "YTD", FALSE())',
+            )
+        ]
+    )
+    _, _, report = _run(rows)
+    outcome, reason = report.best["Revenue Flag"]
+    assert outcome == "declined"
+    assert "query's grouping" in reason
+
+
+def test_selector_with_a_relationship_is_declined():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue Connected",
+                'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon], "MTD"), "MTD", [Revenue MTD]) '
+                "+ SELECTEDVALUE(Customers[Segment])",
+            )
+        ]
+    )
+    _, _, report = _run(rows)
+    assert report.best["Revenue Connected"][0] == "declined"
+    assert "relationship" in report.best["Revenue Connected"][1]
+
+
+def test_external_measure_is_declined():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue External",
+                'EXTERNALMEASURE("m", Orders[Amount]) + SELECTEDVALUE(Pick_Horizon[Horizon])',
+            )
+        ]
+    )
+    _, _, report = _run(rows)
+    assert report.best["Revenue External"] == ("declined", "reads an EXTERNALMEASURE")
+
+
+def test_numeric_selector_is_declined_as_not_a_text_parameter():
+    rows = _mapping(
+        [
+            _row(
+                "Revenue Index",
+                "SWITCH(SELECTEDVALUE(Pick_Num[Index]), 1, [Revenue MTD], 2, [Revenue YTD])",
+            )
+        ]
+    )
+    _, _, report = _run(rows)
+    outcome, reason = report.best["Revenue Index"]
+    assert outcome == "declined"
+    assert "numeric selector" in reason
+
+
+def test_switch_off_does_nothing():
+    assert slicer_parameters_enabled({}) is False
+    assert slicer_parameters_enabled({"slicer_parameters": "false"}) is False
+    assert slicer_parameters_enabled({"slicer_parameters": True}) is True
+
+
+def test_rehome_moves_a_holder_measure_to_the_view_it_reads():
+    rows = [
+        _row(
+            "Revenue Holder",
+            'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon]), "A", [Revenue MTD])',
+            table="Measures",
+        ),
+        _row("Revenue MTD", "SUM(Orders[Amount])"),
+    ]
+    moved = rehome_candidates(rows, {"Orders"}, connected={"Orders", "Customers"})
+    assert moved == {"Revenue Holder": "Orders"}
+    assert rows[0]["proposed_allocation"] == "Orders"
+
+
+# ── the guard and the YAML ───────────────────────────────────────────────
+
+
+def _guard(sql, parameter_names):
+    measure = TranslationResult(
         measure_name="revenue_view",
         original_name="Revenue View",
-        sql_expr="SUM(source.amount)",
+        sql_expr=sql,
         is_translatable=True,
         skip_reason="",
-        dax_expression=DISPATCH,
-        confidence="high",
+        dax_expression="",
+        confidence="medium",
         category="single_table",
     )
-    specs = {"Orders": _spec(measures=[existing])}
-    report = add_slicer_parameters(specs, _mapping(), ON, relationships=RELATIONSHIPS)
-    assert report["translated_count"] == 0
-    assert specs["Orders"].parameters == []
+    return guard_view(
+        "Orders",
+        joins=[],
+        dimensions=[],
+        measures=[measure],
+        fact_columns=frozenset({"amount", "region"}),
+        columns_by_key={},
+        key_by_view={},
+        parameter_names=frozenset(parameter_names),
+    )
 
 
-# ── YAML ─────────────────────────────────────────────────────────────────
+def test_guard_accepts_a_parameter_name_read_bare():
+    result = _guard(
+        "CASE pick_horizon_horizon WHEN 'MTD' THEN SUM(source.amount) END",
+        {"pick_horizon_horizon"},
+    )
+    assert [m.measure_name for m in result.measures] == ["revenue_view"]
+    assert result.gaps == []
 
 
-def _emitted(specs):
-    return emit_yaml(specs["Orders"])
+def test_guard_still_rejects_an_unknown_bare_column():
+    result = _guard(
+        "CASE pick_horizon_horizon WHEN 'MTD' THEN SUM(unknown_col) END",
+        {"pick_horizon_horizon"},
+    )
+    assert result.measures == []
+    assert any("unknown_col" in gap.reason for gap in result.gaps)
 
 
-def test_emitted_yaml_declares_only_parameters_a_measure_reads():
-    specs = {"Orders": _spec(untranslatable=[_untranslated_view_measure()])}
-    add_slicer_parameters(specs, _mapping(), ON, relationships=RELATIONSHIPS)
-    yaml_text = _emitted(specs)
-
-    assert "\nparameters:\n" in yaml_text
-    assert "  - name: pick_horizon_horizon\n" in yaml_text
-    assert "    data_type: string\n" in yaml_text
-    assert "    default: 'MTD'\n" in yaml_text
-    assert "CASE pick_horizon_horizon WHEN 'MTD' THEN MEASURE(revenue_mtd)" in yaml_text
-    # Parameters are declared before the measures that read them, and no view-level
-    # materialization is written for a view that has parameters.
-    assert yaml_text.index("parameters:") < yaml_text.index("measures:")
-    assert "materialization" not in yaml_text
+def test_emitted_yaml_declares_a_read_parameter_and_no_materialization():
+    _, spec, _ = _run(_mapping())
+    text = emit_yaml(spec)
+    assert "\nparameters:\n" in text
+    assert "  - name: pick_horizon_horizon\n" in text
+    assert "    default: 'MTD'\n" in text
+    assert "materialization" not in text
 
 
-def test_yaml_without_parameters_is_unchanged():
-    specs = {"Orders": _spec()}
-    assert "parameters:" not in _emitted(specs)
-
-
-def test_parameter_not_read_by_a_written_measure_is_not_declared():
+def test_unread_parameter_is_not_declared():
     params = [
         {
-            "name": "unused_param",
+            "name": "unused",
             "data_type": "string",
             "default": "A",
             "allowed_values": ["A"],
@@ -329,30 +477,36 @@ def test_parameter_not_read_by_a_written_measure_is_not_declared():
     assert parameter_block_lines(params, ["SUM(source.amount)"]) == []
 
 
-def test_parameter_default_with_quote_is_escaped():
-    params = [
-        {
-            "name": "p",
-            "data_type": "string",
-            "default": "It's",
-            "allowed_values": ["It's", "No"],
-            "selector": "T[c]",
-        }
-    ]
-    lines = parameter_block_lines(params, ["CASE p WHEN 'It''s' THEN 1 END"])
-    assert "    default: 'It''s'" in lines
+def test_the_llm_table_context_carries_the_view_parameters():
+    from types import SimpleNamespace
+
+    from src.services.tools.metric_view_utils.data_classes import TableInfo
+    from src.services.tools.metric_view_utils.table_processor import _llm_context
+
+    table_info = TableInfo(
+        table_name="Orders",
+        source_table="cat.sch.orders",
+        aggregate_columns=[{"name": "Amount", "source_col": "Amount"}],
+        group_by_columns=["Region"],
+        calculated_columns=[],
+        is_fact=True,
+        full_sql="",
+    )
+    params = [{"name": "pick_horizon_horizon", "allowed_values": ["MTD", "YTD"], "default": "MTD"}]
+    ctx = SimpleNamespace(source_columns={}, slicer_parameters=params)
+    context = _llm_context(ctx, "Orders", table_info, "cat.sch.orders", [])
+    assert "- source table: cat.sch.orders" in context
+    assert "pick_horizon_horizon: values 'MTD', 'YTD'" in context
+    assert "Write the bare name" in context
 
 
-def test_option_value_that_cannot_be_a_literal_is_declined():
-    mapping = _mapping()
-    mapping[2] = _measure(
-        "Revenue View",
-        'SWITCH(SELECTEDVALUE(Pick_Horizon[Horizon]), "M;TD", [Revenue MTD])',
-        table="Pick_Horizon",
+def test_the_llm_reference_checks_accept_a_bare_parameter_name():
+    from src.services.tools.metric_view_utils.llm_reference_check import (
+        column_violation,
+        reference_violation,
     )
-    specs = {"Orders": _spec()}
-    report = add_slicer_parameters(specs, mapping, ON, relationships=RELATIONSHIPS)
-    assert report["translated_count"] == 0
-    assert any(
-        "cannot be written as a literal" in reason for reason in report["declined"]
-    )
+
+    dax = 'CALCULATE(SUM(Orders[Amount]), Orders[Region] = "__sel_pick_region_region")'
+    sql = "SUM(CASE WHEN source.Region = pick_region_region THEN source.Amount END)"
+    assert column_violation(dax, sql, frozenset({"amount", "region"})) is None
+    assert reference_violation(dax, sql, {}) is None

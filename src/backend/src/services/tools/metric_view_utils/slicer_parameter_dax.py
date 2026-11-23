@@ -1,20 +1,14 @@
-"""DAX shape of a measure that dispatches on a slicer selector.
+"""DAX text of a measure that reads a slicer selector (``SELECTEDVALUE(T[c])``).
 
-A Power BI selector is a value a report reader picks on a slicer, read back in a
-measure with ``SELECTEDVALUE(T[c])``. When ``T`` is a disconnected table (no
-relationship to any table of the model), the measure's value depends on that
-pick and on nothing in the query's grouping. This module recognises the two shapes
-that a metric view can carry as a parameter:
+Three operations, none of them model-aware (``slicer_parameters`` decides which tables are
+selectors):
 
-* ``SWITCH(SELECTEDVALUE(T[c] [, alternate]), "A", x, "B", y [, otherwise])``
-* ``IF(SELECTEDVALUE(T[c]) = "A", x, y [, ...])``
-
-A VAR-bound selector (``VAR s = SELECTEDVALUE(T[c]) RETURN SWITCH(s, ...)``) is
-read as the same shape once the VARs are expanded. Anything else raises
-``DispatchDecline`` with the reason, so the caller can report it.
-
-Pure DAX text handling, no model state: whether ``T`` is disconnected is decided by
-the caller (``slicer_parameters``).
+* ``selector_refs`` finds the ``SELECTEDVALUE`` calls of a measure;
+* ``rewrite_selectors`` replaces each call by the placeholder literal of its parameter
+  (``slicer_parameter_text``), so the normal translation path can carry it;
+* ``parse_case`` reads a measure whose result is a choice on one parameter, as
+  ``SWITCH(<param>, "A", x, ...)``, ``SWITCH(TRUE(), <param> = "A", x, ...)`` or
+  ``IF(<param> = "A", x, y)``, into its options. Anything else raises ``DispatchDecline``.
 """
 
 from __future__ import annotations
@@ -25,13 +19,13 @@ from dataclasses import dataclass
 from src.services.powerbi.switch_decomposition import (
     _parse_dax_vars,
     _split_balanced_args,
-    _substitute_vars,
 )
+
+from .slicer_parameter_text import TOKEN_PREFIX
 
 
 class DispatchDecline(Exception):
-    """A measure with a selector that cannot be read as a parameter. The message is the
-    reason shown in the report; it names the branch when a branch is the cause."""
+    """A measure whose selector use this module cannot read. The message is the reason."""
 
 
 @dataclass(frozen=True)
@@ -44,22 +38,13 @@ class SelectorRef:
 
 
 @dataclass(frozen=True)
-class SelectorOption:
-    """One selector value and the DAX that the measure returns for it."""
+class CaseShape:
+    """A choice on one parameter: ``options`` are (value, DAX result) pairs in order and
+    ``otherwise`` the DAX result when no option matches (None: no such branch)."""
 
-    value: str
-    result: str
-
-
-@dataclass(frozen=True)
-class SelectorDispatch:
-    """A measure read as one selector and the result for each of its values."""
-
-    selector: SelectorRef
-    options: tuple[SelectorOption, ...]
-    otherwise: (
-        str | None
-    )  # the DAX returned when no option matches, when the DAX has one
+    param: str
+    options: tuple[tuple[str, str], ...]
+    otherwise: str | None
     shape: str  # "SWITCH" or "IF"
 
 
@@ -67,20 +52,22 @@ _SELECTOR_CALL = re.compile(
     r"SELECTEDVALUE\s*\(\s*(?:'([^']+)'|([A-Za-z_]\w*))\s*\[\s*(\w+)\s*\]",
     re.IGNORECASE,
 )
+_SELECTEDVALUE_HEAD = re.compile(r"\bSELECTEDVALUE\s*\(", re.IGNORECASE)
 _COLUMN_ARG = re.compile(r"\s*(?:'([^']+)'|([A-Za-z_]\w*))\s*\[\s*(\w+)\s*\]\s*")
 _TEXT_LITERAL = re.compile(r'\s*"([^"]*)"\s*')
+_TOKEN_LITERAL = re.compile(rf'\s*"{TOKEN_PREFIX}(\w+)"\s*')
 _GROUPING_FUNCTION = re.compile(
     r"\b(ISFILTERED|HASONEVALUE|ISINSCOPE)\s*\(", re.IGNORECASE
 )
+EXTERNAL_MEASURE = re.compile(r"\bEXTERNALMEASURE\s*\(", re.IGNORECASE)
 
 
 def selector_refs(dax: str) -> list[SelectorRef]:
     """Every ``SELECTEDVALUE(T[c])`` written in ``dax``, VAR definitions included."""
-    refs = []
-    for match in _SELECTOR_CALL.finditer(dax or ""):
-        table = match.group(1) or match.group(2)
-        refs.append(SelectorRef(table=table, column=match.group(3), alternate=None))
-    return refs
+    return [
+        SelectorRef(table=m.group(1) or m.group(2), column=m.group(3), alternate=None)
+        for m in _SELECTOR_CALL.finditer(dax or "")
+    ]
 
 
 def reads_query_grouping(dax: str) -> bool:
@@ -89,20 +76,121 @@ def reads_query_grouping(dax: str) -> bool:
     return bool(_GROUPING_FUNCTION.search(dax or ""))
 
 
-def parse_selector_dispatch(dax: str) -> SelectorDispatch:
-    """Read a measure as a SWITCH or IF on one SELECTEDVALUE. Raises ``DispatchDecline``."""
-    body = _expanded_body(dax)
-    switch_args = _whole_call(body, "SWITCH")
-    if switch_args is not None:
-        return _switch_dispatch(switch_args)
+def rewrite_selectors(dax: str, register) -> str:
+    """``dax`` with each ``SELECTEDVALUE(T[c] [, alt])`` replaced by its parameter's token.
+
+    ``register(ref)`` returns the parameter name for a selector (and records its alternate).
+    Raises ``DispatchDecline`` for a call whose arguments are not a column and a text literal.
+    """
+    pieces: list[str] = []
+    pos = 0
+    for head in _SELECTEDVALUE_HEAD.finditer(dax):
+        if head.start() < pos:
+            continue  # inside a call already rewritten
+        open_index = head.end() - 1
+        close = _matching_close(dax, open_index)
+        if close < 0:
+            raise DispatchDecline("SELECTEDVALUE with unbalanced parentheses")
+        args = _split_balanced_args(dax[open_index + 1 : close])
+        if len(args) not in (1, 2):
+            raise DispatchDecline("SELECTEDVALUE with an unexpected argument list")
+        column = _COLUMN_ARG.fullmatch(args[0])
+        if column is None:
+            raise DispatchDecline("SELECTEDVALUE does not name a table column")
+        alternate = (
+            _text_literal(args[1], "the SELECTEDVALUE alternate")
+            if len(args) == 2
+            else None
+        )
+        ref = SelectorRef(
+            column.group(1) or column.group(2), column.group(3), alternate
+        )
+        name = register(ref)
+        pieces.append(dax[pos : head.start()])
+        pieces.append(f'"{TOKEN_PREFIX}{name}"')
+        pos = close + 1
+    pieces.append(dax[pos:])
+    return "".join(pieces)
+
+
+def parse_case(dax: str) -> CaseShape:
+    """Read a rewritten measure as a choice on one parameter. Raises ``DispatchDecline``."""
+    body = expanded_body(dax)
+    switch = _whole_call(body, "SWITCH")
+    if switch is not None:
+        return _switch_case(switch)
     if_args = _whole_call(body, "IF")
     if if_args is not None:
-        return _if_dispatch(if_args)
-    raise DispatchDecline("not a SWITCH or IF on a selector value")
+        return _if_case(if_args)
+    raise DispatchDecline("not a SWITCH or IF on a selector parameter")
 
 
-def _expanded_body(dax: str) -> str:
-    """The RETURN expression with VAR definitions inlined and outer parentheses removed."""
+def _switch_case(args: list[str]) -> CaseShape:
+    if len(args) < 3:
+        raise DispatchDecline("SWITCH without a branch")
+    first = _strip_parens(args[0])
+    rest = args[1:]
+    otherwise = rest[-1] if len(rest) % 2 == 1 else None
+    pairs = rest[:-1] if otherwise is not None else rest
+    if first.upper() == "TRUE()":
+        # SWITCH(TRUE(), <param> = "A", x, <param> = "B", y, [otherwise])
+        params: set[str] = set()
+        options = []
+        for i in range(0, len(pairs), 2):
+            name, value = _equality(pairs[i])
+            params.add(name)
+            options.append((value, pairs[i + 1]))
+        if len(params) != 1:
+            raise DispatchDecline(
+                "the conditions read more than one selector parameter"
+            )
+        return CaseShape(params.pop(), tuple(options), otherwise, "SWITCH")
+    name = _token_name(first)
+    if name is None:
+        raise DispatchDecline("SWITCH is not on a selector parameter")
+    options = tuple(
+        (_text_literal(pairs[i], "a SWITCH option value"), pairs[i + 1])
+        for i in range(0, len(pairs), 2)
+    )
+    return CaseShape(name, options, otherwise, "SWITCH")
+
+
+def _if_case(args: list[str]) -> CaseShape:
+    if len(args) not in (2, 3):
+        raise DispatchDecline("IF without a true and a false branch")
+    name, value = _equality(args[0])
+    otherwise = args[2] if len(args) == 3 else None
+    return CaseShape(name, ((value, args[1]),), otherwise, "IF")
+
+
+def _equality(condition: str) -> tuple[str, str]:
+    """``(parameter, value)`` of ``<param> = "value"`` (either side); raises otherwise."""
+    text = _strip_parens(condition)
+    eq = _top_level_equals(text)
+    if eq is None:
+        raise DispatchDecline(
+            "a condition is not an equality with a selector parameter"
+        )
+    left = _strip_parens(text[:eq])
+    right = _strip_parens(text[eq + 1 :])
+    for param_side, value_side in ((left, right), (right, left)):
+        name = _token_name(param_side)
+        if name is not None:
+            return name, _text_literal(
+                value_side, "the value compared with the selector"
+            )
+    raise DispatchDecline("a condition is not an equality with a selector parameter")
+
+
+def _token_name(text: str) -> str | None:
+    match = _TOKEN_LITERAL.fullmatch(_strip_parens(text))
+    return match.group(1) if match else None
+
+
+def expanded_body(dax: str) -> str:
+    """The RETURN expression with VAR definitions inlined and outer parentheses removed.
+
+    DAX names are case-insensitive: ``var a = ...`` is read where ``A`` is written."""
     text = (dax or "").strip()
     vars_map: dict[str, str] = {}
     if re.match(r"(?is)^var\s", text):
@@ -111,10 +199,21 @@ def _expanded_body(dax: str) -> str:
         if ret is None:
             raise DispatchDecline("VAR block without a RETURN expression")
         text = ret.group(1)
-    text = _substitute_vars(text, vars_map).strip()
-    while text.startswith("(") and _matching_close(text, 0) == len(text) - 1:
-        text = text[1:-1].strip()
-    return text
+    return _strip_parens(_inline_vars(text, vars_map))
+
+
+def _inline_vars(text: str, vars_map: dict[str, str], depth: int = 0) -> str:
+    """``text`` with each VAR name (any letter case) replaced by its definition, nested VARs
+    included; bounded, so a cycle stops."""
+    if depth > 4 or not vars_map:
+        return text
+    lower = {name.lower(): value for name, value in vars_map.items()}
+    pattern = re.compile(
+        r"(?<![\w\[])(" + "|".join(re.escape(name) for name in lower) + r")(?![\w\]])",
+        re.IGNORECASE,
+    )
+    new = pattern.sub(lambda m: f"({lower[m.group(1).lower()]})", text)
+    return _inline_vars(new, vars_map, depth + 1) if new != text else text
 
 
 def _matching_close(text: str, open_index: int) -> int:
@@ -157,63 +256,11 @@ def _strip_parens(text: str) -> str:
     return text
 
 
-def _parse_selectedvalue(text: str) -> SelectorRef:
-    args = _whole_call(_strip_parens(text), "SELECTEDVALUE")
-    if args is None or len(args) not in (1, 2):
-        raise DispatchDecline("the selector is not a SELECTEDVALUE(table[column]) call")
-    column = _COLUMN_ARG.fullmatch(args[0])
-    if column is None:
-        raise DispatchDecline("SELECTEDVALUE does not name a table column")
-    alternate = None
-    if len(args) == 2:
-        alternate = _text_literal(args[1], "the SELECTEDVALUE alternate")
-    return SelectorRef(
-        table=column.group(1) or column.group(2),
-        column=column.group(3),
-        alternate=alternate,
-    )
-
-
 def _text_literal(text: str, what: str) -> str:
     match = _TEXT_LITERAL.fullmatch(text)
     if match is None:
         raise DispatchDecline(f"{what} is not a text literal: {text.strip()[:60]}")
     return match.group(1)
-
-
-def _switch_dispatch(args: list[str]) -> SelectorDispatch:
-    if len(args) < 3:
-        raise DispatchDecline("SWITCH without a branch")
-    first = _strip_parens(args[0])
-    if not first.upper().startswith("SELECTEDVALUE"):
-        raise DispatchDecline("SWITCH is on a condition, not on a selector value")
-    selector = _parse_selectedvalue(first)
-    rest = args[1:]
-    otherwise = rest[-1] if len(rest) % 2 == 1 else None
-    pairs = rest[:-1] if otherwise is not None else rest
-    options = tuple(
-        SelectorOption(
-            value=_text_literal(pairs[i], "a SWITCH option value"),
-            result=pairs[i + 1],
-        )
-        for i in range(0, len(pairs), 2)
-    )
-    return SelectorDispatch(selector, options, otherwise, "SWITCH")
-
-
-def _if_dispatch(args: list[str]) -> SelectorDispatch:
-    if len(args) not in (2, 3):
-        raise DispatchDecline("IF without a true and a false branch")
-    condition = _strip_parens(args[0])
-    eq = _top_level_equals(condition)
-    if eq is None:
-        raise DispatchDecline("IF condition is not an equality with a selector value")
-    selector = _parse_selectedvalue(_strip_parens(condition[:eq]))
-    value = _text_literal(condition[eq + 1 :], "the IF comparison value")
-    otherwise = args[2] if len(args) == 3 else None
-    return SelectorDispatch(
-        selector, (SelectorOption(value, args[1]),), otherwise, "IF"
-    )
 
 
 def _top_level_equals(text: str) -> int | None:

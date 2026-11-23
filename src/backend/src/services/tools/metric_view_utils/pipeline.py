@@ -58,7 +58,15 @@ from .source_layer_binding import (
     read_from_source_layer,
     source_layer_naming,
 )
-from .slicer_parameters import add_slicer_parameters
+from .slicer_parameters import (
+    SlicerReport,
+    connected_tables,
+    finish_view,
+    plan_view,
+    slicer_parameters_enabled,
+    rehome_candidates,
+    unplaced_candidates,
+)
 from .sql_emitter import emit_deploy_sql
 from .sql_post_processor import SqlPostProcessor
 from .switch_measure_builder import build_switch_measure
@@ -205,6 +213,7 @@ class MetricViewPipeline:
         self.translator = DaxTranslator(config=self.config)
         self.translator.set_model_relationships(relationships or [])
         self._model_relationships: list[dict] = relationships or []
+        self._slicer = SlicerReport()  # selector measures' outcome (slicer_parameters)
         self.join_detector = JoinDetector(mquery_tables, config=self.config)
 
         # Merge auto-enrichment joins from PBI relationships.
@@ -289,6 +298,7 @@ class MetricViewPipeline:
         prior_year_mixed.split_mixed_shifts(self.mapping, self.config)
         prior_year.take_out_shifts(self.mapping, self.config)
         self._allocate_by_columns()
+        self._rehome_slicer_measures()
         prior_year.follow_base_measures(self.mapping)
         measure_groups = self._group_by_table()
 
@@ -306,15 +316,6 @@ class MetricViewPipeline:
         for table_key, spec in self.all_specs.items():
             self._rename_fact_references(table_key, spec)
         prior_year_mixed.drop_unused_helpers(self.all_specs, self.mapping)
-        # Phase 2b: selector measures → parameterised measures (config `slicer_parameters`).
-        slicer_report = add_slicer_parameters(
-            self.all_specs,
-            self.mapping,
-            self.config,
-            relationships=self._model_relationships + self._inactive_rels,
-        )
-        if slicer_report:
-            self._limitations["slicer_parameters"] = slicer_report
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
         for spec in self.all_specs.values():
@@ -337,6 +338,7 @@ class MetricViewPipeline:
         unwritten = report_unemitted(self.all_specs, self._written_yaml)
         if unwritten:
             self._limitations["measures_not_written"] = unwritten
+        self._record_slicer_report()
         return self.all_specs
 
     # ── Run phases (each step of run(), in execution order) ───────────
@@ -638,9 +640,65 @@ class MetricViewPipeline:
 
     # ── _process_table() — delegates to table_processor module ────────
 
+    def _slicer_plan(self, table_key: str, dax_measures: list[dict]):
+        """The selector plan of one view (config ``slicer_parameters``); None when it is off
+        or the model has no relationships (then no selector can be told from a column)."""
+        if not slicer_parameters_enabled(self.config):
+            return None
+        connected = connected_tables(self._model_relationships + self._inactive_rels)
+        if not connected:
+            return None
+        llm = bool((self.llm_config or {}).get("use_llm_fallback"))
+        mode = (self.llm_config or {}).get("translation_mode", "llm_first")
+        taken = {
+            to_snake_case(str(row["measure_name"]))
+            for row in self.mapping
+            if row.get("measure_name")
+        }
+        return plan_view(
+            table_key,
+            dax_measures,
+            self.mapping,
+            connected=connected,
+            taken_names=taken,
+            llm_enabled=llm,
+            trivial_only=llm and mode == "llm_first",
+        )
+
+    def _rehome_slicer_measures(self) -> None:
+        """Config ``slicer_parameters``: a selector measure held by a table with no view moves
+        to the view its DAX reads, before the measures are grouped by view."""
+        if not slicer_parameters_enabled(self.config):
+            return
+        connected = connected_tables(self._model_relationships + self._inactive_rels)
+        if not connected:
+            return
+        fact_keys = {k for k, t in self.mquery_tables.items() if t.is_fact and t.source_table}
+        fact_keys |= set((self.config.get("mapping_only_tables") or {}).keys())
+        rehome_candidates(self.mapping, fact_keys, connected)
+
+    def _record_slicer_report(self) -> None:
+        """Outcome of every selector measure of the run, for the run's limitations."""
+        if not slicer_parameters_enabled(self.config):
+            return
+        connected = connected_tables(self._model_relationships + self._inactive_rels)
+        placed = set(self._slicer.best)
+        for name in unplaced_candidates(self.mapping, connected, placed):
+            reason = (
+                "no metric view carries the measure's table"
+                if connected
+                else "no relationships supplied"
+            )
+            self._slicer.record(name, "declined", reason)
+        if self._slicer.best:
+            self._limitations["slicer_parameters"] = self._slicer.as_dict()
+
     def _process_table(
         self, table_key: str, table_info: TableInfo, dax_measures: list[dict]
     ) -> MetricViewSpec:
+        plan = self._slicer_plan(table_key, dax_measures)
+        if plan is not None:
+            dax_measures = plan.process_rows
         ctx = TableProcessorContext(
             config=self.config,
             source_columns=renamed_columns(self.source_columns, self.column_renames),
@@ -658,6 +716,7 @@ class MetricViewPipeline:
             cross_table_measures=self.cross_table_measures,
             filter_warnings=self._filter_warnings,
             limitations=self._limitations,
+            slicer_parameters=plan.public_parameters() if plan is not None else [],
         )
         # The calculated columns translated into this table's view: joins may key on them.
         table_info.calc_view_columns = list(
@@ -680,6 +739,8 @@ class MetricViewPipeline:
         from .join_columns import add_join_key_dimensions
 
         spec.fact_columns = self._fact_columns(table_key, table_info)
+        if plan is not None:
+            finish_view(plan, spec, self.translator, self._slicer)
         add_join_key_dimensions(spec, self._dimension_exclusions.get(table_key, ()))
         return spec
 

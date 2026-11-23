@@ -9,10 +9,22 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from .data_classes import MetricViewSpec, TranslationResult
+
 
 def _quote(value: str) -> str:
     """A YAML single-quoted scalar (``'`` is written as ``''``)."""
     return "'" + value.replace("'", "''") + "'"
+
+
+def insert_parameter_block(
+    lines: list[str], at: int, spec: MetricViewSpec, written: Iterable[TranslationResult]
+) -> None:
+    """Insert, at line ``at``, the parameters block of the view: the parameters that the
+    measures in ``written`` (those the emitter kept) read."""
+    lines[at:at] = parameter_block_lines(
+        spec.parameters, [m.sql_expr for m in written if m.sql_expr]
+    )
 
 
 def parameter_block_lines(

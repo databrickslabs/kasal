@@ -62,17 +62,23 @@ def view_key_by_name(views: Mapping[str, str]) -> dict[str, str]:
     return {normalized_name(name): key for key, name in views.items()}
 
 
-def _missing(text: str, alias: str, columns: frozenset[str] | None) -> list[str]:
+def _missing(
+    text: str,
+    alias: str,
+    columns: frozenset[str] | None,
+    parameter_names: frozenset[str] = frozenset(),
+) -> list[str]:
     """Columns the expression reads through ``alias`` that the view does not have (sorted).
 
     For the fact (``alias`` is the fact qualifier) a column written without a qualifier is read
     from the fact too: Databricks resolves it against the fact's own columns, so a measure that
-    names a column the fact lacks fails the deploy whichever way it is written."""
+    names a column the fact lacks fails the deploy whichever way it is written. A bare name that
+    is one of the view's ``parameter_names`` is a parameter, not a column, and is not counted."""
     if columns is None:
         return []
     read = columns_read(text, alias)
     if alias == QUALIFIER:
-        read |= bare_columns_read(text)
+        read |= bare_columns_read(text) - parameter_names
     return sorted(read - columns)
 
 
@@ -85,9 +91,12 @@ def guard_view(
     fact_columns: frozenset[str] | None,
     columns_by_key: Mapping[str, frozenset[str]],
     key_by_view: Mapping[str, str],
+    parameter_names: frozenset[str] = frozenset(),
 ) -> GuardResult:
     """Check one bound view. ``fact_columns`` is None when the fact's columns are not known;
-    ``columns_by_key`` holds the known columns (lower case) of each joined view."""
+    ``columns_by_key`` holds the known columns (lower case) of each joined view.
+    ``parameter_names``: the view's own parameters, read bare in a measure; the only bare
+    names that are not checked against the fact's columns."""
     gaps: list[SourceGap] = []
     kept_joins: list[dict] = []
     join_cols: dict[str, frozenset[str] | None] = {}
@@ -117,7 +126,7 @@ def guard_view(
         for alias in sorted(dropped):
             if re.search(rf"(?<![\w.]){re.escape(alias)}\.", text):
                 return f"reads join {alias}, which is not in the view"
-        missing = _missing(text, QUALIFIER, fact_columns)
+        missing = _missing(text, QUALIFIER, fact_columns, parameter_names)
         if missing:
             return f"reads column {', '.join(missing)}, which the fact's source view does not have"
         for alias, cols in join_cols.items():
@@ -204,6 +213,7 @@ def guard_bound_spec(
         fact_columns=columns_by_key.get(key),
         columns_by_key=columns_by_key,
         key_by_view=key_by_view,
+        parameter_names=frozenset(str(p.get("name", "")) for p in spec.parameters),
     )
     guarded = dataclasses.replace(
         spec,

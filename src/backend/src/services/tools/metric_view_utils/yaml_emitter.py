@@ -23,7 +23,7 @@ from .source_columns import rebind_dropped_join_columns
 from .sql_guard import SIDE_EFFECT_FUNCTIONS
 from .utils import spark_sql_compat
 from .yaml_annotations import _MAX_EXPLANATION as _MAX_EXPLANATION
-from .slicer_parameter_yaml import parameter_block_lines
+from .slicer_parameter_yaml import insert_parameter_block
 from .yaml_annotations import _categorize_untranslatable as _categorize_untranslatable
 from .yaml_annotations import (
     _indirect_visual_usage_suffix as _indirect_visual_usage_suffix,
@@ -396,9 +396,7 @@ def emit_yaml(
     lines.append("comment: |-")
     for comment_line in _fit_comment(spec.comment).split("\n"):
         lines.append(f"  {comment_line}")
-    # The parameters block is decided after the measure validations below: it holds
-    # only the parameters that a measure still written reads (slicer_parameter_yaml).
-    parameters_at = len(lines)
+    parameters_at = len(lines)  # the block is set in after the measures (slicer_parameter_yaml)
 
     # Build calculated-column expansion map: source.<calc_name> -> actual expression
     # e.g. source.plant_workcenter_key -> CONCAT(source.plant, '/', source.workcenter)
@@ -636,7 +634,9 @@ def emit_yaml(
 
     if _known_source_cols:
         _drop_unknown_filter_columns(
-            spec, (dax_measures, switch_measures, implicit_measures), _known_source_cols
+            spec,
+            (dax_measures, switch_measures, implicit_measures),
+            _known_source_cols | {str(p["name"]) for p in spec.parameters},
         )
 
     # Handle empty measures: if ALL measures were dropped, skip the view entirely
@@ -747,13 +747,8 @@ def emit_yaml(
     if spec.untranslatable:
         render_untranslatable_comments(lines, spec)
 
-    written_sql = [
-        m.sql_expr
-        for m in base_measures + dax_measures + switch_measures + implicit_measures
-        if m.sql_expr
-    ]
-    lines[parameters_at:parameters_at] = parameter_block_lines(
-        spec.parameters, written_sql
+    insert_parameter_block(
+        lines, parameters_at, spec, base_measures + dax_measures + switch_measures + implicit_measures
     )
 
     lines.append("")

@@ -19,6 +19,7 @@ from .join_detector import _sanitize_alias
 from .m_transform_folder import MTransformFolder
 from .measure_arithmetic import resolve_measure_arithmetic
 from .pbi_parameter_resolver import PbiParameterResolver
+from .slicer_parameter_text import with_parameter_lines
 from .sql_post_processor import SqlPostProcessor
 from .table_structure import build_table_structure
 from .utils import col_to_readable, run_async, spark_sql_compat, to_snake_case
@@ -137,6 +138,8 @@ class TableProcessorContext:
     filter_warnings: list[str]
     limitations: dict[str, list]
     source_columns: dict[str, list[str]] = field(default_factory=dict)
+    # The view's selector parameters the LLM is told about (slicer_parameter_text).
+    slicer_parameters: list[dict] = field(default_factory=list)
 
 
 def expand_calculation_groups(
@@ -312,9 +315,13 @@ def _llm_context(
     source_table: str | None,
     joins: list[dict],
 ) -> str:
-    """``_fact_table_context`` with the fact's real view columns, when the run knows them."""
-    return _fact_table_context(
-        table_info, source_table, joins, ctx.source_columns.get(table_key)
+    """``_fact_table_context`` with the fact's real view columns, when the run knows them,
+    and the view's selector parameters."""
+    return with_parameter_lines(
+        _fact_table_context(
+            table_info, source_table, joins, ctx.source_columns.get(table_key)
+        ),
+        ctx.slicer_parameters,
     )
 
 
