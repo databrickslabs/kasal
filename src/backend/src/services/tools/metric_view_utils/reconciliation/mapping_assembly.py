@@ -208,7 +208,7 @@ def _switch_option(name: str, row: RawMap) -> RawMap | None:
             "value_format": "raw_number",
             "tolerance": {"kind": "absolute", "value": 0.001},
         }
-    if kind in ("switch", "unresolved", "dimension_conditional"):
+    if kind in ("switch", "unresolved", "dimension_conditional", "slicer_parameter"):
         return {
             "ucmv_measure": name,
             "pbi_kind": "unresolved",

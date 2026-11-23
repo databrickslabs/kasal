@@ -16,13 +16,14 @@ import copy
 import logging
 import re
 
-from .data_classes import MetricViewSpec
+from .data_classes import MetricViewSpec, TranslationResult
 from .join_columns import missing_join_columns
 from .metadata_generator import MetadataGenerator
 from .source_columns import rebind_dropped_join_columns
 from .sql_guard import SIDE_EFFECT_FUNCTIONS
 from .utils import spark_sql_compat
 from .yaml_annotations import _MAX_EXPLANATION as _MAX_EXPLANATION
+from .slicer_parameter_yaml import parameter_block_lines
 from .yaml_annotations import _categorize_untranslatable as _categorize_untranslatable
 from .yaml_annotations import (
     _indirect_visual_usage_suffix as _indirect_visual_usage_suffix,
@@ -275,6 +276,63 @@ def _drop_unusable_joins(spec: MetricViewSpec, known_missing: set) -> None:
         ]
 
 
+def _drop_unknown_filter_columns(
+    spec: MetricViewSpec,
+    measure_lists: tuple[list[TranslationResult], ...],
+    known_source_cols: set[str],
+) -> None:
+    """Drop a measure whose FILTER clause names a column that neither the source nor a
+    joined table has (checked after the FILTER prefixes are stripped)."""
+    _join_cols_fv: set[str] = set()
+    if spec.joins:
+        for j in spec.joins:
+            on_clause = j.get("join_on") or j.get("on") or ""
+            _join_cols_fv.update(re.findall(r"\w+\.(\w+)", str(on_clause)))
+    _all_known_filter_cols = known_source_cols | _join_cols_fv
+    for measure_list in measure_lists:
+        drop_idx = []
+        for i, m in enumerate(measure_list):
+            if m.sql_expr and "FILTER" in m.sql_expr:
+                for fc_m in re.finditer(
+                    r"FILTER\s*\(WHERE\s+([^)]+)\)", m.sql_expr
+                ):
+                    filter_body = fc_m.group(1)
+                    bare_in_filter = set(
+                        re.findall(
+                            r"(?<!\.)(?<!\w)\b([a-z_]\w*)\s*(?:=|<>|!=|IN\b|<|>|<=|>=|LIKE\b)",
+                            filter_body,
+                        )
+                    )
+                    _SQL_KW_FV = {
+                        "AND",
+                        "OR",
+                        "NOT",
+                        "IN",
+                        "IS",
+                        "NULL",
+                        "BETWEEN",
+                        "LIKE",
+                        "TRUE",
+                        "FALSE",
+                    }
+                    bare_in_filter = {
+                        c for c in bare_in_filter if c.upper() not in _SQL_KW_FV
+                    }
+                    unknown_filter_cols = bare_in_filter - _all_known_filter_cols
+                    if unknown_filter_cols:
+                        m.is_translatable = False
+                        m.skip_reason = (
+                            f"FILTER references unknown columns: "
+                            f"{unknown_filter_cols}"
+                        )
+                        m.sql_expr = None
+                        spec.untranslatable.append(m)
+                        drop_idx.append(i)
+                        break
+        for i in reversed(drop_idx):
+            measure_list.pop(i)
+
+
 def emit_yaml(
     spec: MetricViewSpec,
     measure_metadata: dict | None = None,
@@ -338,6 +396,9 @@ def emit_yaml(
     lines.append("comment: |-")
     for comment_line in _fit_comment(spec.comment).split("\n"):
         lines.append(f"  {comment_line}")
+    # The parameters block is decided after the measure validations below: it holds
+    # only the parameters that a measure still written reads (slicer_parameter_yaml).
+    parameters_at = len(lines)
 
     # Build calculated-column expansion map: source.<calc_name> -> actual expression
     # e.g. source.plant_workcenter_key -> CONCAT(source.plant, '/', source.workcenter)
@@ -573,57 +634,10 @@ def emit_yaml(
         if _dropped == 0:
             break
 
-    # FILTER bare-column validation: after prefix stripping, check that bare column
-    # names in FILTER clauses exist on source or joined tables.
     if _known_source_cols:
-        _join_cols_fv: set[str] = set()
-        if spec.joins:
-            for j in spec.joins:
-                on_clause = j.get("join_on") or j.get("on") or ""
-                _join_cols_fv.update(re.findall(r"\w+\.(\w+)", str(on_clause)))
-        _all_known_filter_cols = _known_source_cols | _join_cols_fv
-        for measure_list in (dax_measures, switch_measures, implicit_measures):
-            drop_idx = []
-            for i, m in enumerate(measure_list):
-                if m.sql_expr and "FILTER" in m.sql_expr:
-                    for fc_m in re.finditer(
-                        r"FILTER\s*\(WHERE\s+([^)]+)\)", m.sql_expr
-                    ):
-                        filter_body = fc_m.group(1)
-                        bare_in_filter = set(
-                            re.findall(
-                                r"(?<!\.)(?<!\w)\b([a-z_]\w*)\s*(?:=|<>|!=|IN\b|<|>|<=|>=|LIKE\b)",
-                                filter_body,
-                            )
-                        )
-                        _SQL_KW_FV = {
-                            "AND",
-                            "OR",
-                            "NOT",
-                            "IN",
-                            "IS",
-                            "NULL",
-                            "BETWEEN",
-                            "LIKE",
-                            "TRUE",
-                            "FALSE",
-                        }
-                        bare_in_filter = {
-                            c for c in bare_in_filter if c.upper() not in _SQL_KW_FV
-                        }
-                        unknown_filter_cols = bare_in_filter - _all_known_filter_cols
-                        if unknown_filter_cols:
-                            m.is_translatable = False
-                            m.skip_reason = (
-                                f"FILTER references unknown columns: "
-                                f"{unknown_filter_cols}"
-                            )
-                            m.sql_expr = None
-                            spec.untranslatable.append(m)
-                            drop_idx.append(i)
-                            break
-            for i in reversed(drop_idx):
-                measure_list.pop(i)
+        _drop_unknown_filter_columns(
+            spec, (dax_measures, switch_measures, implicit_measures), _known_source_cols
+        )
 
     # Handle empty measures: if ALL measures were dropped, skip the view entirely
     if (
@@ -732,6 +746,15 @@ def emit_yaml(
     # Untranslatable measures as comments (see render_untranslatable_comments).
     if spec.untranslatable:
         render_untranslatable_comments(lines, spec)
+
+    written_sql = [
+        m.sql_expr
+        for m in base_measures + dax_measures + switch_measures + implicit_measures
+        if m.sql_expr
+    ]
+    lines[parameters_at:parameters_at] = parameter_block_lines(
+        spec.parameters, written_sql
+    )
 
     lines.append("")
     return "\n".join(lines)

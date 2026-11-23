@@ -135,6 +135,18 @@ def _measure_pbi_kind(m: TranslationResult) -> dict:
         hint = (m.dax_expression or m.skip_reason or "").strip()
         return {"kind": "unresolved", "raw_hint": hint[:300]}
 
+    if m.pbi_kind == "slicer_parameter":
+        # The parameter measure's Power BI value depends on the slicer pick: it is not
+        # compared with the measure as direct (slicer_parameters.py; the per-option
+        # measures carry the comparisons).
+        return {
+            "kind": "unresolved",
+            "raw_hint": (
+                f"slicer parameter over {m.original_name!r}: value depends on the selector; "
+                "not compared"
+            )[:300],
+        }
+
     if m.pbi_kind == "unresolved":
         # A SWITCH option that no single selector literal chooses: never compared with the
         # parent measure, which would be right for one option only (switch_decomposition).

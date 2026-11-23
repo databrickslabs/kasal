@@ -141,6 +141,9 @@ class MetricViewSpec:
     # The fact's columns when fully known (its native SQL's select list), else empty:
     # a join on a fact column outside this list cannot deploy (join_columns.py).
     fact_columns: list[str] = field(default_factory=list)
+    # Metric view parameters (``slicer_parameters``): {name, data_type, default,
+    # allowed_values, selector}. Only the ones a written measure reads are emitted.
+    parameters: list[dict] = field(default_factory=list)
 
 
 @dataclass

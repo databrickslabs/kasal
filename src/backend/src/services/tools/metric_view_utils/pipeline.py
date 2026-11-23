@@ -58,6 +58,7 @@ from .source_layer_binding import (
     read_from_source_layer,
     source_layer_naming,
 )
+from .slicer_parameters import add_slicer_parameters
 from .sql_emitter import emit_deploy_sql
 from .sql_post_processor import SqlPostProcessor
 from .switch_measure_builder import build_switch_measure
@@ -203,6 +204,7 @@ class MetricViewPipeline:
 
         self.translator = DaxTranslator(config=self.config)
         self.translator.set_model_relationships(relationships or [])
+        self._model_relationships: list[dict] = relationships or []
         self.join_detector = JoinDetector(mquery_tables, config=self.config)
 
         # Merge auto-enrichment joins from PBI relationships.
@@ -304,6 +306,15 @@ class MetricViewPipeline:
         for table_key, spec in self.all_specs.items():
             self._rename_fact_references(table_key, spec)
         prior_year_mixed.drop_unused_helpers(self.all_specs, self.mapping)
+        # Phase 2b: selector measures → parameterised measures (config `slicer_parameters`).
+        slicer_report = add_slicer_parameters(
+            self.all_specs,
+            self.mapping,
+            self.config,
+            relationships=self._model_relationships + self._inactive_rels,
+        )
+        if slicer_report:
+            self._limitations["slicer_parameters"] = slicer_report
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
         for spec in self.all_specs.values():
