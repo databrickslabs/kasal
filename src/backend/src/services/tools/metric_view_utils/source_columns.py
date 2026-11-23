@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 #: The alias a metric view gives its fact; a fact column with this name collides with it.
 QUALIFIER = "source"
@@ -113,6 +113,48 @@ def rename_references(text: str, alias: str, renames: Mapping[str, str]) -> str:
         return f"{match.group(1)}.{quote}{new}{quote}"
 
     return pattern.sub(_sub, text)
+
+
+def spec_texts(spec: object) -> list[str]:
+    """The SQL texts of a view's specification: dimension and measure expressions, join ONs."""
+    texts = [str(d.get("expr") or "") for d in getattr(spec, "dimensions", [])]
+    texts += [str(m.sql_expr or "") for m in getattr(spec, "measures", [])]
+    for join in getattr(spec, "joins", []):
+        texts.append(str(join.get("join_on") or join.get("on") or ""))
+    return texts
+
+
+def _letters(name: str) -> str:
+    """A column name without case, underscores or spaces: ``Order_Date`` and ``orderdate``."""
+    return re.sub(r"[^0-9a-z]", "", name.lower())
+
+
+def known_name_fixes(
+    texts: Iterable[str], alias: str, columns: Iterable[str]
+) -> dict[str, str]:
+    """``{name as written (lower case): the view's column}`` for each ``alias.<name>`` in
+    ``texts`` that the view does not have under that spelling but has under exactly one other
+    spelling of the same letters and digits (``order_date`` for ``OrderDate``, ``fis_code``
+    for ``fiscode``).
+
+    The generator names columns from the Power BI model and the Power Query; the source view
+    keeps what its SQL says. The two differ in underscores and case only often enough that a
+    measure, or the join to the calendar, was dropped for a column the view does have. A name
+    that matches no column, or more than one, is left as written."""
+    by_letters: dict[str, set[str]] = {}
+    present: set[str] = set()
+    for column in columns:
+        present.add(column.lower())
+        by_letters.setdefault(_letters(column), set()).add(column)
+    fixes: dict[str, str] = {}
+    for text in texts:
+        for name in columns_read(text, alias):
+            if name in present:
+                continue
+            candidates = by_letters.get(_letters(name), set())
+            if len(candidates) == 1:
+                fixes[name] = next(iter(candidates))
+    return fixes
 
 
 def columns_read(text: str, alias: str) -> set[str]:

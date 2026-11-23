@@ -5,6 +5,7 @@ from src.services.tools.metric_view_utils.source_columns import (
     bare_columns_read,
     column_renames,
     columns_read,
+    known_name_fixes,
     parse_source_columns,
     rename_references,
     renamed_columns,
@@ -88,3 +89,26 @@ def test_bare_columns_read_finds_unqualified_fact_columns_only():
         "event_date",
     }
     assert bare_columns_read("") == set()
+
+
+class TestKnownNameFixes:
+    """A reference spelled differently from the view's column (case, underscores) is read as
+    that column; a name that matches none, or more than one, is left alone."""
+
+    def test_underscore_and_case_variants_resolve_to_the_view_column(self):
+        texts = [
+            "source.order_date = dim_cal.date_id",
+            "SUM(source.amount) FILTER (WHERE source.acc_code = 'A1')",
+        ]
+        fixes = known_name_fixes(texts, "source", ["OrderDate", "acccode", "amount"])
+        assert fixes == {"order_date": "OrderDate", "acc_code": "acccode"}
+
+    def test_a_column_the_view_has_is_not_touched(self):
+        assert known_name_fixes(["source.acc_code"], "source", ["acc_code", "acccode"]) == {}
+
+    def test_an_ambiguous_or_unknown_name_is_left_as_written(self):
+        texts = ["source.acc_code + source.missing"]
+        assert known_name_fixes(texts, "source", ["AccCode", "acccode", "amount"]) == {}
+
+    def test_only_the_given_alias_is_read(self):
+        assert known_name_fixes(["dim_cal.order_date"], "source", ["OrderDate"]) == {}

@@ -96,3 +96,30 @@ def test_the_renamed_references_are_guarded_against_the_new_column_set():
         for g in pipeline._limitations.get("source_column_gaps", [])
         if g["kind"] == "measure"
     ]
+
+
+def test_a_reference_spelled_differently_from_the_view_column_uses_the_view_spelling():
+    # The model calls the column plant_code; the deployed view has it as PlantCode. Before,
+    # the measure was reported as reading a column the view does not have.
+    measures = [
+        {
+            "measure_name": "Plant A Amount",
+            "dax_expression": 'CALCULATE(SUM(Fact_Sales[amount]), Fact_Sales[plant_code] = "A")',
+            "original_name": "Plant A Amount",
+            "proposed_allocation": "Fact_Sales",
+        }
+    ]
+    pipeline = MetricViewPipeline(
+        mapping=measures,
+        mquery_tables=MQueryParser().parse_json(MQUERY),
+        config={"read_from_source_layer": True},
+        source_columns={"Fact_Sales": ["PlantCode", "amount"]},
+    )
+    pipeline.run()
+    view = yaml.safe_load(pipeline.emit_all_yaml(catalog="tgt", schema="ucmv")["Fact_Sales"])
+    by_name = {m["name"]: m["expr"] for m in view["measures"]}
+    assert "source.PlantCode" in by_name["plant_a_amount"]
+    assert "plant_code" not in by_name["plant_a_amount"]
+    assert not [
+        g for g in pipeline._limitations.get("source_column_gaps", []) if g["kind"] == "measure"
+    ]

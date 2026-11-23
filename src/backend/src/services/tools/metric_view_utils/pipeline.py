@@ -41,9 +41,11 @@ from .source_column_guard import guard_bound_spec, view_key_by_name
 from .source_columns import (
     QUALIFIER,
     column_renames,
+    known_name_fixes,
     rename_references,
     renamed_columns,
     source_columns_enabled,
+    spec_texts,
 )
 from .source_layer_binding import (
     SourceLayerBinding,
@@ -294,6 +296,9 @@ class MetricViewPipeline:
         self._cross_table_artifact_cascade(self.all_specs)
         self._reclassify_secondary_allocations()
         self._resolve_generated_table_names()
+        # The physical-name pass can write a Power Query's inner name; the view has its own.
+        for table_key, spec in self.all_specs.items():
+            self._rename_fact_references(table_key, spec)
         prior_year_mixed.drop_unused_helpers(self.all_specs, self.mapping)
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
@@ -669,8 +674,13 @@ class MetricViewPipeline:
         return known_fact_columns(table_info)
 
     def _rename_fact_references(self, table_key: str, spec: MetricViewSpec) -> None:
-        """The fact's references to a renamed column (``source.<col>``) use the new name."""
-        renames = self.column_renames.get(table_key)
+        """The fact's references (``source.<col>``) use the names its source view has: a
+        renamed column's new name, and the view's spelling where only that differs."""
+        renames = dict(self.column_renames.get(table_key) or {})
+        known = self.source_columns.get(table_key)
+        if known:
+            exposed = renamed_columns({table_key: known}, self.column_renames)[table_key]
+            renames.update(known_name_fixes(spec_texts(spec), QUALIFIER, exposed))
         if not renames:
             return
         for dim in spec.dimensions:
