@@ -874,6 +874,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                     exc_info=True,
                 )
 
+        self._merge_scanned_calculated_columns(run, config)  # S6, Admin Scanner
         if run.calculated_columns:  # S6
             config["calculated_columns"] = run.calculated_columns
         if run.measure_metadata:  # display format from the PBI formatString
@@ -898,6 +899,43 @@ class PipelineConfigGeneratorTool(BaseTool):
                 tbl: info.get("indicators", [])
                 for tbl, info in run.fiscal_calendars.items()
             }
+
+    def _merge_scanned_calculated_columns(
+        self, run: _ConfigGenRun, config: dict
+    ) -> None:
+        """Add the calculated columns of the Admin Scanner result to ``run.calculated_columns``.
+
+        TMDL keeps precedence per table (``merge_calculated_columns``). The scan also gives the
+        DAX kind of each plain column of those tables, which the source-layer translator needs
+        (``config['calculated_column_kinds']``). Fail-open: a scan that cannot be read adds
+        nothing and the run continues as before.
+        """
+        if not run.scan_result:
+            return
+        try:
+            from src.services.powerbi.scan_calculated_columns import (
+                merge_calculated_columns,
+                scan_calculated_columns,
+                scan_column_kinds,
+            )
+
+            scanned = scan_calculated_columns(run.scan_result, run.dataset_id)
+            if not scanned:
+                return
+            run.calculated_columns = merge_calculated_columns(
+                run.calculated_columns, scanned
+            )
+            kinds = scan_column_kinds(
+                run.scan_result, run.calculated_columns.keys(), run.dataset_id
+            )
+            if kinds:
+                config["calculated_column_kinds"] = kinds
+        except Exception as e:
+            logger.warning(
+                "[PipelineConfigGen] Admin Scanner calculated columns skipped: %s",
+                e,
+                exc_info=True,
+            )
 
     # ── Output assembly ───────────────────────────────────────────────────
 

@@ -115,6 +115,9 @@ class TableInfo:
     transform_todos: list[str] = field(default_factory=list)
     # Power Query type conversions the view does not apply (``mquery_handoff``)
     type_changes: list[str] = field(default_factory=list)
+    # Power BI calculated columns translated into this table's source view (calc_column_views).
+    # They are real columns of the view, so a join may key on them, as on a GROUP BY column.
+    calc_view_columns: list[str] = field(default_factory=list)
 
 
 @dataclass

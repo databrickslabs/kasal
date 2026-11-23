@@ -26,6 +26,7 @@ from .artifact_cascade import (
     cross_table_artifact_cascade,
     group_by_table,
 )
+from .calc_column_views import plan_calc_columns, translated_calc_names
 from .data_classes import MetricViewSpec, ScanTableInfo, TableInfo, TranslationResult
 from .dax_translator import DaxTranslator
 from .emitted_measures import report_unemitted
@@ -150,6 +151,9 @@ class MetricViewPipeline:
         self.column_renames: dict[str, dict[str, str]] = column_renames(
             self.source_columns
         )
+        # Calculated columns translated into their source view (calc_column_views); computed
+        # once, because the fact columns, the view and the guard all read the same answer.
+        self._translated_calc: dict[str, list[str]] | None = None
         self.inner_dim_joins = inner_dim_joins
         self.scan_data = scan_data or {}
         # Raw Power Query M per table, for physical-name resolution (Gaps 1-3).
@@ -644,6 +648,10 @@ class MetricViewPipeline:
             filter_warnings=self._filter_warnings,
             limitations=self._limitations,
         )
+        # The calculated columns translated into this table's view: joins may key on them.
+        table_info.calc_view_columns = list(
+            self._translated_calc_names().get(table_key, [])
+        )
         spec = process_table(
             table_key,
             table_info,
@@ -657,6 +665,7 @@ class MetricViewPipeline:
         )
         self._sanitize_spec_measures(spec)
         self._rename_fact_references(table_key, spec)
+        self._note_calc_key_joins(table_key, spec)
         from .join_columns import add_join_key_dimensions
 
         spec.fact_columns = self._fact_columns(table_key, table_info)
@@ -671,8 +680,17 @@ class MetricViewPipeline:
         known = self.source_columns.get(table_key)
         if known:
             names = renamed_columns({table_key: known}, self.column_renames)[table_key]
+            names = names + self._translated_calc_names().get(table_key, [])
             return sorted({c.lower() for c in names})
         return known_fact_columns(table_info)
+
+    def _translated_calc_names(self) -> dict[str, list[str]]:
+        """``{table key: calculated columns translated into its source view}`` (read mode)."""
+        if self._translated_calc is None:
+            self._translated_calc = translated_calc_names(
+                self.config, self.source_columns
+            )
+        return self._translated_calc
 
     def _rename_fact_references(self, table_key: str, spec: MetricViewSpec) -> None:
         """The fact's references (``source.<col>``) use the names its source view has: a
@@ -1026,6 +1044,7 @@ class MetricViewPipeline:
             mquery_expressions=self._mquery_expressions,
             combined_sources=self.combined_sources,
             column_renames=self.column_renames,
+            source_columns=self.source_columns,
         )
         if not read_from_source_layer(self.config):
             return {}
@@ -1044,13 +1063,57 @@ class MetricViewPipeline:
             schema=schema,
             naming=naming,
             raw_by_key=raw_source_by_key(self.all_specs, self.mquery_tables),
-            calc_columns=calc_columns_by_key(self.config),
+            calc_columns=self._untranslated_calc_columns(),
             join_key_map=self.config.get("join_key_map"),
         )
         self._limitations["source_layer_binding"] = self.source_layer_binding.to_dict()
         if self.source_columns:
             bound = self._guard_source_columns(bound, self.source_layer_binding.views)
         return bound
+
+    def _note_calc_key_joins(self, table_key: str, spec: MetricViewSpec) -> None:
+        """Record each join keyed on a calculated column the source view does not define.
+
+        The join detector drops such a join without a message. The column's own reason
+        (why it was not translated) is recorded here, so the dropped join is explained.
+        """
+        if not self.source_columns:
+            return
+        untranslated = {
+            c.name: c.comment or "its formula is not translated"
+            for c in plan_calc_columns(
+                table_key, self.config, self.source_columns.get(table_key) or None
+            )
+            if c.translation_status != "translated"
+        }
+        if not untranslated:
+            return
+        present = {str(j.get("name")) for j in spec.joins}
+        for dim, jk in (self.config.get("join_key_map") or {}).items():
+            if not isinstance(jk, dict):
+                continue
+            alias = str(jk.get("alias") or "")
+            key = str(jk.get("join_key") or "")
+            if key in untranslated and alias and alias not in present:
+                notes = self._limitations.setdefault("calculated_column_joins", [])
+                notes.append(
+                    {
+                        "fact": table_key,
+                        "join": alias,
+                        "dimension": dim,
+                        "column": key,
+                        "reason": untranslated[key],
+                    }
+                )
+
+    def _untranslated_calc_columns(self) -> dict[str, frozenset[str]]:
+        """The calculated columns that stay a TODO: a reference to one of the others is untranslated.
+        A translated one is a real column of its view and is not flagged."""
+        translated = self._translated_calc_names()
+        return {
+            key: names - frozenset(translated.get(key, ()))
+            for key, names in calc_columns_by_key(self.config).items()
+        }
 
     def _guard_source_columns(
         self, bound: dict[str, MetricViewSpec], views: dict[str, str]
@@ -1059,6 +1122,9 @@ class MetricViewPipeline:
         known (``source_column_guard``). Removed measures are also moved to the table's
         untranslated list, so the results report them."""
         exposed = renamed_columns(self.source_columns, self.column_renames)
+        for key, names in self._translated_calc_names().items():
+            if key in exposed:  # the view's real columns, plus the ones it now defines
+                exposed[key] = exposed[key] + names
         columns = {
             key: frozenset(c.lower() for c in cols)
             for key, cols in exposed.items()

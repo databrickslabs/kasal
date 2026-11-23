@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Optional
 
+from .calc_column_views import plan_calc_columns
 from .source_layer_binding import (
     normalized_name,
     read_from_source_layer,
@@ -194,20 +195,6 @@ def _fold_dimension_read(
     return native  # the native SQL itself, or "" for a plain passthrough
 
 
-def _calc_columns(key: str, calc_cfg: dict, calc_column_cls: type) -> list:
-    """DAX calculated columns for a table, as ``todo`` CalcColumns (never SQL)."""
-    return [
-        calc_column_cls(
-            name=cc.get("name", ""),
-            sql_expr=cc.get("expression", ""),
-            translation_status="todo",  # DAX expr, not yet translated to SQL
-            comment="DAX calculated column — verify/translate before use",
-        )
-        for cc in (calc_cfg.get(key) or [])
-        if isinstance(cc, dict) and cc.get("name")
-    ]
-
-
 def _would_overwrite_source(target_fqn: str, src_tbl: str, native_sql: str) -> bool:
     """True when the target view name is the table the view itself reads."""
     target = normalized_name(target_fqn)
@@ -262,6 +249,7 @@ def build_source_layer(
     mquery_expressions: dict | None = None,
     combined_sources: Mapping[str, "CombinedSource"] | None = None,
     column_renames: Mapping[str, Mapping[str, str]] | None = None,
+    source_columns: Mapping[str, Sequence[str]] | None = None,
 ) -> dict:
     """One source-layer UC view per PBI table (rec #3).
 
@@ -277,8 +265,10 @@ def build_source_layer(
       is surfaced as a TODO, never silently dropped.
 
     DAX calculated columns from config-gen enrichment
-    (``config['calculated_columns']``) are attached as ``todo`` calc columns —
-    surfaced as ``-- TODO`` rather than emitted as (untranslated) SQL.
+    (``config['calculated_columns']``) become real columns of their view when their
+    formula translates over the view's known columns (``source_columns``, see
+    ``calc_column_views``); any other calculated column stays a ``todo``, surfaced as
+    ``-- TODO`` rather than emitted as (untranslated) SQL.
 
     Config (read by ``source_layer_binding``):
     - ``source_layer_naming``: ``"src_prefix"`` (``src_<snake>``, default) or
@@ -290,7 +280,7 @@ def build_source_layer(
     Returns ``{table: {ddl, todo_steps, error}}`` keyed by PBI table.
     """
     try:
-        from .source_layer_emitter import CalcColumn, TableSource, ViewSpec, emit_views
+        from .source_layer_emitter import TableSource, ViewSpec, emit_views
     except Exception as e:  # module import must never break generation
         logger.warning("[source_layer] emitter import failed: %s", e, exc_info=True)
         return {}
@@ -318,7 +308,7 @@ def build_source_layer(
             for key, _s, _i in planned
         }
 
-    calc_cfg = (config or {}).get("calculated_columns") or {}
+    known_columns = source_columns or {}
     mq_exprs = mquery_expressions or {}
     parameters = dict((config or {}).get("parameter_defaults") or {})
     fold_todos: dict[str, list] = {}
@@ -379,7 +369,9 @@ def build_source_layer(
                     catalog, schema, source_layer_leaf_name(key, naming)
                 ),
                 source=source,
-                calc_columns=_calc_columns(key, calc_cfg, CalcColumn),
+                calc_columns=plan_calc_columns(
+                    key, config, known_columns.get(key) or None
+                ),
                 comment=f"Source layer for PBI table {key} — read the metric view off this.",
                 materialized=(read_mode and materialize) or row_filter is not None,
                 row_filter=row_filter,

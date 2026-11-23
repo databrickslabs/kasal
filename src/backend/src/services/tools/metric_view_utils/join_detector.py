@@ -17,6 +17,13 @@ from .utils import col_to_readable, to_snake_case
 
 logger = logging.getLogger(__name__)
 
+
+def _key_columns(fact_info: TableInfo) -> list[str]:
+    """The fact's columns a join may key on: its GROUP BY columns, and the calculated columns
+    translated into its source view (``calc_view_columns``)."""
+    return [*fact_info.group_by_columns, *fact_info.calc_view_columns]
+
+
 _RE_SAFE_ALIAS = re.compile(r"^[a-zA-Z_]\w*$")
 # A dedup ORDER BY from config: columns, each optionally ASC / DESC.
 _RE_SAFE_ORDER_BY = re.compile(
@@ -166,11 +173,11 @@ class JoinDetector:
             if dim_name in referenced_dims:
                 continue
             jk_key = jk_check.get("join_key", "")
-            if jk_key and jk_key in fact_info.group_by_columns:
+            if jk_key and jk_key in _key_columns(fact_info):
                 referenced_dims.add(dim_name)
             else:
                 for alt_k in jk_check.get("alt_join_keys", []):
-                    if alt_k in fact_info.group_by_columns:
+                    if alt_k in _key_columns(fact_info):
                         referenced_dims.add(dim_name)
                         break
 
@@ -217,7 +224,7 @@ class JoinDetector:
             join_key = jk["join_key"]
             dim_key = jk.get("dim_key", join_key)
 
-            has_key = join_key in fact_info.group_by_columns or (
+            has_key = join_key in _key_columns(fact_info) or (
                 not fact_info.group_by_columns and join_key in fact_info.full_sql
             )
 
@@ -235,7 +242,7 @@ class JoinDetector:
                 if (
                     alt_keys
                     and alt_join_on
-                    and all(k in fact_info.group_by_columns for k in alt_keys)
+                    and all(k in _key_columns(fact_info) for k in alt_keys)
                 ):
                     has_key = True
                     join_on = alt_join_on
@@ -434,7 +441,7 @@ class JoinDetector:
         if "join_on_expr" in fj:
             join_on: str = fj["join_on_expr"].format(alias=alias)
             for src_ref in re.findall(r"\bsource\.(\w+)", join_on):
-                if src_ref in fact_info.group_by_columns:
+                if src_ref in _key_columns(fact_info):
                     continue
                 calc = next(
                     (c for c in fact_info.calculated_columns if c["name"] == src_ref),
@@ -477,7 +484,7 @@ class JoinDetector:
             join_keys = (
                 fj["join_key"] if isinstance(fj["join_key"], list) else [fj["join_key"]]
             )
-            if not all(k in fact_info.group_by_columns for k in join_keys):
+            if not all(k in _key_columns(fact_info) for k in join_keys):
                 return None
             return " AND ".join(f"source.{k} = {alias}.{k}" for k in join_keys)
         return None
