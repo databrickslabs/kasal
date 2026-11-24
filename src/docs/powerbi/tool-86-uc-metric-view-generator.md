@@ -158,6 +158,18 @@ Pipeline config keys added for production readiness: `read_from_source_layer` an
 
 **Source-view columns (read mode, with `enable_reconciliation`).** The metric views read one source-layer view per Power BI table, and the translation runs before those views exist, so the generator has to guess their columns from the Power Query. The loop therefore reads the real columns of the deployed source views once per run (`information_schema.columns`, through the deployer's session). Order: a first generation with the LLM off gives the source-layer DDL (the DDL does not depend on the translation); the layer is deployed; the columns are read; the real generation runs once, with the columns (`source_columns_json`). Later cycles reuse them. What the columns change: the fact's column set and each joined view's column set, so a dimension, measure or join that reads a column its view does not have is removed with a reason (`source_column_gaps` in the output); a measure keeps the placement it has without the columns when the real columns of that same view confirm the columns it relies on; a measure is moved only off a home whose real columns lack its columns, or given a home when it had none; a column named like the fact alias (`source`) is exposed as `source_` in the view and its references use the new name. A dimension whose join is removed is not replaced by a same-named dimension of another join. The output carries `source_columns_probe` (views deployed, views with columns). A partial answer is discarded: if the column query comes back in more than one chunk, or with fewer rows than it reports, no columns are used for that run, and a view the query returned nothing for keeps its parsed columns (no removal is judged on it). Pipeline config key `use_source_columns` (default `true`) switches all of this off: the loop then reads nothing and runs no pre-pass, the layer is still deployed, and the generator ignores any `source_columns_json` it is given. Use it to compare a run with and without the columns.
 
+**Slicer selections as metric view parameters.** A measure that reads a disconnected slicer (`SELECTEDVALUE(T[c])` on a table with no relationship to the model) has no value of its own in a metric view, because a view has no slicer. With the pipeline config key `slicer_parameters: true` (default `false`) the selection becomes a parameter of the view: a top-level `parameters:` block (name, `data_type: STRING`, default) and a measure that reads the parameter, for a `SWITCH` or `IF` on the selector as `CASE <param> WHEN 'A' THEN ... END`. The default is the alternate of `SELECTEDVALUE`, else the first option the DAX compares with, written as a SQL literal (`default: "'Actual'"`). Query the view as a function: `SELECT ... FROM cat.sch.view(selector => 'Budget')`; without an argument the default applies.
+
+- Needs a SQL warehouse on DBR 18.2 or above. A view with parameters cannot be materialized.
+- Not translated this way, each with its reason in the review list: a selector that has a relationship to the model, a measure whose table has no view, a branch that reads another selector measure, a selector no text literal is compared with.
+- The per-option measures of a decomposed `SWITCH` stay as they are; the parameter measure is an extra measure, named `<measure>__selector` only when an option already has the plain name.
+- Parameter measures are deployed but not compared with Power BI: the review list shows them as `not_compared` ("no Power BI counterpart in the mapping"). Check them by hand before relying on them.
+- The output lists candidates, counts and reasons under `limitations.slicer_parameters`.
+
+**Measures on a table without a readable source.** Some Power BI tables have no source the generator can read, for example a `Table.Combine` of queries that are not loaded. A measure that aggregates such a table, or references such a measure, used to be placed on another fact that happens to have columns of the same name, and returned numbers that looked plausible and were wrong. These measures are now listed as `not_translated` with the reason "reads <table>, a table the generator has no source for", and under `limitations.sourceless_measures`. They become translatable when the table's source is supplied (the unloaded queries' sources from the model owner, or a service principal with admin read rights so the scan returns them). Pipeline config key `refuse_sourceless_measures` (default `true`); switch it off only to compare runs.
+
+**Calculated columns in the source layer.** A calculated column exists only in the Power BI model, so the source view of its table does not have it, and every measure, dimension or join that reads it is removed. When the extract carries the column formulas (they come from the Admin Scanner; the service principal needs tenant read rights, otherwise the scan answers 401 and no formulas arrive), a row-level formula that translates to SQL is added as a column of the table's source view. Formulas with `RELATED`, `CALCULATE`, `LOOKUPVALUE` or `TODAY` are not translated and stay in `source_transform_todos`. Pipeline config key `calculated_columns_in_source_layer` (default `true`). Without the formulas the usual symptom is the review reason "a column, join or dimension it reads is not in the view".
+
 ---
 
 ## Example crew (JSON mode, full pipeline)
@@ -236,6 +248,13 @@ Tested against the SC Reporting project (26 fact tables, 470 measures):
 - 3 of 23: **strict supersets** (more translated, zero missing)
 - Translation rate: **93% business coverage**
 - Runtime: **~30 seconds per run**
+
+Compared cell by cell with Power BI on a production model (about 640 measures, 37 tables with measures, full run with `enable_reconciliation` and `slicer_parameters`, 2026-11-24):
+- 527 measures in scope, 347 translated and in a deployed view
+- 325 of those compared with Power BI, 302 at or above the 90 % bar; 23 below it, listed by name in the review list
+- including plain column sums: 520 measures compared, 97.4 % of cells matching
+- 31 views pass the deployer's validation, no deploy errors
+- Not translated, by main reason: reads a table without a readable source (about 45), a column or join it reads is missing because calculated-column formulas were not available (about 50), needs a model change or is display logic (about 50), slicer measures the parameter rules decline (about 35)
 
 ---
 

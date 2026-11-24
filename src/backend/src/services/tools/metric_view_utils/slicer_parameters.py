@@ -21,8 +21,8 @@ The per-option SWITCH decomposition (``switch_decomposition``) is not changed: t
 measure is an additional measure, named ``<measure>__selector`` only when a per-option
 measure already has the plain name.
 
-Not verified against a warehouse: the metric view documentation for parameters (DBR 18.2 or
-above; a view with parameters cannot be materialized) is the basis.
+Deployed on a warehouse (DBR 18.2 or above; a view with parameters cannot be materialized).
+The parameter measures are not compared with Power BI yet.
 """
 
 from __future__ import annotations
