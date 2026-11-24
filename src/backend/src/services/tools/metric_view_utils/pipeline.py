@@ -39,6 +39,7 @@ from .pipeline_results import build_results
 from .scan_columns import extract_columns_from_scan, extract_source_table_from_scan
 from .source_artifacts import build_source_layer
 from .source_column_guard import guard_bound_spec, view_key_by_name
+from .sourceless_tables import demote_rooted, rooted_measures, sourceless_tables
 from .source_columns import (
     QUALIFIER,
     column_renames,
@@ -213,6 +214,7 @@ class MetricViewPipeline:
         self.translator = DaxTranslator(config=self.config)
         self.translator.set_model_relationships(relationships or [])
         self._model_relationships: list[dict] = relationships or []
+        self._rooted: dict[str, str] = {}  # measures on a table with no source
         self._slicer = SlicerReport()  # selector measures' outcome (slicer_parameters)
         self.join_detector = JoinDetector(mquery_tables, config=self.config)
 
@@ -295,6 +297,10 @@ class MetricViewPipeline:
         """
         # Prior-year measures are translated without their year shift and get it back
         # as a window at the end (prior_year.py).
+        if self.config.get("refuse_sourceless_measures", True):
+            self._rooted = rooted_measures(
+                self.mapping, sourceless_tables(self.mquery_tables)
+            )
         prior_year_mixed.split_mixed_shifts(self.mapping, self.config)
         prior_year.take_out_shifts(self.mapping, self.config)
         self._allocate_by_columns()
@@ -734,6 +740,8 @@ class MetricViewPipeline:
             validate_filter_consistency_fn=MetricViewPipeline._validate_filter_consistency,
         )
         self._sanitize_spec_measures(spec)
+        if demote_rooted(spec, self._rooted):
+            self._limitations["sourceless_measures"] = dict(self._rooted)
         self._rename_fact_references(table_key, spec)
         self._note_calc_key_joins(table_key, spec)
         from .join_columns import add_join_key_dimensions
