@@ -266,3 +266,34 @@ def test_a_dimension_on_a_column_the_native_query_returns_is_not_a_phantom():
         ("salesorg", "source.salesorg"),
         ("comp_code", "dim_geo.comp_code"),  # the join's dimension keeps its name
     ]
+
+
+def test_a_measure_that_filters_on_the_join_key_does_not_stop_the_key_dimension():
+    """A translated measure filtered on the fact's date. The key was then not added as a
+    dimension, the calendar join was dropped for a column the calendar lacks, and the view was
+    left with no period: none of its measures could be compared with Power BI."""
+    from types import SimpleNamespace
+
+    from src.services.tools.metric_view_utils.join_columns import (
+        add_join_key_dimensions,
+    )
+
+    spec = _spec(
+        joins=[
+            {
+                "name": "dim_calendar",
+                "source": "c.s.cal",
+                "join_on": "source.OrderDate = dim_calendar.date_id",
+            }
+        ],
+        dimensions=[{"name": "region", "expr": "source.region"}],
+        fact_columns=["orderdate", "region", "amount"],
+    )
+    spec.measures = [
+        SimpleNamespace(
+            measure_name="early_amount",
+            sql_expr="SUM(source.amount) FILTER (WHERE source.OrderDate < DATE'2026-01-01')",
+        )
+    ]
+    assert add_join_key_dimensions(spec) == ["orderdate"]
+

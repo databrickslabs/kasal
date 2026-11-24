@@ -149,15 +149,16 @@ def add_join_key_dimensions(
     (``formated_date``); the source has no such column, the join is dropped, and with it the
     only date the view has: nothing to slice by, and no period to compare with Power BI by.
     The fact's column itself is added (under the name the source gives it) unless a dimension
-    or a measure already reads it or has its name, or the pipeline config excludes it. Only
+    already reads it, a dimension or measure has its name, or the pipeline config excludes it. Only
     when the fact's columns are fully known. Returns the names it added."""
     if not spec.fact_columns:
         return []
     by_loose: dict[str, list[str]] = {}
     for column in spec.fact_columns:
         by_loose.setdefault(_loose(column), []).append(column)
+    # Only a dimension that already reads the key stands in for it. A measure that filters on
+    # the key (``... FILTER (WHERE source.date < ...)``) does not make the view sliceable by it.
     exprs = [str(d.get("expr") or "") for d in spec.dimensions]
-    exprs += [str(m.sql_expr or "") for m in spec.measures]
     read = {c.lower() for expr in exprs for c in _SOURCE_COLUMN.findall(expr)}
     taken = {str(d.get("name") or "").lower() for d in spec.dimensions}
     taken |= {str(m.measure_name or "").lower() for m in spec.measures}
