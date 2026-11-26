@@ -13,8 +13,10 @@ from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
 from src.services.flow_builder.modules.handoff_json import (
+    PIPELINE_CONFIG_KEYS,
     UCMV_HANDOFF_KEYS,
     extract_first_json_object,
+    handoff_config,
 )
 from src.services.flow_builder.modules.task_context import (
     task_with_context,
@@ -1566,31 +1568,20 @@ class FlowMethodFactory:
                                     )
                                 )
                                 is_bare_pipeline_config = inner_cfg is None and any(
-                                    k in prev_data
-                                    for k in (
-                                        "join_key_map",
-                                        "enrichment_joins",
-                                        "filter_sets",
-                                        "measure_resolutions",
-                                    )
+                                    k in prev_data for k in PIPELINE_CONFIG_KEYS
                                 )
                                 if has_ucmv_handoff or is_bare_pipeline_config:
                                     # config_json ← proposed_config (or the bare dict itself)
+                                    # Switches the crew set itself stay on top (handoff_json).
                                     if "config_json" in cfg:
-                                        existing = cfg.get("config_json") or ""
-                                        if (
-                                            not existing
-                                            or existing in ("{}", "null")
-                                            or len(existing) <= 10
-                                        ):
-                                            config_payload = (
-                                                inner_cfg
-                                                if inner_cfg is not None
-                                                else prev_data
-                                            )
-                                            cfg["config_json"] = _json.dumps(
-                                                config_payload
-                                            )
+                                        handed_off = handoff_config(
+                                            cfg.get("config_json"),
+                                            inner_cfg
+                                            if inner_cfg is not None
+                                            else prev_data,
+                                        )
+                                        if handed_off is not None:
+                                            cfg["config_json"] = handed_off
                                             injected_count += 1
                                             logger.info(
                                                 f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json"

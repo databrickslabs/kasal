@@ -134,7 +134,7 @@ Limits:
 | `measures_json` | JSON mode | - | Output from Tool 73 |
 | `mquery_json` | JSON mode | - | Output from Tool 74 |
 | `relationships_json` | No | - | Output from Tool 75 (improves join detection) |
-| `config_json` | No | `{}` | Pipeline config (see [Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md)) |
+| `config_json` | No | `{}` | Pipeline config (see [Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md)). In a flow, the config handed off by Tool 90 fills an empty value. A value that holds switches only (for example `{"read_from_source_layer": true, "slicer_parameters": true}`) is kept on top of the handed-off config; a value that is a pipeline config of its own (`join_key_map`, `enrichment_joins`, `filter_sets` or `measure_resolutions`) is left as it is. |
 | `catalog` | No | `main` | Target Unity Catalog name |
 | `schema_name` | No | `default` | Target schema name |
 | `workspace_id` | API mode | - | PBI Workspace GUID |
