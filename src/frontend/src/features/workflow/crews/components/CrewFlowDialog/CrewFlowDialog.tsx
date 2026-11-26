@@ -2,7 +2,7 @@ import { catalogExecutionSettings } from './catalogExecutionSettings';
 import CatalogSurface from './CatalogSurface';
 import CatalogActionPane from './CatalogActionPane';
 import { CatalogNavigation } from './CatalogNavigation';
-import { cloneCatalogCrew } from './cloneCatalogCrew';
+import { cloneCatalogCrew, crewWithOwnRows } from './cloneCatalogCrew';
 import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
 import { 
   DialogContent, 
@@ -864,15 +864,14 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
         let name = baseName;
         let attempt = 0;
+        // The file's agent and task ids belong to another installation: create the rows here.
+        const rows = await crewWithOwnRows({
+          nodes: (normalized.nodes as _Node[]) || [],
+          edges: (normalized.edges as _Edge[]) || []
+        });
         while (true) {
           try {
-            await CrewService.saveCrew({
-              name,
-              nodes: (normalized.nodes as _Node[]) || [],
-              edges: (normalized.edges as _Edge[]) || [],
-              agent_ids: (normalized.agent_ids as string[]) || [],
-              task_ids: (normalized.task_ids as string[]) || []
-            });
+            await CrewService.saveCrew({ name, ...rows });
             importedCrews++;
             return;
           } catch (err: unknown) {
