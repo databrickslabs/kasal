@@ -37,6 +37,9 @@ from src.services.tools.pipeline_config_generator_utils.persistence import (
     save_conversion_history,
     save_powerbi_extraction,
 )
+from src.services.tools.pipeline_config_generator_utils.source_access import (
+    rejected_login_error,
+)
 from src.services.tools.pipeline_config_generator_utils.scope_outputs import (
     parse_tracked_tables,
     report_scope,
@@ -300,6 +303,10 @@ class PipelineConfigGeneratorTool(BaseTool):
             gen = self._import_generate_config()
             run = self._acquire_tokens(gen, inputs)
             self._extract_pbi_artifacts(run)
+            error = rejected_login_error(run.admin_tables, run.warnings)
+            if error:
+                logger.error("[PipelineConfigGen] %s", error)
+                return json.dumps({"error": error})
             config: dict = self._build_proposed_config(run)
             enrichment_log = self._enrich_config(run, config)
             output = self._assemble_output(run, config, enrichment_log)
