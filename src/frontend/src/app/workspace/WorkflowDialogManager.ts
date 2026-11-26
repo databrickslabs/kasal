@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { readSettingsNavigation } from '../../features/configuration/lib/settingsNavigation';
+import { OPEN_SETTINGS_EVENT } from '../../features/configuration/lib/settingsIntent';
 import { useAPIKeysStore } from '../../store/apiKeys';
 
 export interface DialogManagerResult {
@@ -49,6 +50,13 @@ export const useDialogManager = (
     setIsTutorialOpen(false);
     setHasSeenTutorial(true);
   }, [setHasSeenTutorial]);
+
+  // Settings opened from elsewhere (e.g. a tool config linking to Skills).
+  useEffect(() => {
+    const open = () => setIsConfigurationDialogOpen(true);
+    window.addEventListener(OPEN_SETTINGS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
+  }, []);
 
   // Listen for the openConfigAPIKeysInternal event
   useEffect(() => {

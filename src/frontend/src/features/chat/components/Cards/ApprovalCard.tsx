@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HITLService, HITLRejectionAction } from '../../../../api/execution/HITLService';
+import { ConverterService } from '../../../../api/tools/ConverterService';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 
 /**
@@ -60,7 +62,41 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId, onDecision
   const [feedback, setFeedback] = useState('');
   const [comment, setComment] = useState('');
   const [retry, setRetry] = useState(false);
+  const [loadingCfg, setLoadingCfg] = useState(false);
+  const navigate = useNavigate();
   const updateMessage = useSessionStore((s) => s.updateMessage);
+
+  // Open the pipeline-config review/edit page for this run. The gate's own
+  // output is a markdown summary, so fetch the real config from conversion_history
+  // by execution_id and hand it to /config-editor (per-key review, edit, save).
+  const openConfigReview = async () => {
+    if (!data.job_id) return;
+    setLoadingCfg(true);
+    try {
+      const resp = await ConverterService.listHistory({
+        execution_id: data.job_id,
+        target_format: 'pipeline_config',
+        limit: 5,
+      });
+      const rec =
+        (resp.history || []).find((h) => h.output_data?.proposed_config) ||
+        (resp.history || [])[0];
+      const config = rec?.output_data?.proposed_config ?? rec?.output_data ?? {};
+      navigate('/config-editor', {
+        state: {
+          config,
+          source: 'Flow gate review',
+          jobId: data.job_id,
+          approvalId: Number(data.approval_id),
+        },
+      });
+    } catch (e) {
+      console.error('[ReviewConfig] failed to open config', e);
+      setError(`Could not open the config for review${e instanceof Error ? ': ' + e.message : ''}.`);
+    } finally {
+      setLoadingCfg(false);
+    }
+  };
   const decided = data.decided;
   const isTaskReview = data.kind === 'task_review';
   // A flow paused at a gate between two steps. Same card, same decision,
@@ -190,6 +226,11 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId, onDecision
             </button>
             {isFlowGate && <button type="button" disabled={busy} className={linkClass} style={linkStyle}
               onClick={() => { setRetry(true); setFeedbackOpen(true); }}>Request changes &amp; retry</button>}
+            {isFlowGate && data.job_id && <>
+              <span className="shrink-0">·</span>
+              <button type="button" disabled={loadingCfg} className={linkClass} style={linkStyle}
+                onClick={() => void openConfigReview()}>{loadingCfg ? 'Opening…' : 'Review config'}</button>
+            </>}
             {busy && <span className="shrink-0">…</span>}
           </>
         )}

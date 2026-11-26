@@ -8,9 +8,16 @@ import asyncio
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
+from src.config.settings import settings
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
+from src.services.flow_builder.modules.handoff_json import (
+    PIPELINE_CONFIG_KEYS,
+    UCMV_HANDOFF_KEYS,
+    extract_first_json_object,
+    handoff_config,
+)
 from src.services.flow_builder.modules.task_context import (
     task_with_context,
     tasks_for_review,
@@ -23,11 +30,10 @@ from .flow_conditions import state_snapshot
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
-# Per-crew kickoff timeout for flow execution. Large Power BI models (hundreds of
-# measures, dozens of fact tables + opt-in LLM DAX translation) can legitimately
-# take longer than the original 10 min. Bumped to 20 min as headroom; the DAX LLM
-# fallback is also now bounded-concurrent so it finishes far faster than before.
-CREW_KICKOFF_TIMEOUT_SECONDS = 1200.0
+# Per-crew kickoff timeout for flow execution. Large Power BI models (LLM DAX
+# translation + reconciliation cycles) legitimately run long: 40 min by default,
+# KASAL_FLOW_CREW_TIMEOUT_SECONDS in config/settings.py for extreme cases.
+CREW_KICKOFF_TIMEOUT_SECONDS = float(settings.KASAL_FLOW_CREW_TIMEOUT_SECONDS)
 
 
 def extract_final_answer(results: Any) -> str:
@@ -1032,7 +1038,7 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if "start_time" in dir() else 0
-                logger.error(
+                logger.exception(
                     f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
                 )
                 raise TimeoutError(
@@ -1479,27 +1485,8 @@ class FlowMethodFactory:
                 # not just from the immediately preceding crew B.
                 import json as _json
 
-                def _extract_json(raw: str) -> Any:
-                    """Try to extract a JSON dict from a string (handles agent narrative wrapping)."""
-                    if not raw or not isinstance(raw, str):
-                        return None
-                    s = raw.strip()
-                    # Direct JSON
-                    if s.startswith("{"):
-                        try:
-                            return _json.loads(s)
-                        except _json.JSONDecodeError:
-                            pass
-                    # Extract JSON from "Final Answer: {...}" or narrative wrapping
-                    import re as _re
-
-                    match = _re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", s)
-                    if match:
-                        try:
-                            return _json.loads(match.group(0))
-                        except _json.JSONDecodeError:
-                            pass
-                    return None
+                # Balanced-brace scan, not a regex (see handoff_json).
+                _extract_json = extract_first_json_object
 
                 # Build a list of all parsed outputs from flow state + current results
                 all_outputs: list[dict] = []
@@ -1533,6 +1520,14 @@ class FlowMethodFactory:
                     injected_count = 0
                     for agent in agents:
                         for tool in agent.tools or []:
+                            # Under the CrewAI harness agent.tools holds KasalToolAdapter
+                            # wrappers; the real tool (with _default_config) is .kasal_tool.
+                            # Unwrap only a real dict config (a bare MagicMock fakes one).
+                            _inner = getattr(tool, "kasal_tool", None)
+                            if isinstance(
+                                getattr(_inner, "_default_config", None), dict
+                            ):
+                                tool = _inner
                             if not hasattr(tool, "_default_config") or not isinstance(
                                 tool._default_config, dict
                             ):
@@ -1573,31 +1568,20 @@ class FlowMethodFactory:
                                     )
                                 )
                                 is_bare_pipeline_config = inner_cfg is None and any(
-                                    k in prev_data
-                                    for k in (
-                                        "join_key_map",
-                                        "enrichment_joins",
-                                        "filter_sets",
-                                        "measure_resolutions",
-                                    )
+                                    k in prev_data for k in PIPELINE_CONFIG_KEYS
                                 )
                                 if has_ucmv_handoff or is_bare_pipeline_config:
                                     # config_json ← proposed_config (or the bare dict itself)
+                                    # Switches the crew set itself stay on top (handoff_json).
                                     if "config_json" in cfg:
-                                        existing = cfg.get("config_json") or ""
-                                        if (
-                                            not existing
-                                            or existing in ("{}", "null")
-                                            or len(existing) <= 10
-                                        ):
-                                            config_payload = (
-                                                inner_cfg
-                                                if inner_cfg is not None
-                                                else prev_data
-                                            )
-                                            cfg["config_json"] = _json.dumps(
-                                                config_payload
-                                            )
+                                        handed_off = handoff_config(
+                                            cfg.get("config_json"),
+                                            inner_cfg
+                                            if inner_cfg is not None
+                                            else prev_data,
+                                        )
+                                        if handed_off is not None:
+                                            cfg["config_json"] = handed_off
                                             injected_count += 1
                                             logger.info(
                                                 f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json"
@@ -1611,11 +1595,7 @@ class FlowMethodFactory:
                                     # them to _default_config is exactly what JSON mode expects.
                                     # Only fill when the current value is empty so a manually
                                     # provided value is never clobbered.
-                                    for _hk in (
-                                        "measures_json",
-                                        "mquery_json",
-                                        "relationships_json",
-                                    ):
+                                    for _hk in UCMV_HANDOFF_KEYS:
                                         payload = prev_data.get(_hk)
                                         if not payload:
                                             continue
@@ -1777,7 +1757,9 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if "start_time" in dir() else 0
-                logger.error(
+                # With the traceback: it names the timeout's true source (a run/agent
+                # deadline vs a DB call hung on a dropped idle connection).
+                logger.exception(
                     f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
                 )
                 raise TimeoutError("Listener crew execution timed out")

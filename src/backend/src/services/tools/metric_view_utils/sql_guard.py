@@ -50,6 +50,70 @@ def is_read_only_select(sql: str) -> bool:
     return True
 
 
+# Functions that reach outside the query: a model, the network, files, the JVM.
+SIDE_EFFECT_FUNCTIONS = (
+    r"\b(?:ai_query|ai_generate_text|http_request|read_files|java_method|reflect|"
+    r"try_reflect|remote_query)\s*\("
+)
+_WRITING_VERBS = re.compile(
+    r"\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE|MERGE|GRANT|REVOKE|CREATE|EXEC|"
+    r"EXECUTE|CALL|COPY|MSCK)\b|" + SIDE_EFFECT_FUNCTIONS,
+    re.IGNORECASE,
+)
+
+
+def _without_literals(sql: str) -> str:
+    """``sql`` with string literals, quoted identifiers and comments blanked, so a keyword
+    check sees only what the parser reads as SQL (``WHERE status = 'Update'`` is a value).
+    """
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch in "'\"`":
+            i += 1
+            while i < n and sql[i] != ch:
+                i += 2 if sql[i] == "\\" and ch != "`" else 1
+            i += 1
+            out.append(" ")
+        elif sql.startswith("--", i):
+            end = sql.find("\n", i)
+            i = n if end < 0 else end
+        elif sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def has_no_side_effects(sql: str) -> bool:
+    """Whether model- or LLM-derived SQL is free of what a view must never carry: a second
+    statement, a dollar quote, a writing verb, or a function that reaches outside the query.
+
+    ``;`` and ``$$`` are refused anywhere in the text, literals included: how a literal ends
+    depends on the warehouse's escape setting, and neither has a use in a view body.
+    """
+    if not sql or not isinstance(sql, str):
+        return False
+    text = sql.strip().rstrip(";")
+    if ";" in text or "$$" in text:
+        return False
+    return not _WRITING_VERBS.search(_without_literals(text))
+
+
+def is_read_only_view_body(sql: str) -> bool:
+    """Whether ``sql`` can be the body of a view: one SELECT / WITH query (its terms may be
+    parenthesised), with no side effects. For a table's native query and for SQL an LLM
+    recovered from M; unlike ``is_read_only_select`` a writing verb inside a string literal
+    (``reason = 'Update'``) is a value, not a statement."""
+    if not has_no_side_effects(sql):
+        return False
+    return bool(re.match(r"^[\s(]*(SELECT|WITH)\b", sql, re.IGNORECASE))
+
+
 def sql_value_literal(value: object, col_type: str) -> str:
     """One ``VALUES`` item for a column of ``col_type``.
 

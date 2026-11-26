@@ -64,11 +64,16 @@ class TestFold:
         assert "COALESCE" in result
         assert "WHERE" in result
 
-    def test_no_effective_transforms_returns_base(self, folder: MTransformFolder):
-        """Steps list with an unrecognised step_type that produces no transforms."""
+    def test_unrecognised_step_surfaced_as_todo(self, folder: MTransformFolder):
+        """An unrecognised step produces no SQL transform but is NOT silently
+        dropped (S5): the base SQL is preserved and the step is appended as a
+        ``-- TODO:`` note and recorded on ``transform_todos``."""
         sql = "SELECT a FROM t"
         steps = [MStep(step_type="UnknownType", raw_expression="something")]
-        assert folder.fold(sql, steps, []) == sql
+        out = folder.fold(sql, steps, [])
+        assert out.startswith(sql)
+        assert "-- TODO:" in out
+        assert folder.transform_todos and "something" in folder.transform_todos[0]
 
     def test_union_arms_with_transforms(self, folder: MTransformFolder):
         sql = "SELECT a, b FROM t1 UNION SELECT a, b FROM t2"
@@ -90,8 +95,11 @@ class TestFold:
                 raw_expression='Table.RenameColumns(prev, {{"old_col", "new_col"}})',
             ),
         ]
-        # RenameColumns alone produces no col_exprs → returns base
-        assert folder.fold(sql, steps, []) == sql
+        # The rename is applied (it used to be ignored, so the PBI name was missing)
+        assert (
+            folder.fold(sql, steps, [])
+            == "SELECT\n  old_col AS new_col\nFROM (\nSELECT old_col FROM t\n) _src"
+        )
 
     def test_remove_columns(self, folder: MTransformFolder):
         sql = "SELECT keep_col, drop_col FROM t"
@@ -105,12 +113,12 @@ class TestFold:
         assert "drop_col" not in result or "None" not in result
 
     def test_add_column_step(self, folder: MTransformFolder):
-        """AddColumn steps are added to column_transforms but only matter
-        if _build_column_transforms can parse them (currently no handler)."""
+        """An AddColumn step that cannot be read is a TODO, not silently dropped
+        (translatable ones: test_m_column_expressions.py)."""
         sql = "SELECT a FROM t"
         steps = [MStep(step_type="AddColumn", raw_expression="ignored")]
-        # No matching handler in _build_column_transforms → no col_exprs
-        assert folder.fold(sql, steps, []) == sql
+        out = folder.fold(sql, steps, [])
+        assert out.startswith(sql) and "-- TODO:" in out and folder.transform_todos
 
 
 # ── _split_union() ──────────────────────────────────────────────────

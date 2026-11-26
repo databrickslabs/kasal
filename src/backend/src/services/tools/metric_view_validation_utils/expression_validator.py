@@ -19,6 +19,20 @@ from .measure_fingerprint import (
     sql_fingerprint,
     var_used_inside_calculate,
 )
+from .composed_verdicts import COMPOSED_DIFFERENCE, resolve_composed_verdicts
+from .measure_expression_tree import compare_shapes, composed_of_measures_only
+from .measure_references import (
+    SELECTION_CONTEXT,
+    dax_measure_names,
+    dax_measure_refs,
+    ucmv_measure_refs,
+)
+from .prior_year_check import (
+    PriorYearJudgement,
+    is_prior_year_dax,
+    judge_prior_year,
+    loose_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +53,28 @@ _BASE_MEASURE_RE = re.compile(
 def _is_base_measure_expr(expr: Optional[str]) -> bool:
     """True when the emitted SQL is a plain single-column aggregate (base measure)."""
     return bool(expr and _BASE_MEASURE_RE.match(expr.strip()))
+
+
+def _judged_result(
+    measure_name: str,
+    judgement: PriorYearJudgement,
+    databricks_expr: Optional[str],
+    dax_expr: str,
+) -> dict:
+    """The result for a prior-year measure the window settles on its own."""
+    is_valid = judgement.status == STATUS_VALID
+    return {
+        "measure_name": measure_name,
+        "status": judgement.status,
+        "is_valid": is_valid,
+        "confidence": "high" if is_valid else "medium",
+        "reason": judgement.reason,
+        "databricks_expr": databricks_expr,
+        "dax_expr": dax_expr,
+        "differences": [] if is_valid else [judgement.reason],
+        "similarities": [judgement.reason] if is_valid else [],
+        "recommendations": [],
+    }
 
 
 class ExpressionValidator:
@@ -98,6 +134,28 @@ class ExpressionValidator:
                     }
                 )
                 continue
+            # A prior-year measure (it has a window, or its DAX shifts a year back) is
+            # judged against its DAX whatever its SQL looks like: a plain aggregate
+            # must not pass as correct by construction when the shift is not carried.
+            dax_match = self.data_handler.find_matching_dax_for_yaml_measure(measure)
+            if measure.get("window") or is_prior_year_dax(
+                (dax_match or {}).get("dax_expression")
+            ):
+                if dax_match:
+                    matched_measures.append(
+                        {
+                            "measure_eval": "matched",
+                            "measure_name": measure["name"],
+                            "measure_eval_result": self.validate_measure_by_name(
+                                measure["name"]
+                            ),
+                        }
+                    )
+                else:
+                    unmatched_measures.append(
+                        {"measure_eval": "unmatched", "measure_name": measure["name"]}
+                    )
+                continue
             # Base measures — plain single-column aggregates like
             # SUM(source.col) or SUM(COALESCE(source.col, 0)) — are correct BY
             # CONSTRUCTION (they come straight from the MQuery SUM columns, not a
@@ -133,7 +191,7 @@ class ExpressionValidator:
                         "measure_expression": measure["expr"],
                     }
                 )
-            elif self.data_handler.get_dax_measure(measure.get("name", "")):
+            elif dax_match:
                 matched_measures.append(
                     {
                         "measure_eval": "matched",
@@ -147,10 +205,49 @@ class ExpressionValidator:
                 unmatched_measures.append(
                     {"measure_eval": "unmatched", "measure_name": measure["name"]}
                 )
+        view_names = {
+            loose_name(m["name"])
+            for m in self.data_handler.mv_parser.measures
+            if m.get("name")
+        }
+        resolve_composed_verdicts(matched_measures, view_names)
         return {
             "skipped": unmatched_measures + simple_measures,
             "evaluated": matched_measures,
         }
+
+    def _selection_context_review(
+        self, result: dict, dax_expr: str, databricks_expr: Optional[str]
+    ) -> dict:
+        """An INVALID verdict that rests on a measure the DAX references by name, whose own
+        definition depends on the selection (ISFILTERED, HASONEVALUE, ...), becomes REVIEW.
+        The translation inlines such a measure as the calculation it evaluates to in the
+        view, and the static comparison cannot read the selection logic. Never promotes.
+        """
+        if result.get("status") != STATUS_INVALID or not self.data_handler:
+            return result
+        called = ucmv_measure_refs(databricks_expr or "")
+        dependent = [
+            name
+            for name in sorted(
+                dax_measure_names(self.dax_parser.resolved_expression(dax_expr))
+            )
+            if loose_name(name) not in called
+            and SELECTION_CONTEXT.search(
+                self.data_handler.get_measure_definition(name) or ""
+            )
+        ]
+        if not dependent:
+            return result
+        result["status"] = STATUS_REVIEW
+        result["is_valid"] = False
+        result["confidence"] = "low"
+        result["recommendations"].append(
+            "The DAX references measure(s) whose definition depends on the selection "
+            f"{dependent}: the static comparison cannot read the selection logic, so the "
+            "measure is for review (check the referenced measure's own row)"
+        )
+        return result
 
     def validate_measure_by_name(self, measure_name: str) -> Dict[str, Any]:
         """
@@ -243,11 +340,22 @@ class ExpressionValidator:
                 "recommendations": [],
             }
 
-        # Validate using the existing validate method
+        # A prior-year measure: the window must carry the DAX's one-year shift. The
+        # window can settle the measure, or leave its un-shifted base to compare.
         databricks_expr = yaml_measure.get("expr")
+        judgement = judge_prior_year(yaml_measure, dax_expr)
+        if judgement is not None and judgement.status:
+            return _judged_result(measure_name, judgement, databricks_expr, dax_expr)
+        compare_dax = (
+            judgement.base_dax
+            if judgement is not None and judgement.base_dax
+            else dax_expr
+        )
         try:
-            result = self.validate(databricks_expr or "", dax_expr, strict=False)
+            result = self.validate(databricks_expr or "", compare_dax, strict=False)
             result["measure_name"] = measure_name
+            if judgement is not None:
+                result["similarities"].append(judgement.reason)
             if result["is_valid"]:
                 self._demote_if_fingerprints_differ(result)
             if result["is_valid"]:
@@ -258,7 +366,7 @@ class ExpressionValidator:
                 result["status"] = STATUS_REVIEW
             else:
                 result["status"] = STATUS_INVALID
-            return result
+            return self._selection_context_review(result, dax_expr, databricks_expr)
         except (ValueError, RuntimeError) as e:
             logger.error("Error validating measure %s: %s", measure_name, e)
             return {
@@ -335,6 +443,42 @@ class ExpressionValidator:
             if column_result.get("recommendation"):
                 recommendations.append(column_result["recommendation"])
 
+        # 3b. Measure references: a MEASURE(name) call is a reference to a measure, not a
+        # column. The two sides must call the same measures, and then the arithmetic around
+        # the calls must have the same shape (operator precedence, ratio, grouping).
+        called = ucmv_measure_refs(db_expr)
+        composed_refs: List[str] = []
+        if called:
+            dax_resolved = self.dax_parser.resolved_expression(dax_expr)
+            dax_called = dax_measure_refs(dax_resolved)
+            missing = called - dax_called
+            extra = dax_called - called
+            if missing:
+                differences.append(
+                    "Reference mismatch (measures): MEASURE() calls a measure the DAX "
+                    f"does not reference: {sorted(missing)}"
+                )
+            elif extra:
+                differences.append(
+                    "Reference mismatch (measures): the DAX references a measure the "
+                    f"metric view does not call: {sorted(extra)}"
+                )
+            else:
+                same_shape, why = compare_shapes(db_expr, dax_resolved)
+                if same_shape:
+                    similarities.append(f"Measure references match: {why}")
+                    if composed_of_measures_only(db_expr):
+                        # No column aggregate here: the value is the referenced measures'
+                        # values. Not VALID on this row alone; the view resolves it from
+                        # the verdicts of the measures it reads (composed_verdicts).
+                        composed_refs = sorted(called)
+                        differences.append(
+                            f"{COMPOSED_DIFFERENCE}: judged by the referenced measures' "
+                            "own rows, not by this expression"
+                        )
+                else:
+                    differences.append(f"Structure mismatch (measures): {why}")
+
         # 4. Strict mode: require structural equivalence in addition to semantic match
         if strict:
             structure_result = self._compare_structure(
@@ -387,6 +531,7 @@ class ExpressionValidator:
             "recommendations": recommendations,
             "databricks_parsed": db_parsed,
             "dax_parsed": dax_parsed,
+            "composed_refs": composed_refs,
         }
 
     def _is_equivalent(self, result: dict) -> bool:

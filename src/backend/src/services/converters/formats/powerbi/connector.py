@@ -140,7 +140,7 @@ class PowerBIConnector(BaseInboundConnector):
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   tenant_id: '{tenant_id}'")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_id: '{client_id}'")
         self.logger.info(
-            f"[POWERBI CONNECTOR DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}"
+            f"[POWERBI CONNECTOR DEBUG]   client_secret set: {bool(client_secret)}"
         )
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   auth_method: '{auth_method}'")
         self.logger.info(
@@ -236,7 +236,7 @@ class PowerBIConnector(BaseInboundConnector):
                 self.logger.warning("Query returned no tables")
                 return []
         else:
-            error_msg = f"Query failed ({response.status_code}): {response.text}"
+            error_msg = f"Query failed ({response.status_code}): {response.text[:500]}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 

@@ -6,7 +6,8 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 const mockApproveGate = vi.fn();
 const mockRejectGate = vi.fn();
@@ -25,6 +26,11 @@ vi.mock('../../../../app/sessions/sessionStore', () => ({
 }));
 
 import ApprovalCard, { ApprovalData } from './ApprovalCard';
+
+// ApprovalCard now uses useNavigate (the "Review config" link), so renders need
+// a Router context.
+const render = (ui: React.ReactElement, opts?: Parameters<typeof rtlRender>[1]) =>
+  rtlRender(<MemoryRouter>{ui}</MemoryRouter>, opts);
 
 const TOOL_CALL: ApprovalData = {
   approval_id: 7,

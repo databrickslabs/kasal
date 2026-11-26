@@ -48,20 +48,12 @@ const TOOL_CAPABILITIES: Record<string, number> = {
   'MCPTool':                                                _U | _E,
 
   // Power BI tools
-  'PowerBIAnalysisTool':                                    _S | _E,
-  'Power BI Comprehensive Analysis Tool':                   _S | _E,
-  'Power BI Intelligent Analysis (Copilot-Style)':          _S | _E,
   'PowerBIConnectorTool':                                   _S | _E,
   'Power BI Connector':                                     _S | _E,
   'Measure Conversion Pipeline':                            _S | _E,
-  'M-Query Conversion Pipeline':                            _S | _E,
-  'Power BI Relationships Tool':                            _S | _E,
   'Power BI Hierarchies Tool':                              _S | _E,
   'Power BI Field Parameters & Calculation Groups Tool':    _S | _E,
   'Power BI Report References Tool':                        _S | _E,
-  'Power BI Semantic Model Fetcher':                        _S | _E,
-  'Power BI Semantic Model DAX Generator':                  _S | _E,
-  'Power BI Metadata Reducer':                              _S | _E,
   'Power BI DAX Executor':                                  _S | _E,
 
   // Databricks Jobs runtime name

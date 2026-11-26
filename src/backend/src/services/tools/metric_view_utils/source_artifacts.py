@@ -1,0 +1,564 @@
+"""Bridge: turn a run's pipeline state into the source-layer, PBI-only-ingestion
+and validation artifacts, so the generator tool can emit them without carrying
+the glue itself (the tool is already over the size ceiling).
+
+Each function is fail-open and pure-ish: it reads the pipeline's already-built
+`all_specs` / `mquery_tables` / `config` and returns plain dicts/lists ready to
+drop into the tool's output. The heavy lifting lives in the three standalone
+modules — `source_layer_emitter`, `pbi_only_ingestion`, `pbi_validation`; this
+module only adapts pipeline shapes to their inputs.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Optional
+
+from .calc_column_views import plan_calc_columns
+from .source_layer_binding import (
+    normalized_name,
+    read_from_source_layer,
+    source_layer_ddl_name,
+    source_layer_leaf_name,
+    source_layer_naming,
+)
+from .utils import to_snake_case
+
+if TYPE_CHECKING:
+    from .cross_table_source_planner import CombinedSource
+    from .data_classes import MetricViewSpec, TableInfo
+    from .pbi_validation import EvaluateFn, Rows
+
+logger = logging.getLogger(__name__)
+
+
+def _bq(fqn: str) -> str:
+    """Back-quote each dotted part of a UC name (``a.b-c.d`` → `` `a`.`b-c`.`d` ``).
+
+    A resolved PBI source catalog frequently contains characters that are not
+    valid unquoted SQL (e.g. ``acme_adb-landing-zone-002``), so every emitted
+    target/source name is quoted part-by-part.
+    """
+    parts = [p for p in str(fqn).split(".") if p]
+    # A back-quote inside a part is doubled: the name comes from the model's M
+    # (Item="..."), and an undoubled one would end the identifier and continue as SQL.
+    return ".".join("`" + p.strip("`").replace("`", "``") + "`" for p in parts)
+
+
+def _planned_tables(
+    all_specs: dict, mquery_tables: dict, include_unspecced: bool
+) -> list[tuple[str, MetricViewSpec | None, TableInfo | None]]:
+    """``(key, spec | None, TableInfo | None)`` for every table to plan a view for.
+
+    Default: the metric-view specs only. In read mode the PBI tables that are not
+    specs (dimensions) are planned too, since a join reads their view.
+    """
+    planned: list[tuple[str, MetricViewSpec | None, TableInfo | None]] = [
+        (key, spec, (mquery_tables or {}).get(key))
+        for key, spec in (all_specs or {}).items()
+    ]
+    if include_unspecced:
+        planned += [
+            (key, None, info)
+            for key, info in (mquery_tables or {}).items()
+            if key not in (all_specs or {})
+        ]
+    return planned
+
+
+_TWO_PART_REF = re.compile(
+    r"\b(FROM|JOIN)\s+([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?![\w.`])", re.I
+)
+
+
+def _native_base(
+    m_expression: str,
+    src_tbl: str,
+    parameters: dict | None = None,
+    assumed: list[str] | None = None,
+) -> str:
+    """The table's ``Value.NativeQuery`` SQL as the base of its source-layer view, "" if none.
+
+    Reading the raw table instead loses what the native SQL selects (``fiscper3 AS Month``,
+    DISTINCT, its WHERE). Only complete SQL is used: one that Power Query assembles from
+    parameters (``'"& Filter &"'``) is cut off where the parameter starts. Two-part names
+    get the source table's catalog, so the view does not depend on the session's catalog.
+    """
+    from .m_native_sql import native_sql_with_parameters, without_outer_parentheses
+    from .mquery_parser import extract_native_query_sql
+    from .sql_guard import is_read_only_view_body
+
+    # SQL assembled from literals and parameters ("..." & FiscperFilter & "..."); a
+    # parameter with no known value is assumed '' and reported by the caller.
+    sql, unknown = native_sql_with_parameters(m_expression or "", parameters or {})
+    if sql and assumed is not None:
+        assumed.extend(unknown)
+    sql = sql or (extract_native_query_sql(m_expression or "") or "").strip()
+    sql = without_outer_parentheses(sql)
+    # "(WITH ...) UNION (SELECT ...)" is a query too: parenthesised terms of a set operation.
+    if not sql or not re.match(r"(?is)^[\s(]*(SELECT|WITH)\b", sql):
+        return ""
+    if (
+        sql.count("(") != sql.count(")")
+        or sql.count("'") % 2
+        or '"&' in sql
+        or '&"' in sql
+    ):
+        return ""
+    if not is_read_only_view_body(sql):
+        logger.warning(
+            "[source_layer] a native query is not one read-only SELECT; reading %s instead",
+            src_tbl or "the raw table",
+        )
+        return ""
+    parts = [p.strip("`") for p in (src_tbl or "").split(".")]
+    if len(parts) == 3 and parts[0]:
+        catalog = parts[0]
+        sql = _TWO_PART_REF.sub(
+            lambda m: f"{m.group(1)} {catalog}.{m.group(2)}.{m.group(3)}", sql
+        )
+    return sql
+
+
+def _embedded_read(key: str, m_expression: str, fold_todos: dict[str, list]) -> str:
+    """An "enter data" table's rows as SQL (embedded_tables), with its M steps folded on."""
+    from .embedded_tables import embedded_table_sql
+    from .m_transform_folder import MTransformFolder
+
+    base = embedded_table_sql(m_expression)
+    if not base:
+        return ""
+    folder = MTransformFolder()
+    try:
+        folded = folder.fold_from_mquery(base, m_expression, None)
+    except Exception:  # the rows alone are still a valid read
+        logger.debug("[source_layer] fold failed for embedded %s", key, exc_info=True)
+        return base
+    # The Table.FromRows source step is the base itself, not a step left undone.
+    todos = [
+        t for t in getattr(folder, "transform_todos", []) if "Binary.FromText(" not in t
+    ]
+    if todos:
+        fold_todos[key] = todos
+    lines = (folded or base).splitlines()
+    return "\n".join(line for line in lines if "Binary.FromText(" not in line)
+
+
+def _fold_dimension_read(
+    key: str,
+    src_tbl: str,
+    info: TableInfo | None,
+    m_expression: str,
+    fold_todos: dict[str, list],
+    parameters: dict | None = None,
+) -> str:
+    """The M transform steps folded onto a base ``SELECT * FROM`` read ("" if none).
+
+    Fail-open to a plain passthrough. Any untranslatable step is recorded in
+    ``fold_todos`` so it is surfaced, never silently dropped (S5).
+    """
+    from .m_transform_folder import MTransformFolder
+
+    folder = MTransformFolder()
+    assumed: list[str] = []
+    native = _native_base(m_expression, src_tbl, parameters, assumed)
+    if assumed:
+        fold_todos.setdefault(key, []).extend(
+            f"parameter {name} has no known value in the model; '' assumed in the native SQL"
+            for name in assumed
+        )
+    base = native or f"SELECT * FROM {_bq(src_tbl)}"
+    try:
+        # No column list: the parser's group-by names are not the table's columns, and
+        # the folder keeps every column of a read whose columns it does not know.
+        folded = folder.fold_from_mquery(base, m_expression, None)
+    except Exception as exc:
+        # Never silent: without its Power Query steps the view holds other values
+        # (codes not replaced, versions not renamed) and its numbers differ.
+        logger.warning(
+            "[source_layer] Power Query steps of %s were not applied: %s",
+            key,
+            exc,
+            exc_info=True,
+        )
+        fold_todos.setdefault(key, []).append(
+            f"Power Query steps not applied ({type(exc).__name__}); "
+            "the view reads the native query as it is"
+        )
+        return native
+    if getattr(folder, "transform_todos", None):
+        fold_todos.setdefault(key, []).extend(folder.transform_todos)
+    if folded and folded.strip() != base.strip():
+        return folded
+    return native  # the native SQL itself, or "" for a plain passthrough
+
+
+def _would_overwrite_source(target_fqn: str, src_tbl: str, native_sql: str) -> bool:
+    """True when the target view name is the table the view itself reads."""
+    target = normalized_name(target_fqn)
+    if src_tbl and normalized_name(src_tbl) == target:
+        return True
+    if not native_sql:
+        return False
+    text = native_sql.replace("`", "").lower()
+    return re.search(rf"(?<![\w.]){re.escape(target)}(?!\w)", text) is not None
+
+
+def _combined_view_spec(
+    key: str,
+    combined: "CombinedSource",
+    catalog: str,
+    schema: str,
+    naming: str,
+    read_mode: bool,
+    materialize: bool,
+) -> object:
+    """ViewSpec of a combined cross-fact source: the facts' source views, unioned."""
+    from .cross_table_source_planner import union_sql
+    from .source_layer_emitter import TableSource, ViewSpec
+
+    def view_of(fact: str) -> str:
+        return source_layer_ddl_name(
+            catalog, schema, source_layer_leaf_name(fact, naming)
+        )
+
+    return ViewSpec(
+        table_name=key,
+        target_view=source_layer_ddl_name(
+            catalog, schema, source_layer_leaf_name(key, naming)
+        ),
+        source=TableSource(native_sql=union_sql(combined, view_of)),
+        calc_columns=[],
+        comment=(
+            f"Combined source for {key}: the source views of "
+            f"{', '.join(getattr(combined, 'facts', ()))} unioned at the shared grain."
+        ),
+        materialized=read_mode and materialize,
+        row_filter=None,
+    )
+
+
+def build_source_layer(
+    all_specs: dict,
+    mquery_tables: dict,
+    config: dict | None,
+    catalog: str,
+    schema: str,
+    mquery_expressions: dict | None = None,
+    combined_sources: Mapping[str, "CombinedSource"] | None = None,
+    column_renames: Mapping[str, Mapping[str, str]] | None = None,
+    source_columns: Mapping[str, Sequence[str]] | None = None,
+) -> dict:
+    """One source-layer UC view per PBI table (rec #3).
+
+    ``combined_sources`` (cross_table_source_planner) maps a synthetic combined key
+    to its two-fact union; that view is a UNION ALL of the facts' own source views.
+
+    Reproduces the physical read each metric view sits on:
+    - a ``Value.NativeQuery`` table keeps its verbatim SQL
+      (``TableInfo.native_query_sql``, derived columns / filters preserved);
+    - a table without native SQL reads ``SELECT * FROM <source_table>`` with the
+      M transformation steps that follow the source (filters, code remaps, dedup)
+      FOLDED in via ``MTransformFolder.fold_from_mquery``. Any untranslatable step
+      is surfaced as a TODO, never silently dropped.
+
+    DAX calculated columns from config-gen enrichment
+    (``config['calculated_columns']``) become real columns of their view when their
+    formula translates over the view's known columns (``source_columns``, see
+    ``calc_column_views``); any other calculated column stays a ``todo``, surfaced as
+    ``-- TODO`` rather than emitted as (untranslated) SQL.
+
+    Config (read by ``source_layer_binding``):
+    - ``source_layer_naming``: ``"src_prefix"`` (``src_<snake>``, default) or
+      ``"table_name"`` (``<snake>``);
+    - ``read_from_source_layer``: when true, every PBI table gets a view (not only
+      the metric-view specs, since joins read dimension views), each view is
+      materialized, and the views are what the metric views read.
+
+    Returns ``{table: {ddl, todo_steps, error}}`` keyed by PBI table.
+    """
+    try:
+        from .source_layer_emitter import TableSource, ViewSpec, emit_views
+    except Exception as e:  # module import must never break generation
+        logger.warning("[source_layer] emitter import failed: %s", e, exc_info=True)
+        return {}
+    from src.services.tools.ucmv_source_layer_utils.inputs import (
+        parse_row_filters,
+        row_filter_for,
+    )
+
+    read_mode = read_from_source_layer(config)
+    # source_layer_materialized: false keeps read mode but emits plain views, e.g.
+    # for a sandbox reconciliation that must not copy every fact table.
+    materialize = (config or {}).get("source_layer_materialized", True) not in (
+        False,
+        "false",
+        "False",
+    )
+    planned = _planned_tables(all_specs, mquery_tables, read_mode)
+    try:
+        naming = source_layer_naming(config)
+        row_filters = parse_row_filters((config or {}).get("row_filters"))
+    except ValueError as e:
+        # A bad config is reported per view, never silently dropped.
+        return {
+            key: {"ddl": "", "todo_steps": [], "error": str(e)}
+            for key, _s, _i in planned
+        }
+
+    known_columns = source_columns or {}
+    mq_exprs = mquery_expressions or {}
+    parameters = dict((config or {}).get("parameter_defaults") or {})
+    fold_todos: dict[str, list] = {}
+    specs: list = []
+    errors: dict[str, str] = {}
+    combined = dict(combined_sources or {})
+    for key, spec, info in planned:
+        if key in combined:
+            specs.append(
+                _combined_view_spec(
+                    key, combined[key], catalog, schema, naming, read_mode, materialize
+                )
+            )
+            continue
+        native = (info.native_query_sql or "") if info is not None else ""
+        src_tbl = (getattr(spec, "source_table", "") or "") or (
+            info.source_table if info is not None else ""
+        )
+        if not native:
+            # Rows embedded in the M are the table, whatever placeholder source it has.
+            native = _embedded_read(key, mq_exprs.get(key) or "", fold_todos)
+            if native:
+                src_tbl = ""
+        if not native and not src_tbl:
+            continue  # nothing resolvable to read from — skip (not a stub)
+        m_expr = mq_exprs.get(key) or ""
+        # The parser keeps a native SQL that a parameter splice cut off; assemble it.
+        spliced = bool(re.search(r'"\s*&\s*(?:#"|[A-Za-z_])', m_expr))
+        if src_tbl and m_expr and (not native or spliced):
+            folded = _fold_dimension_read(
+                key, src_tbl, info, m_expr, fold_todos, parameters
+            )
+            if folded:
+                native = folded
+        try:
+            source = (
+                TableSource(native_sql=native)
+                if native
+                else TableSource(full_table_name=_bq(src_tbl))
+            )
+        except Exception:
+            logger.debug("[source_layer] unusable source for %s", key, exc_info=True)
+            continue
+        target_fqn = f"{catalog}.{schema}.{source_layer_leaf_name(key, naming)}"
+        if _would_overwrite_source(target_fqn, src_tbl, native):
+            errors[key] = (
+                "target view would overwrite the table it reads; use "
+                "source_layer_naming 'src_prefix' or another schema"
+            )
+            continue
+        # A row filter exists only on materialized views (set at CREATE). In read
+        # mode every view is materialized: the metric views read a frozen copy.
+        row_filter = row_filter_for(key, row_filters)
+        specs.append(
+            ViewSpec(
+                table_name=key,
+                target_view=source_layer_ddl_name(
+                    catalog, schema, source_layer_leaf_name(key, naming)
+                ),
+                source=source,
+                calc_columns=plan_calc_columns(
+                    key, config, known_columns.get(key) or None
+                ),
+                comment=f"Source layer for PBI table {key} — read the metric view off this.",
+                materialized=(read_mode and materialize) or row_filter is not None,
+                row_filter=row_filter,
+                renamed_columns=dict((column_renames or {}).get(key, {})),
+            )
+        )
+    out: dict = {
+        key: {"ddl": "", "todo_steps": [], "error": msg} for key, msg in errors.items()
+    }
+    if not specs:
+        return out
+    try:
+        emitted = emit_views(specs)
+    except Exception as e:
+        logger.warning("[source_layer] emit_views failed: %s", e, exc_info=True)
+        return out
+    out.update(
+        {
+            e.table_name: {
+                "ddl": e.ddl,
+                # emitter TODOs (calc columns) + any untranslatable M transform steps
+                # folded in above — so a dropped/uncertain step is always visible.
+                "todo_steps": list(e.todo_steps) + fold_todos.get(e.table_name, []),
+                "error": e.error,
+            }
+            for e in emitted
+        }
+    )
+    return out
+
+
+def detect_pbi_only_tables(
+    mquery_expressions: dict, catalog: str, schema: str
+) -> list[dict]:
+    """PBI-only source detection + ingestion tasks (S8).
+
+    For every table whose M reads from Excel / SharePoint / Web / a typed or
+    Json.Document literal (no warehouse source to transpile), emit an ingestion
+    task so the team knows it needs a snapshot loader, not a SQL translation.
+    Returns a list of task descriptors (empty when none / on failure).
+    """
+    try:
+        from .pbi_only_ingestion import build_ingestion_task, detect_pbi_only_source
+    except Exception as e:
+        logger.warning("[pbi_only] import failed: %s", e, exc_info=True)
+        return []
+    tasks: list[dict] = []
+    for table, mquery in (mquery_expressions or {}).items():
+        if not mquery:
+            continue
+        try:
+            src = detect_pbi_only_source(mquery)
+            if src is None:
+                continue
+            # Loaded where the joins expect the table (the join detector's placeholder).
+            task = build_ingestion_task(
+                table,
+                src.kind,
+                catalog,
+                schema,
+                source=src,
+                uc_table_suffix=to_snake_case(table),
+            )
+            tasks.append(
+                {
+                    "table": task.table_name,
+                    "uc_target": task.uc_target,
+                    "kind": getattr(task.kind, "value", str(task.kind)),
+                    "source_description": task.source_description,
+                    "recommended_approach": task.recommended_approach,
+                    "snapshot_loader_stub": task.snapshot_loader_stub,
+                }
+            )
+        except Exception as e:
+            logger.debug(
+                "[pbi_only] detection failed for %s: %s", table, e, exc_info=True
+            )
+    return tasks
+
+
+def build_pbi_evaluate_fn(
+    access_token: Optional[str],
+    workspace_id: Optional[str],
+    dataset_id: Optional[str],
+    *,
+    base_url: Optional[str] = None,
+    uc_sql_fn: Optional[Callable[[str], Rows | None]] = None,
+) -> Optional[EvaluateFn]:
+    """Build the ``evaluate_fn`` the validation loop (rec#4) needs, or ``None``
+    when the PBI credentials required to run it aren't present.
+
+    The returned callable routes by query shape, which is exactly the contract
+    ``pbi_validation.validate_view`` / ``validate_measure`` expect:
+    - a DAX query (``EVALUATE`` / ``DEFINE``) → Power BI ``executeQueries`` REST
+      call against the dataset (the reference side);
+    - anything else (the generated UC SQL) → ``uc_sql_fn`` when supplied (a
+      Databricks SQL executor for the deployed view), else ``[]`` — so the view
+      is reported *unverified* rather than crashing when it isn't deployed yet.
+
+    Synchronous (httpx.Client) so it drops straight into the tool's sync
+    post-processing. Fail-soft: a failed PBI call returns ``[]``.
+    """
+    if not (access_token and workspace_id and dataset_id):
+        return None
+    api_base = (base_url or "https://api.powerbi.com/v1.0/myorg").rstrip("/")
+    url = f"{api_base}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+
+    def _evaluate(query: str) -> Rows:
+        q = (query or "").strip()
+        if not q.upper().startswith(("EVALUATE", "DEFINE")):
+            # Generated UC SQL — needs a live warehouse + deployed view.
+            if uc_sql_fn is None:
+                return []
+            try:
+                return list(uc_sql_fn(query) or [])
+            except Exception as e:
+                logger.debug("[pbi_validation] uc_sql_fn failed: %s", e, exc_info=True)
+                return []
+        try:
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "queries": [{"query": q}],
+                "serializerSettings": {"includeNulls": True},
+            }
+            with httpx.Client(timeout=120.0) as client:
+                resp = client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            if isinstance(data, dict) and "error" in data:
+                logger.debug("[pbi_validation] PBI error: %s", data["error"])
+                return []
+            tables = (data.get("results", [{}]) or [{}])[0].get("tables", [])
+            rows: Rows = tables[0].get("rows", []) if tables else []
+            return rows
+        except Exception as e:
+            logger.debug("[pbi_validation] executeQueries failed: %s", e, exc_info=True)
+            return []
+
+    return _evaluate
+
+
+def run_pbi_validation(
+    all_specs: dict,
+    yaml_output: dict,
+    evaluate_fn: Optional[EvaluateFn] = None,
+) -> dict:
+    """Validation loop hook (rec #4).
+
+    When a live PBI ``evaluate_fn`` (a service-account ``executeQueries`` callback)
+    is supplied, this is where each view/measure would be compared against
+    ``EVALUATE`` per period/country and marked verified/unverified. No callback is
+    wired in the generation subprocess yet, so this reports ``skipped`` with the
+    reason — the honest state — rather than silently claiming "verified". The
+    mechanism (``pbi_validation.validate_view`` / ``validate_measure``) is ready
+    for the caller that can provide the callback.
+    """
+    if evaluate_fn is None:
+        return {
+            "status": "skipped",
+            "reason": (
+                "no live PBI EVALUATE callback configured — provide a "
+                "service-account executeQueries callback to verify views/measures "
+                "against Power BI per period/country"
+            ),
+            "candidate_views": sorted((yaml_output or {}).keys()),
+        }
+    # A callback IS available — validate each emitted view. (Reserved for the
+    # caller that wires live creds; kept minimal and fail-open.)
+    try:
+        from .pbi_validation import validate_view
+
+        results: dict[str, str] = {}
+        for view_name, sql in (yaml_output or {}).items():
+            try:
+                res = validate_view(view_name, sql, evaluate_fn)
+                results[view_name] = res.status.value
+            except Exception as e:
+                logger.warning(
+                    "[pbi_validation] view %s failed: %s", view_name, e, exc_info=True
+                )
+                results[view_name] = f"error: {e}"
+        return {"status": "ran", "views": results}
+    except Exception as e:
+        logger.warning("[pbi_validation] failed: %s", e, exc_info=True)
+        return {"status": "error", "reason": str(e)}

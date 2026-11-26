@@ -18,11 +18,7 @@ from src.services.tools import async_bridge
 
 TOOL_MODULES = [
     "src.services.tools.databricks_jobs_tool",
-    "src.services.tools.powerbi_analysis_tool",
     "src.services.tools.powerbi_dax_executor_tool",
-    "src.services.tools.powerbi_metadata_reducer_tool",
-    "src.services.tools.powerbi_semantic_model_dax_tool",
-    "src.services.tools.powerbi_semantic_model_fetcher_tool",
 ]
 
 _marker = contextvars.ContextVar("bridge_test_marker", default=None)

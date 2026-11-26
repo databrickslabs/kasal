@@ -1,8 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { HITLService, type HITLApprovalResponse, type ExecutionHITLStatus, type HITLActionResponse } from '../../../../api/execution/HITLService';
 import BuilderRunApprovals from './BuilderRunApprovals';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
+
+// ApprovalCard's "Review config" link navigates, so it needs a router, as in the app.
+const renderInRouter = (ui: ReactElement) => render(ui, { wrapper: MemoryRouter });
 
 vi.mock('../../../../api/execution/HITLService', () => ({ HITLService: {
   getExecutionHITLStatus: vi.fn(), approveGate: vi.fn(), rejectGate: vi.fn(), getApproval: vi.fn(),
@@ -21,7 +26,7 @@ describe('builder conversation approvals', () => {
   it.each([true, false])('polls pending approvals without SSE (running=%s) and stops after unmount', async running => {
     vi.useFakeTimers();
     try {
-      const view = render(<BuilderRunApprovals jobId="job" running={running} />);
+      const view = renderInRouter(<BuilderRunApprovals jobId="job" running={running} />);
       await act(async () => { await Promise.resolve(); });
       api.getExecutionHITLStatus.mockClear();
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
@@ -34,7 +39,7 @@ describe('builder conversation approvals', () => {
   });
   it.each(['flow_gate', 'task_review', 'tool_call'])('restores a pending %s inline and submits exactly one decision', async kind => {
     api.getExecutionHITLStatus.mockResolvedValue(status(approval(kind)));
-    render(<BuilderRunApprovals jobId="job" running />);
+    renderInRouter(<BuilderRunApprovals jobId="job" running />);
     const approve = await screen.findByRole('button', { name: 'Approve', exact: true });
     expect(screen.getAllByRole('button', { name: 'Approve', exact: true })).toHaveLength(1);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -46,7 +51,7 @@ describe('builder conversation approvals', () => {
   });
   it('sends task-review feedback from the conversation', async () => {
     api.getExecutionHITLStatus.mockResolvedValue(status(approval('task_review')));
-    render(<BuilderRunApprovals jobId="job" running />);
+    renderInRouter(<BuilderRunApprovals jobId="job" running />);
     fireEvent.click(await screen.findByRole('button', { name: 'Request changes' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Include the sources' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send', exact: true }));
@@ -54,7 +59,7 @@ describe('builder conversation approvals', () => {
     expect(await screen.findByText(/changes requested: Include the sources/)).toBeVisible();
   });
   it('refreshes on matching live events and ignores another execution', async () => {
-    render(<BuilderRunApprovals jobId="job" running />);
+    renderInRouter(<BuilderRunApprovals jobId="job" running />);
     await screen.findByRole('button', { name: 'Approve', exact: true });
     api.getExecutionHITLStatus.mockClear();
     act(() => window.dispatchEvent(new CustomEvent('hitlRequest', { detail: { job_id: 'other' } })));
@@ -64,14 +69,14 @@ describe('builder conversation approvals', () => {
   });
   it('shows decisions from history and no actions for expired gates', async () => {
     api.getExecutionHITLStatus.mockResolvedValue(status({ ...approval(), status: 'timeout' } as HITLApprovalResponse));
-    render(<BuilderRunApprovals jobId="job" running={false} />);
+    renderInRouter(<BuilderRunApprovals jobId="job" running={false} />);
     expect(await screen.findByText('— Approval expired')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Approve', exact: true })).toBeNull();
   });
   it('loads the output only on demand and opens it beside the conversation', async () => {
     api.getApproval.mockResolvedValue({ ...approval(), previous_crew_output: 'Full report for review' });
     const openResult = vi.fn();
-    render(<BuilderPreviewContext.Provider value={{ openMemory: vi.fn(), openStep: vi.fn(), openResult }}><BuilderRunApprovals jobId="job" running /></BuilderPreviewContext.Provider>);
+    renderInRouter(<BuilderPreviewContext.Provider value={{ openMemory: vi.fn(), openStep: vi.fn(), openResult }}><BuilderRunApprovals jobId="job" running /></BuilderPreviewContext.Provider>);
     fireEvent.click(await screen.findByRole('button', { name: 'Review output' }));
     await waitFor(() => expect(openResult).toHaveBeenCalledWith(expect.objectContaining({ data: 'Full report for review', sourceMessageId: 'job' })));
     expect(api.getApproval).toHaveBeenCalledWith(7, 'ui');
@@ -79,7 +84,7 @@ describe('builder conversation approvals', () => {
   it('does not restore stale approval data after switching runs', async () => {
     let finish!: (value: ExecutionHITLStatus) => void;
     api.getExecutionHITLStatus.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-    const view = render(<BuilderRunApprovals jobId="job" running />);
+    const view = renderInRouter(<BuilderRunApprovals jobId="job" running />);
     api.getExecutionHITLStatus.mockResolvedValue({ approval_history: [] } as unknown as ExecutionHITLStatus);
     view.rerender(<BuilderRunApprovals jobId="new-job" running />);
     await act(async () => finish(status(approval())));
@@ -87,7 +92,7 @@ describe('builder conversation approvals', () => {
   });
   it('keeps the request actionable after a failed submission', async () => {
     api.approveGate.mockRejectedValue(new Error('Permission denied'));
-    render(<BuilderRunApprovals jobId="job" running />);
+    renderInRouter(<BuilderRunApprovals jobId="job" running />);
     fireEvent.click(await screen.findByRole('button', { name: 'Approve', exact: true }));
     expect(await screen.findByText(/Permission denied/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();

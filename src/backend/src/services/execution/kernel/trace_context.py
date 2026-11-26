@@ -13,6 +13,38 @@ from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().crew
 
+# Process-scoped current execution id (job_id). A crew/flow subprocess serves
+# exactly one run (see execution/harnesses/selection.py), so a module global is
+# a safe, instance-independent source of the execution id. It is the fallback a
+# tool uses when its own ``trace_context`` was not attached to the instance that
+# actually executes — e.g. when ToolFactory re-creates the tool at task-exec
+# time, after attach_tools_trace_context ran on an earlier instance. Without it,
+# config-gen persisted powerbi_extraction rows with a NULL execution_id, which
+# broke the UC Metric View Generator's DB-fallback handoff (0 views).
+_CURRENT_EXECUTION_ID: Optional[str] = None
+
+
+def set_current_execution_id(job_id: Optional[str]) -> None:
+    """Record the running execution's job_id for this process (best-effort)."""
+    global _CURRENT_EXECUTION_ID
+    if job_id:
+        _CURRENT_EXECUTION_ID = job_id
+
+
+def get_current_execution_id() -> Optional[str]:
+    """Return the process-scoped execution job_id, or None if unset."""
+    return _CURRENT_EXECUTION_ID
+
+
+def resolve_tool_execution_id(tool: object) -> Optional[str]:
+    """Job id for a tool: its attached ``trace_context`` first, else the
+    process-scoped current execution id. Use this wherever a tool persists or
+    looks up a row keyed by execution_id — it survives ToolFactory rebuilding
+    the instance after ``attach_tools_trace_context`` ran on an earlier one."""
+    ctx = getattr(tool, "trace_context", None)
+    jid = ctx.get("job_id") if isinstance(ctx, dict) else None
+    return jid if isinstance(jid, str) and jid else _CURRENT_EXECUTION_ID
+
 
 def attach_execution_trace_context(
     crew: Any,
@@ -39,6 +71,15 @@ def attach_execution_trace_context(
             from src.services.memory.run.crew_memory import CrewMemoryService
 
             svc = CrewMemoryService({"group_id": group_id, "execution_id": job_id})
+        # Record the run's job_id process-wide so tools whose per-instance
+        # trace_context was not attached (e.g. ToolFactory rebuilt the instance
+        # after this ran) can still recover it. Prefer the explicit job_id, else
+        # the service's configured execution_id (the crew path passes a service).
+        _svc_config = getattr(svc, "config", None)
+        _svc_exec_id = (
+            _svc_config.get("execution_id") if isinstance(_svc_config, dict) else None
+        )
+        set_current_execution_id(job_id or _svc_exec_id)
         # memory_backend_config is unused by attach_memory_trace_context
         # (it reads only self.config); pass None.
         svc.attach_memory_trace_context(crew, None, crew_kwargs)

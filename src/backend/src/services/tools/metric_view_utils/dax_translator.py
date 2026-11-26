@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from . import dax_patterns
 from .constants import (
     RE_AVERAGEX_FILTER,
     RE_COUNTX_FILTER,
@@ -13,17 +14,50 @@ from .constants import (
     RE_SUMX_FILTER,
 )
 from .data_classes import TranslateFn, TranslationResult
+from .measure_arithmetic import _operand
 from .dax_condition_sql import (
     DaxConditionMixin,
     _sql_in_list,
     _sql_str_literal,
     split_top_level_args,
 )
+from .dax_preclean import preclean_dax, unwrap_keepfilters
+from .dax_sumx_terms import match_sumx_terms, translate_sumx_terms
+from .dax_scalar_converters import DaxScalarConvertersMixin
+from .filter_reach import (
+    dax_table_names,
+    drop_non_filtering_filters,
+    filter_reach,
+    model_mentions,
+)
 from .join_detector import _sanitize_alias
+from .sql_measure_sanitizer import sanitize_measure_name
 from .utils import to_snake_case
 
 
-class DaxTranslator(DaxConditionMixin):
+def _outer_calculate_filters(text: str) -> tuple[str, str]:
+    """``CALCULATE(<body>, <f1>, ...)`` as ``("CALCULATE(<body>)", "<f1>, ...")``; the text
+    unchanged with "" when it is not one CALCULATE call with filter arguments after the body.
+    """
+    head = re.match(r"\s*CALCULATE\s*\(", text, re.IGNORECASE)
+    if not head:
+        return text, ""
+    depth, pos = 1, head.end()
+    while pos < len(text) and depth:
+        if text[pos] == "(":
+            depth += 1
+        elif text[pos] == ")":
+            depth -= 1
+        pos += 1
+    if depth or text[pos:].strip():
+        return text, ""
+    args = split_top_level_args(text[head.end() : pos - 1])
+    if len(args) < 2:
+        return text, ""
+    return f"CALCULATE({args[0]})", ", ".join(args[1:])
+
+
+class DaxTranslator(DaxConditionMixin, DaxScalarConvertersMixin):
     """Pattern-based DAX→SQL translator with ordered registry."""
 
     def __init__(self, config: dict | None = None):
@@ -36,12 +70,51 @@ class DaxTranslator(DaxConditionMixin):
         self._cwc_filter_column: str = cfg.get("cwc_filter_column", "")
         self._fact_joins: list[dict] = []
         self._source_col_map: dict[str, str] = {}
+        self._relationships: list[dict] = []
+        self._reach_cache: dict[str, frozenset[str] | None] = {}
+        # The view being translated: match functions get DAX only, so translate() records it.
+        self._view_key: str = ""
         self._patterns: list[tuple[str, Callable, TranslateFn]] = []
         self._register_patterns()
 
+    def set_model_relationships(self, relationships: list[dict]) -> None:
+        """The model's full relationship list. Without it no predicate is dropped (a list
+        that is not known says nothing about which tables filter a fact)."""
+        self._relationships = [r for r in relationships if isinstance(r, dict)]
+        self._reach_cache = {}
+
+    def _drop_non_filtering_filters(
+        self, dax: str, table_key: str
+    ) -> tuple[str, list[str]]:
+        """``(DAX, tables)``: the CALCULATE predicates on tables that do not filter the fact
+        ``table_key`` are taken out, and the tables are returned for the measure's comment.
+        """
+        if not self._relationships or not table_key:
+            return dax, []
+        if table_key not in self._reach_cache:
+            known = model_mentions(table_key, self._relationships)
+            self._reach_cache[table_key] = (
+                filter_reach(table_key, self._relationships) if known else None
+            )
+        reach = self._reach_cache[table_key]
+        if reach is None:
+            return dax, []
+        return drop_non_filtering_filters(dax, table_key, reach)
+
     def _register_patterns(self) -> None:
         """Register translation patterns in priority order. First match wins."""
-        self._patterns = [
+        # ── Defect-class matchers (IDOR/DQA post-mortem M1–M5, M9, M11) ──
+        # Prepended FIRST so they win over the generic catch-alls AND before
+        # quick_reject (M4's `IF(ISBLANK(...), BLANK(), 1 - x)` would otherwise be
+        # dropped as an "ISBLANK+BLANK guard"). Each returns None unless it fully
+        # parses its shape, so anything else falls straight through. Logic lives in
+        # dax_patterns (keeps this module from growing); translate_fn is bound to
+        # this translator so it can read _measure_resolutions.
+        defect = [
+            (name, mfn, (lambda m, d, tk, _tf=tfn: _tf(m, d, tk, self)))
+            for name, mfn, tfn in dax_patterns.DEFECT_PATTERNS
+        ]
+        self._patterns = defect + [
             ("quick_reject", self._match_quick_reject, self._translate_noop),
             (
                 "sameperiodlastyear",
@@ -56,6 +129,7 @@ class DaxTranslator(DaxConditionMixin):
                 self._translate_calculate_equality_filter,
             ),
             ("simple_sumx", self._match_simple_sumx, self._translate_simple_sumx),
+            ("sumx_terms", self._match_sumx_terms, self._translate_sumx_terms),
             (
                 "calculate_sumx_vars_divide",
                 self._match_calc_sumx_vars_divide,
@@ -131,13 +205,17 @@ class DaxTranslator(DaxConditionMixin):
     # In llm_first mode, only these patterns run as the regex fast-path (Step 3.8):
     # display-artifact rejects + the trivial single-column, high-confidence
     # aggregations. Everything else falls through to the LLM-first translator.
-    _TRIVIAL_FAST_PATH = frozenset(
+    # Defect-class matchers (dax_patterns.DEFECT_FAST_PATH) join the fast-path via
+    # the union below — deterministic, exact, reproducible, so they run in
+    # llm_first mode instead of burning an LLM call.
+    _TRIVIAL_FAST_PATH = dax_patterns.DEFECT_FAST_PATH | frozenset(
         {
             "quick_reject",
             "simple_sum",
             "simple_agg",
             "calculate_equality_filter",
             "simple_sumx",
+            "sumx_terms",
             "distinctcountnoblank",
             # Deterministic scalar/date converters — cheap, reproducible, no LLM.
             "date_part",
@@ -187,9 +265,55 @@ class DaxTranslator(DaxConditionMixin):
         aren't the primary path in llm_first mode.
         """
         name = measure.get("measure_name", "")
+        self._view_key = table_key
         dax = self._preclean_dax(measure.get("dax_expression", ""))
+        dax = unwrap_keepfilters(
+            dax, lambda p: self._keepfilters_accepted(p, table_key)
+        )
+        if re.search(r"\bEXTERNALMEASURE\s*\(", dax, re.IGNORECASE):
+            # A measure of another model (DirectQuery to Analysis Services): never part of a
+            # translation, and not routed to the LLM either (table_processor).
+            return TranslationResult(
+                measure_name=sanitize_measure_name(
+                    to_snake_case(measure.get("original_name", name))
+                ),
+                original_name=measure.get("original_name", name),
+                sql_expr=None,
+                is_translatable=False,
+                skip_reason="EXTERNALMEASURE: a measure of another model is not translatable",
+                dax_expression=dax,
+                confidence="none",
+                category="external_measure",
+            )
+        wrapped, outer = _outer_calculate_filters(dax.strip())
+        if (
+            outer
+            and "DIVIDE" in wrapped.upper()
+            and not self._keepfilters_accepted(outer, table_key)
+        ):
+            # The DIVIDE translations below read the numerator and denominator and drop this
+            # filter: a filter on a model dimension wrapping a DIVIDE is not translated.
+            return TranslationResult(
+                measure_name=sanitize_measure_name(
+                    to_snake_case(measure.get("original_name", name))
+                ),
+                original_name=measure.get("original_name", name),
+                sql_expr=None,
+                is_translatable=False,
+                skip_reason="CALCULATE filter on a model dimension wraps DIVIDE",
+                dax_expression=dax,
+                confidence="none",
+                category="unassigned",
+            )
+        # A predicate on a table that does not filter this fact has no effect in Power BI and
+        # no join in the view: it is left out before any translation (rules and LLM alike).
+        dax, dropped_filter_tables = self._drop_non_filtering_filters(dax, table_key)
+        dropped = tuple(dropped_filter_tables)
         original_name = measure.get("original_name", name)
-        snake = to_snake_case(original_name)
+        # M8: guarantee a valid [a-z0-9_] identifier (dots, parens, &, commas out).
+        # to_snake_case already does this; sanitize_measure_name makes the invariant
+        # explicit and holds even if an upstream name path changes.
+        snake = sanitize_measure_name(to_snake_case(original_name))
 
         for pattern_name, match_fn, translate_fn in self._patterns:
             if trivial_only and pattern_name not in self._TRIVIAL_FAST_PATH:
@@ -202,7 +326,9 @@ class DaxTranslator(DaxConditionMixin):
                 # the regex claimed a measure it can't fully handle — reject it here
                 # so the caller routes it to the skill-corpus LLM (which CAN do the
                 # full ratio) rather than shipping a silently-wrong bare aggregate.
-                if trivial_only and sql:
+                # Also after a predicate was left out: the rewritten DAX is what is translated,
+                # and a rule that drops a component of it (a ratio's denominator) is not trusted.
+                if (trivial_only or dropped) and sql:
                     from .sql_measure_sanitizer import detect_lost_dax_component
 
                     if detect_lost_dax_component(dax, sql):
@@ -215,6 +341,7 @@ class DaxTranslator(DaxConditionMixin):
                             dax_expression=dax,
                             confidence="none",
                             category="unassigned",
+                            dropped_filter_tables=dropped,
                         )
                 window_spec = None
                 if skip_reason == "__SAMEPERIODLASTYEAR__":
@@ -224,6 +351,11 @@ class DaxTranslator(DaxConditionMixin):
                         "range": "trailing 12 month",
                         "semiadditive": "last",
                     }
+                elif skip_reason.startswith("__WINDOW__:"):
+                    # M11: a latest-period semi-additive measure — the matcher emits
+                    # `__WINDOW__:order=<col>;range=<r>;semiadditive=<s>`.
+                    window_spec = dax_patterns.parse_window_sentinel(skip_reason)
+                    skip_reason = ""
                 return TranslationResult(
                     measure_name=snake,
                     original_name=original_name,
@@ -234,6 +366,7 @@ class DaxTranslator(DaxConditionMixin):
                     confidence="high" if sql else "none",
                     category="single_table" if sql else "unassigned",
                     window_spec=window_spec,
+                    dropped_filter_tables=dropped,
                 )
 
         return TranslationResult(
@@ -245,6 +378,7 @@ class DaxTranslator(DaxConditionMixin):
             dax_expression=dax,
             confidence="none",
             category="unassigned",
+            dropped_filter_tables=dropped,
         )
 
     def translate_expression(self, dax_expr: str, table_key: str) -> str | None:
@@ -585,9 +719,22 @@ class DaxTranslator(DaxConditionMixin):
         up = cleaned.upper()
         if "DIVIDE(" not in up and "DIVIDE (" not in up:
             return None
+        # CALCULATE(DIVIDE(...), <filters>): the outer filters apply to every measure the
+        # DIVIDE reads, so they are added to each reference and taken off the wrapper.
+        cleaned, outer = _outer_calculate_filters(cleaned)
+        if outer and not self._keepfilters_accepted(outer, self._view_key):
+            return None  # an outer filter on a model dimension: not translated
         refs = self._find_calculate_measure_refs(cleaned)
         if not refs:
             return None
+        if outer:
+            refs = [
+                {
+                    **r,
+                    "filter_text": ", ".join(p for p in (r["filter_text"], outer) if p),
+                }
+                for r in refs
+            ]
         return {"cleaned": cleaned, "refs": refs}
 
     def _match_divide(self, dax: str, name: str) -> dict | None:
@@ -667,6 +814,14 @@ class DaxTranslator(DaxConditionMixin):
         col = match["column"]
         return f"SUM(source.{col})", ""
 
+    def _match_sumx_terms(self, dax: str, name: str) -> dict | None:
+        return match_sumx_terms(self._strip_return(self._strip_var_block(dax)))
+
+    def _translate_sumx_terms(
+        self, match: dict, dax: str, table_key: str
+    ) -> tuple[str | None, str]:
+        return translate_sumx_terms(match["terms"])
+
     def _translate_simple_sumx(
         self, match: dict, dax: str, table_key: str
     ) -> tuple[str | None, str]:
@@ -704,245 +859,6 @@ class DaxTranslator(DaxConditionMixin):
     ) -> tuple[str | None, str]:
         col = match["column"]
         return f"COUNT(DISTINCT source.{col})", ""
-
-    # ── Deterministic scalar/date converters (field-eng parity) ───────────
-    #
-    # These translate cheap, high-frequency DAX scalar/date functions to Spark
-    # SQL WITHOUT an LLM call. They match a single top-level function wrapping a
-    # ``Table[Column]`` reference (the common shape); anything more complex
-    # returns None so it falls through to the LLM. Column refs emit as
-    # ``source.<col>`` to match the rest of the translator.
-
-    # DAX date-part function → Spark SQL function
-    _DATE_PART_FUNCS = {
-        "YEAR": "year",
-        "MONTH": "month",
-        "DAY": "day",
-        "QUARTER": "quarter",
-        "HOUR": "hour",
-        "MINUTE": "minute",
-        "SECOND": "second",
-        "WEEKNUM": "weekofyear",
-        "WEEKDAY": "dayofweek",
-    }
-
-    def _match_date_part(self, dax: str, name: str) -> dict | None:
-        cleaned = self._strip_return(self._strip_var_block(dax))
-        m = re.fullmatch(
-            r"\s*(YEAR|MONTH|DAY|QUARTER|HOUR|MINUTE|SECOND|WEEKNUM|WEEKDAY)\s*\(\s*"
-            r"(\w+)\[(\w+)\]\s*(?:,\s*\d+\s*)?\)\s*",
-            cleaned,
-            re.IGNORECASE,
-        )
-        if not m:
-            return None
-        return {"func": m.group(1).upper(), "column": m.group(3)}
-
-    def _translate_date_part(
-        self, match: dict, dax: str, table_key: str
-    ) -> tuple[str | None, str]:
-        spark = self._DATE_PART_FUNCS.get(match["func"])
-        if not spark:
-            return None, f"Unsupported date part {match['func']}"
-        return f"{spark}(source.{match['column']})", ""
-
-    # DATEDIFF(<start>, <end>, <interval>) → Spark SQL per interval.
-    def _match_datediff(self, dax: str, name: str) -> dict | None:
-        cleaned = self._strip_return(self._strip_var_block(dax))
-        if "DATEDIFF" not in cleaned.upper():
-            return None
-        m = re.fullmatch(
-            r"\s*DATEDIFF\s*\(\s*(\w+)\[(\w+)\]\s*,\s*(\w+)\[(\w+)\]\s*,\s*"
-            r"(DAY|WEEK|MONTH|QUARTER|YEAR|HOUR|MINUTE|SECOND)\s*\)\s*",
-            cleaned,
-            re.IGNORECASE,
-        )
-        if not m:
-            return None
-        return {"a": m.group(2), "b": m.group(4), "interval": m.group(5).upper()}
-
-    def _translate_datediff(
-        self, match: dict, dax: str, table_key: str
-    ) -> tuple[str | None, str]:
-        a, b, iv = f"source.{match['a']}", f"source.{match['b']}", match["interval"]
-        if iv == "DAY":
-            return f"datediff({b}, {a})", ""
-        if iv == "WEEK":
-            return f"floor(datediff({b}, {a}) / 7)", ""
-        if iv == "MONTH":
-            return f"floor(months_between({b}, {a}))", ""
-        if iv == "QUARTER":
-            return f"floor(months_between({b}, {a}) / 3)", ""
-        if iv == "YEAR":
-            return f"floor(months_between({b}, {a}) / 12)", ""
-        # Sub-day intervals via unix-second difference.
-        divisor = {"HOUR": 3600, "MINUTE": 60, "SECOND": 1}[iv]
-        inner = f"(unix_timestamp({b}) - unix_timestamp({a}))"
-        return (inner if divisor == 1 else f"floor({inner} / {divisor})"), ""
-
-    def _resolve_scalar_inner(self, expr: str) -> str | None:
-        """Resolve an inner expression for SCALAR context (FORMAT/RANKX arg).
-
-        A bare ``Table[col]`` maps to ``source.<col>`` WITHOUT a SUM wrapper —
-        unlike ``translate_expression`` (which SUM-wraps bare columns for its
-        DIVIDE-numerator use). An aggregate/other expr is delegated as-is.
-        """
-        expr = expr.strip()
-        cm = re.fullmatch(r"\s*(\w+)\[(\w+)\]\s*", expr)
-        if cm:
-            return f"source.{cm.group(2)}"
-        # DIVIDE is a valid scalar inner but translate_expression skips it — use
-        # the divide converter directly.
-        if re.match(r"\s*DIVIDE\s*\(", expr, re.IGNORECASE):
-            dm = self._match_divide(expr, "")
-            if dm is not None:
-                sql, _ = self._translate_divide(dm, expr, "")
-                if sql:
-                    return sql
-        return self.translate_expression(expr, "")
-
-    # RANKX(<table>, <expr>, , <order>, <ties>) → rank()/dense_rank() OVER.
-    def _match_rankx(self, dax: str, name: str) -> dict | None:
-        cleaned = self._strip_return(self._strip_var_block(dax))
-        if "RANKX" not in cleaned.upper():
-            return None
-        # RANKX(All/Table, <expr>, [<value>], [ASC|DESC], [Dense|Skip])
-        m = re.fullmatch(
-            r"\s*RANKX\s*\(\s*[^,]+,\s*(.+?)\s*"
-            r"(?:,\s*[^,]*)??"  # optional value arg
-            r"(?:,\s*(ASC|DESC))?"  # optional order
-            r"(?:,\s*(DENSE|SKIP))?\s*\)\s*",
-            cleaned,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if not m:
-            return None
-        expr = m.group(1).strip()
-        # Only handle a simple aggregate/column expr deterministically.
-        inner = self._resolve_scalar_inner(expr)
-        if not inner:
-            return None
-        order = (m.group(2) or "DESC").upper()
-        ties = (m.group(3) or "SKIP").upper()
-        return {"inner": inner, "order": order, "dense": ties == "DENSE"}
-
-    def _translate_rankx(
-        self, match: dict, dax: str, table_key: str
-    ) -> tuple[str | None, str]:
-        fn = "dense_rank" if match["dense"] else "rank"
-        return f"{fn}() OVER (ORDER BY {match['inner']} {match['order']})", ""
-
-    # EDATE(<date>, <n>) → add_months ; EOMONTH(<date>, <n>) → last_day(add_months)
-    def _match_edate_eomonth(self, dax: str, name: str) -> dict | None:
-        cleaned = self._strip_return(self._strip_var_block(dax))
-        m = re.fullmatch(
-            r"\s*(EDATE|EOMONTH)\s*\(\s*(\w+)\[(\w+)\]\s*,\s*(-?\d+)\s*\)\s*",
-            cleaned,
-            re.IGNORECASE,
-        )
-        if not m:
-            return None
-        return {
-            "func": m.group(1).upper(),
-            "column": m.group(3),
-            "months": int(m.group(4)),
-        }
-
-    def _translate_edate_eomonth(
-        self, match: dict, dax: str, table_key: str
-    ) -> tuple[str | None, str]:
-        base = f"add_months(source.{match['column']}, {match['months']})"
-        if match["func"] == "EDATE":
-            return base, ""
-        return f"last_day({base})", ""
-
-    # FIRSTNONBLANK / LASTNONBLANK / LASTNONBLANKVALUE → MIN/MAX simplification.
-    def _match_firstlastnonblank(self, dax: str, name: str) -> dict | None:
-        cleaned = self._strip_return(self._strip_var_block(dax))
-        m = re.fullmatch(
-            r"\s*(FIRSTNONBLANK|LASTNONBLANK|LASTNONBLANKVALUE)\s*\(\s*"
-            r"(\w+)\[(\w+)\]\s*(?:,\s*[^)]+)?\)\s*",
-            cleaned,
-            re.IGNORECASE,
-        )
-        if not m:
-            return None
-        return {"func": m.group(1).upper(), "column": m.group(3)}
-
-    def _translate_firstlastnonblank(
-        self, match: dict, dax: str, table_key: str
-    ) -> tuple[str | None, str]:
-        agg = "MIN" if match["func"] == "FIRSTNONBLANK" else "MAX"
-        return f"{agg}(source.{match['column']})", ""
-
-    # FORMAT(<expr>, "<format string>") → date_format / format_number.
-    # Format-string → (kind, spark_arg) lookup. kind: 'date' | 'number' | 'raw'.
-    _FORMAT_MAP = {
-        # Date formats (DAX format string → Spark date_format pattern)
-        "MMM YYYY": ("date", "MMM yyyy"),
-        "MMM-YYYY": ("date", "MMM-yyyy"),
-        "MMMM YYYY": ("date", "MMMM yyyy"),
-        "MMM": ("date", "MMM"),
-        "MMMM": ("date", "MMMM"),
-        "YYYY-MM-DD": ("date", "yyyy-MM-dd"),
-        "DD/MM/YYYY": ("date", "dd/MM/yyyy"),
-        "MM/DD/YYYY": ("date", "MM/dd/yyyy"),
-        "YYYY": ("date", "yyyy"),
-        "YYYY-MM": ("date", "yyyy-MM"),
-        "DDDD": ("date", "EEEE"),
-        "DDD": ("date", "EEE"),
-        # Number formats (DAX format string → Spark format_number decimal places)
-        "#,##0": ("number", 0),
-        "#,##0.0": ("number", 1),
-        "#,##0.00": ("number", 2),
-        "0": ("number", 0),
-        "0.0": ("number", 1),
-        "0.00": ("number", 2),
-    }
-
-    def _match_format_func(self, dax: str, name: str) -> dict | None:
-        cleaned = self._strip_return(self._strip_var_block(dax))
-        if not re.match(r"\s*FORMAT\s*\(", cleaned, re.IGNORECASE):
-            return None
-        # FORMAT(<expr>, "<fmt>") — expr is a Table[col] or a simple aggregate.
-        m = re.fullmatch(
-            r'\s*FORMAT\s*\(\s*(.+?)\s*,\s*"([^"]*)"\s*\)\s*',
-            cleaned,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if not m:
-            return None
-        expr, fmt = m.group(1).strip(), m.group(2).strip()
-        # Resolve the inner expr for scalar context (bare Table[col] → source.col,
-        # NOT SUM-wrapped; aggregates delegated as-is).
-        inner = self._resolve_scalar_inner(expr)
-        if not inner:
-            return None
-        return {"inner": inner, "fmt": fmt}
-
-    def _translate_format_func(
-        self, match: dict, dax: str, table_key: str
-    ) -> tuple[str | None, str]:
-        inner, fmt = match["inner"], match["fmt"]
-        spec = self._FORMAT_MAP.get(fmt) or self._FORMAT_MAP.get(fmt.upper())
-        if not spec:
-            # Percent formats (contain %) → multiply *100 and format_number.
-            if "%" in fmt:
-                decimals = fmt.count("0", fmt.find(".")) if "." in fmt else 0
-                return f"CONCAT(format_number({inner} * 100, {decimals}), '%')", ""
-            # Currency (leading $/€/£) → format_number with 2 decimals + symbol.
-            cur = re.match(r"\s*([$€£])", fmt)
-            if cur:
-                return f"CONCAT('{cur.group(1)}', format_number({inner}, 2))", ""
-            # Unknown format code: keep the value unformatted rather than lose the
-            # measure (display formatting isn't essential in a UC metric view).
-            return inner, ""
-        kind, arg = spec
-        if kind == "date":
-            return f"date_format({inner}, '{arg}')", ""
-        if kind == "number":
-            return f"format_number({inner}, {arg})", ""
-        return inner, ""
 
     def _translate_calculate_measure_ref(
         self, match: dict, dax: str, table_key: str
@@ -1133,7 +1049,8 @@ class DaxTranslator(DaxConditionMixin):
         num_result = self.translate_expression(num_dax.strip(), table_key)
         den_result = self.translate_expression(den_dax.strip(), table_key)
         if num_result and den_result:
-            return f"{num_result} / NULLIF({den_result}, 0)", ""
+            # A numerator that is a sum must stay together: a + b / d divides only b.
+            return f"{_operand(num_result)} / NULLIF({den_result}, 0)", ""
         return None, "DIVIDE sub-expression not translatable"
 
     # ── Helpers ──────────────────────────────────────────────────────────
@@ -1254,64 +1171,8 @@ class DaxTranslator(DaxConditionMixin):
 
     @staticmethod
     def _preclean_dax(dax: str) -> str:
-        """PROP-6: strip DAX comments and normalize BLANK() before translation.
-
-        - Remove ``//`` and ``--`` line comments (DAX allows both); left in, an
-          inline ``-- Denominator`` leaks into the emitted SQL and comments out the
-          rest of the line.
-        - Remove ``/* ... */`` block comments.
-        - Replace standalone ``BLANK()`` with ``NULL`` (emitted literally it is not
-          valid Spark SQL).
-        """
-        if not dax:
-            return dax
-        dax = re.sub(r"/\*.*?\*/", " ", dax, flags=re.DOTALL)
-        cleaned_lines = []
-        for line in dax.split("\n"):
-            line = re.sub(r"//.*$", "", line)
-            line = re.sub(r"--.*$", "", line)
-            cleaned_lines.append(line)
-        dax = "\n".join(cleaned_lines)
-        # BLANK() → NULL, but ONLY when it's part of a larger expression. A measure
-        # that is *only* BLANK() is a display placeholder — leave it for the
-        # quick-reject matcher to drop (converting it to bare NULL would hide it).
-        if dax.strip().upper() not in ("BLANK()", "BLANK ()"):
-            dax = re.sub(r"\bBLANK\s*\(\s*\)", "NULL", dax, flags=re.IGNORECASE)
-
-        # Strip slicer-scalar date-window scaffolding vars. Many real-world ratio
-        # measures prefix the real formula with:
-        #     var std = CALCULATE([F_Start_date])
-        #     var etd = CALCULATE([F_End_date])
-        # These reference dynamic date-picker measures ([F_Start_date] etc.) that
-        # are NOT translatable and NOT used by the ratio aggregation — but left in,
-        # they poison the LLM translation (leftover [F_Start_date] trips the
-        # DAX-construct validator) and block the ~36 ratios underneath. Drop any
-        # `var <n> = ...` line whose body references only these window pickers,
-        # AND drop bare references to them elsewhere. Only touches measures that
-        # actually contain the window-picker names, so normal DAX is untouched.
-        if re.search(r"F_Start_date|F_End_date|PY_Start_date|PY_End_date", dax, re.I):
-            _picker = re.compile(
-                r"F_Start_date|F_End_date|PY_Start_date|PY_End_date", re.I
-            )
-            kept = []
-            dropped_vars: set[str] = set()
-            for line in dax.split("\n"):
-                vm = re.match(r"\s*var\s+(\w+)\s*=\s*(.+)$", line, re.IGNORECASE)
-                if (
-                    vm
-                    and _picker.search(vm.group(2))
-                    and not re.search(
-                        r"\b(SUM|SUMX|COUNT|AVERAGE|MIN|MAX)\s*\(", vm.group(2), re.I
-                    )
-                ):
-                    dropped_vars.add(vm.group(1))  # e.g. std, etd
-                    continue  # drop the scaffolding var line
-                kept.append(line)
-            dax = "\n".join(kept)
-            # remove now-dangling references to the dropped vars (bare tokens)
-            for v in dropped_vars:
-                dax = re.sub(rf"(?<![\w.])\b{re.escape(v)}\b(?![\w.(])", "", dax)
-        return dax
+        """PROP-6: strip DAX comments and normalize BLANK() before translation."""
+        return preclean_dax(dax)
 
     @staticmethod
     def _extract_divide_args(text: str) -> tuple[str, str] | None:
@@ -1451,6 +1312,21 @@ class DaxTranslator(DaxConditionMixin):
                 return None
             conditions.append(cond)
         return conditions
+
+    def _keepfilters_accepted(self, predicate: str, table_key: str) -> bool:
+        """Whether a KEEPFILTERS predicate may be unwrapped: it reads the fact's own columns,
+        or only tables the model does not describe. A predicate on a model dimension stays
+        wrapped (refused): its column is not a fact column, and the view has no join to it.
+        """
+        others = {t.lower() for t in dax_table_names(predicate)} - {table_key.lower()}
+        if not others:
+            return True
+        related = {
+            str(r.get(end) or "").lower()
+            for r in self._relationships
+            for end in ("from_table", "to_table")
+        }
+        return not others & (related | {k.lower() for k in self._dim_alias_map})
 
     def _resolve_measure_ref(
         self, ref_name: str, extra_filters: list[str]

@@ -190,6 +190,21 @@ describe('taskExecutionStore - transitionAll()', () => {
 
     expect(store.getTaskStatus('task-1')?.status).toBe('completed');
   });
+
+  it('should batch-transition running/planning tasks to warning (late timeout)', () => {
+    const store = useTaskExecutionStore.getState();
+    store.transition('task-1', 'running', { task_name: 'Task 1' });
+    store.transition('task-2', 'planning', { task_name: 'Task 2' });
+
+    store.transitionAll(['running', 'planning'], 'warning', {
+      completed_at: '2024-06-01T12:00:00Z',
+    });
+
+    // 'warning' is terminal (outputs saved) and carries a completion timestamp.
+    expect(store.getTaskStatus('task-1')?.status).toBe('warning');
+    expect(store.getTaskStatus('task-1')?.completed_at).toBe('2024-06-01T12:00:00Z');
+    expect(store.getTaskStatus('task-2')?.status).toBe('warning');
+  });
 });
 
 describe('taskExecutionStore - clearTaskStates', () => {

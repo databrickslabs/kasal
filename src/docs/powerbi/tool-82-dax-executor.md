@@ -140,8 +140,5 @@ CALCULATETABLE(
 
 - [Power BI integration hub](./README.md)
 - [Authentication and service principal setup](./01-authentication-setup.md)
-- [Tool 72 - comprehensive analysis](./tool-72-comprehensive-analysis.md)
-- [Tool 80 - DAX generator](./tool-80-dax-generator.md)
-- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
 
 Back to the [Power BI integration hub](./README.md).

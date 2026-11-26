@@ -336,9 +336,7 @@ class AadService:
             self.logger.info(
                 f"[AUTH DEBUG]   client_id: '{client_id}' (type: {type(client_id).__name__})"
             )
-            self.logger.info(
-                f"[AUTH DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}"
-            )
+            self.logger.info(f"[AUTH DEBUG]   client_secret set: {bool(client_secret)}")
 
             # Ensure ClientSecretCredential is available (should be checked earlier)
             if ClientSecretCredential is None:
@@ -413,10 +411,10 @@ class AadService:
             self.logger.debug("[AUTH DEBUG] Acquiring token with service account:")
             self.logger.debug(f"[AUTH DEBUG]   tenant_id: '{self.tenant_id}'")
             self.logger.debug(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
-            self.logger.debug(f"[AUTH DEBUG]   username: '{username}'")
-            self.logger.debug(f"[AUTH DEBUG]   password length: {len(password)}")
+            self.logger.debug(f"[AUTH DEBUG]   username set: {bool(username)}")
+            self.logger.debug(f"[AUTH DEBUG]   password set: {bool(password)}")
             self.logger.debug(
-                f"[AUTH DEBUG]   password stripped length: {len(password.strip())}"
+                f"[AUTH DEBUG]   password has outer spaces: {password != password.strip()}"
             )
             self.logger.debug(
                 f"[AUTH DEBUG]   password has whitespace: {password != password.strip()}"
@@ -432,9 +430,7 @@ class AadService:
 
                 encoded_password = password.strip()[7:]  # Remove 'base64:' prefix
                 password = base64.b64decode(encoded_password).decode("utf-8")
-                self.logger.info(
-                    f"[AUTH DEBUG] Decoded base64 password - length: {len(password)}"
-                )
+                self.logger.info("[AUTH DEBUG] Decoded base64 password")
             else:
                 password = password.strip()
 
@@ -452,13 +448,9 @@ class AadService:
                 )  # \t -> tab (unlikely but handle it)
 
                 if len(password) != original_length:
-                    self.logger.info(
-                        f"[AUTH DEBUG] Unescaped password - original length: {original_length}, new length: {len(password)}"
-                    )
+                    self.logger.info("[AUTH DEBUG] Unescaped password")
                 else:
-                    self.logger.info(
-                        f"[AUTH DEBUG] Using raw password - length: {len(password)}"
-                    )
+                    self.logger.info("[AUTH DEBUG] Using raw password")
 
             # Ensure UsernamePasswordCredential is available
             if UsernamePasswordCredential is None:

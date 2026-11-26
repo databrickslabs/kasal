@@ -19,6 +19,32 @@ from __future__ import annotations
 
 import re
 
+# M8: a UC Metric View measure name must be a valid [a-z0-9_] identifier. PBI
+# names carry dots, parens, `&`, commas, `%`, spaces (e.g.
+# `cycle_time(order intake to settlement)`, `DSD ... & settled ...`,
+# `Touchless settlement, billing ...`). Left unsanitized they produce invalid
+# YAML / a rejected metric view.
+_INVALID_NAME_CHARS = re.compile(r"[^a-z0-9_]")
+_MULTI_UNDERSCORE = re.compile(r"_+")
+
+
+def sanitize_measure_name(name: str) -> str:
+    """Return a valid ``[a-z0-9_]`` measure identifier (M8).
+
+    Lower-cases, maps ``&`` to ``and`` (a common, meaning-preserving name part),
+    replaces every remaining invalid char with ``_``, collapses runs of ``_`` and
+    trims leading/trailing ``_``. Idempotent and a no-op on names that are already
+    valid, so it is safe to layer on top of ``to_snake_case``.
+    """
+    if not name:
+        return name
+    s = name.strip().lower()
+    s = s.replace("&", " and ")
+    s = _INVALID_NAME_CHARS.sub("_", s)
+    s = _MULTI_UNDERSCORE.sub("_", s).strip("_")
+    return s
+
+
 # x / NULLIF(1, 0)  → x   (denominator is a literal 1; the divide is a no-op)
 _NULLIF_ONE = re.compile(r"\s*/\s*NULLIF\(\s*1\s*,\s*0\s*\)")
 
@@ -113,6 +139,15 @@ _SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
         re.compile(
             r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|SAMEPERIOD", re.IGNORECASE
         ),
+    ),
+    # A SQL window function (LAG(...) OVER (ORDER BY ...)). A metric view measure cannot
+    # hold one: the whole view fails with MISSING_AGGREGATION, which names no measure. A
+    # shift in time is a window measure (prior_year.py), not an OVER clause.
+    ("SQL window function (OVER)", re.compile(r"\)\s*OVER\s*\(", re.IGNORECASE)),
+    # a DAX VAR block emitted as it stood ("var ret = MEASURE(x) ret")
+    (
+        "untranslated DAX variable",
+        re.compile(r"^\s*var\s+\w+\s*=", re.IGNORECASE),
     ),
     # raw DAX constructs that never got translated
     (
@@ -270,7 +305,33 @@ def detect_silent_wrong(sql: str | None) -> str | None:
     for reason, pat in _SILENT_WRONG_CHECKS:
         if pat.search(sql):
             return reason
+    if _has_nested_aggregate(sql):
+        return "aggregate inside an aggregate"
     return None
+
+
+_AGGREGATE = re.compile(r"\b(SUM|AVG|MIN|MAX|COUNT)\s*\(", re.IGNORECASE)
+_AGGREGATED = re.compile(r"\b(SUM|AVG|MIN|MAX|COUNT|MEASURE)\s*\(", re.IGNORECASE)
+
+
+def _has_nested_aggregate(sql: str) -> bool:
+    """Whether an aggregate's argument holds another aggregate or a ``MEASURE()``
+    (``SUM(MEASURE(x) * source.y)``). Databricks rejects the whole view for it
+    (NESTED_AGGREGATE_FUNCTION) without naming the measure, and finding it by
+    deploying halves removed measures that were fine."""
+    for call in _AGGREGATE.finditer(sql):
+        depth, i = 0, call.end() - 1
+        while i < len(sql):
+            if sql[i] == "(":
+                depth += 1
+            elif sql[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if _AGGREGATED.search(sql[call.end() : i]):
+            return True
+    return False
 
 
 def sanitize_measure_sql(sql: str, *, is_base: bool) -> tuple[str | None, str | None]:

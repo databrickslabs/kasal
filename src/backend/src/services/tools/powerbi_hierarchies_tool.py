@@ -24,6 +24,8 @@ from typing import Any, Coroutine, Dict, List, Type
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.powerbi.fabric_definition import operation_location
+from src.services.powerbi.ids import semantic_model_definition_url
 from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -309,7 +311,7 @@ class PowerBIHierarchiesTool(BaseTool):
             logger.info(
                 f"  auth_method in merged_kwargs: {merged_kwargs.get('auth_method')}"
             )
-            logger.info(f"  username in merged_kwargs: {merged_kwargs.get('username')}")
+            logger.info(f"  username set: {bool(merged_kwargs.get('username'))}")
             logger.info(
                 f"  Has client_secret: {bool(merged_kwargs.get('client_secret'))}"
             )
@@ -332,11 +334,11 @@ class PowerBIHierarchiesTool(BaseTool):
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
             logger.info(
-                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+                f"  client_secret: {'set' if auth_config.get('client_secret') else 'None'}"
             )
-            logger.info(f"  username: {auth_config.get('username')}")
+            logger.info(f"  username set: {bool(auth_config.get('username'))}")
             logger.info(
-                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+                f"  password: {'set' if auth_config.get('password') else 'None'}"
             )
             logger.info(
                 f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"
@@ -540,7 +542,7 @@ class PowerBIHierarchiesTool(BaseTool):
         error marker with guidance on alternative approaches.
         """
         # Fabric API endpoint for getting semantic model definition
-        url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+        url = semantic_model_definition_url(workspace_id, dataset_id)
 
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -558,12 +560,13 @@ class PowerBIHierarchiesTool(BaseTool):
 
                 # Handle 202 Accepted (long running operation)
                 if response.status_code == 202:
-                    location = response.headers.get("Location")
+                    # Only a Fabric host is polled: the request carries the token.
+                    location = operation_location(response.headers)
                     if not location:
                         return [
                             {
                                 "_error": "api_error",
-                                "_message": "No Location header in 202 response",
+                                "_message": "No trusted Location in 202 response",
                             }
                         ]
 
@@ -693,7 +696,7 @@ class PowerBIHierarchiesTool(BaseTool):
                     return [{"_error": "forbidden"}]
                 else:
                     logger.error(
-                        f"Fabric API error: {e.response.status_code} - {e.response.text}"
+                        f"Fabric API error: {e.response.status_code} - {e.response.text[:500]}"
                     )
                     return [{"_error": "api_error", "_status": e.response.status_code}]
             except Exception as e:

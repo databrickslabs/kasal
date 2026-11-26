@@ -77,24 +77,11 @@ def _source_gap_sections(limitations: dict) -> list[str]:
     return lines
 
 
-def emit_migration_report(
-    all_specs: dict[str, MetricViewSpec],
-    stats: dict[str, dict],
-    config: dict | None = None,
-    limitations: dict | None = None,
-) -> str:
-    """Generate a markdown migration report.
-
-    Includes:
-    - Executive summary (total measures, translation rate, table count)
-    - Per-table breakdown (translated, untranslatable, artifacts, confidence)
-    - Join map (which dimensions are joined to which facts)
-    - Untranslatable DAX measures with explanations
-    - M:N relationships (if any were skipped)
-    - Recommendations
-    """
+def _executive_summary_lines(
+    stats: dict[str, dict], all_specs: dict[str, MetricViewSpec]
+) -> list[str]:
+    """Headline counts: measures in scope, translated, artifacts and coverage."""
     lines: list[str] = []
-
     # ── Executive Summary ──────────────────────────────────────────────────
 
     lines.append("# UC Metric View Migration Report")
@@ -127,7 +114,12 @@ def emit_migration_report(
     lines.append(f"| **Business coverage** | **{real_pct}%** |")
     lines.append(f"| Gaps remaining | {real_scope - total_translated} |")
     lines.append("")
+    return lines
 
+
+def _per_table_lines(stats: dict[str, dict]) -> list[str]:
+    """One row per table: translated (base/dax/switch), artifacts, gaps, coverage."""
+    lines: list[str] = []
     # ── Per-Table Breakdown ────────────────────────────────────────────────
 
     lines.append("## Per-Table Results")
@@ -163,7 +155,12 @@ def emit_migration_report(
             f"| {art} | {gaps} | {scope} | {pct}% | MQuery |"
         )
     lines.append("")
+    return lines
 
+
+def _skipped_table_lines(stats: dict[str, dict]) -> list[str]:
+    """Tables that produced no view, grouped by cause, with their original M-query."""
+    lines: list[str] = []
     # ── Tables not emitted (with the original M-query as a note) ────────────
     # Mirrors the measure-level "not emitted" block: a table that produced no
     # view is surfaced here with WHY (classified) and its original Power Query M
@@ -210,7 +207,12 @@ def emit_migration_report(
                         lines.append(f"  {ml}")
                     lines.append("  ```")
             lines.append("")
+    return lines
 
+
+def _join_map_lines(all_specs: dict[str, MetricViewSpec]) -> list[str]:
+    """Join map: which dimension/fact joins each fact table uses."""
+    lines: list[str] = []
     # ── Join Map ───────────────────────────────────────────────────────────
 
     lines.append("## Join Map")
@@ -227,10 +229,14 @@ def emit_migration_report(
                 on_clause = on_clause[:57] + "..."
             lines.append(f'| {table_key} | {j["name"]} | `{source}` | `{on_clause}` |')
     lines.append("")
+    return lines
 
+
+def _inactive_relationship_lines(lim: dict) -> list[str]:
+    """USERELATIONSHIP inactive relationships and their alternate aliases."""
+    lines: list[str] = []
     # ── Inactive Relationships (USERELATIONSHIP) ────────────────────────
-    _lim = limitations or {}
-    if _lim.get("inactive_relationships"):
+    if lim.get("inactive_relationships"):
         lines.append("## Inactive Relationships (USERELATIONSHIP)")
         lines.append("")
         lines.append(
@@ -240,14 +246,19 @@ def emit_migration_report(
         lines.append("")
         lines.append("| From Table | From Column | To Table | To Column | Alias |")
         lines.append("|-----------|-------------|----------|----------|-------|")
-        for irel in _lim["inactive_relationships"]:
+        for irel in lim["inactive_relationships"]:
             alias = f"{irel['to_table'].lower()}_{irel['from_column'].lower()}"
             lines.append(
                 f"| {irel['from_table']} | {irel['from_column']} "
                 f"| {irel['to_table']} | {irel['to_column']} | {alias} |"
             )
         lines.append("")
+    return lines
 
+
+def _untranslatable_lines(all_specs: dict[str, MetricViewSpec]) -> list[str]:
+    """Untranslatable DAX measures with class, reason and proposed approach."""
+    lines: list[str] = []
     # ── Untranslatable Measures ────────────────────────────────────────────
 
     lines.append("## Untranslatable Measures")
@@ -266,11 +277,57 @@ def emit_migration_report(
                 f'| {table_key} | {m.original_name} | {getattr(m, "dax_class", "") or ""} '
                 f"| {reason} | {proposal} |"
             )
-    lines.extend(["", *_source_gap_sections(_lim)])
+    return lines
 
+
+def _business_usage_lines(all_specs: dict[str, MetricViewSpec]) -> list[str]:
+    """Visual references (pages and roles) for each translated measure."""
+    lines: list[str] = []
+    # ── Business Usage (Visual References) ─────────────────────────────────
+    # Which report page(s)/visual(s) actually draw or filter on each translated
+    # measure (PROP-8) — separates measures business users actually see from
+    # ones that exist only as building blocks for other measures. Populated
+    # from TranslationResult.used_in_visuals (visual_usage_annotator); silently
+    # empty (no section at all) when no visual_usage_index was supplied, e.g.
+    # the run had no report_id — that's a normal degrade, not an error.
+    _any_usage = any(
+        getattr(m, "used_in_visuals", None)
+        for spec in all_specs.values()
+        for m in spec.measures
+    )
+    if _any_usage:
+        lines.append("## Business Usage (Visual References)")
+        lines.append("")
+        lines.append(
+            "Where each deployed measure is actually seen in the report — a "
+            "measure with no rows here still deployed correctly, it just isn't "
+            "drawn/filtered by any visual directly (common for an intermediate "
+            "measure other measures build on)."
+        )
+        lines.append("")
+        lines.append("| Table | Measure | Pages | Roles |")
+        lines.append("|-------|---------|-------|-------|")
+        for table_key, spec in sorted(all_specs.items()):
+            for m in spec.measures:
+                usage = getattr(m, "used_in_visuals", None)
+                if not usage:
+                    continue
+                pages = sorted({o.get("page", "") for o in usage if o.get("page")})
+                roles = sorted({o.get("role", "") for o in usage if o.get("role")})
+                lines.append(
+                    f"| {table_key} | {m.measure_name} "
+                    f"| {', '.join(pages)} | {', '.join(roles)} |"
+                )
+        lines.append("")
+    return lines
+
+
+def _limitation_lines(lim: dict) -> list[str]:
+    """Sections for M:N, refresh policies, summarization, RLS, aggregation, perspectives and field parameters."""
+    lines: list[str] = []
     # ── M:N Relationships ─────────────────────────────────────────────────
 
-    if _lim.get("m2n_relationships"):
+    if lim.get("m2n_relationships"):
         lines.append("## M:N Relationships (Not Migrated)")
         lines.append("")
         lines.append(
@@ -284,7 +341,7 @@ def emit_migration_report(
         lines.append("")
         lines.append("| From Table | From Column | To Table | To Column |")
         lines.append("|-----------|-------------|----------|----------|")
-        for rel in _lim["m2n_relationships"]:
+        for rel in lim["m2n_relationships"]:
             lines.append(
                 f"| {rel['from_table']} | {rel['from_column']} "
                 f"| {rel['to_table']} | {rel['to_column']} |"
@@ -293,7 +350,7 @@ def emit_migration_report(
 
     # ── Incremental Refresh Policies ─────────────────────────────────────
 
-    if _lim.get("refresh_policies"):
+    if lim.get("refresh_policies"):
         lines.append("## Incremental Refresh Policies")
         lines.append("")
         lines.append("These tables have incremental refresh policies in PBI.")
@@ -301,13 +358,13 @@ def emit_migration_report(
             "Consider adding a date filter to the UC Metric View for performance."
         )
         lines.append("")
-        for rp in _lim["refresh_policies"]:
+        for rp in lim["refresh_policies"]:
             lines.append(f"- **{rp['table_name']}**")
         lines.append("")
 
     # ── Summarization Override Warnings ───────────────────────────────────
 
-    if _lim.get("summarization_warnings"):
+    if lim.get("summarization_warnings"):
         lines.append("## Summarization Override Warnings")
         lines.append("")
         lines.append(
@@ -317,13 +374,13 @@ def emit_migration_report(
         lines.append("")
         lines.append("| Table | Column |")
         lines.append("|-------|--------|")
-        for sw in _lim["summarization_warnings"]:
+        for sw in lim["summarization_warnings"]:
             lines.append(f"| {sw['table_name']} | {sw['column_name']} |")
         lines.append("")
 
     # ── Row-Level Security Warning ────────────────────────────────────────
 
-    if _lim.get("rls_tables"):
+    if lim.get("rls_tables"):
         lines.append("## Row-Level Security Warning")
         lines.append("")
         lines.append(
@@ -331,13 +388,13 @@ def emit_migration_report(
         )
         lines.append("Configure Databricks row filters separately.")
         lines.append("")
-        for t in sorted(_lim["rls_tables"]):
+        for t in sorted(lim["rls_tables"]):
             lines.append(f"- {t}")
         lines.append("")
 
     # ── Aggregation Table Warnings ─────────────────────────────────────────
 
-    if _lim.get("aggregation_warnings"):
+    if lim.get("aggregation_warnings"):
         lines.append("## Aggregation Table Warnings")
         lines.append("")
         lines.append(
@@ -345,13 +402,13 @@ def emit_migration_report(
         )
         lines.append("Verify the source grain matches your metric view expectations.")
         lines.append("")
-        for w in _lim["aggregation_warnings"]:
+        for w in lim["aggregation_warnings"]:
             lines.append(f"- **{w['table']}**: {w['warning']}")
         lines.append("")
 
     # ── Perspectives (Agent 9) ────────────────────────────────────────────
 
-    if _lim.get("perspectives"):
+    if lim.get("perspectives"):
         lines.append("## Perspectives (Not Migrated)")
         lines.append("")
         lines.append(
@@ -361,14 +418,14 @@ def emit_migration_report(
             "UC Metric Views do not support perspectives. Consider separate UCMV sets or Databricks permissions."
         )
         lines.append("")
-        for p in _lim["perspectives"]:
+        for p in lim["perspectives"]:
             name = p.get("name", p) if isinstance(p, dict) else str(p)
             lines.append(f"- {name}")
         lines.append("")
 
     # ── Field Parameters (Agent 9) ────────────────────────────────────────
 
-    if _lim.get("field_parameters"):
+    if lim.get("field_parameters"):
         lines.append("## Field Parameters (Not Migrated)")
         lines.append("")
         lines.append(
@@ -378,11 +435,16 @@ def emit_migration_report(
             "No UC equivalent. Consider separate metric views or Genie space configuration."
         )
         lines.append("")
-        for fp in _lim["field_parameters"]:
+        for fp in lim["field_parameters"]:
             name = fp.get("name", fp) if isinstance(fp, dict) else str(fp)
             lines.append(f"- {name}")
         lines.append("")
+    return lines
 
+
+def _native_feature_lines(lim: dict) -> list[str]:
+    """PBI native features migration status table."""
+    lines: list[str] = []
     # ── PBI Native Features — Migration Status (Agent 10) ────────────────
     lines.append("## PBI Native Features — Migration Status")
     lines.append("")
@@ -390,56 +452,56 @@ def emit_migration_report(
     lines.append("|---------|--------|-------|---------|")
 
     # Inactive relationships
-    inactive = _lim.get("inactive_relationships", [])
+    inactive = lim.get("inactive_relationships", [])
     lines.append(
         f"| USERELATIONSHIP | {'Migrated' if inactive else 'N/A'} | {len(inactive)} | Alternate join aliases generated |"
     )
 
     # M:N
-    m2n = _lim.get("m2n_relationships", [])
+    m2n = lim.get("m2n_relationships", [])
     lines.append(
         f"| M:N Relationships | {'Flagged' if m2n else 'N/A'} | {len(m2n)} | Requires bridge table |"
     )
 
     # RLS
-    rls = _lim.get("rls_tables", set())
+    rls = lim.get("rls_tables", set())
     lines.append(
         f"| Row-Level Security | {'Flagged' if rls else 'N/A'} | {len(rls)} | Configure Databricks row filters |"
     )
 
     # Aggregation
-    agg = _lim.get("aggregation_warnings", [])
+    agg = lim.get("aggregation_warnings", [])
     lines.append(
         f"| Aggregation Tables | {'Flagged' if agg else 'N/A'} | {len(agg)} | Verify source grain |"
     )
 
     # Refresh policies
-    rp = _lim.get("refresh_policies", [])
+    rp = lim.get("refresh_policies", [])
     lines.append(
         f"| Incremental Refresh | {'Flagged' if rp else 'N/A'} | {len(rp)} | Add date filter for performance |"
     )
 
     # Summarization
-    sw = _lim.get("summarization_warnings", [])
+    sw = lim.get("summarization_warnings", [])
     lines.append(
         f"| Default Summarization | {'Flagged' if sw else 'N/A'} | {len(sw)} | SummarizeBy=None columns |"
     )
 
     # Calc groups
-    cg = _lim.get("calculation_groups_expanded", [])
+    cg = lim.get("calculation_groups_expanded", [])
     cg_count = sum(c.get("expanded_count", 0) for c in cg)
     lines.append(
         f"| Calculation Groups | {'Expanded' if cg else 'N/A'} | {cg_count} | Measures auto-generated |"
     )
 
     # Perspectives
-    persp = _lim.get("perspectives", [])
+    persp = lim.get("perspectives", [])
     lines.append(
         f"| Perspectives | {'Flagged' if persp else 'N/A'} | {len(persp)} | Not migrated |"
     )
 
     # Field parameters
-    fp_list = _lim.get("field_parameters", [])
+    fp_list = lim.get("field_parameters", [])
     lines.append(
         f"| Field Parameters | {'Flagged' if fp_list else 'N/A'} | {len(fp_list)} | Not migrated |"
     )
@@ -450,7 +512,12 @@ def emit_migration_report(
     )
 
     lines.append("")
+    return lines
 
+
+def _recommendation_lines() -> list[str]:
+    """Closing recommendations."""
+    lines: list[str] = []
     # ── Recommendations ────────────────────────────────────────────────────
 
     lines.append("## Recommendations")
@@ -469,5 +536,42 @@ def emit_migration_report(
         "no SQL equivalent needed"
     )
     lines.append("")
+    return lines
+
+
+def emit_migration_report(
+    all_specs: dict[str, MetricViewSpec],
+    stats: dict[str, dict],
+    config: dict | None = None,
+    limitations: dict | None = None,
+) -> str:
+    """Generate a markdown migration report.
+
+    Includes:
+    - Executive summary (total measures, translation rate, table count)
+    - Per-table breakdown (translated, untranslatable, artifacts, confidence)
+    - Join map (which dimensions are joined to which facts)
+    - Untranslatable DAX measures with explanations
+    - M:N relationships (if any were skipped)
+    - Recommendations
+    """
+    lines: list[str] = []
+    lines.append("# UC Metric View Migration Report")
+    lines.append("")
+    lines.append(f"Generated: {datetime.now():%Y-%m-%d %H:%M}")
+    lines.append("")
+    lim = limitations or {}
+
+    lines.extend(_executive_summary_lines(stats, all_specs))
+    lines.extend(_per_table_lines(stats))
+    lines.extend(_skipped_table_lines(stats))
+    lines.extend(_join_map_lines(all_specs))
+    lines.extend(_inactive_relationship_lines(lim))
+    lines.extend(_untranslatable_lines(all_specs))
+    lines.extend(["", *_source_gap_sections(lim)])
+    lines.extend(_business_usage_lines(all_specs))
+    lines.extend(_limitation_lines(lim))
+    lines.extend(_native_feature_lines(lim))
+    lines.extend(_recommendation_lines())
 
     return "\n".join(lines)

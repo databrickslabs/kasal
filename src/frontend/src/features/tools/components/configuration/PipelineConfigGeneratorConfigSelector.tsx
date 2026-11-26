@@ -15,8 +15,6 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  ToggleButtonGroup,
-  ToggleButton,
   Switch,
   FormControlLabel,
   FormControl,
@@ -28,10 +26,14 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { DatabricksService } from '../../../../api/databricks/DatabricksService';
+import {
+  PowerBIPipelineCredentialFields,
+  type PipelineAuthMethod,
+} from './PowerBIPipelineCredentialFields';
+
+export type { PipelineAuthMethod };
 
 interface WarehouseOption { id: string; name: string; state: string; }
-
-export type PipelineAuthMethod = 'service_principal' | 'service_account';
 
 export interface PipelineConfigGeneratorConfig {
   // PBI Configuration
@@ -83,30 +85,6 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
     });
   };
 
-  // A single auth_method applies to both credential sets. Default to Service
-  // Principal to preserve prior behaviour when unset.
-  const authMethod: PipelineAuthMethod = value.auth_method || 'service_principal';
-  const isSA = authMethod === 'service_account';
-
-  const handleAuthMethodChange = (
-    _e: React.MouseEvent<HTMLElement>,
-    newMethod: PipelineAuthMethod | null,
-  ) => {
-    if (!newMethod) return;  // ignore de-select
-    const updated: PipelineConfigGeneratorConfig = { ...value, auth_method: newMethod };
-    if (newMethod === 'service_principal') {
-      // Clear Service Account fields on both sets.
-      updated.username = undefined;
-      updated.password = undefined;
-      updated.admin_username = undefined;
-      updated.admin_password = undefined;
-    }
-    // NOTE: switching to Service Account does NOT clear client_secret /
-    // admin_client_secret — they remain an optional SP fallback (the backend
-    // uses SP if provided when an SA can't reach an API).
-    onChange(updated);
-  };
-
   // ── Optional warehouse + LLM enrichment ──
   const enrichEnabled = value.enable_enrichment === true;
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
@@ -148,198 +126,7 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
         </Typography>
       </Alert>
 
-      {/* PBI Configuration */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(25, 118, 210)' }}>
-        Power BI Configuration
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 2 }}>
-        <TextField
-          label="Workspace ID"
-          value={value.workspace_id || ''}
-          onChange={(e) => handleFieldChange('workspace_id', e.target.value)}
-          disabled={disabled}
-          fullWidth
-          size="small"
-          required
-          helperText="PBI Workspace GUID"
-        />
-        <TextField
-          label="Dataset ID"
-          value={value.dataset_id || ''}
-          onChange={(e) => handleFieldChange('dataset_id', e.target.value)}
-          disabled={disabled}
-          fullWidth
-          size="small"
-          required
-          helperText="PBI Dataset / Semantic Model GUID"
-        />
-      </Box>
-
-      {/* Auth method toggle */}
-      <Box>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          Authentication method
-        </Typography>
-        <ToggleButtonGroup
-          value={authMethod}
-          exclusive
-          onChange={handleAuthMethodChange}
-          size="small"
-          disabled={disabled}
-        >
-          <ToggleButton value="service_principal">Service Principal</ToggleButton>
-          <ToggleButton value="service_account">Service Account</ToggleButton>
-        </ToggleButtonGroup>
-        <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>
-          <Typography variant="caption" component="div">
-            <strong>Service Principal:</strong> use an app registration (Client ID + Client Secret).<br />
-            <strong>Service Account:</strong> use a user account (Client ID + username + password).
-            The Client Secret stays available as an optional SP fallback.
-          </Typography>
-        </Alert>
-      </Box>
-
-      {/* Non-Admin credentials */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(76, 175, 80)' }}>
-        Non-Admin {isSA ? 'Service Account' : 'Service Principal'} (Execute Queries API)
-      </Typography>
-      <TextField
-        label="Tenant ID"
-        value={value.tenant_id || ''}
-        onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
-        disabled={disabled}
-        fullWidth
-        size="small"
-        required
-        helperText="Azure AD Tenant ID (shared by both credential sets)"
-      />
-      <Box sx={{ display: 'flex', gap: 2 }}>
-        <TextField
-          label="Client ID"
-          value={value.client_id || ''}
-          onChange={(e) => handleFieldChange('client_id', e.target.value)}
-          disabled={disabled}
-          fullWidth
-          size="small"
-          required
-          helperText="Workspace member with SemanticModel.ReadWrite.All"
-        />
-        {isSA ? (
-          <TextField
-            label="Client Secret (optional SP fallback)"
-            value={value.client_secret || ''}
-            onChange={(e) => handleFieldChange('client_secret', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            type="password"
-            helperText="Optional — used as SP fallback if the SA can't reach an API"
-          />
-        ) : (
-          <TextField
-            label="Client Secret"
-            value={value.client_secret || ''}
-            onChange={(e) => handleFieldChange('client_secret', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            required
-            type="password"
-            helperText="Non-admin SP secret"
-          />
-        )}
-      </Box>
-      {isSA && (
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <TextField
-            label="Username (UPN)"
-            value={value.username || ''}
-            onChange={(e) => handleFieldChange('username', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            required
-            helperText="Service Account username / UPN"
-          />
-          <TextField
-            label="Password"
-            value={value.password || ''}
-            onChange={(e) => handleFieldChange('password', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            required
-            type="password"
-            helperText="Service Account password"
-          />
-        </Box>
-      )}
-
-      {/* Admin credentials */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(255, 152, 0)' }}>
-        Admin {isSA ? 'Service Account' : 'Service Principal'} (Admin Scanner API)
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 2 }}>
-        <TextField
-          label="Admin Client ID"
-          value={value.admin_client_id || ''}
-          onChange={(e) => handleFieldChange('admin_client_id', e.target.value)}
-          disabled={disabled}
-          fullWidth
-          size="small"
-          required
-          helperText="Power BI Admin with Tenant.Read.All"
-        />
-        {isSA ? (
-          <TextField
-            label="Admin Client Secret (optional SP fallback)"
-            value={value.admin_client_secret || ''}
-            onChange={(e) => handleFieldChange('admin_client_secret', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            type="password"
-            helperText="Optional — used as SP fallback if the admin SA can't reach the Admin Scanner"
-          />
-        ) : (
-          <TextField
-            label="Admin Client Secret"
-            value={value.admin_client_secret || ''}
-            onChange={(e) => handleFieldChange('admin_client_secret', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            required
-            type="password"
-            helperText="Admin SP secret"
-          />
-        )}
-      </Box>
-      {isSA && (
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <TextField
-            label="Admin Username (UPN)"
-            value={value.admin_username || ''}
-            onChange={(e) => handleFieldChange('admin_username', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            required
-            helperText="Admin Service Account username / UPN"
-          />
-          <TextField
-            label="Admin Password"
-            value={value.admin_password || ''}
-            onChange={(e) => handleFieldChange('admin_password', e.target.value)}
-            disabled={disabled}
-            fullWidth
-            size="small"
-            required
-            type="password"
-            helperText="Admin Service Account password"
-          />
-        </Box>
-      )}
+      <PowerBIPipelineCredentialFields value={value} onChange={onChange} disabled={disabled} />
 
       {/* Target Configuration */}
       <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(76, 175, 80)' }}>

@@ -109,7 +109,7 @@ class MQueryConnector(BaseInboundConnector):
         logger.info(f"  config.auth_method: {self.config.auth_method}")
         logger.info(f"  config.tenant_id: {self.config.tenant_id}")
         logger.info(f"  config.client_id: {self.config.client_id}")
-        logger.info(f"  config.username: {self.config.username}")
+        logger.info(f"  config.username set: {bool(self.config.username)}")
         logger.info("=" * 80)
 
         # Initialize auth service with all auth options

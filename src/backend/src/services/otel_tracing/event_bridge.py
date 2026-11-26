@@ -27,6 +27,7 @@ from opentelemetry.trace import (
 
 from src.services.otel_tracing.auto_decision import LLM_EVENT_TYPES, AutoDecision
 from src.services.otel_tracing.event_subscriptions import _EVENT_CLASSES
+from src.services.trace.tool_args import observable_tool_args
 
 logger = logging.getLogger(__name__)
 
@@ -849,7 +850,10 @@ class OTelEventBridge:
                 # never touches contextvars.
                 tool_args = getattr(event, "tool_args", None)
                 inputs = (
-                    {"tool": tool_name, "args": _safe_str(tool_args, 4000)}
+                    {
+                        "tool": tool_name,
+                        "args": _safe_str(observable_tool_args(tool_args), 4000),
+                    }
                     if tool_args is not None
                     else {"tool": tool_name}
                 )
@@ -1196,7 +1200,7 @@ class OTelEventBridge:
         tool_name = getattr(event, "tool_name", None) or getattr(event, "tool", None)
         if tool_name:
             span.set_attribute("kasal.extra.tool_name", str(tool_name))
-        tool_args = getattr(event, "tool_args", None)
+        tool_args = observable_tool_args(getattr(event, "tool_args", None))
         if tool_args:
             span.set_attribute("kasal.extra.tool_args", str(tool_args))
         tool_class = getattr(event, "tool_class", None)

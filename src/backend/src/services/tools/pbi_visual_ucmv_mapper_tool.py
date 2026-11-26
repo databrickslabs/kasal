@@ -16,6 +16,10 @@ from typing import TYPE_CHECKING, Any, Optional, Type
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.dashboard_creator_utils.report_items import (
+    resolve_slicers,
+    split_report_items,
+)
 
 # SEC #3: dashboard SQL becomes a stored Lakeview dataset query that runs when
 # the dashboard opens — one read-only SELECT only (shared with the M-Query
@@ -192,59 +196,18 @@ class PBIVisualUCMVMapperTool(BaseTool):
         return summaries
 
     def _extract_visuals(self, report_data: dict) -> list:
-        """Extract all visuals from tool 78 report references output.
+        """Visuals to map from tool 78 output (flat or reports > pages format).
 
-        Handles two formats:
-        A) Real tool 78 output: {"report": {...}, "visuals": [...flat...], "pages": [...]}
-        B) Demo/expected format: {"reports": [{"pages": [{"visuals": [...]}]}]}
+        Slicers, decorative / AI visuals and visuals without fields are not mapped; see
+        ``_extract_report_items`` for the full split used by ``_run``.
         """
-        visuals = []
-
-        # ── Format A: real tool 78 output — flat visuals list at top level ──────
-        if "visuals" in report_data and isinstance(report_data["visuals"], list):
-            # Build page_name lookup from pages list
-            pages = report_data.get("pages") or []
-            # pages in real format: [{"page_name": "...", "page_url": "...", "visual_count": N}]
-            default_page = pages[0].get("page_name", "Page 1") if pages else "Page 1"
-            for visual in report_data["visuals"]:
-                measures = visual.get("measures", [])
-                tables = visual.get("tables", [])
-                # Skip slicers/filters with no real measures
-                if not measures or visual.get("visual_type") == "slicer":
-                    continue
-                visuals.append(
-                    {
-                        "visual_id": visual.get("visual_id", ""),
-                        "page_name": visual.get("page_name") or default_page,
-                        "visual_type": visual.get("visual_type", "tableEx"),
-                        "measures": measures,
-                        "tables": tables,
-                    }
-                )
-            if visuals:
-                logger.info(
-                    f"[PBIVisualMapper] Parsed {len(visuals)} visuals (real tool 78 format)"
-                )
-                return visuals
-
-        # ── Format B: demo/wrapped format — reports > pages > visuals ────────────
-        for report in report_data.get("reports") or []:
-            for page in report.get("pages") or []:
-                page_name = page.get("page_display_name") or page.get("page_name") or ""
-                for visual in page.get("visuals") or []:
-                    if visual.get("visual_type") == "slicer":
-                        continue
-                    visuals.append(
-                        {
-                            "visual_id": visual.get("visual_id", ""),
-                            "page_name": page_name,
-                            "visual_type": visual.get("visual_type", "tableEx"),
-                            "measures": visual.get("measures", []),
-                            "tables": visual.get("tables", []),
-                        }
-                    )
-
+        visuals, _, _ = split_report_items(report_data)
         return visuals
+
+    @staticmethod
+    def _extract_report_items(report_data: dict) -> tuple[list, list, list]:
+        """``(visuals, slicers, skipped)`` from tool 78 output."""
+        return split_report_items(report_data)
 
     # ──────────────────────────────────────────────────────────────────────────
     # LLM call
@@ -306,6 +269,7 @@ class PBIVisualUCMVMapperTool(BaseTool):
                 f"\n- visual_id: {v['visual_id']}, page: {v['page_name']}, "
                 f"type: {v['visual_type']}, "
                 f"pbi_measures: {v['measures']}, "
+                f"pbi_columns: {v.get('columns', [])}, "
                 f"pbi_tables: {v['tables']}\n"
             )
 
@@ -349,7 +313,8 @@ Rules:
 1. Match PBI measure names to UCMV measure names using fuzzy/semantic matching
    (e.g. "Revenue" → "total_revenue", "Qty" → "production_quantity")
 2. Pick the UCMV metric view whose measures best match the visual's PBI measures
-3. For dimensions: pick suitable UCMV dimensions for GROUP BY based on visual type
+3. For dimensions: use the UCMV dimensions that match the visual's pbi_columns first
+   (axis / legend / rows), otherwise pick suitable ones based on visual type
    - barChart/lineChart: pick 1-2 categorical/temporal dimensions
    - tableEx/matrix: list up to 3 relevant dimensions
    - card/kpiVisual: no GROUP BY needed (aggregate only)
@@ -520,7 +485,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
             )
 
         report_data = self._parse_report_references(report_raw)
-        visuals = self._extract_visuals(report_data)
+        visuals, slicers, skipped = self._extract_report_items(report_data)
         if not visuals:
             return json.dumps({"error": "No visuals found in report_references_json"})
 
@@ -581,6 +546,12 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         logger.info(
             f"[PBIVisualMapper] Found {len(ucmv_summaries)} deployed metric views"
         )
+        resolved_slicers = resolve_slicers(slicers, ucmv_summaries)
+
+        def finish(mappings: list) -> str:
+            return self._build_output(
+                mappings, dashboard_title, catalog, schema, resolved_slicers, skipped
+            )
 
         # ── 3. Parse optional measures_json ──────────────────────────────────
         measures_data = None
@@ -603,15 +574,13 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
                     "[PBIVisualMapper] Authentication failed — using structural fallback"
                 )
                 visual_mappings = self._fallback_mapping(visuals, ucmv_summaries)
-                return self._build_output(
-                    visual_mappings, dashboard_title, catalog, schema
-                )
+                return finish(visual_mappings)
         except Exception as e:
             logger.warning(
                 f"[PBIVisualMapper] Auth error — using structural fallback: {e}"
             )
             visual_mappings = self._fallback_mapping(visuals, ucmv_summaries)
-            return self._build_output(visual_mappings, dashboard_title, catalog, schema)
+            return finish(visual_mappings)
 
         # ── 5. Call LLM ──────────────────────────────────────────────────────
         try:
@@ -659,10 +628,16 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
             )
             visual_mappings = self._fallback_mapping(visuals, ucmv_summaries)
 
-        return self._build_output(visual_mappings, dashboard_title, catalog, schema)
+        return finish(visual_mappings)
 
     def _build_output(
-        self, visual_mappings: list, dashboard_title: str, catalog: str, schema: str
+        self,
+        visual_mappings: list,
+        dashboard_title: str,
+        catalog: str,
+        schema: str,
+        slicers: Optional[list] = None,
+        skipped: Optional[list] = None,
     ) -> str:
         """Assemble the final output JSON."""
         mapped = sum(1 for m in visual_mappings if m.get("ucmv_view"))
@@ -676,10 +651,16 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
             "dashboard_title": dashboard_title,
             "catalog": catalog,
             "schema_name": schema,
+            # Slicers with their columns resolved to metric view dimensions (tool 95
+            # builds filter widgets from them) and visuals that were not mapped.
+            "slicers": slicers or [],
+            "skipped_visuals": skipped or [],
             "summary": {
                 "total_visuals": len(visual_mappings),
                 "mapped": mapped,
                 "unmapped": unmapped,
+                "slicers": len(slicers or []),
+                "skipped": len(skipped or []),
             },
         }
         logger.info(

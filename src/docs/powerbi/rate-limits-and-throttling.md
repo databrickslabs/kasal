@@ -47,6 +47,26 @@ These token-demand reductions are built in — you do **not** need to do anythin
 
 So the levers below are the **operator** options when throttling still occurs.
 
+### Power BI / Fabric REST calls: HTTP 429 handling
+
+Every Power BI and Fabric REST call Kasal makes goes through one retry policy
+(`src/backend/src/services/powerbi/http_retry.py`): `executeQueries` (DAX, DMVs,
+INFO.VIEW), the report and refresh listings, the admin scanner, and the Fabric
+`getDefinition` calls with their operation polls. On HTTP 429 a call waits:
+
+1. the `Retry-After` header (seconds or HTTP date), plus 1 s;
+2. else the `Retry in N seconds` text of the error message, plus 1 s;
+3. else exponential backoff (2 s, 4 s, 8 s, 16 s).
+
+A single wait is capped at 120 s, a call makes at most 5 attempts, and the total
+waiting per call is capped at 240 s. When the budget is spent the last 429 is
+reported as the error. Logs record the call label, the attempt and the wait only;
+URLs, headers and bodies are not logged.
+
+Not covered: the Entra login calls (token acquisition), and the call sites in
+`pipeline_config_generator_tool.py`, `services/powerbi/service.py` and
+`services/powerbi/column_metadata.py`, which still make their own requests.
+
 ## What to do when you hit throttling
 
 ### 1. Raise the ceiling (quota — ~free) — do this first

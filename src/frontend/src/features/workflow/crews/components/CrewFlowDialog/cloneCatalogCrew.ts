@@ -161,3 +161,19 @@ export async function cloneCatalogCrew(crew: CrewResponse): Promise<{ nodes: Nod
 
   return { nodes, edges };
 }
+
+/**
+ * An imported crew file names agents and tasks by the ids of the installation
+ * it was exported from. Those rows do not exist here, so the crew would open
+ * on the canvas and then answer "Task not found" on the first edit. Create the
+ * rows and return the crew re-pointed at them. Saving the crew writes each
+ * task node's tool_configs to its new row.
+ */
+export async function crewWithOwnRows(
+  crew: Pick<CrewResponse, 'nodes' | 'edges'>
+): Promise<{ nodes: Node[]; edges: Edge[]; agent_ids: string[]; task_ids: string[] }> {
+  const { nodes, edges } = await cloneCatalogCrew(crew as CrewResponse);
+  const ids = (type: string, key: 'agentId' | 'taskId') =>
+    nodes.filter(node => node.type === type && node.data[key]).map(node => String(node.data[key]));
+  return { nodes, edges, agent_ids: ids('agentNode', 'agentId'), task_ids: ids('taskNode', 'taskId') };
+}

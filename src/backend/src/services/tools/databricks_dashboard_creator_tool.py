@@ -3,26 +3,30 @@
 Takes visual-to-UCMV mappings from the PBI Visual-UCMV Mapper (tool 94) and creates
 a Databricks AI/BI (Lakeview) dashboard via the REST API.
 
-Visual types → widget types:
-  barChart   → bar   (version 3)
-  lineChart  → line  (version 3)
-  tableEx    → table (version 2)
-  matrix     → table (version 2)
-  card       → counter (version 2)
-  kpiVisual  → counter (version 2)
-  others     → table (version 2)
+Datasets are the UC metric views themselves (``asset_name``) and widgets use
+``MEASURE()``, so measures are evaluated at the widget's grain and under every filter
+(``dataset_mode: sql`` keeps one grouped SQL dataset per visual instead). Power BI visual
+types map to bar / line / area / pie / scatter / counter / table widgets (see
+``dashboard_creator_utils/visual_types.py``), slicers become filter widgets, and the
+output carries a per-visual coverage report (mapped / approximated / table fallback /
+filter / decorative / unsupported / unmapped, with a note for every loss).
 """
 
 import json
 import logging
-import re
 import urllib.parse
 from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from src.services.tools.metric_view_utils.sql_guard import is_read_only_select
+from src.services.tools.dashboard_creator_utils.build import (
+    build_dashboard,
+    coverage,
+    dashboard_counts,
+    safe_name,
+)
+from src.services.tools.dashboard_creator_utils.visual_types import rule_for
 
 if TYPE_CHECKING:
     from src.utils.databricks_auth import AuthContext
@@ -52,6 +56,11 @@ class DatabricksDashboardCreatorSchema(BaseModel):
     publish_dashboard: Optional[bool] = Field(
         None, description="Whether to publish after creation (default: True)"
     )
+    dataset_mode: Optional[str] = Field(
+        None,
+        description="metric_view (default: datasets are the metric views, filters work) "
+        "| sql (one grouped SQL dataset per visual, no filters)",
+    )
 
 
 class DatabricksDashboardCreatorTool(BaseTool):
@@ -61,8 +70,8 @@ class DatabricksDashboardCreatorTool(BaseTool):
     description: str = (
         "Creates Databricks AI/BI (Lakeview) dashboards from visual-to-UCMV mappings. "
         "Takes the structured visual mappings from the PBI Visual-UCMV Mapper (tool 94), "
-        "generates a Lakeview dashboard JSON with correct widget types (bar, line, table, counter), "
-        "datasets with MEASURE() SQL queries, and page layouts. "
+        "generates a Lakeview dashboard JSON on the metric views (bar, line, area, pie, scatter, "
+        "counter, table widgets, slicers as filter widgets) with a per-visual coverage report. "
         "Calls the Databricks Lakeview REST API to create or update the dashboard and optionally "
         "publishes it. Returns the dashboard URL. "
         "Final step in the CI/CD dashboard pipeline."
@@ -90,6 +99,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
             "databricks_host",
             "parent_path",
             "publish_dashboard",
+            "dataset_mode",
         )
         # Seed visual_mappings_json so flow injection check fires
         default_config: dict = {"visual_mappings_json": None}
@@ -187,266 +197,55 @@ class DatabricksDashboardCreatorTool(BaseTool):
     @staticmethod
     def _safe_name(s: str) -> str:
         """Make a string safe for widget/dataset names (alphanumeric + underscores only)."""
-        return re.sub(r"[^a-zA-Z0-9_]", "_", s).strip("_")[:60] or "unnamed"
+        return safe_name(s)
 
     @staticmethod
     def _widget_type_for_visual(visual_type: str) -> tuple[str, int]:
-        """Return (widgetType, version) for a given PBI visual type."""
-        mapping = {
-            "barChart": ("bar", 3),
-            "lineChart": ("line", 3),
-            "tableEx": ("table", 2),
-            "matrix": ("table", 2),
-            "card": ("counter", 2),
-            "cardVisual": ("counter", 2),
-            "kpiVisual": ("counter", 2),
-        }
-        return mapping.get(visual_type, ("table", 2))
+        """Return (widgetType, version) for a given PBI visual type (filters and
+        decorative visuals report the table they would fall back to)."""
+        rule = rule_for(visual_type)
+        return (rule.widget, rule.version) if rule.widget else ("table", 2)
 
-    def _build_widget(
-        self,
-        mapping: dict,
-        dataset_name: str,
-        position: dict,
-    ) -> dict:
-        """Build a single Lakeview widget from a visual mapping."""
-        visual_type = mapping.get("visual_type", "tableEx")
-        chart_title = (
-            mapping.get("chart_title")
-            or f"{mapping.get('page_name', '')} - {visual_type}"
+    @staticmethod
+    def _parse_slicers(raw: Any) -> list:
+        """Slicers resolved by tool 94 (``slicers``), when present."""
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return []
+        slicers = data.get("slicers") if isinstance(data, dict) else None
+        return (
+            [s for s in slicers if isinstance(s, dict)]
+            if isinstance(slicers, list)
+            else []
         )
-        widget_type, version = self._widget_type_for_visual(visual_type)
 
-        visual_id = mapping.get("visual_id", "")
-        page_name = mapping.get("page_name", "")
-        widget_name = self._safe_name(f"w_{visual_id or page_name}_{widget_type}")
-
-        dimensions = mapping.get("dimensions") or []
-        measures = mapping.get("measures") or []
-
-        # Build query fields — match your dashboard script conventions:
-        # dimensions: {"name": "col",        "expression": "`col`"}
-        # measures:   {"name": "sum(col)",   "expression": "SUM(`col`)"}
-        fields = []
-        for dim in dimensions:
-            fields.append({"name": dim, "expression": f"`{dim}`"})
-        for m in measures:
-            fields.append({"name": f"sum({m})", "expression": f"SUM(`{m}`)"})
-
-        query = {
-            "name": "main_query",
-            "query": {
-                "datasetName": dataset_name,  # camelCase — Lakeview API requirement
-                "fields": fields,
-                "disaggregated": False,  # widget handles aggregation
-            },
-        }
-
-        # Build widget spec based on type
-        if widget_type in ("bar", "line") and version == 3:
-            # Need at least one dim and one measure
-            x_field = (
-                dimensions[0]
-                if dimensions
-                else (fields[0]["name"] if fields else "dim")
-            )
-            y_field = (
-                f"sum({measures[0]})"
-                if measures
-                else (fields[-1]["name"] if fields else "value")
-            )
-            spec: dict[str, Any] = {
-                "version": version,
-                "widgetType": widget_type,
-                "encodings": {
-                    "x": {"fieldName": x_field, "scale": {"type": "categorical"}},
-                    "y": {"fieldName": y_field, "scale": {"type": "quantitative"}},
-                },
-            }
-            if len(dimensions) > 1 and version == 3:
-                color_field = dimensions[1]
-                spec["encodings"]["color"] = {
-                    "fieldName": color_field,
-                    "scale": {"type": "categorical"},
-                }
-        elif widget_type == "table" and version == 2:
-            columns = []
-            for f in fields:
-                columns.append(
-                    {
-                        "fieldName": f["name"],
-                        "displayName": f["name"].replace("_", " ").title(),
-                    }
-                )
-            spec = {
-                "version": version,
-                "widgetType": widget_type,
-                "encodings": {"columns": columns},
-                "frame": {"showTitle": True, "title": chart_title},
-            }
-        elif widget_type == "counter" and version == 2:
-            value_field = (
-                f"sum({measures[0]})"
-                if measures
-                else (fields[0]["name"] if fields else "value")
-            )
-            spec = {
-                "version": version,
-                "widgetType": widget_type,
-                "encodings": {
-                    "value": {
-                        "fieldName": value_field,
-                        "displayName": (measures[0] if measures else "Value")
-                        .replace("_", " ")
-                        .title(),
-                        "aggregation": "SUM",
-                    }
-                },
-                "disaggregated": True,
-            }
-        else:
-            # Generic table fallback
-            columns = [
-                {
-                    "fieldName": f["name"],
-                    "displayName": f["name"].replace("_", " ").title(),
-                }
-                for f in fields
-            ]
-            spec = {
-                "version": 2,
-                "widgetType": "table",
-                "encodings": {"columns": columns},
-                "frame": {"showTitle": True, "title": chart_title},
-            }
-
-        # Add frame title to bar/line specs (table/counter already have it in spec)
-        if widget_type in ("bar", "line"):
-            spec["frame"] = {"title": chart_title, "showTitle": True}
-
-        widget_obj = {
-            "name": widget_name,
-            "queries": [query],
-            "spec": spec,  # always required — fixes "missing spec" API error
-            "frame": {"title": chart_title, "showTitle": True},
-        }
-
-        return {
-            "widget": widget_obj,
-            "position": position,
-        }
-
-    def _build_dataset(
-        self, view_name: str, sql: Optional[str], dataset_name: str
-    ) -> dict:
-        """Build a Lakeview dataset entry.
-
-        The query is stored and runs whenever the dashboard opens, and the
-        mappings can come straight from agent input: only a single read-only
-        SELECT is kept, and the default query back-quotes the view name.
-        """
-        if sql and not is_read_only_select(sql):
-            logger.warning("Dropping non-read-only dataset SQL for %s", view_name)
-            sql = None
-        view = ".".join("`" + p.replace("`", "``") + "`" for p in view_name.split("."))
-        default_sql = f"SELECT * FROM {view} LIMIT 1000"  # view back-quoted above — nosemgrep: tmp.databricks.sql-injection.fstring-select
-        query_sql = sql or default_sql
-        display = view_name.split(".")[-1].replace("_", " ").title()
-        return {
-            "name": dataset_name,
-            "displayName": display,  # required by Lakeview API
-            "query": query_sql,
-            "type": "DBSQL",
-        }
+    @staticmethod
+    def _parse_skipped(raw: Any) -> list:
+        """Visuals tool 94 did not map (decorative, no fields), for the coverage report."""
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return []
+        skipped = data.get("skipped_visuals") if isinstance(data, dict) else None
+        return (
+            [s for s in skipped if isinstance(s, dict)]
+            if isinstance(skipped, list)
+            else []
+        )
 
     def _build_lakeview_json(
         self,
         visual_mappings: list,
         warehouse_id: str,
+        slicers: Optional[list] = None,
+        dataset_mode: str = "metric_view",
     ) -> dict:
         """Build the full Lakeview dashboard serialized_dashboard dict."""
-        # Group visuals by page
-        pages_map: dict[str, list] = {}
-        for m in visual_mappings:
-            page = m.get("page_name") or "Default"
-            pages_map.setdefault(page, []).append(m)
-
-        # Build datasets: one per unique UCMV view
-        datasets: list[dict[str, Any]] = []
-        view_to_dataset: dict[str, str] = {}
-        view_to_sql: dict[str, Optional[str]] = {}
-        for m in visual_mappings:
-            view = m.get("ucmv_view")
-            sql = m.get("sql")
-            if view and view not in view_to_dataset:
-                ds_name = self._safe_name(f"ds_{view.split('.')[-1]}")
-                # Ensure uniqueness
-                base = ds_name
-                suffix = 1
-                existing = {d["name"] for d in datasets}
-                while ds_name in existing:
-                    ds_name = f"{base}_{suffix}"
-                    suffix += 1
-                view_to_dataset[view] = ds_name
-                view_to_sql[view] = sql
-                datasets.append(self._build_dataset(view, sql, ds_name))
-
-        # Build pages
-        pages = []
-        for page_display_name, page_visuals in pages_map.items():
-            page_id = self._safe_name(f"page_{page_display_name}")
-            layout = []
-            col = 0
-            row = 0
-            max_col = 6
-
-            for mapping in page_visuals:
-                view = mapping.get("ucmv_view")
-                if not view:
-                    continue
-                dataset_name = view_to_dataset.get(view, "ds_unknown")
-
-                vtype = mapping.get("visual_type", "tableEx")
-                widget_type, _ = self._widget_type_for_visual(vtype)
-
-                # Sizing by widget type
-                if widget_type == "counter":
-                    width = 2
-                    height = 3
-                elif widget_type == "table":
-                    width = 6
-                    height = 5
-                    col = 0  # Tables always start at left edge
-                else:
-                    width = 3
-                    height = 5
-
-                if col + width > max_col:
-                    col = 0
-                    row += 5 if col == 0 else height
-
-                position = {"x": col, "y": row, "width": width, "height": height}
-                widget_layout = self._build_widget(mapping, dataset_name, position)
-                layout.append(widget_layout)
-
-                col += width
-                if col >= max_col:
-                    col = 0
-                    row += height
-
-            pages.append(
-                {
-                    "name": page_id,
-                    "displayName": page_display_name,  # camelCase required by Lakeview API
-                    "page_type": "PAGE_TYPE_CANVAS",
-                    "layout": layout,
-                }
-            )
-
-        return {
-            "pages": pages,
-            "datasets": datasets,
-        }
+        dashboard, _ = build_dashboard(
+            visual_mappings, slicers, dataset_mode=dataset_mode
+        )
+        return dashboard
 
     # ──────────────────────────────────────────────────────────────────────────
     # API calls
@@ -605,11 +404,12 @@ class DatabricksDashboardCreatorTool(BaseTool):
             f"[DashboardCreator] Building dashboard '{dashboard_title}' with {len(visual_mappings)} visuals"
         )
 
-        # Filter out unmapped visuals (no ucmv_view)
-        mapped = [m for m in visual_mappings if m.get("ucmv_view") and m.get("sql")]
-        if not mapped:
+        # Datasets are built from the metric views, so a mapping needs a view, not SQL
+        if not any(isinstance(m, dict) and m.get("ucmv_view") for m in visual_mappings):
             return json.dumps(
-                {"error": "No mapped visuals with SQL found — cannot create dashboard"}
+                {
+                    "error": "No visual is mapped to a metric view — cannot create dashboard"
+                }
             )
 
         # ── 2. Authenticate ──────────────────────────────────────────────────
@@ -638,14 +438,26 @@ class DatabricksDashboardCreatorTool(BaseTool):
             )
 
         # ── 4. Build Lakeview JSON ────────────────────────────────────────────
-        lakeview_dict = self._build_lakeview_json(mapped, warehouse_id)
+        dataset_mode = str(_get("dataset_mode") or "metric_view")
+        lakeview_dict, outcomes = build_dashboard(
+            [m for m in visual_mappings if isinstance(m, dict)],
+            self._parse_slicers(raw),
+            dataset_mode=dataset_mode,
+        )
+        for skipped in self._parse_skipped(raw):
+            outcomes.append(
+                {
+                    "visual_id": str(skipped.get("visual_id") or ""),
+                    "page": str(skipped.get("page_name") or "Default"),
+                    "visual_type": str(skipped.get("visual_type") or ""),
+                    "status": str(skipped.get("status") or "unmapped"),
+                    "widget": "",
+                    "note": str(skipped.get("note") or ""),
+                }
+            )
         serialized_dashboard_str = json.dumps(lakeview_dict)
 
-        widget_count = sum(
-            len(p.get("layout", [])) for p in lakeview_dict.get("pages", [])
-        )
-        page_count = len(lakeview_dict.get("pages", []))
-        dataset_count = len(lakeview_dict.get("datasets", []))
+        page_count, widget_count, dataset_count = dashboard_counts(lakeview_dict)
 
         logger.info(
             f"[DashboardCreator] Lakeview JSON: {page_count} pages, "
@@ -687,6 +499,9 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 "widget_count": widget_count,
                 "page_count": page_count,
                 "dataset_count": dataset_count,
+                "dataset_mode": dataset_mode,
+                "visual_coverage": coverage(outcomes),
+                "visual_outcomes": outcomes,
                 "catalog": catalog,
                 "schema_name": schema,
                 # CI/CD export — download a ZIP of YAML configuration files

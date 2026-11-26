@@ -3,6 +3,7 @@
 from src.services.tools.metric_view_utils.sql_measure_sanitizer import (
     coalesce_wrap_base,
     detect_self_division,
+    detect_silent_wrong,
     sanitize_measure_sql,
     strip_nullif_one,
 )
@@ -262,3 +263,20 @@ class TestDanglingMultiLetterVar:
 
     def test_clean_not_flagged(self):
         assert self._S("SUM(source.a) / NULLIF(SUM(source.b), 0)") is None
+
+
+class TestWindowFunctionIsNotEmitted:
+    """A metric view measure cannot hold an OVER clause: the view fails to deploy with
+    MISSING_AGGREGATION, which names no measure, so it is kept out before the deploy."""
+
+    def test_lag_over_is_rejected(self):
+        sql = "LAG(MEASURE(deliveries), 52) OVER (ORDER BY source.week)"
+        assert detect_silent_wrong(sql) == "SQL window function (OVER)"
+
+    def test_running_total_over_partition_is_rejected(self):
+        sql = "SUM(SUM(source.amount)) OVER (PARTITION BY source.year ORDER BY source.period)"
+        assert detect_silent_wrong(sql) is not None
+
+    def test_a_column_named_over_is_not_a_window(self):
+        assert detect_silent_wrong("SUM(source.over) / NULLIF(SUM(source.total), 0)") is None
+        assert detect_silent_wrong("SUM(source.amount) FILTER (WHERE source.kind = 'OVER (limit)')") is None
